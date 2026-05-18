@@ -29,7 +29,7 @@ def create_eval_env(
     camera_heights=128,
     seed=None,
     # robocasa-related configs
-    obj_instance_split="B",
+    obj_instance_split="target",
     generative_textures=None,
     randomize_cameras=False,
     layout_and_style_ids=((1, 1), (2, 2), (4, 4), (6, 9), (7, 10)),
