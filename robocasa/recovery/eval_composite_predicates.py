@@ -377,7 +377,8 @@ def _with_descriptions(predicates, task_name=None):
     for name, predicate in predicates.items():
         entry = dict(predicate)
         entry.setdefault(
-            "description", task_descriptions.get(name) or _describe_predicate(name, entry)
+            "description",
+            task_descriptions.get(name) or _describe_predicate(name, entry),
         )
         described[name] = entry
     return described
@@ -510,10 +511,8 @@ def _fridge_rack_contact(env, obj_name, **kwargs):
 def _deliver_straw(env):
     straw_in_glass = _in(env, "straw", "glass_cup", th=0.5)
     return {
-        "drawer_open": _p(
-            _is_open(env, env.drawer), required=False, stage="precondition"
-        ),
-        "straw_grasped": _p(_grasped(env, "straw"), required=False, stage="transient"),
+        "drawer_open": _p(_is_open(env, env.drawer), stage="precondition"),
+        "straw_grasped": _p(_grasped(env, "straw"), stage="transient"),
         "straw_in_glass": _p(straw_in_glass, stage="placement"),
         "gripper_released": _p(_far(env, "straw"), stage="release"),
     }
@@ -522,7 +521,7 @@ def _deliver_straw(env):
 def _get_toasted_bread(env):
     return {
         "toaster_started": _p(_toaster_any_slot_on(env), stage="control"),
-        "bread_grasped": _p(_grasped(env, "obj"), required=False, stage="transient"),
+        "bread_grasped": _p(_grasped(env, "obj"), stage="transient"),
         "bread_on_plate": _p(_in(env, "obj", "plate"), stage="placement"),
         "gripper_released": _p(_far(env, "obj"), stage="release"),
     }
@@ -535,7 +534,7 @@ def _kettle_boiling(env):
         for location in env.stove.get_knobs_state(env=env).keys()
     )
     return {
-        "kettle_grasped": _p(_grasped(env, "obj"), required=False, stage="transient"),
+        "kettle_grasped": _p(_grasped(env, "obj"), stage="transient"),
         "kettle_on_burner": _p(kettle_on_burner, stage="placement"),
         "burner_on": _p(burner_on, stage="control"),
         "gripper_released": _p(_far(env, "obj"), stage="release"),
@@ -548,11 +547,10 @@ def _load_dishwasher(env):
     )
     return {
         "dishwasher_rack_accessible": _p(
-            _is_open(env, env.dishwasher), required=False, stage="diagnostic"
+            _is_open(env, env.dishwasher), stage="diagnostic"
         ),
         "dishes_grasped": _p(
             _grasped(env, "dish0") or _grasped(env, "dish1"),
-            required=False,
             stage="transient",
         ),
         "dishes_on_rack": _p(dishes_on_rack, stage="placement"),
@@ -569,25 +567,21 @@ def _make_ice_lemonade(env):
     return {
         "fridge_open": _p(
             _is_open(env, env.fridge),
-            required=False,
             stage="precondition",
             source="fixture_state",
         ),
         "lemon_grasped": _p(
             _grasped(env, "lemon_wedge"),
-            required=False,
             stage="transient",
             source="diagnostic",
         ),
         "ice_cube1_grasped": _p(
             _grasped(env, "ice_cube1"),
-            required=False,
             stage="transient",
             source="diagnostic",
         ),
         "ice_cube2_grasped": _p(
             _grasped(env, "ice_cube2"),
-            required=False,
             stage="transient",
             source="diagnostic",
         ),
@@ -621,9 +615,7 @@ def _pack_identical_lunches(env):
     all_objs = veg_in_0 + veg_in_1 + meat_in_0 + meat_in_1
     no_duplicates = len(all_objs) == len(set(all_objs))
     return {
-        "fridge_open": _p(
-            _is_open(env, env.fridge), required=False, stage="precondition"
-        ),
+        "fridge_open": _p(_is_open(env, env.fridge), stage="precondition"),
         "tupperware0_has_one_vegetable": _p(len(veg_in_0) == 1, stage="placement"),
         "tupperware0_has_one_meat": _p(len(meat_in_0) == 1, stage="placement"),
         "tupperware1_has_one_vegetable": _p(len(veg_in_1) == 1, stage="placement"),
@@ -639,11 +631,11 @@ def _pack_identical_lunches(env):
 
 def _pre_soak_pan(env):
     return {
-        "pan_grasped": _p(_grasped(env, "obj1"), required=False, stage="transient"),
+        "pan_grasped": _p(_grasped(env, "obj1"), stage="transient"),
         "pan_in_sink": _p(
             _inside(env, "obj1", env.sink, partial_check=False), stage="placement"
         ),
-        "sponge_grasped": _p(_grasped(env, "obj2"), required=False, stage="transient"),
+        "sponge_grasped": _p(_grasped(env, "obj2"), stage="transient"),
         "sponge_in_sink": _p(
             _inside(env, "obj2", env.sink, partial_check=False), stage="placement"
         ),
@@ -654,7 +646,7 @@ def _pre_soak_pan(env):
 
 def _prepare_coffee(env):
     return {
-        "mug_grasped": _p(_grasped(env, "obj"), required=False, stage="transient"),
+        "mug_grasped": _p(_grasped(env, "obj"), stage="transient"),
         "mug_under_dispenser": _p(
             _safe(
                 False,
@@ -712,30 +704,24 @@ def _scrub_cutting_board(env):
 def _searing_meat(env):
     pan_on_burner = _stove_obj_on_burner(env, env.stove, "pan", burner_name=env.knob)
     return {
-        "cabinet_open": _p(
-            _is_open(env, env.cab), required=False, stage="precondition"
-        ),
-        "pan_grasped": _p(_grasped(env, "pan"), required=False, stage="transient"),
+        "cabinet_open": _p(_is_open(env, env.cab), stage="precondition"),
+        "pan_grasped": _p(_grasped(env, "pan"), stage="transient"),
         "pan_on_target_burner": _p(pan_on_burner, stage="placement"),
-        "meat_grasped": _p(_grasped(env, "meat"), required=False, stage="transient"),
+        "meat_grasped": _p(_grasped(env, "meat"), stage="transient"),
         "meat_in_pan": _p(_in(env, "meat", "pan", th=0.07), stage="placement"),
-        "burner_on": _p(
-            _stove_burner_on(env, env.stove, env.knob), required=False, stage="control"
-        ),
+        "burner_on": _p(_stove_burner_on(env, env.stove, env.knob), stage="control"),
         "gripper_released": _p(_far(env, "meat"), stage="release"),
     }
 
 
 def _set_up_cutting_station(env):
     return {
-        "drawer_open": _p(
-            _is_open(env, env.drawer), required=False, stage="precondition"
-        ),
-        "knife_grasped": _p(_grasped(env, "knife"), required=False, stage="transient"),
+        "drawer_open": _p(_is_open(env, env.drawer), stage="precondition"),
+        "knife_grasped": _p(_grasped(env, "knife"), stage="transient"),
         "knife_on_cutting_board": _p(
             _in(env, "knife", "receptacle"), stage="placement"
         ),
-        "meat_grasped": _p(_grasped(env, "meat"), required=False, stage="transient"),
+        "meat_grasped": _p(_grasped(env, "meat"), stage="transient"),
         "meat_on_cutting_board": _p(_in(env, "meat", "receptacle"), stage="placement"),
         "gripper_released": _p(_far(env, "knife", "receptacle"), stage="release"),
     }
@@ -746,9 +732,7 @@ def _stack_bowls_cabinet(env):
     bowl2_in_cabinet = _inside(env, "bowl2", env.cabinet)
     stacked = _in(env, "bowl2", "bowl1") or _in(env, "bowl1", "bowl2")
     return {
-        "cabinet_open": _p(
-            _is_open(env, env.cabinet), required=False, stage="precondition"
-        ),
+        "cabinet_open": _p(_is_open(env, env.cabinet), stage="precondition"),
         "larger_bowl_in_cabinet": _p(bowl2_in_cabinet, stage="placement"),
         "smaller_bowl_in_cabinet": _p(bowl1_in_cabinet, stage="placement"),
         "bowls_stacked": _p(stacked, stage="placement"),
@@ -769,13 +753,11 @@ def _stir_vegetables(env):
     return {
         "vegetable1_in_pot": _p(_in(env, "veg1", "pot"), stage="placement"),
         "vegetable2_in_pot": _p(_in(env, "veg2", "pot"), stage="placement"),
-        "spatula_grasped": _p(
-            _grasped(env, "spatula"), required=False, stage="transient"
-        ),
+        "spatula_grasped": _p(_grasped(env, "spatula"), stage="transient"),
         "vegetables_stirred": _p(
             getattr(env, "success_time", 0) >= 5, stage="temporal"
         ),
-        "spatula_released": _p(_far(env, "spatula"), required=False, stage="release"),
+        "spatula_released": _p(_far(env, "spatula"), stage="release"),
     }
 
 
@@ -803,9 +785,7 @@ def _wash_lettuce(env):
 
 def _arrange_bread_basket(env):
     return {
-        "cabinet_open": _p(
-            _is_open(env, env.cab), required=False, stage="precondition"
-        ),
+        "cabinet_open": _p(_is_open(env, env.cab), stage="precondition"),
         "bread_in_basket": _p(_in(env, "bread", "basket"), stage="placement"),
         "basket_on_dining_counter": _p(
             _on_fixture(env, "basket", env.dining_table), stage="placement"
@@ -861,12 +841,8 @@ def _cutting_tool_selection(env):
         else peeler_on_board and not knife_on_board
     )
     return {
-        "drawer_open": _p(
-            _is_open(env, env.drawer), required=False, stage="precondition"
-        ),
-        "correct_tool_grasped": _p(
-            _grasped(env, correct_tool), required=False, stage="transient"
-        ),
+        "drawer_open": _p(_is_open(env, env.drawer), stage="precondition"),
+        "correct_tool_grasped": _p(_grasped(env, correct_tool), stage="transient"),
         "correct_tool_on_cutting_board": _p(correct_tool_chosen, stage="placement"),
         "wrong_tool_not_on_cutting_board": _p(
             (not peeler_on_board) if correct_tool == "knife" else (not knife_on_board),
@@ -878,12 +854,8 @@ def _cutting_tool_selection(env):
 
 def _garnish_pancake(env):
     return {
-        "fridge_open": _p(
-            _is_open(env, env.fridge), required=False, stage="precondition"
-        ),
-        "strawberry_grasped": _p(
-            _grasped(env, "strawberry"), required=False, stage="transient"
-        ),
+        "fridge_open": _p(_is_open(env, env.fridge), stage="precondition"),
+        "strawberry_grasped": _p(_grasped(env, "strawberry"), stage="transient"),
         "pancake_on_plate": _p(
             _in(env, "pancake", "pancake_container"), stage="placement"
         ),
@@ -910,7 +882,6 @@ def _gather_tableware(env):
     return {
         "cabinets_open": _p(
             _is_open(env, env.cab) and _is_open(env, env.cab2),
-            required=False,
             stage="precondition",
         ),
         "glasses_clustered": _p(glasses_clustered, stage="placement"),
@@ -946,9 +917,7 @@ def _heat_kebab_sandwich(env):
 
 def _pan_transfer(env):
     return {
-        "pan_grasped": _p(
-            _grasped(env, "vegetable_container"), required=False, stage="transient"
-        ),
+        "pan_grasped": _p(_grasped(env, "vegetable_container"), stage="transient"),
         "vegetable_on_plate": _p(_in(env, "vegetable", "plate"), stage="placement"),
         "pan_on_stove": _p(
             _safe(
@@ -1014,9 +983,7 @@ def _recycle_bottles_by_type(env):
 
 def _separate_freezer_rack(env):
     return {
-        "freezer_open": _p(
-            _is_open(env, env.fridge), required=False, stage="precondition"
-        ),
+        "freezer_open": _p(_is_open(env, env.fridge), stage="precondition"),
         "meat_in_tupperware": _p(
             _in(env, "meat", "meat_tupperware"), stage="object_state"
         ),
@@ -1045,18 +1012,14 @@ def _separate_freezer_rack(env):
 
 def _waffle_reheat(env):
     return {
-        "microwave_open": _p(
-            _is_open(env, env.microwave), required=False, stage="precondition"
-        ),
+        "microwave_open": _p(_is_open(env, env.microwave), stage="precondition"),
         "waffle_in_bowl": _p(
             _in(env, "waffle", "waffle_container"), stage="object_state"
         ),
         "bowl_in_microwave": _p(
             _inside(env, "waffle_container", env.microwave), stage="placement"
         ),
-        "microwave_closed": _p(
-            _is_closed(env, env.microwave), required=False, stage="fixture_state"
-        ),
+        "microwave_closed": _p(_is_closed(env, env.microwave), stage="fixture_state"),
         "microwave_started": _p(_microwave_on(env, env.microwave), stage="control"),
     }
 
@@ -1066,9 +1029,7 @@ def _wash_fruit_colander(env):
         _in(env, f"fruit{i}", "colander") for i in range(env.num_fruit)
     )
     return {
-        "colander_in_sink": _p(
-            _inside(env, "colander", env.sink), required=False, stage="placement"
-        ),
+        "colander_in_sink": _p(_inside(env, "colander", env.sink), stage="placement"),
         "fruit_in_colander": _p(fruit_in_colander, stage="placement"),
         "colander_under_water": _p(
             _safe(False, lambda: env.sink.check_obj_under_water(env, "colander")),
@@ -1079,9 +1040,7 @@ def _wash_fruit_colander(env):
 
 def _weigh_ingredients(env):
     return {
-        "packaged_food_grasped": _p(
-            _grasped(env, "obj"), required=False, stage="transient"
-        ),
+        "packaged_food_grasped": _p(_grasped(env, "obj"), stage="transient"),
         "packaged_food_on_scale": _p(
             _in(env, "obj", "digital_scale"), stage="placement"
         ),
