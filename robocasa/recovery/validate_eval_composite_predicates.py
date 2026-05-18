@@ -53,6 +53,13 @@ def check_coverage(decomposition_csv: Path) -> dict:
 
 
 def summarize_rollout_json(path: Path) -> dict:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Rollout JSON not found: {path}. Generate it first with "
+            "run_random_subtask_rollouts(...) or pass the actual output path from "
+            "your policy evaluation."
+        )
+
     data = json.loads(path.read_text())
     rollouts = data.get("rollouts", [])
     failure_modes = Counter()
