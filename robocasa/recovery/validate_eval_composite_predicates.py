@@ -17,9 +17,6 @@ DEFAULT_DECOMPOSITION_CSV = (
     / "manual-20260513-robocasa-recovery"
     / "eval_composite_task_subtask_decomposition.csv"
 )
-LOCAL_TASK_OVERRIDES = {"MakeIceLemonade"}
-
-
 def _load_eval_registry() -> dict:
     path = Path(__file__).with_name("eval_composite_predicates.py")
     spec = importlib.util.spec_from_file_location("eval_composite_predicates", path)
@@ -38,15 +35,10 @@ def _load_eval_tasks(path: Path) -> list[str]:
 def check_coverage(decomposition_csv: Path) -> dict:
     tasks = _load_eval_tasks(decomposition_csv)
     registry = _load_eval_registry()
-    missing = [
-        task
-        for task in tasks
-        if task not in registry and task not in LOCAL_TASK_OVERRIDES
-    ]
+    missing = [task for task in tasks if task not in registry]
     return {
         "csv_task_count": len(tasks),
         "registry_task_count": len(registry),
-        "local_override_tasks": sorted(LOCAL_TASK_OVERRIDES & set(tasks)),
         "missing_runtime_predicate_tasks": missing,
         "extra_registry_tasks": sorted(set(registry) - set(tasks)),
     }

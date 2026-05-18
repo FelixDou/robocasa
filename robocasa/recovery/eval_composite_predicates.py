@@ -189,6 +189,53 @@ def _load_dishwasher(env):
     }
 
 
+def _make_ice_lemonade(env):
+    ice_in_glass = _in(env, "ice_cube1", "glass_cup", th=0.5) or _in(
+        env, "ice_cube2", "glass_cup", th=0.5
+    )
+    return {
+        "fridge_open": _p(
+            _is_open(env, env.fridge),
+            required=False,
+            stage="precondition",
+            source="fixture_state",
+        ),
+        "lemon_grasped": _p(
+            _grasped(env, "lemon_wedge"),
+            required=False,
+            stage="transient",
+            source="diagnostic",
+        ),
+        "ice_cube1_grasped": _p(
+            _grasped(env, "ice_cube1"),
+            required=False,
+            stage="transient",
+            source="diagnostic",
+        ),
+        "ice_cube2_grasped": _p(
+            _grasped(env, "ice_cube2"),
+            required=False,
+            stage="transient",
+            source="diagnostic",
+        ),
+        "lemon_in_glass": _p(
+            _in(env, "lemon_wedge", "glass_cup", th=0.5),
+            stage="placement",
+            source="_check_success",
+        ),
+        "ice_in_glass": _p(
+            ice_in_glass,
+            stage="placement",
+            source="_check_success",
+        ),
+        "gripper_released": _p(
+            _far(env, "lemon_wedge", "ice_cube1", "ice_cube2", th=0.15),
+            stage="release",
+            source="_check_success",
+        ),
+    }
+
+
 def _pack_identical_lunches(env):
     veg_in_0 = [
         veg for veg in ["vegetable0", "vegetable1"] if _in(env, veg, "tupperware0")
@@ -681,6 +728,7 @@ EVAL_COMPOSITE_PREDICATES = {
     "GetToastedBread": _get_toasted_bread,
     "KettleBoiling": _kettle_boiling,
     "LoadDishwasher": _load_dishwasher,
+    "MakeIceLemonade": _make_ice_lemonade,
     "PackIdenticalLunches": _pack_identical_lunches,
     "PreSoakPan": _pre_soak_pan,
     "PrepareCoffee": _prepare_coffee,
