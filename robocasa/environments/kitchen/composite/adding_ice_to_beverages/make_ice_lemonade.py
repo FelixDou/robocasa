@@ -128,7 +128,7 @@ class MakeIceLemonade(Kitchen):
         )
         return cfgs
 
-    def _check_success(self):
+    def _check_task_predicates(self):
         lemon_in_cup = OU.check_obj_in_receptacle(
             self, "lemon_wedge", "glass_cup", th=0.5
         )
@@ -143,5 +143,70 @@ class MakeIceLemonade(Kitchen):
             ]
         )
 
-        success = lemon_in_cup and ice_in_cup and gripper_far_lemon and gripper_far_ice
-        return success
+        return {
+            "lemon_in_glass": lemon_in_cup,
+            "ice_in_glass": ice_in_cup,
+            "gripper_released": gripper_far_lemon and gripper_far_ice,
+        }
+
+    def _check_success(self):
+        predicates = self._check_task_predicates()
+        return (
+            predicates["lemon_in_glass"]
+            and predicates["ice_in_glass"]
+            and predicates["gripper_released"]
+        )
+
+    def _safe_check_obj_grasped(self, obj_name):
+        try:
+            return OU.check_obj_grasped(self, obj_name)
+        except Exception:
+            return False
+
+    def _check_subtask_predicates(self):
+        predicates = self._check_task_predicates()
+
+        return {
+            "fridge_open": {
+                "value": self.fridge.is_open(self),
+                "required": False,
+                "source": "fixture_state",
+                "stage": "precondition",
+            },
+            "lemon_grasped": {
+                "value": self._safe_check_obj_grasped("lemon_wedge"),
+                "required": False,
+                "source": "diagnostic",
+                "stage": "transient",
+            },
+            "ice_cube1_grasped": {
+                "value": self._safe_check_obj_grasped("ice_cube1"),
+                "required": False,
+                "source": "diagnostic",
+                "stage": "transient",
+            },
+            "ice_cube2_grasped": {
+                "value": self._safe_check_obj_grasped("ice_cube2"),
+                "required": False,
+                "source": "diagnostic",
+                "stage": "transient",
+            },
+            "lemon_in_glass": {
+                "value": predicates["lemon_in_glass"],
+                "required": True,
+                "source": "_check_success",
+                "stage": "placement",
+            },
+            "ice_in_glass": {
+                "value": predicates["ice_in_glass"],
+                "required": True,
+                "source": "_check_success",
+                "stage": "placement",
+            },
+            "gripper_released": {
+                "value": predicates["gripper_released"],
+                "required": True,
+                "source": "_check_success",
+                "stage": "release",
+            },
+        }

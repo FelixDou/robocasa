@@ -1,0 +1,234 @@
+"""Subtask-level evaluation helpers for recovery-oriented RoboCasa runs."""
+
+
+DEFAULT_STUCK_PATIENCE = 10
+
+
+def get_subtask_eval(env):
+    """
+    Return the subtask progress payload for an environment when available.
+
+    This helper intentionally treats subtask evaluation as an optional layer so
+    existing binary task success evaluators can continue to run unchanged.
+    """
+    if hasattr(env, "get_subtask_progress"):
+        return env.get_subtask_progress()
+
+    inner_env = getattr(env, "env", None)
+    if inner_env is not None and hasattr(inner_env, "get_subtask_progress"):
+        return inner_env.get_subtask_progress()
+
+    return None
+
+
+def _predicate_value(subtask_eval, predicate_name):
+    predicate = subtask_eval.get("predicates", {}).get(predicate_name, {})
+    return bool(predicate.get("value", False))
+
+
+def _current_subtask_estimate(subtask_eval):
+    for name in subtask_eval.get("required_predicates", []):
+        if not _predicate_value(subtask_eval, name):
+            return name
+    return None
+
+
+def _failed_preconditions(subtask_eval):
+    failed = []
+    for name, predicate in subtask_eval.get("predicates", {}).items():
+        if predicate.get("stage") == "precondition" and not predicate.get(
+            "value", False
+        ):
+            failed.append(name)
+    return failed
+
+
+def _failure_modes(final_subtask_eval, max_subtask_progress):
+    modes = []
+    failed_names = set(final_subtask_eval.get("failed_required_predicates", []))
+    failed_preconditions = _failed_preconditions(final_subtask_eval)
+
+    if failed_preconditions:
+        modes.append("failed_precondition")
+
+    if max_subtask_progress == 0.0 and failed_names:
+        modes.append("no_progress")
+
+    if any("grasped" in name for name in failed_names):
+        modes.append("wrong_object")
+
+    if any(
+        token in name
+        for name in failed_names
+        for token in ("on_target", "in_target", "in_glass", "in_cup", "in_bowl")
+    ):
+        modes.append("wrong_receptacle")
+
+    return sorted(set(modes))
+
+
+def _trace_failure_modes(trace_entry, ever_completed):
+    modes = []
+    failed_preconditions = trace_entry.get("failed_preconditions", [])
+    current_subtask = trace_entry.get("current_subtask_estimate")
+
+    if failed_preconditions:
+        modes.append("failed_precondition")
+
+    if not ever_completed and current_subtask is not None:
+        modes.append("no_progress")
+
+    if current_subtask is not None and any(
+        name.endswith("_grasped") for name in ever_completed
+    ):
+        modes.append("wrong_object")
+
+    if current_subtask is not None and any(
+        token in current_subtask
+        for token in ("on_target", "in_target", "in_glass", "in_cup", "in_bowl")
+    ):
+        modes.append("wrong_receptacle")
+
+    return sorted(set(modes))
+
+
+def build_subtask_trace(subtask_evals):
+    """Build stepwise progress diagnostics from subtask-evaluation payloads."""
+    trace = []
+    previous_completed = set()
+    previous_required_values = {}
+    completed_ever = set()
+
+    for step_i, subtask_eval in enumerate(subtask_evals):
+        if not subtask_eval:
+            trace.append(
+                {
+                    "step": step_i,
+                    "subtask_eval_available": False,
+                    "subtask_progress": 0.0,
+                    "completed_subtask_estimate": [],
+                    "current_subtask_estimate": None,
+                    "newly_completed_predicates": [],
+                    "regressed_predicates": [],
+                    "failed_preconditions": [],
+                }
+            )
+            continue
+
+        required_names = subtask_eval.get("required_predicates", [])
+        required_values = {
+            name: _predicate_value(subtask_eval, name) for name in required_names
+        }
+        completed = {name for name, value in required_values.items() if value}
+        newly_completed = completed - previous_completed
+        regressed = {
+            name
+            for name, value in required_values.items()
+            if previous_required_values.get(name, False) and not value
+        }
+        completed_ever.update(completed)
+        for name, predicate in subtask_eval.get("predicates", {}).items():
+            if predicate.get("value", False):
+                completed_ever.add(name)
+
+        trace_entry = {
+            "step": step_i,
+            "subtask_eval_available": True,
+            "subtask_progress": subtask_eval.get("subtask_progress", 0.0),
+            "completed_subtask_estimate": sorted(completed),
+            "current_subtask_estimate": _current_subtask_estimate(subtask_eval),
+            "newly_completed_predicates": sorted(newly_completed),
+            "regressed_predicates": sorted(regressed),
+            "failed_preconditions": _failed_preconditions(subtask_eval),
+        }
+        trace_entry["failure_modes"] = _trace_failure_modes(trace_entry, completed_ever)
+        trace.append(trace_entry)
+
+        previous_completed = completed
+        previous_required_values = required_values
+
+    return trace
+
+
+def infer_stuck_subtask(trace, stuck_patience=DEFAULT_STUCK_PATIENCE):
+    """Infer the active subtask if progress has not changed recently."""
+    valid_trace = [entry for entry in trace if entry.get("subtask_eval_available")]
+    if not valid_trace:
+        return None
+
+    latest = valid_trace[-1]
+    current_subtask = latest.get("current_subtask_estimate")
+    if current_subtask is None:
+        return None
+
+    recent_trace = valid_trace[-stuck_patience:]
+    made_progress_recently = any(
+        entry.get("newly_completed_predicates") for entry in recent_trace
+    )
+    if made_progress_recently:
+        return None
+
+    return current_subtask
+
+
+def summarize_subtask_rollout(
+    subtask_evals, stuck_patience=DEFAULT_STUCK_PATIENCE, include_trace=True
+):
+    """Summarize a sequence of subtask-evaluation payloads from one rollout."""
+    valid_evals = [subtask_eval for subtask_eval in subtask_evals if subtask_eval]
+    if not valid_evals:
+        return {
+            "final_subtask_eval": None,
+            "subtask_trace": build_subtask_trace(subtask_evals)
+            if include_trace
+            else [],
+            "max_subtask_progress": 0.0,
+            "completed_predicates_ever": [],
+            "completed_subtask_estimate": [],
+            "current_subtask_estimate": None,
+            "stuck_subtask": None,
+            "failed_preconditions": [],
+            "failed_preconditions_ever": [],
+            "failure_modes": ["subtask_eval_unavailable"],
+            "failed_required_predicates_final": [],
+            "task_success": False,
+        }
+
+    trace = build_subtask_trace(subtask_evals)
+    completed_predicates_ever = set()
+    max_subtask_progress = 0.0
+    for subtask_eval in valid_evals:
+        max_subtask_progress = max(
+            max_subtask_progress, subtask_eval.get("subtask_progress", 0.0)
+        )
+        for name, predicate in subtask_eval.get("predicates", {}).items():
+            if predicate.get("value", False):
+                completed_predicates_ever.add(name)
+
+    final_subtask_eval = valid_evals[-1]
+    final_trace = next(
+        entry for entry in reversed(trace) if entry.get("subtask_eval_available")
+    )
+    failed_preconditions = _failed_preconditions(final_subtask_eval)
+    failed_preconditions_ever = sorted(
+        {name for entry in trace for name in entry.get("failed_preconditions", [])}
+    )
+    failure_modes = set(_failure_modes(final_subtask_eval, max_subtask_progress))
+    for entry in trace:
+        failure_modes.update(entry.get("failure_modes", []))
+    return {
+        "final_subtask_eval": final_subtask_eval,
+        "subtask_trace": trace if include_trace else [],
+        "max_subtask_progress": max_subtask_progress,
+        "completed_predicates_ever": sorted(completed_predicates_ever),
+        "completed_subtask_estimate": final_trace["completed_subtask_estimate"],
+        "current_subtask_estimate": final_trace["current_subtask_estimate"],
+        "stuck_subtask": infer_stuck_subtask(trace, stuck_patience=stuck_patience),
+        "failed_preconditions": failed_preconditions,
+        "failed_preconditions_ever": failed_preconditions_ever,
+        "failure_modes": sorted(failure_modes),
+        "failed_required_predicates_final": final_subtask_eval.get(
+            "failed_required_predicates", []
+        ),
+        "task_success": final_subtask_eval.get("task_success", False),
+    }

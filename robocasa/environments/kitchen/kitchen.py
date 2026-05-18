@@ -1550,6 +1550,78 @@ class Kitchen(ManipulationEnv, metaclass=KitchenEnvMeta):
         """
         return False
 
+    def _check_subtask_predicates(self):
+        """
+        Return named intermediate predicates for subtask-level monitoring.
+
+        Subclasses can override this to expose task-specific progress checks
+        without changing the official sparse success predicate. Values can be
+        either booleans or dictionaries with at least a ``value`` key. The
+        optional ``required`` key controls whether the predicate is counted in
+        subtask progress metrics.
+        """
+        from robocasa.recovery.eval_composite_predicates import (
+            get_eval_composite_subtask_predicates,
+        )
+
+        return get_eval_composite_subtask_predicates(self)
+
+    def get_subtask_predicates(self):
+        """
+        Return normalized named predicates for subtask-level evaluation.
+
+        This is intentionally separate from ``_check_success()`` so existing
+        evaluators keep their official binary success behavior.
+        """
+        raw_predicates = self._check_subtask_predicates() or {}
+        predicates = {}
+        for name, raw_value in raw_predicates.items():
+            if isinstance(raw_value, dict):
+                value = bool(raw_value.get("value", False))
+                required = bool(raw_value.get("required", True))
+                entry = dict(raw_value)
+                entry["value"] = value
+                entry["required"] = required
+            else:
+                entry = {"value": bool(raw_value), "required": True}
+            predicates[name] = entry
+
+        predicates["task_success"] = {
+            "value": bool(self._check_success()),
+            "required": False,
+            "source": "_check_success",
+        }
+        return predicates
+
+    def get_subtask_progress(self):
+        """
+        Summarize named predicate progress for recovery-oriented evaluation.
+        """
+        predicates = self.get_subtask_predicates()
+        required_names = [
+            name for name, pred in predicates.items() if pred.get("required", True)
+        ]
+        completed_required = [
+            name for name in required_names if predicates[name].get("value", False)
+        ]
+        failed_required = [
+            name for name in required_names if not predicates[name].get("value", False)
+        ]
+        total = len(required_names)
+        completed = len(completed_required)
+        return {
+            "predicates": predicates,
+            "required_predicates": required_names,
+            "completed_required_predicates": completed_required,
+            "failed_required_predicates": failed_required,
+            "num_required_predicates": total,
+            "num_completed_required_predicates": completed,
+            "subtask_progress": float(completed / total)
+            if total
+            else float(predicates["task_success"]["value"]),
+            "task_success": predicates["task_success"]["value"],
+        }
+
     def sample_object(
         self,
         groups,

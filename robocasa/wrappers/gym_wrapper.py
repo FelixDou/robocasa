@@ -285,6 +285,11 @@ class RoboCasaGymEnv(gym.Env):
 
         return obs
 
+    def _get_subtask_eval(self):
+        if hasattr(self.env, "get_subtask_progress"):
+            return self.env.get_subtask_progress()
+        return None
+
     # def process_img(self, img):
     #     h, w, _ = img.shape
     #     if h != w:
@@ -307,6 +312,9 @@ class RoboCasaGymEnv(gym.Env):
 
         info = {}
         info["success"] = False
+        subtask_eval = self._get_subtask_eval()
+        if subtask_eval is not None:
+            info["subtask_eval"] = subtask_eval
 
         return obs, info
 
@@ -339,6 +347,9 @@ class RoboCasaGymEnv(gym.Env):
         truncated = False
 
         info["success"] = reward > 0
+        subtask_eval = self._get_subtask_eval()
+        if subtask_eval is not None:
+            info["subtask_eval"] = subtask_eval
 
         return obs, reward, done, truncated, info
 

@@ -162,35 +162,96 @@ class LoadFridgeByType(Kitchen):
 
         return cfgs
 
-    def _check_success(self):
-        # Check that vegetables are in the veg_bowl
+    def _check_task_predicates(self):
         veg1_in_bowl = OU.check_obj_in_receptacle(self, "vegetable1", "veg_bowl")
         veg2_in_bowl = OU.check_obj_in_receptacle(self, "vegetable2", "veg_bowl")
-
-        # Check that meat is in the meat_bowl
         meat1_in_bowl = OU.check_obj_in_receptacle(self, "meat1", "meat_bowl")
         meat2_in_bowl = OU.check_obj_in_receptacle(self, "meat2", "meat_bowl")
 
-        # Check that veg_bowl is on the correct shelf
-        veg_bowl_on_correct_shelf = self.fridge.check_rack_contact(
+        vegetable_bowl_on_target_shelf = self.fridge.check_rack_contact(
             self, "veg_bowl", rack_index=self.veg_rack_index, compartment="fridge"
         )
-
-        # Check that meat_bowl is on the correct shelf
-        meat_bowl_on_correct_shelf = self.fridge.check_rack_contact(
+        meat_bowl_on_target_shelf = self.fridge.check_rack_contact(
             self, "meat_bowl", rack_index=self.meat_rack_index, compartment="fridge"
         )
-
-        gripper_far = all(
+        gripper_released = all(
             OU.gripper_obj_far(self, obj) for obj in ["veg_bowl", "meat_bowl"]
         )
 
+        return {
+            "vegetables_in_vegetable_bowl": veg1_in_bowl and veg2_in_bowl,
+            "meats_in_meat_bowl": meat1_in_bowl and meat2_in_bowl,
+            "vegetable_bowl_on_target_shelf": vegetable_bowl_on_target_shelf,
+            "meat_bowl_on_target_shelf": meat_bowl_on_target_shelf,
+            "gripper_released": gripper_released,
+        }
+
+    def _check_success(self):
+        predicates = self._check_task_predicates()
         return (
-            veg1_in_bowl
-            and veg2_in_bowl
-            and meat1_in_bowl
-            and meat2_in_bowl
-            and veg_bowl_on_correct_shelf
-            and meat_bowl_on_correct_shelf
-            and gripper_far
+            predicates["vegetables_in_vegetable_bowl"]
+            and predicates["meats_in_meat_bowl"]
+            and predicates["vegetable_bowl_on_target_shelf"]
+            and predicates["meat_bowl_on_target_shelf"]
+            and predicates["gripper_released"]
         )
+
+    def _safe_check_obj_grasped(self, obj_name):
+        try:
+            return OU.check_obj_grasped(self, obj_name)
+        except Exception:
+            return False
+
+    def _check_subtask_predicates(self):
+        predicates = self._check_task_predicates()
+
+        return {
+            "fridge_open": {
+                "value": self.fridge.is_open(self),
+                "required": False,
+                "source": "fixture_state",
+                "stage": "precondition",
+            },
+            "vegetables_in_vegetable_bowl": {
+                "value": predicates["vegetables_in_vegetable_bowl"],
+                "required": True,
+                "source": "_check_success",
+                "stage": "object_state",
+            },
+            "meats_in_meat_bowl": {
+                "value": predicates["meats_in_meat_bowl"],
+                "required": True,
+                "source": "_check_success",
+                "stage": "object_state",
+            },
+            "vegetable_bowl_grasped": {
+                "value": self._safe_check_obj_grasped("veg_bowl"),
+                "required": False,
+                "source": "diagnostic",
+                "stage": "transient",
+            },
+            "meat_bowl_grasped": {
+                "value": self._safe_check_obj_grasped("meat_bowl"),
+                "required": False,
+                "source": "diagnostic",
+                "stage": "transient",
+            },
+            "vegetable_bowl_on_target_shelf": {
+                "value": predicates["vegetable_bowl_on_target_shelf"],
+                "required": True,
+                "source": "_check_success",
+                "stage": "placement",
+            },
+            "meat_bowl_on_target_shelf": {
+                "value": predicates["meat_bowl_on_target_shelf"],
+                "required": True,
+                "source": "_check_success",
+                "stage": "placement",
+            },
+            "gripper_released": {
+                "value": predicates["gripper_released"],
+                "required": True,
+                "source": "_check_success",
+                "stage": "release",
+            },
+        }
