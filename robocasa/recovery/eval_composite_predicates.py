@@ -10,6 +10,379 @@ from __future__ import annotations
 import numpy as np
 
 
+_OBJECT_LABELS = {
+    "obj": "the object",
+    "obj1": "the first object",
+    "obj2": "the second object",
+    "veg1": "the first vegetable",
+    "veg2": "the second vegetable",
+    "cab": "the cabinet",
+    "cabinet": "the cabinet",
+    "counter": "the counter",
+    "receptacle": "the cutting board",
+    "container": "the container",
+    "food_container": "the cutting board",
+    "glass_cup": "the glass",
+    "pancake_container": "the plate",
+    "vegetable_container": "the pan",
+    "waffle_container": "the bowl",
+    "meat_tupperware": "the meat container",
+    "veg_tupperware": "the vegetable container",
+    "digital_scale": "the scale",
+    "baguette": "the baguette",
+    "basket": "the basket",
+    "bowl": "the bowl",
+    "bread": "the bread",
+    "chicken": "the chicken",
+    "chicken_drumstick": "the chicken drumstick",
+    "colander": "the colander",
+    "croissant": "the croissant",
+    "fruit": "the fruit",
+    "glass": "the glass",
+    "ice": "an ice cube",
+    "ice_cube1": "the first ice cube",
+    "ice_cube2": "the second ice cube",
+    "jam": "the jam",
+    "kebab": "the kebab",
+    "kettle": "the kettle",
+    "knife": "the knife",
+    "lemon": "the lemon wedge",
+    "lemon_wedge": "the lemon wedge",
+    "lettuce": "the lettuce",
+    "meat": "the meat",
+    "microwave": "the microwave",
+    "mug": "the mug",
+    "pan": "the pan",
+    "pancake": "the pancake",
+    "plate": "the plate",
+    "sponge": "the sponge",
+    "spatula": "the spatula",
+    "straw": "the straw",
+    "strawberry": "the strawberry",
+    "tupperware0": "the first tupperware",
+    "tupperware1": "the second tupperware",
+    "vegetable": "the vegetable",
+    "waffle": "the waffle",
+}
+
+
+_PREDICATE_DESCRIPTION_OVERRIDES = {
+    "board_contact_count_reached": "Scrub cutting board.",
+    "board_sweep_range_reached": "Scrub cutting board.",
+    "objects_not_duplicated": "Distribute objects.",
+    "wrong_tool_not_on_cutting_board": "Remove wrong tool.",
+    "robot_did_not_touch_food": "Avoid touching food.",
+    "washed_time_reached": "Rinse object.",
+    "vegetables_stirred": "Stir vegetables.",
+    "bottles_on_table": "Move bottles to table.",
+    "bowl_separated_from_glasses": "Separate bowl from glasses.",
+    "glasses_clustered": "Group glasses.",
+    "plastic_bottles_clustered": "Group plastic bottles.",
+    "glass_bottles_clustered": "Group glass bottles.",
+    "cabinets_open": "Open cabinets.",
+    "dishes_on_rack": "Move dishes to rack.",
+    "dishwasher_rack_accessible": "Open dishwasher.",
+    "left_basin_rinsed": "Rinse left basin.",
+    "center_basin_rinsed": "Rinse center basin.",
+    "right_basin_rinsed": "Rinse right basin.",
+    "fruit_in_colander": "Move fruit to colander.",
+    "colander_under_water": "Move colander under water.",
+    "lettuce_under_water": "Move lettuce under water.",
+    "water_on": "Turn on water.",
+    "burner_on": "Turn on burner.",
+    "timer_set": "Set timer.",
+    "coffee_started": "Start coffee machine.",
+    "microwave_started": "Start microwave.",
+    "toaster_started": "Start toaster.",
+    "freezer_open": "Open freezer.",
+    "fridge_open": "Open fridge.",
+    "drawer_open": "Open drawer.",
+    "cabinet_open": "Open cabinet.",
+    "cabinet_closed": "Close cabinet.",
+    "dishwasher_closed": "Close dishwasher.",
+    "microwave_closed": "Close microwave.",
+    "toaster_oven_closed": "Close toaster oven.",
+    "gripper_released": "Release object.",
+}
+
+
+_TASK_PREDICATE_DESCRIPTION_OVERRIDES = {
+    "DeliverStraw": {
+        "drawer_open": "Open drawer.",
+        "straw_grasped": "Pick straw.",
+        "straw_in_glass": "Move straw to glass.",
+        "gripper_released": "Release straw.",
+    },
+    "GetToastedBread": {
+        "toaster_started": "Start toaster.",
+        "bread_grasped": "Pick bread.",
+        "bread_on_plate": "Move bread to plate.",
+        "gripper_released": "Release bread.",
+    },
+    "KettleBoiling": {
+        "kettle_grasped": "Pick kettle.",
+        "kettle_on_burner": "Move kettle to stove burner.",
+        "burner_on": "Turn on burner.",
+        "gripper_released": "Release kettle.",
+    },
+    "LoadDishwasher": {
+        "dishwasher_rack_accessible": "Open dishwasher.",
+        "dishes_grasped": "Pick dishes.",
+        "dishes_on_rack": "Move dishes to dishwasher rack.",
+        "dishwasher_closed": "Close dishwasher.",
+    },
+    "MakeIceLemonade": {
+        "fridge_open": "Open fridge.",
+        "lemon_grasped": "Pick lemon wedge.",
+        "ice_cube1_grasped": "Pick first ice cube.",
+        "ice_cube2_grasped": "Pick second ice cube.",
+        "lemon_in_glass": "Move lemon wedge to glass.",
+        "ice_in_glass": "Move ice cube to glass.",
+        "gripper_released": "Release object.",
+    },
+    "PackIdenticalLunches": {
+        "fridge_open": "Open fridge.",
+        "tupperware0_has_one_vegetable": "Move vegetable to first tupperware.",
+        "tupperware0_has_one_meat": "Move meat to first tupperware.",
+        "tupperware1_has_one_vegetable": "Move vegetable to second tupperware.",
+        "tupperware1_has_one_meat": "Move meat to second tupperware.",
+        "objects_not_duplicated": "Distribute objects.",
+        "gripper_released": "Release object.",
+    },
+    "PreSoakPan": {
+        "pan_grasped": "Pick pan.",
+        "pan_in_sink": "Move pan to sink.",
+        "sponge_grasped": "Pick sponge.",
+        "sponge_in_sink": "Move sponge to sink.",
+        "water_on": "Turn on water.",
+        "gripper_released": "Release objects.",
+    },
+    "PrepareCoffee": {
+        "mug_grasped": "Pick mug.",
+        "mug_under_dispenser": "Move mug under coffee dispenser.",
+        "coffee_started": "Start coffee machine.",
+        "gripper_released": "Release mug.",
+    },
+    "RinseSinkBasin": {
+        "water_on": "Turn on water.",
+        "left_basin_rinsed": "Rinse left basin.",
+        "center_basin_rinsed": "Rinse center basin.",
+        "right_basin_rinsed": "Rinse right basin.",
+    },
+    "ScrubCuttingBoard": {
+        "sponge_grasped": "Pick sponge.",
+        "board_contact_count_reached": "Scrub cutting board.",
+        "board_sweep_range_reached": "Scrub cutting board.",
+        "gripper_released": "Release sponge.",
+    },
+    "SearingMeat": {
+        "cabinet_open": "Open cabinet.",
+        "pan_grasped": "Pick pan.",
+        "pan_on_target_burner": "Move pan to target burner.",
+        "meat_grasped": "Pick meat.",
+        "meat_in_pan": "Move meat to pan.",
+        "burner_on": "Turn on burner.",
+        "gripper_released": "Release meat.",
+    },
+    "SetUpCuttingStation": {
+        "drawer_open": "Open drawer.",
+        "knife_grasped": "Pick knife.",
+        "knife_on_cutting_board": "Move knife to cutting board.",
+        "meat_grasped": "Pick meat.",
+        "meat_on_cutting_board": "Move meat to cutting board.",
+        "gripper_released": "Release object.",
+    },
+    "StackBowlsCabinet": {
+        "cabinet_open": "Open cabinet.",
+        "larger_bowl_in_cabinet": "Move larger bowl to cabinet.",
+        "smaller_bowl_in_cabinet": "Move smaller bowl to cabinet.",
+        "bowls_stacked": "Stack bowls.",
+        "gripper_released": "Release bowls.",
+    },
+    "SteamInMicrowave": {
+        "vegetable_in_bowl": "Move vegetable to bowl.",
+        "bowl_in_microwave": "Move bowl to microwave.",
+        "microwave_closed": "Close microwave.",
+        "microwave_started": "Start microwave.",
+    },
+    "StirVegetables": {
+        "vegetable1_in_pot": "Move first vegetable to pot.",
+        "vegetable2_in_pot": "Move second vegetable to pot.",
+        "spatula_grasped": "Pick spatula.",
+        "vegetables_stirred": "Stir vegetables.",
+        "spatula_released": "Release spatula.",
+    },
+    "StoreLeftoversInBowl": {
+        "chicken_in_bowl": "Move chicken to bowl.",
+        "vegetable_in_bowl": "Move vegetable to bowl.",
+        "bowl_in_fridge": "Move bowl to fridge.",
+        "gripper_released": "Release bowl.",
+    },
+    "WashLettuce": {
+        "water_on": "Turn on water.",
+        "lettuce_under_water": "Move lettuce under water.",
+        "washed_time_reached": "Rinse lettuce.",
+    },
+    "ArrangeBreadBasket": {
+        "cabinet_open": "Open cabinet.",
+        "bread_in_basket": "Move bread to basket.",
+        "basket_on_dining_counter": "Move basket to dining counter.",
+        "gripper_released": "Release basket.",
+    },
+    "ArrangeTea": {
+        "kettle_on_tray": "Move kettle to tray.",
+        "mug_on_tray": "Move mug to tray.",
+        "cabinet_closed": "Close cabinet.",
+        "gripper_released": "Release object.",
+    },
+    "BreadSelection": {
+        "croissant_on_cutting_board": "Move croissant to cutting board.",
+        "jam_on_cutting_board": "Move jam to cutting board.",
+        "gripper_released": "Release object.",
+    },
+    "CategorizeCondiments": {
+        "bottle_in_cabinet": "Move bottle to cabinet.",
+        "shaker_in_cabinet": "Move shaker to cabinet.",
+        "bottle_next_to_counterpart": "Move bottle next to matching bottle.",
+        "shaker_next_to_counterpart": "Move shaker next to matching shaker.",
+        "gripper_released": "Release objects.",
+    },
+    "CuttingToolSelection": {
+        "drawer_open": "Open drawer.",
+        "correct_tool_grasped": "Pick correct tool.",
+        "correct_tool_on_cutting_board": "Move correct tool to cutting board.",
+        "wrong_tool_not_on_cutting_board": "Remove wrong tool.",
+        "gripper_released": "Release object.",
+    },
+    "GarnishPancake": {
+        "fridge_open": "Open fridge.",
+        "strawberry_grasped": "Pick strawberry.",
+        "pancake_on_plate": "Move pancake to plate.",
+        "plate_on_table": "Move plate to table.",
+        "strawberry_on_pancake": "Move strawberry to pancake.",
+        "gripper_released": "Release strawberry.",
+    },
+    "GatherTableware": {
+        "cabinets_open": "Open cabinets.",
+        "glasses_clustered": "Group glasses.",
+        "bowl_separated_from_glasses": "Separate bowl from glasses.",
+        "gripper_released": "Release tableware.",
+    },
+    "HeatKebabSandwich": {
+        "kebab_in_toaster_oven": "Move kebab to toaster oven.",
+        "baguette_in_toaster_oven": "Move baguette to toaster oven.",
+        "toaster_oven_closed": "Close toaster oven.",
+        "timer_set": "Set timer.",
+    },
+    "PanTransfer": {
+        "pan_grasped": "Pick pan.",
+        "vegetable_on_plate": "Move vegetable to plate.",
+        "pan_on_stove": "Move pan to stove.",
+        "robot_did_not_touch_food": "Avoid touching food.",
+        "gripper_released": "Release pan.",
+    },
+    "PortionHotDogs": {
+        "plate1_has_one_bun": "Move bun to first plate.",
+        "plate1_has_one_sausage": "Move sausage to first plate.",
+        "plate2_has_one_bun": "Move bun to second plate.",
+        "plate2_has_one_sausage": "Move sausage to second plate.",
+        "gripper_released": "Release food.",
+    },
+    "RecycleBottlesByType": {
+        "plastic_bottles_clustered": "Group plastic bottles.",
+        "glass_bottles_clustered": "Group glass bottles.",
+        "bottles_on_table": "Move bottles to table.",
+        "gripper_released": "Release bottles.",
+    },
+    "SeparateFreezerRack": {
+        "freezer_open": "Open freezer.",
+        "meat_in_tupperware": "Move meat to meat container.",
+        "vegetables_in_tupperware": "Move vegetables to vegetable container.",
+        "meat_container_on_second_rack": "Move meat container to second freezer rack.",
+        "vegetable_container_on_top_rack": "Move vegetable container to top freezer rack.",
+        "gripper_released": "Release containers.",
+    },
+    "WaffleReheat": {
+        "microwave_open": "Open microwave.",
+        "waffle_in_bowl": "Move waffle to bowl.",
+        "bowl_in_microwave": "Move bowl to microwave.",
+        "microwave_closed": "Close microwave.",
+        "microwave_started": "Start microwave.",
+    },
+    "WashFruitColander": {
+        "colander_in_sink": "Move colander to sink.",
+        "fruit_in_colander": "Move fruit to colander.",
+        "colander_under_water": "Move colander under water.",
+    },
+    "WeighIngredients": {
+        "packaged_food_grasped": "Pick packaged food.",
+        "packaged_food_on_scale": "Move packaged food to scale.",
+        "packaged_food_upright": "Orient packaged food upright.",
+        "cabinet_closed": "Close cabinet.",
+        "gripper_released": "Release packaged food.",
+    },
+}
+
+
+def _plain_label(name):
+    return _OBJECT_LABELS.get(name, name.replace("_", " "))
+
+
+def _describe_relation(name, relation):
+    left, right = name.split(relation, 1)
+    left = left.rstrip("_")
+    right = right.lstrip("_")
+    relation_text = relation.strip("_").replace("_", " ")
+    if relation_text in {"in", "on", "under"}:
+        return f"Move {_plain_label(left)} to {_plain_label(right)}."
+    if relation_text == "next to":
+        return f"Move {_plain_label(left)} next to {_plain_label(right)}."
+    return f"Move {_plain_label(left)} to {_plain_label(right)}."
+
+
+def _describe_predicate(name, predicate):
+    if description := predicate.get("description"):
+        return description
+    if name in _PREDICATE_DESCRIPTION_OVERRIDES:
+        return _PREDICATE_DESCRIPTION_OVERRIDES[name]
+
+    if name.endswith("_grasped"):
+        return f"Pick {_plain_label(name.removesuffix('_grasped'))}."
+    if name.endswith("_released"):
+        return f"Release {_plain_label(name.removesuffix('_released'))}."
+    if name.endswith("_open"):
+        return f"Open {_plain_label(name.removesuffix('_open'))}."
+    if name.endswith("_closed"):
+        return f"Close {_plain_label(name.removesuffix('_closed'))}."
+    if name.endswith("_started"):
+        return f"Start {_plain_label(name.removesuffix('_started'))}."
+    if "_in_" in name:
+        return _describe_relation(name, "_in_")
+    if "_on_" in name:
+        return _describe_relation(name, "_on_")
+    if "_under_" in name:
+        return _describe_relation(name, "_under_")
+    if "_next_to_" in name:
+        return _describe_relation(name, "_next_to_")
+    if name.endswith("_upright"):
+        return f"Keep {_plain_label(name.removesuffix('_upright'))} upright."
+
+    text = name.replace("_", " ")
+    return f"Complete the subtask condition: {text}."
+
+
+def _with_descriptions(predicates, task_name=None):
+    task_descriptions = _TASK_PREDICATE_DESCRIPTION_OVERRIDES.get(task_name, {})
+    described = {}
+    for name, predicate in predicates.items():
+        entry = dict(predicate)
+        entry.setdefault(
+            "description", task_descriptions.get(name) or _describe_predicate(name, entry)
+        )
+        described[name] = entry
+    return described
+
+
 def _safe(default, fn):
     try:
         return fn()
@@ -760,7 +1133,8 @@ EVAL_COMPOSITE_PREDICATES = {
 
 
 def get_eval_composite_subtask_predicates(env):
-    fn = EVAL_COMPOSITE_PREDICATES.get(env.__class__.__name__)
+    task_name = env.__class__.__name__
+    fn = EVAL_COMPOSITE_PREDICATES.get(task_name)
     if fn is None:
         return {}
-    return fn(env)
+    return _with_descriptions(fn(env), task_name=task_name)

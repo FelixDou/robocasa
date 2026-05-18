@@ -1590,6 +1590,7 @@ class Kitchen(ManipulationEnv, metaclass=KitchenEnvMeta):
             "value": bool(self._check_success()),
             "required": False,
             "source": "_check_success",
+            "description": "Complete the official task success condition.",
         }
         return predicates
 
