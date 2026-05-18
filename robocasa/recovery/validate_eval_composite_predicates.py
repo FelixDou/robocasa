@@ -17,6 +17,29 @@ DEFAULT_DECOMPOSITION_CSV = (
     / "manual-20260513-robocasa-recovery"
     / "eval_composite_task_subtask_decomposition.csv"
 )
+
+ATOMIC_SEEN_TASKS = [
+    "CloseBlenderLid",
+    "CloseFridge",
+    "CloseToasterOvenDoor",
+    "CoffeeSetupMug",
+    "NavigateKitchen",
+    "OpenCabinet",
+    "OpenDrawer",
+    "OpenStandMixerHead",
+    "PickPlaceCounterToCabinet",
+    "PickPlaceCounterToStove",
+    "PickPlaceDrawerToCounter",
+    "PickPlaceSinkToCounter",
+    "PickPlaceToasterToCounter",
+    "SlideDishwasherRack",
+    "TurnOffStove",
+    "TurnOnElectricKettle",
+    "TurnOnMicrowave",
+    "TurnOnSinkFaucet",
+]
+
+
 def _load_eval_registry() -> dict:
     path = Path(__file__).with_name("eval_composite_predicates.py")
     spec = importlib.util.spec_from_file_location("eval_composite_predicates", path)
@@ -27,6 +50,16 @@ def _load_eval_registry() -> dict:
     return module.EVAL_COMPOSITE_PREDICATES
 
 
+def _load_atomic_registry() -> dict:
+    path = Path(__file__).with_name("eval_composite_predicates.py")
+    spec = importlib.util.spec_from_file_location("eval_composite_predicates", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.ATOMIC_TASK_PREDICATES
+
+
 def _load_eval_tasks(path: Path) -> list[str]:
     with path.open(newline="") as f:
         return sorted({row["task"] for row in csv.DictReader(f)})
@@ -35,12 +68,18 @@ def _load_eval_tasks(path: Path) -> list[str]:
 def check_coverage(decomposition_csv: Path) -> dict:
     tasks = _load_eval_tasks(decomposition_csv)
     registry = _load_eval_registry()
+    atomic_registry = _load_atomic_registry()
     missing = [task for task in tasks if task not in registry]
     return {
         "csv_task_count": len(tasks),
         "registry_task_count": len(registry),
         "missing_runtime_predicate_tasks": missing,
         "extra_registry_tasks": sorted(set(registry) - set(tasks)),
+        "atomic_seen_task_count": len(ATOMIC_SEEN_TASKS),
+        "atomic_registry_task_count": len(atomic_registry),
+        "missing_atomic_seen_runtime_predicate_tasks": [
+            task for task in ATOMIC_SEEN_TASKS if task not in atomic_registry
+        ],
     }
 
 

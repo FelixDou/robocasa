@@ -1,4 +1,4 @@
-"""Runtime subtask predicates for the 32 target composite eval tasks.
+"""Runtime subtask predicates for target atomic and composite eval tasks.
 
 These predicates are a monitoring layer only. They decompose task progress for
 debugging and recovery, but they do not replace each task's official
@@ -103,6 +103,9 @@ _PREDICATE_DESCRIPTION_OVERRIDES = {
     "microwave_closed": "Close microwave.",
     "toaster_oven_closed": "Close toaster oven.",
     "gripper_released": "Release object.",
+    "at_target_position": "Move robot to target.",
+    "facing_target": "Face target.",
+    "object_at_target_and_released": "Move object to target and release it.",
 }
 
 
@@ -320,6 +323,76 @@ _TASK_PREDICATE_DESCRIPTION_OVERRIDES = {
         "packaged_food_upright": "Orient packaged food upright.",
         "cabinet_closed": "Close cabinet.",
         "gripper_released": "Release packaged food.",
+    },
+    "CloseBlenderLid": {
+        "blender_lid_on_blender": "Move blender lid onto blender.",
+        "gripper_released": "Release blender lid.",
+    },
+    "CloseFridge": {
+        "fridge_closed": "Close fridge.",
+    },
+    "CloseToasterOvenDoor": {
+        "toaster_oven_closed": "Close toaster oven.",
+    },
+    "CoffeeSetupMug": {
+        "mug_grasped": "Pick mug.",
+        "mug_under_dispenser": "Move mug under coffee dispenser.",
+        "gripper_released": "Release mug.",
+    },
+    "NavigateKitchen": {
+        "at_target_position": "Move robot to target.",
+        "facing_target": "Face target.",
+    },
+    "OpenCabinet": {
+        "cabinet_open": "Open cabinet.",
+    },
+    "OpenDrawer": {
+        "drawer_open": "Open drawer.",
+    },
+    "OpenStandMixerHead": {
+        "stand_mixer_head_open": "Open stand mixer head.",
+    },
+    "PickPlaceCounterToCabinet": {
+        "object_grasped": "Pick object.",
+        "object_in_cabinet": "Move object to cabinet.",
+        "gripper_released": "Release object.",
+    },
+    "PickPlaceCounterToStove": {
+        "object_grasped": "Pick object.",
+        "object_in_pan": "Move object to pan.",
+        "gripper_released": "Release object.",
+    },
+    "PickPlaceDrawerToCounter": {
+        "object_grasped": "Pick object.",
+        "object_on_counter": "Move object to counter.",
+        "gripper_released": "Release object.",
+    },
+    "PickPlaceSinkToCounter": {
+        "object_grasped": "Pick object.",
+        "object_in_container": "Move object to container.",
+        "container_on_counter": "Move container to counter.",
+        "gripper_released": "Release object.",
+    },
+    "PickPlaceToasterToCounter": {
+        "object_grasped": "Pick object.",
+        "object_on_plate": "Move object to plate.",
+        "gripper_released": "Release object.",
+    },
+    "SlideDishwasherRack": {
+        "dishwasher_rack_slid": "Slide dishwasher rack.",
+    },
+    "TurnOffStove": {
+        "burner_off": "Turn off burner.",
+    },
+    "TurnOnElectricKettle": {
+        "electric_kettle_on": "Turn on electric kettle.",
+    },
+    "TurnOnMicrowave": {
+        "microwave_started": "Start microwave.",
+        "gripper_released": "Release microwave button.",
+    },
+    "TurnOnSinkFaucet": {
+        "water_on": "Turn on water.",
     },
 }
 
@@ -1053,6 +1126,232 @@ def _weigh_ingredients(env):
     }
 
 
+def _close_blender_lid(env):
+    lid_body = _safe(None, lambda: f"{env.blender.blender_lid.name}_main")
+    return {
+        "blender_lid_on_blender": _p(
+            _safe(False, lambda: env.blender.get_state()["lid_on_blender"]),
+            stage="placement",
+        ),
+        "gripper_released": _p(
+            _safe(False, lambda: _OU().gripper_fxtr_far(env, lid_body, th=0.15))
+            if lid_body
+            else False,
+            stage="release",
+        ),
+    }
+
+
+def _close_fridge(env):
+    return {"fridge_closed": _p(_is_closed(env, env.fxtr), stage="fixture_state")}
+
+
+def _close_toaster_oven_door(env):
+    return {
+        "toaster_oven_closed": _p(
+            _safe(False, lambda: env.toaster_oven.is_closed(env)),
+            stage="fixture_state",
+        )
+    }
+
+
+def _coffee_setup_mug(env):
+    return {
+        "mug_grasped": _p(_grasped(env, "obj"), stage="transient"),
+        "mug_under_dispenser": _p(
+            _safe(
+                False,
+                lambda: env.coffee_machine.check_receptacle_placement_for_pouring(
+                    env, "obj"
+                ),
+            ),
+            stage="placement",
+        ),
+        "gripper_released": _p(_far(env, "obj"), stage="release"),
+    }
+
+
+def _navigate_kitchen(env):
+    def base_orientation():
+        import robosuite.utils.transform_utils as T
+
+        return T.mat2euler(np.array(env.sim.data.body_xmat[robot_id]).reshape((3, 3)))
+
+    robot_id = _safe(None, lambda: env.sim.model.body_name2id("mobilebase0_base"))
+    base_pos = _safe(None, lambda: np.array(env.sim.data.body_xpos[robot_id]))
+    base_ori = _safe(None, base_orientation)
+    at_target = (
+        bool(np.linalg.norm(env.target_pos[:2] - base_pos[:2]) <= 0.20)
+        if base_pos is not None
+        else False
+    )
+    facing_target = (
+        bool(np.cos(env.target_ori[2] - base_ori[2]) >= 0.98)
+        if base_ori is not None
+        else False
+    )
+    return {
+        "at_target_position": _p(at_target, stage="navigation"),
+        "facing_target": _p(facing_target, stage="navigation"),
+    }
+
+
+def _open_cabinet(env):
+    return {"cabinet_open": _p(_is_open(env, env.fxtr), stage="fixture_state")}
+
+
+def _open_drawer(env):
+    door_state = _safe({}, lambda: env.drawer.get_door_state(env=env))
+    return {
+        "drawer_open": _p(
+            bool(door_state)
+            and all(joint_p >= 0.95 for joint_p in door_state.values()),
+            stage="fixture_state",
+        )
+    }
+
+
+def _open_stand_mixer_head(env):
+    return {
+        "stand_mixer_head_open": _p(
+            _safe(False, lambda: env.stand_mixer.get_state(env)["head"] > 0.99),
+            stage="fixture_state",
+        )
+    }
+
+
+def _pick_place_target(env, target_predicates):
+    predicates = {"object_grasped": _p(_grasped(env, "obj"), stage="transient")}
+    predicates.update(target_predicates)
+    predicates["gripper_released"] = _p(_far(env, "obj"), stage="release")
+    return predicates
+
+
+def _pick_place_counter_to_cabinet(env):
+    return _pick_place_target(
+        env,
+        {
+            "object_in_cabinet": _p(
+                _inside(env, "obj", env.cab),
+                stage="placement",
+            )
+        },
+    )
+
+
+def _pick_place_counter_to_stove(env):
+    return _pick_place_target(
+        env,
+        {
+            "object_in_pan": _p(
+                _in(env, "obj", "container", th=0.07),
+                stage="placement",
+            )
+        },
+    )
+
+
+def _pick_place_drawer_to_counter(env):
+    return _pick_place_target(
+        env,
+        {
+            "object_on_counter": _p(
+                _safe(False, lambda: _OU().check_obj_any_counter_contact(env, "obj")),
+                stage="placement",
+            )
+        },
+    )
+
+
+def _pick_place_sink_to_counter(env):
+    return _pick_place_target(
+        env,
+        {
+            "object_in_container": _p(
+                _in(env, "obj", "container"),
+                stage="placement",
+            ),
+            "container_on_counter": _p(
+                _safe(
+                    False,
+                    lambda: env.check_contact(env.objects["container"], env.counter),
+                ),
+                stage="placement",
+            ),
+        },
+    )
+
+
+def _pick_place_toaster_to_counter(env):
+    return _pick_place_target(
+        env,
+        {
+            "object_on_plate": _p(
+                _in(env, "obj", "plate"),
+                stage="placement",
+            )
+        },
+    )
+
+
+def _slide_dishwasher_rack(env):
+    current_pos = _safe(None, lambda: env.dishwasher.get_state(env)["rack"])
+    if current_pos is None:
+        rack_slid = False
+    elif getattr(env, "should_pull", False):
+        rack_slid = current_pos >= 0.95
+    else:
+        rack_slid = current_pos <= 0.05
+    return {"dishwasher_rack_slid": _p(rack_slid, stage="fixture_state")}
+
+
+def _turn_off_stove(env):
+    return {
+        "burner_off": _p(
+            not _stove_burner_on(env, env.stove, env.knob),
+            stage="control",
+        )
+    }
+
+
+def _turn_on_electric_kettle(env):
+    return {
+        "electric_kettle_on": _p(
+            _safe(False, lambda: env.electric_kettle.get_state(env)["turned_on"]),
+            stage="control",
+        )
+    }
+
+
+def _turn_on_microwave(env):
+    return {
+        "microwave_started": _p(_microwave_on(env, env.microwave), stage="control"),
+        "gripper_released": _p(
+            _safe(
+                False,
+                lambda: env.microwave.gripper_button_far(env, button="start_button"),
+            ),
+            stage="release",
+        ),
+    }
+
+
+def _turn_on_sink_faucet(env):
+    handle_state = _safe({}, lambda: env.sink.get_handle_state(env=env))
+    return {"water_on": _p(bool(handle_state.get("water_on", False)), stage="control")}
+
+
+def _generic_atomic_success(env):
+    return {"official_success": _p(env._check_success(), stage="task_success")}
+
+
+def _generic_pick_place_success(env):
+    return {
+        "object_grasped": _p(_grasped(env, "obj"), stage="transient"),
+        "object_at_target_and_released": _p(env._check_success(), stage="task_success"),
+    }
+
+
 EVAL_COMPOSITE_PREDICATES = {
     "DeliverStraw": _deliver_straw,
     "GetToastedBread": _get_toasted_bread,
@@ -1089,9 +1388,50 @@ EVAL_COMPOSITE_PREDICATES = {
 }
 
 
+ATOMIC_TASK_PREDICATES = {
+    "CloseBlenderLid": _close_blender_lid,
+    "CloseFridge": _close_fridge,
+    "CloseToasterOvenDoor": _close_toaster_oven_door,
+    "CoffeeSetupMug": _coffee_setup_mug,
+    "NavigateKitchen": _navigate_kitchen,
+    "OpenCabinet": _open_cabinet,
+    "OpenDrawer": _open_drawer,
+    "OpenStandMixerHead": _open_stand_mixer_head,
+    "PickPlaceCounterToCabinet": _pick_place_counter_to_cabinet,
+    "PickPlaceCounterToStove": _pick_place_counter_to_stove,
+    "PickPlaceDrawerToCounter": _pick_place_drawer_to_counter,
+    "PickPlaceSinkToCounter": _pick_place_sink_to_counter,
+    "PickPlaceToasterToCounter": _pick_place_toaster_to_counter,
+    "SlideDishwasherRack": _slide_dishwasher_rack,
+    "TurnOffStove": _turn_off_stove,
+    "TurnOnElectricKettle": _turn_on_electric_kettle,
+    "TurnOnMicrowave": _turn_on_microwave,
+    "TurnOnSinkFaucet": _turn_on_sink_faucet,
+}
+
+
 def get_eval_composite_subtask_predicates(env):
     task_name = env.__class__.__name__
     fn = EVAL_COMPOSITE_PREDICATES.get(task_name)
     if fn is None:
         return {}
     return _with_descriptions(fn(env), task_name=task_name)
+
+
+def get_atomic_subtask_predicates(env):
+    task_name = env.__class__.__name__
+    fn = ATOMIC_TASK_PREDICATES.get(task_name)
+    if fn is None:
+        if task_name.startswith("PickPlace"):
+            return _with_descriptions(
+                _generic_pick_place_success(env), task_name=task_name
+            )
+        return _with_descriptions(_generic_atomic_success(env), task_name=task_name)
+    return _with_descriptions(fn(env), task_name=task_name)
+
+
+def get_runtime_subtask_predicates(env):
+    task_name = env.__class__.__name__
+    if task_name in EVAL_COMPOSITE_PREDICATES:
+        return get_eval_composite_subtask_predicates(env)
+    return get_atomic_subtask_predicates(env)

@@ -1561,10 +1561,10 @@ class Kitchen(ManipulationEnv, metaclass=KitchenEnvMeta):
         subtask progress metrics.
         """
         from robocasa.recovery.eval_composite_predicates import (
-            get_eval_composite_subtask_predicates,
+            get_runtime_subtask_predicates,
         )
 
-        return get_eval_composite_subtask_predicates(self)
+        return get_runtime_subtask_predicates(self)
 
     def get_subtask_predicates(self):
         """
