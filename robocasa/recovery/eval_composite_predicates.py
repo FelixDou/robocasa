@@ -67,8 +67,8 @@ _OBJECT_LABELS = {
 
 
 _PREDICATE_DESCRIPTION_OVERRIDES = {
-    "board_contact_count_reached": "Scrub cutting board.",
-    "board_sweep_range_reached": "Scrub cutting board.",
+    "board_contact_count_reached": "Press sponge on cutting board.",
+    "board_sweep_range_reached": "Move sponge across cutting board.",
     "objects_not_duplicated": "Distribute objects.",
     "wrong_tool_not_on_cutting_board": "Remove wrong tool.",
     "robot_did_not_touch_food": "Avoid touching food.",
@@ -171,8 +171,8 @@ _TASK_PREDICATE_DESCRIPTION_OVERRIDES = {
     },
     "ScrubCuttingBoard": {
         "sponge_grasped": "Pick sponge.",
-        "board_contact_count_reached": "Scrub cutting board.",
-        "board_sweep_range_reached": "Scrub cutting board.",
+        "board_contact_count_reached": "Press sponge on cutting board.",
+        "board_sweep_range_reached": "Move sponge across cutting board.",
         "gripper_released": "Release sponge.",
     },
     "SearingMeat": {

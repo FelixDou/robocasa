@@ -23,8 +23,14 @@ def _print_rollout(path: Path) -> None:
         final_eval = rollout.get("final_subtask_eval") or {}
         predicates = final_eval.get("predicates", {})
         required = final_eval.get("required_predicates", [])
+        optional = [
+            name
+            for name, predicate in predicates.items()
+            if not predicate.get("required", True) and name != "task_success"
+        ]
         completed = set(final_eval.get("completed_required_predicates", []))
         failed = set(final_eval.get("failed_required_predicates", []))
+        completed_ever = set(rollout.get("completed_predicates_ever", []))
 
         print(
             f"\nEpisode {rollout.get('episode_idx', '?')} "
@@ -40,6 +46,18 @@ def _print_rollout(path: Path) -> None:
         print("Not completed required subtasks:")
         for name in required:
             if name in failed:
+                print(f"- {_description(predicates, name)}")
+
+        observed_optional = [name for name in optional if name in completed_ever]
+        if observed_optional:
+            print("Observed optional subtasks:")
+            for name in observed_optional:
+                print(f"- {_description(predicates, name)}")
+
+        not_observed_optional = [name for name in optional if name not in completed_ever]
+        if not_observed_optional:
+            print("Not observed optional subtasks:")
+            for name in not_observed_optional:
                 print(f"- {_description(predicates, name)}")
 
         print("Diagnosis:")
