@@ -5,7 +5,7 @@ from robocasa.utils.dataset_registry import (
 from robocasa.scripts.dataset_scripts.playback_dataset_hdf5 import (
     get_env_metadata_from_dataset,
 )
-from robosuite import load_controller_config
+from robosuite.controllers import load_composite_controller_config
 import os
 import robosuite
 import imageio
@@ -34,7 +34,10 @@ def create_eval_env(
     randomize_cameras=False,
     layout_and_style_ids=((1, 1), (2, 2), (4, 4), (6, 9), (7, 10)),
 ):
-    controller_configs = load_controller_config(default_controller=controllers)
+    controller_configs = load_composite_controller_config(
+        controller=None,
+        robot=robots if isinstance(robots, str) else robots[0],
+    )
 
     env_kwargs = dict(
         env_name=env_name,
