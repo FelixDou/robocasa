@@ -700,9 +700,7 @@ def _scrub_cutting_board(env):
             np.linalg.norm(positions.max(axis=0) - positions.min(axis=0))
         )
     return {
-        "sponge_grasped": _p(
-            _grasped(env, "sponge"), required=False, stage="transient"
-        ),
+        "sponge_grasped": _p(_grasped(env, "sponge"), stage="transient"),
         "board_contact_count_reached": _p(
             getattr(env, "board_contact_timer", 0) >= 5, stage="temporal"
         ),

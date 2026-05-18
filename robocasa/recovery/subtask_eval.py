@@ -26,9 +26,10 @@ def _predicate_value(subtask_eval, predicate_name):
     return bool(predicate.get("value", False))
 
 
-def _current_subtask_estimate(subtask_eval):
+def _current_subtask_estimate(subtask_eval, completed_required=None):
+    completed_required = set(completed_required or [])
     for name in subtask_eval.get("required_predicates", []):
-        if not _predicate_value(subtask_eval, name):
+        if name not in completed_required:
             return name
     return None
 
@@ -43,9 +44,13 @@ def _failed_preconditions(subtask_eval):
     return failed
 
 
-def _failure_modes(final_subtask_eval, max_subtask_progress):
+def _failure_modes(final_subtask_eval, max_subtask_progress, failed_required_names=None):
     modes = []
-    failed_names = set(final_subtask_eval.get("failed_required_predicates", []))
+    failed_names = set(
+        failed_required_names
+        if failed_required_names is not None
+        else final_subtask_eval.get("failed_required_predicates", [])
+    )
     failed_preconditions = _failed_preconditions(final_subtask_eval)
 
     if failed_preconditions:
@@ -95,9 +100,11 @@ def _trace_failure_modes(trace_entry, ever_completed):
 def build_subtask_trace(subtask_evals):
     """Build stepwise progress diagnostics from subtask-evaluation payloads."""
     trace = []
-    previous_completed = set()
     previous_required_values = {}
     completed_ever = set()
+    ordered_required_names = []
+    ordered_completed = []
+    ordered_index = 0
 
     for step_i, subtask_eval in enumerate(subtask_evals):
         if not subtask_eval:
@@ -109,6 +116,10 @@ def build_subtask_trace(subtask_evals):
                     "completed_subtask_estimate": [],
                     "current_subtask_estimate": None,
                     "newly_completed_predicates": [],
+                    "ordered_completed_subtasks": [],
+                    "ordered_current_subtask": None,
+                    "ordered_newly_completed_subtasks": [],
+                    "ordered_subtask_progress": 0.0,
                     "regressed_predicates": [],
                     "failed_preconditions": [],
                 }
@@ -116,11 +127,31 @@ def build_subtask_trace(subtask_evals):
             continue
 
         required_names = subtask_eval.get("required_predicates", [])
+        if not ordered_required_names:
+            ordered_required_names = list(required_names)
         required_values = {
             name: _predicate_value(subtask_eval, name) for name in required_names
         }
         completed = {name for name, value in required_values.items() if value}
-        newly_completed = completed - previous_completed
+        ordered_newly_completed = []
+        while ordered_index < len(ordered_required_names):
+            current_name = ordered_required_names[ordered_index]
+            if not required_values.get(current_name, False):
+                break
+            ordered_completed.append(current_name)
+            ordered_newly_completed.append(current_name)
+            ordered_index += 1
+
+        ordered_current_subtask = (
+            ordered_required_names[ordered_index]
+            if ordered_index < len(ordered_required_names)
+            else None
+        )
+        ordered_subtask_progress = (
+            float(len(ordered_completed) / len(ordered_required_names))
+            if ordered_required_names
+            else float(subtask_eval.get("task_success", False))
+        )
         regressed = {
             name
             for name, value in required_values.items()
@@ -134,17 +165,25 @@ def build_subtask_trace(subtask_evals):
         trace_entry = {
             "step": step_i,
             "subtask_eval_available": True,
-            "subtask_progress": subtask_eval.get("subtask_progress", 0.0),
-            "completed_subtask_estimate": sorted(completed),
-            "current_subtask_estimate": _current_subtask_estimate(subtask_eval),
-            "newly_completed_predicates": sorted(newly_completed),
+            "subtask_progress": ordered_subtask_progress,
+            "instantaneous_subtask_progress": subtask_eval.get("subtask_progress", 0.0),
+            "completed_subtask_estimate": list(ordered_completed),
+            "instantaneous_completed_subtask_estimate": sorted(completed),
+            "current_subtask_estimate": ordered_current_subtask,
+            "instantaneous_current_subtask_estimate": _current_subtask_estimate(
+                subtask_eval, completed_required=completed
+            ),
+            "newly_completed_predicates": list(ordered_newly_completed),
+            "ordered_completed_subtasks": list(ordered_completed),
+            "ordered_current_subtask": ordered_current_subtask,
+            "ordered_newly_completed_subtasks": list(ordered_newly_completed),
+            "ordered_subtask_progress": ordered_subtask_progress,
             "regressed_predicates": sorted(regressed),
             "failed_preconditions": _failed_preconditions(subtask_eval),
         }
         trace_entry["failure_modes"] = _trace_failure_modes(trace_entry, completed_ever)
         trace.append(trace_entry)
 
-        previous_completed = completed
         previous_required_values = required_values
 
     return trace
@@ -197,10 +236,12 @@ def summarize_subtask_rollout(
     trace = build_subtask_trace(subtask_evals)
     completed_predicates_ever = set()
     max_subtask_progress = 0.0
+    for entry in trace:
+        if entry.get("subtask_eval_available"):
+            max_subtask_progress = max(
+                max_subtask_progress, entry.get("ordered_subtask_progress", 0.0)
+            )
     for subtask_eval in valid_evals:
-        max_subtask_progress = max(
-            max_subtask_progress, subtask_eval.get("subtask_progress", 0.0)
-        )
         for name, predicate in subtask_eval.get("predicates", {}).items():
             if predicate.get("value", False):
                 completed_predicates_ever.add(name)
@@ -209,11 +250,22 @@ def summarize_subtask_rollout(
     final_trace = next(
         entry for entry in reversed(trace) if entry.get("subtask_eval_available")
     )
+    required_names = final_subtask_eval.get("required_predicates", [])
+    ordered_completed = final_trace.get("ordered_completed_subtasks", [])
+    failed_required_ordered = [
+        name for name in required_names if name not in set(ordered_completed)
+    ]
     failed_preconditions = _failed_preconditions(final_subtask_eval)
     failed_preconditions_ever = sorted(
         {name for entry in trace for name in entry.get("failed_preconditions", [])}
     )
-    failure_modes = set(_failure_modes(final_subtask_eval, max_subtask_progress))
+    failure_modes = set(
+        _failure_modes(
+            final_subtask_eval,
+            max_subtask_progress,
+            failed_required_names=failed_required_ordered,
+        )
+    )
     for entry in trace:
         failure_modes.update(entry.get("failure_modes", []))
     return {
@@ -221,14 +273,15 @@ def summarize_subtask_rollout(
         "subtask_trace": trace if include_trace else [],
         "max_subtask_progress": max_subtask_progress,
         "completed_predicates_ever": sorted(completed_predicates_ever),
-        "completed_subtask_estimate": final_trace["completed_subtask_estimate"],
-        "current_subtask_estimate": final_trace["current_subtask_estimate"],
+        "completed_subtask_estimate": ordered_completed,
+        "current_subtask_estimate": final_trace["ordered_current_subtask"],
+        "ordered_completed_required_subtasks": ordered_completed,
+        "ordered_current_subtask": final_trace["ordered_current_subtask"],
+        "failed_required_subtasks_ordered": failed_required_ordered,
         "stuck_subtask": infer_stuck_subtask(trace, stuck_patience=stuck_patience),
         "failed_preconditions": failed_preconditions,
         "failed_preconditions_ever": failed_preconditions_ever,
         "failure_modes": sorted(failure_modes),
-        "failed_required_predicates_final": final_subtask_eval.get(
-            "failed_required_predicates", []
-        ),
+        "failed_required_predicates_final": failed_required_ordered,
         "task_success": final_subtask_eval.get("task_success", False),
     }
