@@ -106,6 +106,7 @@ _PREDICATE_DESCRIPTION_OVERRIDES = {
     "at_target_position": "Move robot to target.",
     "facing_target": "Face target.",
     "object_at_target_and_released": "Move object to target and release it.",
+    "final_placement_valid": "Complete final placement.",
 }
 
 
@@ -355,27 +356,32 @@ _TASK_PREDICATE_DESCRIPTION_OVERRIDES = {
     "PickPlaceCounterToCabinet": {
         "object_grasped": "Pick object.",
         "object_in_cabinet": "Move object to cabinet.",
+        "final_placement_valid": "Keep object in cabinet and release it.",
         "gripper_released": "Release object.",
     },
     "PickPlaceCounterToStove": {
         "object_grasped": "Pick object.",
         "object_in_pan": "Move object to pan.",
+        "final_placement_valid": "Keep object in pan and release it.",
         "gripper_released": "Release object.",
     },
     "PickPlaceDrawerToCounter": {
         "object_grasped": "Pick object.",
         "object_on_counter": "Move object to counter.",
+        "final_placement_valid": "Keep object on counter and release it.",
         "gripper_released": "Release object.",
     },
     "PickPlaceSinkToCounter": {
         "object_grasped": "Pick object.",
         "object_in_container": "Move object to container.",
         "container_on_counter": "Move container to counter.",
+        "final_placement_valid": "Keep object in container on counter and release it.",
         "gripper_released": "Release object.",
     },
     "PickPlaceToasterToCounter": {
         "object_grasped": "Pick object.",
         "object_on_plate": "Move object to plate.",
+        "final_placement_valid": "Keep object on plate and release it.",
         "gripper_released": "Release object.",
     },
     "SlideDishwasherRack": {
@@ -1224,6 +1230,9 @@ def _pick_place_target(env, target_predicates):
     predicates = {"object_grasped": _p(_grasped(env, "obj"), stage="transient")}
     predicates.update(target_predicates)
     predicates["gripper_released"] = _p(_far(env, "obj"), stage="release")
+    predicates["final_placement_valid"] = _p(
+        env._check_success(), stage="task_success"
+    )
     return predicates
 
 
