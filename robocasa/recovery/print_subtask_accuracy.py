@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import importlib.util
 import json
 from collections import Counter
@@ -29,6 +30,10 @@ def _description(predicates: dict, name: str) -> str:
 
 def _percent(numerator: int | float, denominator: int) -> float:
     return 100.0 * float(numerator) / float(denominator) if denominator else 0.0
+
+
+def _format_rate(rate: float) -> str:
+    return f"{100.0 * rate:.1f}%"
 
 
 def _task_group(task_name: str) -> str:
@@ -202,20 +207,142 @@ def _print_group_summary(summaries: list[dict]) -> None:
         )
 
 
+def _hardest_subtask(summary: dict) -> dict | None:
+    subtasks = summary["subtasks"]
+    if not subtasks:
+        return None
+    return min(
+        subtasks,
+        key=lambda subtask: (
+            subtask["accuracy"],
+            -subtask["first_blocker_count"],
+            subtask["name"],
+        ),
+    )
+
+
+def build_bottleneck_rows(summaries: list[dict]) -> list[dict]:
+    rows = []
+    for summary in summaries:
+        hardest = _hardest_subtask(summary)
+        first_blocker = max(
+            summary["subtasks"],
+            key=lambda subtask: (
+                subtask["first_blocker_count"],
+                -subtask["accuracy"],
+                subtask["name"],
+            ),
+            default=None,
+        )
+        rows.append(
+            {
+                "task": summary["task"],
+                "group": summary["group"],
+                "task_success": summary["success_rate"],
+                "mean_ordered_progress": summary["mean_max_subtask_progress"],
+                "hardest_subtask": hardest["description"] if hardest else "",
+                "hardest_subtask_key": hardest["name"] if hardest else "",
+                "hardest_subtask_accuracy": hardest["accuracy"] if hardest else 0.0,
+                "hardest_subtask_completed": hardest["completed_rollouts"]
+                if hardest
+                else 0,
+                "hardest_subtask_total": hardest["rollout_count"] if hardest else 0,
+                "most_common_first_blocker": first_blocker["description"]
+                if first_blocker
+                else "",
+                "most_common_first_blocker_key": first_blocker["name"]
+                if first_blocker
+                else "",
+                "most_common_first_blocker_count": first_blocker[
+                    "first_blocker_count"
+                ]
+                if first_blocker
+                else 0,
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            row["group"],
+            row["task_success"],
+            row["mean_ordered_progress"],
+            row["task"],
+        ),
+    )
+
+
+def write_bottleneck_csv(rows: list[dict], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "task",
+        "group",
+        "task_success",
+        "mean_ordered_progress",
+        "hardest_subtask",
+        "hardest_subtask_key",
+        "hardest_subtask_accuracy",
+        "hardest_subtask_completed",
+        "hardest_subtask_total",
+        "most_common_first_blocker",
+        "most_common_first_blocker_key",
+        "most_common_first_blocker_count",
+    ]
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
+def write_bottleneck_markdown(rows: list[dict], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "| Task | Group | Success | Mean Progress | Hardest Subtask | Hardest Accuracy | First Blocker | Blocked Rollouts |",
+        "|---|---|---:|---:|---|---:|---|---:|",
+    ]
+    for row in rows:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    row["task"],
+                    row["group"],
+                    _format_rate(row["task_success"]),
+                    _format_rate(row["mean_ordered_progress"]),
+                    row["hardest_subtask"],
+                    _format_rate(row["hardest_subtask_accuracy"]),
+                    row["most_common_first_blocker"],
+                    str(row["most_common_first_blocker_count"]),
+                ]
+            )
+            + " |"
+        )
+    path.write_text("\n".join(lines) + "\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("rollout_json", type=Path, nargs="+")
     parser.add_argument("--out-json", type=Path)
+    parser.add_argument("--out-bottleneck-csv", type=Path)
+    parser.add_argument("--out-bottleneck-md", type=Path)
     args = parser.parse_args()
 
     summaries = [summarize_subtask_accuracy(path) for path in args.rollout_json]
+    bottleneck_rows = build_bottleneck_rows(summaries)
     _print_group_summary(summaries)
     for summary in summaries:
         _print_task(summary)
 
     if args.out_json:
         args.out_json.parent.mkdir(parents=True, exist_ok=True)
-        args.out_json.write_text(json.dumps({"tasks": summaries}, indent=2))
+        args.out_json.write_text(
+            json.dumps({"tasks": summaries, "bottlenecks": bottleneck_rows}, indent=2)
+        )
+    if args.out_bottleneck_csv:
+        write_bottleneck_csv(bottleneck_rows, args.out_bottleneck_csv)
+    if args.out_bottleneck_md:
+        write_bottleneck_markdown(bottleneck_rows, args.out_bottleneck_md)
 
 
 if __name__ == "__main__":
