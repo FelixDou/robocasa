@@ -41,6 +41,23 @@ def json_default(value):
     return str(value)
 
 
+def make_video_path(video_dir, mode, task_name, rollout_i, seed):
+    if video_dir is None:
+        return None
+    safe_mode = mode.replace("/", "_")
+    safe_task = task_name.replace("/", "_")
+    return video_dir / safe_mode / safe_task / f"rollout_{rollout_i:04d}_seed_{seed}.mp4"
+
+
+def open_video_writer(video_path, fps):
+    if video_path is None:
+        return None
+    import imageio
+
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    return imageio.get_writer(str(video_path), fps=fps)
+
+
 def parse_policy_args(values):
     parsed = {}
     for value in values or []:
@@ -185,15 +202,19 @@ def run_benchmark(args):
             print(colored(f"  Task: {task_name}", "cyan"))
             for rollout_i in tqdm(range(args.num_rollouts), leave=False):
                 env = None
+                video_path = None
+                video_writer = None
                 try:
                     seed = args.seed + rollout_i
+                    video_path = make_video_path(args.video_dir, mode, task_name, rollout_i, seed)
                     env = make_env(
                         task_name,
                         env_interface=args.env_interface,
                         split=args.split,
                         seed=seed,
-                        enable_render=args.enable_render,
+                        enable_render=args.enable_render or video_path is not None,
                     )
+                    video_writer = open_video_writer(video_path, args.video_fps)
                     policy = (
                         RandomPolicy(env)
                         if args.random_policy
@@ -209,11 +230,17 @@ def run_benchmark(args):
                             stuck_patience=args.stuck_patience,
                             include_trace=args.include_trace,
                         ),
+                        video_writer=video_writer,
+                        video_camera_name=args.video_camera_name,
+                        video_height=args.video_height,
+                        video_width=args.video_width,
                     )
                     result["task"] = task_name
                     result["rollout_index"] = rollout_i
                     result["seed"] = seed
                     result["mode"] = mode
+                    if video_path is not None:
+                        result["video_path"] = str(video_path)
                     mode_results.append(result)
                 except KeyboardInterrupt:
                     raise
@@ -224,10 +251,13 @@ def run_benchmark(args):
                             "rollout_index": rollout_i,
                             "seed": args.seed + rollout_i,
                             "mode": mode,
+                            "video_path": str(video_path) if video_path else None,
                             "error": traceback.format_exc(),
                         }
                     )
                 finally:
+                    if video_writer is not None:
+                        video_writer.close()
                     if env is not None:
                         env.close()
 
@@ -278,6 +308,16 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--enable-render", action="store_true")
     parser.add_argument("--include-trace", action="store_true")
+    parser.add_argument(
+        "--video-dir",
+        type=Path,
+        default=None,
+        help="Optional directory for rollout videos, grouped by mode and task.",
+    )
+    parser.add_argument("--video-camera-name", default="robot0_agentview_center")
+    parser.add_argument("--video-height", type=int, default=512)
+    parser.add_argument("--video-width", type=int, default=768)
+    parser.add_argument("--video-fps", type=int, default=20)
     args = parser.parse_args()
 
     if not args.random_policy and args.policy_module is None:

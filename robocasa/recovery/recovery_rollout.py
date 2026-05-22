@@ -311,6 +311,16 @@ def _step_env(env, action):
     return obs, reward, bool(done), info
 
 
+def _append_video_frame(env, video_writer, camera_name, height, width):
+    if video_writer is None:
+        return
+    sim = _get_sim(env)
+    if sim is None:
+        return
+    video_img = sim.render(height=height, width=width, camera_name=camera_name)[::-1]
+    video_writer.append_data(video_img)
+
+
 def _latest_ordered_trace_entry(subtask_evals):
     trace = build_subtask_trace(subtask_evals)
     for entry in reversed(trace):
@@ -319,7 +329,16 @@ def _latest_ordered_trace_entry(subtask_evals):
     return None
 
 
-def run_recovery_after_failed_rollout(policy, env, config=None, initial_obs=None):
+def run_recovery_after_failed_rollout(
+    policy,
+    env,
+    config=None,
+    initial_obs=None,
+    video_writer=None,
+    video_camera_name="robot0_agentview_center",
+    video_height=512,
+    video_width=768,
+):
     """
     Run a high-level rollout, then retry only the failed subtask if needed.
 
@@ -329,6 +348,8 @@ def run_recovery_after_failed_rollout(policy, env, config=None, initial_obs=None
         config: ``RecoveryConfig`` or dict.
         initial_obs: Optional already-reset observation. If omitted, ``env.reset()``
             is called.
+        video_writer: Optional imageio writer. Frames are appended after each
+            high-level and recovery step.
 
     Returns:
         A dictionary with the high-level rollout summary, chosen subtask prompt,
@@ -362,6 +383,13 @@ def run_recovery_after_failed_rollout(policy, env, config=None, initial_obs=None
         high_level_steps = step_i + 1
         action = call_policy(policy, obs)
         obs, reward, done, info = _step_env(env, action)
+        _append_video_frame(
+            env,
+            video_writer,
+            camera_name=video_camera_name,
+            height=video_height,
+            width=video_width,
+        )
         current_eval = info.get("subtask_eval") if info else None
         if current_eval is None:
             current_eval = get_subtask_eval(env)
@@ -421,6 +449,13 @@ def run_recovery_after_failed_rollout(policy, env, config=None, initial_obs=None
         retry_steps = step_i + 1
         action = call_policy(policy, obs, instruction=instruction)
         obs, reward, done, info = _step_env(env, action)
+        _append_video_frame(
+            env,
+            video_writer,
+            camera_name=video_camera_name,
+            height=video_height,
+            width=video_width,
+        )
         obs = set_observation_instruction(obs, instruction)
         current_eval = info.get("subtask_eval") if info else None
         if current_eval is None:
