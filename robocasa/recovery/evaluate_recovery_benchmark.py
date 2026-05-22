@@ -232,6 +232,7 @@ def run_benchmark(args):
                             ),
                             stuck_patience=args.stuck_patience,
                             include_trace=args.include_trace,
+                            video_separator_frames=args.video_separator_frames,
                         ),
                         video_writer=video_writer,
                         video_camera_name=args.video_camera_name,
@@ -329,6 +330,15 @@ def main():
     parser.add_argument("--video-height", type=int, default=512)
     parser.add_argument("--video-width", type=int, default=768)
     parser.add_argument("--video-fps", type=int, default=20)
+    parser.add_argument(
+        "--video-separator-frames",
+        type=int,
+        default=0,
+        help=(
+            "Number of duplicated freeze frames to insert at the recovery reset "
+            "boundary. Defaults to 0 to avoid visible flashes."
+        ),
+    )
     args = parser.parse_args()
 
     if not args.random_policy and args.policy_module is None:

@@ -52,6 +52,7 @@ class RecoveryConfig:
     match_recovery_horizon_to_no_progress: bool = False
     stuck_patience: int = 10
     include_trace: bool = True
+    video_separator_frames: int = 0
 
 
 def normalize_recovery_mode(mode):
@@ -329,17 +330,17 @@ def _append_video_frame(env, video_writer, camera_name, height, width):
         video_img = sim.render(height=height, width=width, camera_name=camera_name)[::-1]
 
     video_writer.append_data(video_img)
-    return video_img.shape
+    return video_img
 
 
-def _append_video_separator(video_writer, frame_shape, num_frames=12):
+def _append_video_separator(video_writer, frame, num_frames=0):
     if video_writer is None:
         return
-    if frame_shape is None:
+    if frame is None or num_frames <= 0:
         return
-    frame = np.zeros(frame_shape, dtype=np.uint8)
+    freeze_frame = np.ascontiguousarray(frame)
     for _ in range(num_frames):
-        video_writer.append_data(frame)
+        video_writer.append_data(freeze_frame)
 
 
 def _latest_ordered_trace_entry(subtask_evals):
@@ -400,21 +401,21 @@ def run_recovery_after_failed_rollout(
     high_level_success = False
     high_level_steps = 0
     last_good_step = 0
-    video_frame_shape = None
+    last_video_frame = None
 
     for step_i in range(config.high_level_horizon):
         high_level_steps = step_i + 1
         action = call_policy(policy, obs)
         obs, reward, done, info = _step_env(env, action)
-        frame_shape = _append_video_frame(
+        video_frame = _append_video_frame(
             env,
             video_writer,
             camera_name=video_camera_name,
             height=video_height,
             width=video_width,
         )
-        if frame_shape is not None:
-            video_frame_shape = frame_shape
+        if video_frame is not None:
+            last_video_frame = video_frame
         current_eval = info.get("subtask_eval") if info else None
         if current_eval is None:
             current_eval = get_subtask_eval(env)
@@ -466,7 +467,11 @@ def run_recovery_after_failed_rollout(
     instruction = _subtask_instruction(final_eval, subtask_name)
 
     recovery_meta = apply_recovery_mode(env, mode, last_good_state)
-    _append_video_separator(video_writer, video_frame_shape)
+    _append_video_separator(
+        video_writer,
+        last_video_frame,
+        num_frames=config.video_separator_frames,
+    )
     _set_env_instruction(env, instruction)
     obs = _get_obs_after_state_change(env, fallback_obs=obs)
     obs = set_observation_instruction(obs, instruction)
@@ -485,15 +490,15 @@ def run_recovery_after_failed_rollout(
         retry_steps = step_i + 1
         action = call_policy(policy, obs, instruction=instruction)
         obs, reward, done, info = _step_env(env, action)
-        frame_shape = _append_video_frame(
+        video_frame = _append_video_frame(
             env,
             video_writer,
             camera_name=video_camera_name,
             height=video_height,
             width=video_width,
         )
-        if frame_shape is not None:
-            video_frame_shape = frame_shape
+        if video_frame is not None:
+            last_video_frame = video_frame
         obs = set_observation_instruction(obs, instruction)
         current_eval = info.get("subtask_eval") if info else None
         if current_eval is None:
