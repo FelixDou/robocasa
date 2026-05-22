@@ -334,11 +334,12 @@ def _append_video_frame(env, video_writer, camera_name, height, width):
     return video_img
 
 
-def _load_separator_font(height):
+def _load_separator_font(height, size=None):
+    font_size = size or max(18, height // 18)
     try:
         from PIL import ImageFont
 
-        return ImageFont.truetype("DejaVuSans-Bold.ttf", max(18, height // 18))
+        return ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
     except Exception:
         try:
             from PIL import ImageFont
@@ -349,19 +350,23 @@ def _load_separator_font(height):
 
 
 def _wrap_text(draw, text, font, max_width):
-    words = text.split()
     lines = []
-    current = ""
-    for word in words:
-        candidate = f"{current} {word}".strip()
-        bbox = draw.textbbox((0, 0), candidate, font=font)
-        if current and bbox[2] - bbox[0] > max_width:
+    for paragraph in text.splitlines():
+        if not paragraph.strip():
+            lines.append("")
+            continue
+        words = paragraph.split()
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            bbox = draw.textbbox((0, 0), candidate, font=font)
+            if current and bbox[2] - bbox[0] > max_width:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
             lines.append(current)
-            current = word
-        else:
-            current = candidate
-    if current:
-        lines.append(current)
     return lines
 
 
@@ -375,18 +380,47 @@ def _make_separator_frame(frame, text):
     height, width = frame.shape[:2]
     image = Image.new("RGB", (width, height), color=(18, 20, 22))
     draw = ImageDraw.Draw(image)
-    font = _load_separator_font(height)
+    font = None
+    lines = []
+    line_boxes = []
+    line_heights = []
+    line_gap = 0
+    total_height = 0
+    for font_size in range(max(16, height // 20), 11, -2):
+        candidate_font = _load_separator_font(height, size=font_size)
+        if candidate_font is None:
+            continue
+        candidate_lines = _wrap_text(
+            draw,
+            text,
+            candidate_font,
+            max_width=int(width * 0.84),
+        )
+        candidate_boxes = [
+            draw.textbbox((0, 0), line or " ", font=candidate_font)
+            for line in candidate_lines
+        ]
+        candidate_heights = [box[3] - box[1] for box in candidate_boxes]
+        candidate_gap = max(5, font_size // 3)
+        candidate_total_height = sum(candidate_heights) + candidate_gap * max(
+            0, len(candidate_lines) - 1
+        )
+        font = candidate_font
+        lines = candidate_lines
+        line_boxes = candidate_boxes
+        line_heights = candidate_heights
+        line_gap = candidate_gap
+        total_height = candidate_total_height
+        if candidate_total_height <= height * 0.82:
+            break
     if font is None:
         return np.ascontiguousarray(frame)
-
-    lines = _wrap_text(draw, text, font, max_width=int(width * 0.82))
-    line_boxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
-    line_heights = [box[3] - box[1] for box in line_boxes]
-    line_gap = max(8, height // 48)
-    total_height = sum(line_heights) + line_gap * max(0, len(lines) - 1)
     y = (height - total_height) // 2
 
     for line, box, line_height in zip(lines, line_boxes, line_heights):
+        if not line:
+            y += line_height + line_gap
+            continue
         line_width = box[2] - box[0]
         x = (width - line_width) // 2
         draw.text((x, y), line, fill=(244, 246, 248), font=font)
@@ -403,6 +437,54 @@ def _append_video_separator(video_writer, frame, num_frames=0, text=""):
     separator_frame = _make_separator_frame(frame, text)
     for _ in range(num_frames):
         video_writer.append_data(separator_frame)
+
+
+def _predicate_description(subtask_eval, name):
+    predicate = (subtask_eval or {}).get("predicates", {}).get(name, {})
+    return predicate.get("description") or str(name).replace("_", " ")
+
+
+def _format_description_list(subtask_eval, names, empty="none", max_items=4):
+    if not names:
+        return empty
+    descriptions = [_predicate_description(subtask_eval, name) for name in names]
+    if len(descriptions) > max_items:
+        shown = descriptions[:max_items]
+        shown.append(f"+{len(descriptions) - max_items} more")
+        descriptions = shown
+    return "; ".join(descriptions)
+
+
+def _make_recovery_separator_text(
+    default_text,
+    high_level_summary,
+    subtask_name,
+    instruction,
+):
+    final_eval = high_level_summary.get("final_subtask_eval")
+    completed = high_level_summary.get("ordered_completed_required_subtasks", [])
+    failure_modes = high_level_summary.get("failure_modes", [])
+    failed_preconditions = high_level_summary.get("failed_preconditions_ever", [])
+    diagnostics = ", ".join(failure_modes) if failure_modes else "none"
+    if failed_preconditions:
+        diagnostics = (
+            f"{diagnostics}; failed preconditions: "
+            f"{_format_description_list(final_eval, failed_preconditions)}"
+        )
+    return "\n".join(
+        [
+            default_text,
+            "",
+            "Successful subtasks:",
+            _format_description_list(final_eval, completed),
+            "",
+            "Failure diagnostic:",
+            diagnostics,
+            "",
+            "Recovering now:",
+            instruction or _predicate_description(final_eval, subtask_name),
+        ]
+    )
 
 
 def _latest_ordered_trace_entry(subtask_evals):
@@ -528,13 +610,19 @@ def run_recovery_after_failed_rollout(
     )
     instruction = _subtask_instruction(final_eval, subtask_name)
 
-    recovery_meta = apply_recovery_mode(env, mode, last_good_state)
+    separator_text = _make_recovery_separator_text(
+        config.video_separator_text,
+        high_level_summary,
+        subtask_name,
+        instruction,
+    )
     _append_video_separator(
         video_writer,
         last_video_frame,
         num_frames=config.video_separator_frames,
-        text=config.video_separator_text,
+        text=separator_text,
     )
+    recovery_meta = apply_recovery_mode(env, mode, last_good_state)
     _set_env_instruction(env, instruction)
     obs = _get_obs_after_state_change(env, fallback_obs=obs)
     obs = set_observation_instruction(obs, instruction)
