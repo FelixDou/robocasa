@@ -12,7 +12,11 @@ from enum import Enum
 
 import numpy as np
 
-from robocasa.recovery.subtask_eval import get_subtask_eval, summarize_subtask_rollout
+from robocasa.recovery.subtask_eval import (
+    build_subtask_trace,
+    get_subtask_eval,
+    summarize_subtask_rollout,
+)
 
 
 class RecoveryMode(str, Enum):
@@ -307,6 +311,14 @@ def _step_env(env, action):
     return obs, reward, bool(done), info
 
 
+def _latest_ordered_trace_entry(subtask_evals):
+    trace = build_subtask_trace(subtask_evals)
+    for entry in reversed(trace):
+        if entry.get("subtask_eval_available"):
+            return entry
+    return None
+
+
 def run_recovery_after_failed_rollout(policy, env, config=None, initial_obs=None):
     """
     Run a high-level rollout, then retry only the failed subtask if needed.
@@ -336,7 +348,13 @@ def run_recovery_after_failed_rollout(policy, env, config=None, initial_obs=None
 
     subtask_evals = [get_subtask_eval(env)]
     last_good_state = _capture_state(env)
-    best_progress = float((subtask_evals[-1] or {}).get("subtask_progress", 0.0))
+    initial_trace_entry = _latest_ordered_trace_entry(subtask_evals) or {}
+    best_ordered_count = len(initial_trace_entry.get("ordered_completed_subtasks", []))
+    last_good_subtask = (
+        initial_trace_entry.get("ordered_completed_subtasks", [])[-1]
+        if best_ordered_count
+        else None
+    )
     high_level_success = False
     high_level_steps = 0
 
@@ -349,9 +367,11 @@ def run_recovery_after_failed_rollout(policy, env, config=None, initial_obs=None
             current_eval = get_subtask_eval(env)
         subtask_evals.append(current_eval)
 
-        progress = float((current_eval or {}).get("subtask_progress", 0.0))
-        if progress > best_progress:
-            best_progress = progress
+        trace_entry = _latest_ordered_trace_entry(subtask_evals) or {}
+        ordered_completed = trace_entry.get("ordered_completed_subtasks", [])
+        if len(ordered_completed) > best_ordered_count:
+            best_ordered_count = len(ordered_completed)
+            last_good_subtask = ordered_completed[-1] if ordered_completed else None
             last_good_state = _capture_state(env)
 
         if _is_task_success(info, reward=reward, env=env):
@@ -367,6 +387,8 @@ def run_recovery_after_failed_rollout(policy, env, config=None, initial_obs=None
     )
     high_level_summary["success"] = high_level_success
     high_level_summary["num_steps"] = high_level_steps
+    high_level_summary["last_good_ordered_subtask"] = last_good_subtask
+    high_level_summary["last_good_ordered_subtask_count"] = best_ordered_count
 
     result = {
         "high_level": high_level_summary,
