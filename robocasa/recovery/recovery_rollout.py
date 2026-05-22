@@ -1,0 +1,428 @@
+"""Policy-agnostic rollout recovery helpers.
+
+This module adds a thin recovery layer around an existing policy evaluator. It
+first runs the original high-level instruction. If that rollout fails, it can
+restore the last good state, restore only the robot state, or continue from the
+failure state, then retry only the currently failed subtask.
+"""
+
+from copy import deepcopy
+from dataclasses import dataclass
+from enum import Enum
+
+import numpy as np
+
+from robocasa.recovery.subtask_eval import get_subtask_eval, summarize_subtask_rollout
+
+
+class RecoveryMode(str, Enum):
+    """State handling mode used before retrying the failed subtask."""
+
+    EEF_TO_LAST_GOOD = "eef_to_last_good"
+    ENV_TO_LAST_GOOD = "env_to_last_good"
+    CONTINUE_FROM_FAILURE = "continue_from_failure"
+
+
+RECOVERY_MODE_ALIASES = {
+    "eef": RecoveryMode.EEF_TO_LAST_GOOD,
+    "move_eef": RecoveryMode.EEF_TO_LAST_GOOD,
+    "move_end_effector": RecoveryMode.EEF_TO_LAST_GOOD,
+    "eef_to_last_good": RecoveryMode.EEF_TO_LAST_GOOD,
+    "env": RecoveryMode.ENV_TO_LAST_GOOD,
+    "reset_env": RecoveryMode.ENV_TO_LAST_GOOD,
+    "reset_environment": RecoveryMode.ENV_TO_LAST_GOOD,
+    "env_to_last_good": RecoveryMode.ENV_TO_LAST_GOOD,
+    "continue": RecoveryMode.CONTINUE_FROM_FAILURE,
+    "continue_from_failure": RecoveryMode.CONTINUE_FROM_FAILURE,
+    "none": RecoveryMode.CONTINUE_FROM_FAILURE,
+}
+
+
+@dataclass
+class RecoveryConfig:
+    """Configuration for a recovery-after-failure rollout."""
+
+    mode: object = RecoveryMode.CONTINUE_FROM_FAILURE
+    high_level_horizon: int = 400
+    subtask_horizon: int = 120
+    stuck_patience: int = 10
+    include_trace: bool = True
+
+
+def normalize_recovery_mode(mode):
+    if isinstance(mode, RecoveryMode):
+        return mode
+    try:
+        return RECOVERY_MODE_ALIASES[str(mode)]
+    except KeyError as exc:
+        valid = ", ".join(sorted(RECOVERY_MODE_ALIASES))
+        raise ValueError(
+            f"Unknown recovery mode {mode!r}. Valid modes: {valid}"
+        ) from exc
+
+
+def call_policy(policy, obs, instruction=None):
+    """
+    Invoke a policy with the common evaluator call conventions.
+
+    The policy can be a plain callable, or expose ``predict``, ``select_action``,
+    or ``get_action``. When possible, the subtask instruction is passed as a
+    keyword so VLA policies that separate observations from language can use it.
+    """
+    if callable(policy):
+        try:
+            return policy(obs, instruction=instruction)
+        except TypeError:
+            return policy(obs)
+
+    for method_name in ("predict", "select_action", "get_action"):
+        method = getattr(policy, method_name, None)
+        if method is None:
+            continue
+        try:
+            result = method(obs, instruction=instruction)
+        except TypeError:
+            result = method(obs)
+        if isinstance(result, tuple):
+            return result[0]
+        return result
+
+    raise TypeError(
+        "policy must be callable or expose predict/select_action/get_action"
+    )
+
+
+def set_observation_instruction(obs, instruction):
+    """Return an observation copy with VLA language fields set to instruction."""
+    if instruction is None:
+        return obs
+    obs = dict(obs)
+    for key in ("annotation.human.task_description", "language"):
+        if key in obs:
+            obs[key] = instruction
+    return obs
+
+
+def _inner_env(env):
+    return getattr(env, "env", env)
+
+
+def _sim_env(env):
+    inner = _inner_env(env)
+    if hasattr(inner, "sim"):
+        return inner
+    return getattr(inner, "env", inner)
+
+
+def _get_sim(env):
+    sim_holder = _sim_env(env)
+    return getattr(sim_holder, "sim", None)
+
+
+def _capture_state(env):
+    if hasattr(env, "get_state"):
+        state = env.get_state()
+    elif hasattr(_inner_env(env), "get_state"):
+        state = _inner_env(env).get_state()
+    else:
+        sim = _get_sim(env)
+        if sim is None:
+            return None
+        state = {"states": np.array(sim.get_state().flatten())}
+        if hasattr(sim.model, "get_xml"):
+            state["model"] = sim.model.get_xml()
+
+    snapshot = deepcopy(state)
+    sim = _get_sim(env)
+    if sim is not None:
+        try:
+            sim_state = sim.get_state()
+            snapshot["_sim_state_qpos"] = np.array(sim_state.qpos).copy()
+            snapshot["_sim_state_qvel"] = np.array(sim_state.qvel).copy()
+        except Exception:
+            pass
+    return snapshot
+
+
+def _reset_to_state(env, state):
+    clean_state = {
+        key: value for key, value in state.items() if not key.startswith("_sim_state_")
+    }
+    if hasattr(env, "reset_to"):
+        return env.reset_to(clean_state)
+    if hasattr(_inner_env(env), "reset_to"):
+        return _inner_env(env).reset_to(clean_state)
+
+    sim = _get_sim(env)
+    if sim is None:
+        raise RuntimeError("Environment does not expose reset_to() or sim state")
+    if "states" not in clean_state:
+        raise RuntimeError("Captured state does not contain flattened simulator state")
+    sim.set_state_from_flattened(clean_state["states"])
+    sim.forward()
+    sim_holder = _sim_env(env)
+    if hasattr(sim_holder, "update_sites"):
+        sim_holder.update_sites()
+    if hasattr(sim_holder, "update_state"):
+        sim_holder.update_state()
+    return None
+
+
+def _get_obs_after_state_change(env, fallback_obs=None):
+    if hasattr(env, "get_current_observation"):
+        return env.get_current_observation()
+    if hasattr(env, "get_observation") and hasattr(_inner_env(env), "_get_observations"):
+        raw_obs = _inner_env(env)._get_observations(force_update=True)
+        return env.get_observation(raw_obs)
+    inner = _inner_env(env)
+    if hasattr(inner, "_get_observations"):
+        return inner._get_observations(force_update=True)
+    return fallback_obs
+
+
+def _set_env_instruction(env, instruction):
+    setter = getattr(env, "set_task_description", None)
+    if setter is not None:
+        setter(instruction)
+
+
+def _robot_joint_indices(env):
+    sim = _get_sim(env)
+    sim_holder = _sim_env(env)
+    if sim is None or not hasattr(sim.model, "njnt"):
+        return [], []
+
+    prefixes = []
+    for robot in getattr(sim_holder, "robots", []):
+        robot_model = getattr(robot, "robot_model", None)
+        prefix = getattr(robot_model, "naming_prefix", None)
+        if prefix:
+            prefixes.append(prefix)
+    if not prefixes:
+        prefixes = ["robot0_", "mobilebase0_", "gripper0_"]
+
+    qpos_indices = []
+    qvel_indices = []
+    for joint_id in range(sim.model.njnt):
+        joint_name = sim.model.joint_id2name(joint_id)
+        if joint_name is None or not any(joint_name.startswith(p) for p in prefixes):
+            continue
+
+        qpos_addr = sim.model.jnt_qposadr[joint_id]
+        qvel_addr = sim.model.jnt_dofadr[joint_id]
+        joint_type = sim.model.jnt_type[joint_id]
+        if joint_type == 0:  # free joint
+            qpos_width, qvel_width = 7, 6
+        elif joint_type == 1:  # ball joint
+            qpos_width, qvel_width = 4, 3
+        else:
+            qpos_width, qvel_width = 1, 1
+        qpos_indices.extend(range(qpos_addr, qpos_addr + qpos_width))
+        qvel_indices.extend(range(qvel_addr, qvel_addr + qvel_width))
+    return sorted(set(qpos_indices)), sorted(set(qvel_indices))
+
+
+def _restore_robot_state_only(env, good_state):
+    sim = _get_sim(env)
+    if sim is None:
+        raise RuntimeError("Environment does not expose simulator state")
+
+    good_qpos = good_state.get("_sim_state_qpos")
+    good_qvel = good_state.get("_sim_state_qvel")
+    if good_qpos is None or good_qvel is None:
+        _reset_to_state(env, good_state)
+        return
+
+    qpos_indices, qvel_indices = _robot_joint_indices(env)
+    if not qpos_indices and not qvel_indices:
+        _reset_to_state(env, good_state)
+        return
+
+    current = sim.get_state()
+    qpos = np.array(current.qpos).copy()
+    qvel = np.array(current.qvel).copy()
+    qpos[qpos_indices] = good_qpos[qpos_indices]
+    qvel[qvel_indices] = good_qvel[qvel_indices]
+    try:
+        current.qpos[:] = qpos
+        current.qvel[:] = qvel
+        sim.set_state(current)
+    except Exception:
+        if not hasattr(current, "_replace"):
+            raise
+        sim.set_state(current._replace(qpos=qpos, qvel=qvel))
+    sim.forward()
+    sim_holder = _sim_env(env)
+    if hasattr(sim_holder, "update_sites"):
+        sim_holder.update_sites()
+    if hasattr(sim_holder, "update_state"):
+        sim_holder.update_state()
+
+
+def apply_recovery_mode(env, mode, last_good_state):
+    """Apply the requested recovery mode and return a short metadata payload."""
+    mode = normalize_recovery_mode(mode)
+    if mode == RecoveryMode.CONTINUE_FROM_FAILURE:
+        return {"mode": mode.value, "state_restored": False}
+    if last_good_state is None:
+        return {"mode": mode.value, "state_restored": False, "reason": "no_state"}
+    if mode == RecoveryMode.ENV_TO_LAST_GOOD:
+        _reset_to_state(env, last_good_state)
+        return {"mode": mode.value, "state_restored": True}
+    if mode == RecoveryMode.EEF_TO_LAST_GOOD:
+        _restore_robot_state_only(env, last_good_state)
+        return {"mode": mode.value, "state_restored": True, "robot_only": True}
+    raise ValueError(f"Unhandled recovery mode: {mode}")
+
+
+def _is_task_success(info, reward=None, env=None):
+    if info and bool(info.get("success", False)):
+        return True
+    if reward is not None and reward > 0:
+        return True
+    inner = _inner_env(env) if env is not None else None
+    return bool(hasattr(inner, "_check_success") and inner._check_success())
+
+
+def _subtask_is_complete(subtask_eval, subtask_name):
+    if subtask_name is None:
+        return False
+    predicate = (subtask_eval or {}).get("predicates", {}).get(subtask_name, {})
+    return bool(predicate.get("value", False))
+
+
+def _subtask_instruction(subtask_eval, subtask_name):
+    if subtask_name is None:
+        return None
+    predicate = (subtask_eval or {}).get("predicates", {}).get(subtask_name, {})
+    return predicate.get("description") or f"Complete this subtask: {subtask_name}."
+
+
+def _step_env(env, action):
+    result = env.step(action)
+    if len(result) == 5:
+        obs, reward, terminated, truncated, info = result
+        return obs, reward, bool(terminated or truncated), info
+    obs, reward, done, info = result
+    return obs, reward, bool(done), info
+
+
+def run_recovery_after_failed_rollout(policy, env, config=None, initial_obs=None):
+    """
+    Run a high-level rollout, then retry only the failed subtask if needed.
+
+    Args:
+        policy: VLA policy callable or object exposing predict/select_action/get_action.
+        env: Gymnasium-style or robosuite-style environment.
+        config: ``RecoveryConfig`` or dict.
+        initial_obs: Optional already-reset observation. If omitted, ``env.reset()``
+            is called.
+
+    Returns:
+        A dictionary with the high-level rollout summary, chosen subtask prompt,
+        recovery metadata, and subtask retry result.
+    """
+    if config is None:
+        config = RecoveryConfig()
+    elif isinstance(config, dict):
+        config = RecoveryConfig(**config)
+    mode = normalize_recovery_mode(config.mode)
+
+    if initial_obs is None:
+        reset_result = env.reset()
+        obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
+    else:
+        obs = initial_obs
+
+    subtask_evals = [get_subtask_eval(env)]
+    last_good_state = _capture_state(env)
+    best_progress = float((subtask_evals[-1] or {}).get("subtask_progress", 0.0))
+    high_level_success = False
+    high_level_steps = 0
+
+    for step_i in range(config.high_level_horizon):
+        high_level_steps = step_i + 1
+        action = call_policy(policy, obs)
+        obs, reward, done, info = _step_env(env, action)
+        current_eval = info.get("subtask_eval") if info else None
+        if current_eval is None:
+            current_eval = get_subtask_eval(env)
+        subtask_evals.append(current_eval)
+
+        progress = float((current_eval or {}).get("subtask_progress", 0.0))
+        if progress > best_progress:
+            best_progress = progress
+            last_good_state = _capture_state(env)
+
+        if _is_task_success(info, reward=reward, env=env):
+            high_level_success = True
+            break
+        if done:
+            break
+
+    high_level_summary = summarize_subtask_rollout(
+        subtask_evals,
+        stuck_patience=config.stuck_patience,
+        include_trace=config.include_trace,
+    )
+    high_level_summary["success"] = high_level_success
+    high_level_summary["num_steps"] = high_level_steps
+
+    result = {
+        "high_level": high_level_summary,
+        "recovery_attempted": False,
+        "recovery": None,
+        "subtask": None,
+    }
+    if high_level_success:
+        return result
+
+    final_eval = high_level_summary.get("final_subtask_eval")
+    subtask_name = (
+        high_level_summary.get("ordered_current_subtask")
+        or high_level_summary.get("current_subtask_estimate")
+        or high_level_summary.get("stuck_subtask")
+    )
+    instruction = _subtask_instruction(final_eval, subtask_name)
+
+    recovery_meta = apply_recovery_mode(env, mode, last_good_state)
+    _set_env_instruction(env, instruction)
+    obs = _get_obs_after_state_change(env, fallback_obs=obs)
+    obs = set_observation_instruction(obs, instruction)
+
+    retry_evals = [get_subtask_eval(env)]
+    retry_success = _subtask_is_complete(retry_evals[-1], subtask_name)
+    retry_steps = 0
+    for step_i in range(config.subtask_horizon):
+        if retry_success:
+            break
+        retry_steps = step_i + 1
+        action = call_policy(policy, obs, instruction=instruction)
+        obs, reward, done, info = _step_env(env, action)
+        obs = set_observation_instruction(obs, instruction)
+        current_eval = info.get("subtask_eval") if info else None
+        if current_eval is None:
+            current_eval = get_subtask_eval(env)
+        retry_evals.append(current_eval)
+        retry_success = _subtask_is_complete(current_eval, subtask_name)
+        if done:
+            break
+
+    retry_summary = summarize_subtask_rollout(
+        retry_evals,
+        stuck_patience=config.stuck_patience,
+        include_trace=config.include_trace,
+    )
+    retry_summary["success"] = retry_success
+    retry_summary["num_steps"] = retry_steps
+    retry_summary["target_subtask"] = subtask_name
+    retry_summary["target_instruction"] = instruction
+
+    result.update(
+        {
+            "recovery_attempted": True,
+            "recovery": recovery_meta,
+            "subtask": retry_summary,
+        }
+    )
+    return result

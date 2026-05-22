@@ -171,6 +171,7 @@ class RoboCasaGymEnv(gym.Env):
         self.enable_render = enable_render
         self.render_obs_key = f"{camera_names[0]}_image"
         self.render_cache = None
+        self.override_task_description = None
 
         self._create_obs_and_action_space()
 
@@ -261,7 +262,11 @@ class RoboCasaGymEnv(gym.Env):
                 )
 
         self.render_cache = raw_obs[self.render_obs_key]
-        raw_obs["language"] = self.env.get_ep_meta().get("lang", "")
+        raw_obs["language"] = (
+            self.override_task_description
+            if self.override_task_description is not None
+            else self.env.get_ep_meta().get("lang", "")
+        )
 
         return raw_obs
 
@@ -290,6 +295,65 @@ class RoboCasaGymEnv(gym.Env):
             return self.env.get_subtask_progress()
         return None
 
+    def set_task_description(self, task_description):
+        """Override the language prompt returned in observations."""
+        self.override_task_description = task_description
+
+    def clear_task_description(self):
+        """Restore the environment's original high-level language prompt."""
+        self.override_task_description = None
+
+    def get_current_observation(self):
+        """Return a fresh observation without advancing the simulator."""
+        raw_obs = (
+            self.env.viewer._get_observations(force_update=True)
+            if self.env.viewer_get_obs
+            else self.env._get_observations(force_update=True)
+        )
+        return self.get_observation(raw_obs)
+
+    def get_state(self):
+        """Return the current simulator state in a reset_to-compatible dict."""
+        state = {
+            "states": np.array(self.env.sim.get_state().flatten()),
+        }
+        if hasattr(self.env.sim.model, "get_xml"):
+            state["model"] = self.env.sim.model.get_xml()
+        if hasattr(self.env, "get_ep_meta"):
+            import json
+
+            state["ep_meta"] = json.dumps(self.env.get_ep_meta(), indent=4)
+        return state
+
+    def reset_to(self, state):
+        """Restore a simulator state and return the corresponding observation."""
+        if "model" in state:
+            if state.get("ep_meta", None) is not None:
+                import json
+
+                ep_meta = json.loads(state["ep_meta"])
+            else:
+                ep_meta = {}
+            if hasattr(self.env, "set_attrs_from_ep_meta"):
+                self.env.set_attrs_from_ep_meta(ep_meta)
+            elif hasattr(self.env, "set_ep_meta"):
+                self.env.set_ep_meta(ep_meta)
+            model_xml = (
+                self.env.edit_model_xml(state["model"])
+                if hasattr(self.env, "edit_model_xml")
+                else state["model"]
+            )
+            self.env.reset_from_xml_string(model_xml)
+            self.env.sim.reset()
+        if "states" in state:
+            self.env.sim.set_state_from_flattened(state["states"])
+            self.env.sim.forward()
+        if hasattr(self.env, "update_sites"):
+            self.env.update_sites()
+        if hasattr(self.env, "update_state"):
+            self.env.update_state()
+        return self.get_current_observation()
+
     # def process_img(self, img):
     #     h, w, _ = img.shape
     #     if h != w:
@@ -303,6 +367,7 @@ class RoboCasaGymEnv(gym.Env):
     #     return np.copy(img)
 
     def reset(self, seed=None, options=None):
+        self.clear_task_description()
         if seed is not None:
             self.env.rng = np.random.default_rng(seed)
 
