@@ -49,6 +49,7 @@ class RecoveryConfig:
     mode: object = RecoveryMode.CONTINUE_FROM_FAILURE
     high_level_horizon: int = 400
     subtask_horizon: int = 120
+    match_recovery_horizon_to_no_progress: bool = False
     stuck_patience: int = 10
     include_trace: bool = True
 
@@ -398,6 +399,7 @@ def run_recovery_after_failed_rollout(
     )
     high_level_success = False
     high_level_steps = 0
+    last_good_step = 0
     video_frame_shape = None
 
     for step_i in range(config.high_level_horizon):
@@ -424,6 +426,7 @@ def run_recovery_after_failed_rollout(
             best_ordered_count = len(ordered_completed)
             last_good_subtask = ordered_completed[-1] if ordered_completed else None
             last_good_state = _capture_state(env)
+            last_good_step = high_level_steps
 
         if _is_task_success(info, reward=reward, env=env):
             high_level_success = True
@@ -440,6 +443,10 @@ def run_recovery_after_failed_rollout(
     high_level_summary["num_steps"] = high_level_steps
     high_level_summary["last_good_ordered_subtask"] = last_good_subtask
     high_level_summary["last_good_ordered_subtask_count"] = best_ordered_count
+    high_level_summary["last_good_step"] = last_good_step
+    high_level_summary["steps_since_last_good_progress"] = (
+        high_level_steps - last_good_step
+    )
 
     result = {
         "high_level": high_level_summary,
@@ -467,7 +474,12 @@ def run_recovery_after_failed_rollout(
     retry_evals = [get_subtask_eval(env)]
     retry_success = _subtask_is_complete(retry_evals[-1], subtask_name)
     retry_steps = 0
-    for step_i in range(config.subtask_horizon):
+    retry_horizon = (
+        max(1, high_level_steps - last_good_step)
+        if config.match_recovery_horizon_to_no_progress
+        else config.subtask_horizon
+    )
+    for step_i in range(retry_horizon):
         if retry_success:
             break
         retry_steps = step_i + 1
@@ -498,6 +510,12 @@ def run_recovery_after_failed_rollout(
     )
     retry_summary["success"] = retry_success
     retry_summary["num_steps"] = retry_steps
+    retry_summary["horizon"] = retry_horizon
+    retry_summary["horizon_source"] = (
+        "steps_since_last_good_progress"
+        if config.match_recovery_horizon_to_no_progress
+        else "fixed_subtask_horizon"
+    )
     retry_summary["target_subtask"] = subtask_name
     retry_summary["target_instruction"] = instruction
 

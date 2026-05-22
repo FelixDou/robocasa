@@ -227,6 +227,9 @@ def run_benchmark(args):
                             mode=mode,
                             high_level_horizon=args.high_level_horizon,
                             subtask_horizon=args.subtask_horizon,
+                            match_recovery_horizon_to_no_progress=(
+                                args.match_recovery_horizon_to_no_progress
+                            ),
                             stuck_patience=args.stuck_patience,
                             include_trace=args.include_trace,
                         ),
@@ -304,6 +307,14 @@ def main():
     parser.add_argument("--num-rollouts", type=int, default=1)
     parser.add_argument("--high-level-horizon", type=int, default=400)
     parser.add_argument("--subtask-horizon", type=int, default=120)
+    parser.add_argument(
+        "--match-recovery-horizon-to-no-progress",
+        action="store_true",
+        help=(
+            "Use high_level_steps - last_good_step as the recovery horizon, "
+            "instead of the fixed --subtask-horizon."
+        ),
+    )
     parser.add_argument("--stuck-patience", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--enable-render", action="store_true")
