@@ -314,7 +314,22 @@ def _step_env(env, action):
     return obs, reward, bool(done), info
 
 
-def _append_video_frame(env, video_writer, camera_name, height, width):
+def _is_likely_corrupt_video_frame(frame):
+    """Detect intermittent EGL/offscreen render garbage before writing videos."""
+    frame = np.asarray(frame)
+    if frame.ndim < 3 or frame.shape[0] < 2 or frame.shape[1] < 2:
+        return True
+    sample = frame[::4, ::4, :3].astype(np.float32)
+    dx = np.abs(sample[:, 1:] - sample[:, :-1])
+    dy = np.abs(sample[1:] - sample[:-1])
+    high_dx = float((dx > 40).mean())
+    high_dy = float((dy > 40).mean())
+    mean_dx = float(dx.mean())
+    mean_dy = float(dy.mean())
+    return (high_dx > 0.25 and high_dy > 0.25) or (mean_dx > 30 and mean_dy > 30)
+
+
+def _append_video_frame(env, video_writer, camera_name, height, width, previous_frame=None):
     if video_writer is None:
         return None
 
@@ -330,6 +345,10 @@ def _append_video_frame(env, video_writer, camera_name, height, width):
             return None
         video_img = sim.render(height=height, width=width, camera_name=camera_name)[::-1]
 
+    if _is_likely_corrupt_video_frame(video_img) and previous_frame is not None:
+        video_img = previous_frame
+
+    video_img = np.ascontiguousarray(video_img)
     video_writer.append_data(video_img)
     return video_img
 
@@ -557,6 +576,7 @@ def run_recovery_after_failed_rollout(
             camera_name=video_camera_name,
             height=video_height,
             width=video_width,
+            previous_frame=last_video_frame,
         )
         if video_frame is not None:
             last_video_frame = video_frame
@@ -647,6 +667,7 @@ def run_recovery_after_failed_rollout(
             camera_name=video_camera_name,
             height=video_height,
             width=video_width,
+            previous_frame=last_video_frame,
         )
         if video_frame is not None:
             last_video_frame = video_frame
