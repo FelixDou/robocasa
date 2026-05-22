@@ -348,7 +348,7 @@ def main():
     parser.add_argument(
         "--video-separator-seconds",
         type=float,
-        default=2.0,
+        default=4.0,
         help="Duration of the reset-message screen in seconds.",
     )
     parser.add_argument(

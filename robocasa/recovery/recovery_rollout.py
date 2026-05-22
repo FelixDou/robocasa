@@ -52,7 +52,7 @@ class RecoveryConfig:
     match_recovery_horizon_to_no_progress: bool = False
     stuck_patience: int = 10
     include_trace: bool = True
-    video_separator_frames: int = 40
+    video_separator_frames: int = 80
     video_separator_text: str = "Environment is resetting to the last successful state"
 
 
