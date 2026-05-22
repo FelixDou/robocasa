@@ -104,6 +104,7 @@ def make_env(task_name, env_interface, split, seed, enable_render):
         return gym.make(
             f"robocasa/{task_name}",
             split=split,
+            seed=seed,
             enable_render=enable_render,
         )
 
