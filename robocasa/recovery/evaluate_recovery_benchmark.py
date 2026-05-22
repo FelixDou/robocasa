@@ -220,6 +220,11 @@ def run_benchmark(args):
                         if args.random_policy
                         else call_factory(policy_factory, env, policy_args)
                     )
+                    video_separator_frames = (
+                        args.video_separator_frames
+                        if args.video_separator_frames is not None
+                        else round(args.video_separator_seconds * args.video_fps)
+                    )
                     result = run_recovery_after_failed_rollout(
                         policy,
                         env,
@@ -232,7 +237,8 @@ def run_benchmark(args):
                             ),
                             stuck_patience=args.stuck_patience,
                             include_trace=args.include_trace,
-                            video_separator_frames=args.video_separator_frames,
+                            video_separator_frames=max(0, int(video_separator_frames)),
+                            video_separator_text=args.video_separator_text,
                         ),
                         video_writer=video_writer,
                         video_camera_name=args.video_camera_name,
@@ -333,11 +339,22 @@ def main():
     parser.add_argument(
         "--video-separator-frames",
         type=int,
-        default=0,
+        default=None,
         help=(
-            "Number of duplicated freeze frames to insert at the recovery reset "
-            "boundary. Defaults to 0 to avoid visible flashes."
+            "Number of reset-message frames to insert at the recovery reset "
+            "boundary. Overrides --video-separator-seconds. Use 0 to disable."
         ),
+    )
+    parser.add_argument(
+        "--video-separator-seconds",
+        type=float,
+        default=2.0,
+        help="Duration of the reset-message screen in seconds.",
+    )
+    parser.add_argument(
+        "--video-separator-text",
+        default="Environment is resetting to the last successful state",
+        help="Text shown on the reset-message screen.",
     )
     args = parser.parse_args()
 

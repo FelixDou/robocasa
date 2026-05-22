@@ -52,7 +52,8 @@ class RecoveryConfig:
     match_recovery_horizon_to_no_progress: bool = False
     stuck_patience: int = 10
     include_trace: bool = True
-    video_separator_frames: int = 0
+    video_separator_frames: int = 40
+    video_separator_text: str = "Environment is resetting to the last successful state"
 
 
 def normalize_recovery_mode(mode):
@@ -333,14 +334,75 @@ def _append_video_frame(env, video_writer, camera_name, height, width):
     return video_img
 
 
-def _append_video_separator(video_writer, frame, num_frames=0):
+def _load_separator_font(height):
+    try:
+        from PIL import ImageFont
+
+        return ImageFont.truetype("DejaVuSans-Bold.ttf", max(18, height // 18))
+    except Exception:
+        try:
+            from PIL import ImageFont
+
+            return ImageFont.load_default()
+        except Exception:
+            return None
+
+
+def _wrap_text(draw, text, font, max_width):
+    words = text.split()
+    lines = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        bbox = draw.textbbox((0, 0), candidate, font=font)
+        if current and bbox[2] - bbox[0] > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _make_separator_frame(frame, text):
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:
+        return np.ascontiguousarray(frame)
+
+    frame = np.asarray(frame)
+    height, width = frame.shape[:2]
+    image = Image.new("RGB", (width, height), color=(18, 20, 22))
+    draw = ImageDraw.Draw(image)
+    font = _load_separator_font(height)
+    if font is None:
+        return np.ascontiguousarray(frame)
+
+    lines = _wrap_text(draw, text, font, max_width=int(width * 0.82))
+    line_boxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
+    line_heights = [box[3] - box[1] for box in line_boxes]
+    line_gap = max(8, height // 48)
+    total_height = sum(line_heights) + line_gap * max(0, len(lines) - 1)
+    y = (height - total_height) // 2
+
+    for line, box, line_height in zip(lines, line_boxes, line_heights):
+        line_width = box[2] - box[0]
+        x = (width - line_width) // 2
+        draw.text((x, y), line, fill=(244, 246, 248), font=font)
+        y += line_height + line_gap
+
+    return np.ascontiguousarray(np.asarray(image))
+
+
+def _append_video_separator(video_writer, frame, num_frames=0, text=""):
     if video_writer is None:
         return
     if frame is None or num_frames <= 0:
         return
-    freeze_frame = np.ascontiguousarray(frame)
+    separator_frame = _make_separator_frame(frame, text)
     for _ in range(num_frames):
-        video_writer.append_data(freeze_frame)
+        video_writer.append_data(separator_frame)
 
 
 def _latest_ordered_trace_entry(subtask_evals):
@@ -471,6 +533,7 @@ def run_recovery_after_failed_rollout(
         video_writer,
         last_video_frame,
         num_frames=config.video_separator_frames,
+        text=config.video_separator_text,
     )
     _set_env_instruction(env, instruction)
     obs = _get_obs_after_state_change(env, fallback_obs=obs)
