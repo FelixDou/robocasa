@@ -175,6 +175,7 @@ def summarize_results(results):
 
 
 def run_benchmark(args):
+    from robocasa.utils.dataset_registry_utils import get_task_horizon
     from robocasa.recovery.recovery_rollout import (
         RecoveryConfig,
         run_recovery_after_failed_rollout,
@@ -192,6 +193,14 @@ def run_benchmark(args):
     output = {
         "config": vars(args),
         "tasks": tasks,
+        "high_level_horizon_by_task": {
+            task_name: (
+                args.high_level_horizon
+                if args.high_level_horizon is not None
+                else get_task_horizon(task_name)
+            )
+            for task_name in tasks
+        },
         "modes": {},
     }
 
@@ -225,12 +234,17 @@ def run_benchmark(args):
                         if args.video_separator_frames is not None
                         else round(args.video_separator_seconds * args.video_fps)
                     )
+                    high_level_horizon = (
+                        args.high_level_horizon
+                        if args.high_level_horizon is not None
+                        else get_task_horizon(task_name)
+                    )
                     result = run_recovery_after_failed_rollout(
                         policy,
                         env,
                         RecoveryConfig(
                             mode=mode,
-                            high_level_horizon=args.high_level_horizon,
+                            high_level_horizon=high_level_horizon,
                             subtask_horizon=args.subtask_horizon,
                             match_recovery_horizon_to_no_progress=(
                                 args.match_recovery_horizon_to_no_progress
@@ -249,6 +263,7 @@ def run_benchmark(args):
                     result["rollout_index"] = rollout_i
                     result["seed"] = seed
                     result["mode"] = mode
+                    result["resolved_high_level_horizon"] = high_level_horizon
                     if video_path is not None:
                         result["video_path"] = str(video_path)
                     mode_results.append(result)
@@ -312,7 +327,15 @@ def main():
     parser.add_argument("--modes", nargs="+", default=None)
     parser.add_argument("--split", default="test")
     parser.add_argument("--num-rollouts", type=int, default=1)
-    parser.add_argument("--high-level-horizon", type=int, default=400)
+    parser.add_argument(
+        "--high-level-horizon",
+        type=int,
+        default=None,
+        help=(
+            "High-level rollout horizon. Defaults to the task-specific horizon "
+            "from robocasa.utils.dataset_registry_utils.get_task_horizon()."
+        ),
+    )
     parser.add_argument("--subtask-horizon", type=int, default=120)
     parser.add_argument(
         "--match-recovery-horizon-to-no-progress",
