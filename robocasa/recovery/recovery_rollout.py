@@ -53,7 +53,7 @@ class RecoveryConfig:
     stuck_patience: int = 10
     include_trace: bool = True
     video_separator_frames: int = 80
-    video_separator_text: str = "Environment is resetting to the last successful state"
+    video_separator_text: str | None = None
 
 
 def normalize_recovery_mode(mode):
@@ -475,7 +475,7 @@ def _format_description_list(subtask_eval, names, empty="none", max_items=4):
 
 
 def _make_recovery_separator_text(
-    default_text,
+    header_text,
     high_level_summary,
     subtask_name,
     instruction,
@@ -492,7 +492,7 @@ def _make_recovery_separator_text(
         )
     return "\n".join(
         [
-            default_text,
+            header_text,
             "",
             "Successful subtasks:",
             _format_description_list(final_eval, completed),
@@ -504,6 +504,16 @@ def _make_recovery_separator_text(
             instruction or _predicate_description(final_eval, subtask_name),
         ]
     )
+
+
+def _recovery_separator_header(mode):
+    if mode == RecoveryMode.ENV_TO_LAST_GOOD:
+        return "Environment is resetting to the last successful state"
+    if mode == RecoveryMode.EEF_TO_LAST_GOOD:
+        return "Robot is moving back to the last successful state"
+    if mode == RecoveryMode.CONTINUE_FROM_FAILURE:
+        return "Robot is continuing from the failure state"
+    return "Recovery is starting"
 
 
 def _latest_ordered_trace_entry(subtask_evals):
@@ -630,8 +640,9 @@ def run_recovery_after_failed_rollout(
     )
     instruction = _subtask_instruction(final_eval, subtask_name)
 
+    separator_header = config.video_separator_text or _recovery_separator_header(mode)
     separator_text = _make_recovery_separator_text(
-        config.video_separator_text,
+        separator_header,
         high_level_summary,
         subtask_name,
         instruction,

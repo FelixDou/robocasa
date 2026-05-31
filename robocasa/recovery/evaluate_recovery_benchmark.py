@@ -364,8 +364,8 @@ def main():
         type=int,
         default=None,
         help=(
-            "Number of reset-message frames to insert at the recovery reset "
-            "boundary. Overrides --video-separator-seconds. Use 0 to disable."
+            "Number of recovery-message frames to insert at the recovery boundary. "
+            "Overrides --video-separator-seconds. Use 0 to disable."
         ),
     )
     parser.add_argument(
@@ -376,8 +376,11 @@ def main():
     )
     parser.add_argument(
         "--video-separator-text",
-        default="Environment is resetting to the last successful state",
-        help="Text shown on the reset-message screen.",
+        default=None,
+        help=(
+            "Optional custom header shown on the recovery-message screen. "
+            "Defaults to text derived from the selected recovery mode."
+        ),
     )
     args = parser.parse_args()
 
