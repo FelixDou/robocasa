@@ -220,8 +220,8 @@ def pct(value: float) -> str:
 
 
 def draw_group_bars(rows: list[dict], path: Path) -> None:
-    width, height = 1200, 720
-    margin_l, margin_r, margin_t, margin_b = 150, 70, 95, 120
+    width, height = 1200, 780
+    margin_l, margin_r, margin_t, margin_b = 150, 70, 150, 120
     chart_w = width - margin_l - margin_r
     chart_h = height - margin_t - margin_b
     img = Image.new("RGB", (width, height), "white")
@@ -231,7 +231,18 @@ def draw_group_bars(rows: list[dict], path: Path) -> None:
     small_font = font(16)
 
     draw.text((margin_l, 35), "High-level success vs tried-subtask accuracy", fill=COLORS["text"], font=title_font)
-    draw.text((margin_l, 70), "Tried-subtask accuracy counts only completed subtasks plus the first failed subtask.", fill=COLORS["muted"], font=small_font)
+    draw.text((margin_l, 72), "Tried-subtask accuracy counts only completed subtasks plus the first failed subtask.", fill=COLORS["muted"], font=small_font)
+
+    legend_x = margin_l
+    legend_y = 108
+    legend_items = (
+        ("High-level success", COLORS["hl"]),
+        ("Tried-subtask accuracy", COLORS["subtask"]),
+    )
+    for idx, (label, color) in enumerate(legend_items):
+        x = legend_x + idx * 235
+        draw.rectangle((x, legend_y, x + 22, legend_y + 16), fill=color)
+        draw.text((x + 31, legend_y - 3), label, fill=COLORS["text"], font=small_font)
 
     for tick in range(0, 101, 20):
         y = margin_t + chart_h - chart_h * tick / 100.0
@@ -251,13 +262,6 @@ def draw_group_bars(rows: list[dict], path: Path) -> None:
             draw.text((x0 - 8, y0 - 25), pct(value), fill=COLORS["text"], font=small_font)
         draw.text((cx - 68, margin_t + chart_h + 22), row["group"], fill=COLORS["text"], font=label_font)
         draw.text((cx - 58, margin_t + chart_h + 50), f"n={row['rollouts']}", fill=COLORS["muted"], font=small_font)
-
-    legend_x = width - 420
-    legend_y = 42
-    for idx, (label, color) in enumerate((("High-level success", COLORS["hl"]), ("Tried-subtask accuracy", COLORS["subtask"]))):
-        y = legend_y + idx * 28
-        draw.rectangle((legend_x, y, legend_x + 20, y + 16), fill=color)
-        draw.text((legend_x + 30, y - 3), label, fill=COLORS["text"], font=small_font)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path)
