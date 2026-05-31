@@ -246,29 +246,30 @@ class RoboCasaGymEnv(gym.Env):
         def process_img(img):
             return np.copy(img[::-1, :, :])
 
+        basic_obs = {}
         for obs_name, obs_value in raw_obs.items():
             if obs_name.endswith("_image"):
                 # image observations
-                raw_obs[obs_name] = process_img(obs_value)
+                basic_obs[obs_name] = process_img(obs_value)
             else:
                 # non-image observations
-                raw_obs[obs_name] = obs_value.astype(np.float32)
+                basic_obs[obs_name] = obs_value.astype(np.float32)
 
         # Return black image if rendering is disabled
         if not self.enable_render:
             for name in self.camera_names:
-                raw_obs[f"{name}_image"] = np.zeros(
+                basic_obs[f"{name}_image"] = np.zeros(
                     (self.camera_heights, self.camera_widths, 3), dtype=np.uint8
                 )
 
-        self.render_cache = raw_obs[self.render_obs_key]
-        raw_obs["language"] = (
+        self.render_cache = basic_obs[self.render_obs_key]
+        basic_obs["language"] = (
             self.override_task_description
             if self.override_task_description is not None
             else self.env.get_ep_meta().get("lang", "")
         )
 
-        return raw_obs
+        return basic_obs
 
     def get_observation(self, raw_obs):
         basic_obs = self.get_basic_observation(raw_obs)
