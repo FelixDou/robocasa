@@ -305,6 +305,13 @@ def _subtask_instruction(subtask_eval, subtask_name):
     return predicate.get("description") or f"Complete this subtask: {subtask_name}."
 
 
+def _ordered_current_subtask_from_eval(subtask_eval):
+    entry = _latest_ordered_trace_entry([subtask_eval])
+    if not entry:
+        return None
+    return entry.get("ordered_current_subtask") or entry.get("current_subtask_estimate")
+
+
 def _step_env(env, action):
     result = env.step(action)
     if len(result) == 5:
@@ -633,19 +640,19 @@ def run_recovery_after_failed_rollout(
         return result
 
     final_eval = high_level_summary.get("final_subtask_eval")
-    subtask_name = (
+    high_level_subtask_name = (
         high_level_summary.get("ordered_current_subtask")
         or high_level_summary.get("current_subtask_estimate")
         or high_level_summary.get("stuck_subtask")
     )
-    instruction = _subtask_instruction(final_eval, subtask_name)
+    high_level_instruction = _subtask_instruction(final_eval, high_level_subtask_name)
 
     separator_header = config.video_separator_text or _recovery_separator_header(mode)
     separator_text = _make_recovery_separator_text(
         separator_header,
         high_level_summary,
-        subtask_name,
-        instruction,
+        high_level_subtask_name,
+        high_level_instruction,
     )
     _append_video_separator(
         video_writer,
@@ -654,11 +661,21 @@ def run_recovery_after_failed_rollout(
         text=separator_text,
     )
     recovery_meta = apply_recovery_mode(env, mode, last_good_state)
+    recovery_start_eval = get_subtask_eval(env)
+    subtask_name = (
+        _ordered_current_subtask_from_eval(recovery_start_eval)
+        or high_level_subtask_name
+    )
+    instruction = _subtask_instruction(recovery_start_eval, subtask_name)
+    recovery_meta["high_level_target_subtask"] = high_level_subtask_name
+    recovery_meta["high_level_target_instruction"] = high_level_instruction
+    recovery_meta["recovery_start_target_subtask"] = subtask_name
+    recovery_meta["recovery_start_target_instruction"] = instruction
     _set_env_instruction(env, instruction)
     obs = _get_obs_after_state_change(env, fallback_obs=obs)
     obs = set_observation_instruction(obs, instruction)
 
-    retry_evals = [get_subtask_eval(env)]
+    retry_evals = [recovery_start_eval]
     retry_success = _subtask_is_complete(retry_evals[-1], subtask_name)
     retry_steps = 0
     retry_horizon = (
