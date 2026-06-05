@@ -181,16 +181,16 @@ class RLDXZeroMQPolicy:
     def _make_rldx_observation(self, obs, instruction):
         """Map RoboCasa Gym obs to RLDX sim-wrapper flat obs."""
 
+        left_image = self._batch_time(obs["video.robot0_agentview_left"], np.uint8)
+        right_image = self._batch_time(obs["video.robot0_agentview_right"], np.uint8)
+        wrist_image = self._batch_time(obs["video.robot0_eye_in_hand"], np.uint8)
         video = {
-            "res256_image_side_0": self._batch_time(
-                obs["video.robot0_agentview_left"], np.uint8
-            ),
-            "res256_image_side_1": self._batch_time(
-                obs["video.robot0_agentview_right"], np.uint8
-            ),
-            "res256_image_wrist_0": self._batch_time(
-                obs["video.robot0_eye_in_hand"], np.uint8
-            ),
+            "robot0_agentview_left": left_image,
+            "robot0_agentview_right": right_image,
+            "robot0_eye_in_hand": wrist_image,
+            "res256_image_side_0": left_image,
+            "res256_image_side_1": right_image,
+            "res256_image_wrist_0": wrist_image,
         }
         state = {
             "end_effector_position_relative": self._batch_time(
