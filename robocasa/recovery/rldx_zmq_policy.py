@@ -214,6 +214,8 @@ class RLDXZeroMQPolicy:
         language = {
             "instruction": [instruction],
             "task_description": [instruction],
+            "annotation.human.action.task_description": [instruction],
+            "annotation.human.task_description": [instruction],
         }
         element = {
             "video": video,
