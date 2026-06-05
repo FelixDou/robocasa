@@ -181,35 +181,45 @@ class RLDXZeroMQPolicy:
     def _make_rldx_observation(self, obs, instruction):
         """Map RoboCasa Gym obs to RLDX sim-wrapper flat obs."""
 
-        element = {
-            "video.res256_image_side_0": self._batch_time(
+        video = {
+            "res256_image_side_0": self._batch_time(
                 obs["video.robot0_agentview_left"], np.uint8
             ),
-            "video.res256_image_side_1": self._batch_time(
+            "res256_image_side_1": self._batch_time(
                 obs["video.robot0_agentview_right"], np.uint8
             ),
-            "video.res256_image_wrist_0": self._batch_time(
+            "res256_image_wrist_0": self._batch_time(
                 obs["video.robot0_eye_in_hand"], np.uint8
             ),
-            "state.end_effector_position_relative": self._batch_time(
+        }
+        state = {
+            "end_effector_position_relative": self._batch_time(
                 obs["state.end_effector_position_relative"], np.float32
             ),
-            "state.end_effector_rotation_relative": self._batch_time(
+            "end_effector_rotation_relative": self._batch_time(
                 obs["state.end_effector_rotation_relative"], np.float32
             ),
-            "state.base_position": self._batch_time(
-                obs["state.base_position"], np.float32
-            ),
-            "state.base_rotation": self._batch_time(
-                obs["state.base_rotation"], np.float32
-            ),
-            "state.gripper_qpos": self._batch_time(
-                obs["state.gripper_qpos"], np.float32
-            ),
+            "base_position": self._batch_time(obs["state.base_position"], np.float32),
+            "base_rotation": self._batch_time(obs["state.base_rotation"], np.float32),
+            "gripper_qpos": self._batch_time(obs["state.gripper_qpos"], np.float32),
+        }
+        element = {
+            "video": video,
+            "state": state,
+            "annotation": {
+                "human": {
+                    "action": {"task_description": [instruction]},
+                    "task_description": [instruction],
+                }
+            },
             "annotation.human.action.task_description": [instruction],
             "annotation.human.task_description": [instruction],
             "task": [instruction],
         }
+        for key, value in video.items():
+            element[f"video.{key}"] = value
+        for key, value in state.items():
+            element[f"state.{key}"] = value
         return element
 
     def _split_action_chunk(self, action_chunk):
