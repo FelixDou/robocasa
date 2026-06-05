@@ -114,6 +114,7 @@ class RLDXZeroMQPolicy:
         port: int = 5555,
         timeout_ms: int = 15000,
         execution_horizon: int = 8,
+        video_history: int = 4,
         api_token: str | None = None,
         session_id: str | None = None,
         reset_memory_on_instruction_change: bool = True,
@@ -125,6 +126,7 @@ class RLDXZeroMQPolicy:
             api_token=api_token,
         )
         self.execution_horizon = int(execution_horizon)
+        self.video_history = int(video_history)
         self.session_id = session_id or f"robocasa-recovery-{uuid.uuid4().hex[:8]}"
         self.reset_memory_on_instruction_change = bool(
             reset_memory_on_instruction_change
@@ -178,12 +180,18 @@ class RLDXZeroMQPolicy:
             return arr[None, ...]
         return arr
 
+    def _batch_video_history(self, value):
+        arr = self._batch_time(value, np.uint8)
+        if arr.ndim >= 5 and arr.shape[1] == 1 and self.video_history > 1:
+            arr = np.repeat(arr, self.video_history, axis=1)
+        return arr
+
     def _make_rldx_observation(self, obs, instruction):
         """Map RoboCasa Gym obs to RLDX sim-wrapper flat obs."""
 
-        left_image = self._batch_time(obs["video.robot0_agentview_left"], np.uint8)
-        right_image = self._batch_time(obs["video.robot0_agentview_right"], np.uint8)
-        wrist_image = self._batch_time(obs["video.robot0_eye_in_hand"], np.uint8)
+        left_image = self._batch_video_history(obs["video.robot0_agentview_left"])
+        right_image = self._batch_video_history(obs["video.robot0_agentview_right"])
+        wrist_image = self._batch_video_history(obs["video.robot0_eye_in_hand"])
         video = {
             "robot0_agentview_left": left_image,
             "robot0_agentview_right": right_image,
@@ -345,6 +353,7 @@ def make_policy(
     port=5555,
     timeout_ms=15000,
     execution_horizon=8,
+    video_history=4,
     api_token=None,
     session_id=None,
     reset_memory_on_instruction_change=True,
@@ -354,6 +363,7 @@ def make_policy(
         port=port,
         timeout_ms=timeout_ms,
         execution_horizon=execution_horizon,
+        video_history=video_history,
         api_token=api_token,
         session_id=session_id,
         reset_memory_on_instruction_change=reset_memory_on_instruction_change,
