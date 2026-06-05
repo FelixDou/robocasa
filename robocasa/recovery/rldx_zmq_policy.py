@@ -212,10 +212,10 @@ class RLDXZeroMQPolicy:
             "gripper_qpos": self._batch_time(obs["state.gripper_qpos"], np.float32),
         }
         language = {
-            "instruction": [instruction],
-            "task_description": [instruction],
-            "annotation.human.action.task_description": [instruction],
-            "annotation.human.task_description": [instruction],
+            "instruction": [[instruction]],
+            "task_description": [[instruction]],
+            "annotation.human.action.task_description": [[instruction]],
+            "annotation.human.task_description": [[instruction]],
         }
         element = {
             "video": video,
@@ -223,15 +223,15 @@ class RLDXZeroMQPolicy:
             "language": language,
             "annotation": {
                 "human": {
-                    "action": {"task_description": [instruction]},
-                    "task_description": [instruction],
+                    "action": {"task_description": [[instruction]]},
+                    "task_description": [[instruction]],
                 }
             },
-            "annotation.human.action.task_description": [instruction],
-            "annotation.human.task_description": [instruction],
-            "language.instruction": [instruction],
-            "language.task_description": [instruction],
-            "task": [instruction],
+            "annotation.human.action.task_description": [[instruction]],
+            "annotation.human.task_description": [[instruction]],
+            "language.instruction": [[instruction]],
+            "language.task_description": [[instruction]],
+            "task": [[instruction]],
         }
         for key, value in video.items():
             element[f"video.{key}"] = value
