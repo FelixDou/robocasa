@@ -203,9 +203,14 @@ class RLDXZeroMQPolicy:
             "base_rotation": self._batch_time(obs["state.base_rotation"], np.float32),
             "gripper_qpos": self._batch_time(obs["state.gripper_qpos"], np.float32),
         }
+        language = {
+            "instruction": [instruction],
+            "task_description": [instruction],
+        }
         element = {
             "video": video,
             "state": state,
+            "language": language,
             "annotation": {
                 "human": {
                     "action": {"task_description": [instruction]},
@@ -214,6 +219,8 @@ class RLDXZeroMQPolicy:
             },
             "annotation.human.action.task_description": [instruction],
             "annotation.human.task_description": [instruction],
+            "language.instruction": [instruction],
+            "language.task_description": [instruction],
             "task": [instruction],
         }
         for key, value in video.items():
