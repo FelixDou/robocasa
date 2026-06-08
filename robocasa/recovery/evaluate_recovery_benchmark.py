@@ -203,9 +203,27 @@ def run_benchmark(args):
         },
         "modes": {},
     }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+
+    def update_mode_output(mode, mode_results, completed=False):
+        output["modes"][mode] = {
+            "summary": summarize_results(
+                [result for result in mode_results if "error" not in result]
+            ),
+            "num_errors": sum(1 for result in mode_results if "error" in result),
+            "rollouts": mode_results,
+            "completed": bool(completed),
+        }
+
+    def write_output(partial=True):
+        output["partial"] = bool(partial)
+        with args.output.open("w") as f:
+            json.dump(output, f, indent=2, default=json_default)
 
     for mode in modes:
         mode_results = []
+        update_mode_output(mode, mode_results, completed=False)
+        write_output(partial=True)
         print(colored(f"Evaluating recovery mode: {mode}", "green"))
         for task_name in tasks:
             print(colored(f"  Task: {task_name}", "cyan"))
@@ -285,18 +303,13 @@ def run_benchmark(args):
                         video_writer.close()
                     if env is not None:
                         env.close()
+                update_mode_output(mode, mode_results, completed=False)
+                write_output(partial=True)
 
-        output["modes"][mode] = {
-            "summary": summarize_results(
-                [result for result in mode_results if "error" not in result]
-            ),
-            "num_errors": sum(1 for result in mode_results if "error" in result),
-            "rollouts": mode_results,
-        }
+        update_mode_output(mode, mode_results, completed=True)
+        write_output(partial=True)
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w") as f:
-        json.dump(output, f, indent=2, default=json_default)
+    write_output(partial=False)
     print(colored(f"Wrote recovery benchmark results to {args.output}", "yellow"))
 
 
