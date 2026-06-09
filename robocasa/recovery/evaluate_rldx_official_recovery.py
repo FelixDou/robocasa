@@ -312,6 +312,16 @@ def _batched_action_like(value, batch_size, shape, fill_value=0.0):
     if arr.shape[:1] != (batch_size,):
         arr = np.broadcast_to(arr, (batch_size,) + tuple(arr.shape)).copy()
     expected_shape = (batch_size,) + tuple(shape)
+    if arr.ndim == len(expected_shape) and arr.shape[0] == batch_size:
+        slices = [slice(None)]
+        can_slice = True
+        for actual, expected in zip(arr.shape[1:], expected_shape[1:]):
+            if actual < expected:
+                can_slice = False
+                break
+            slices.append(slice(0, expected))
+        if can_slice:
+            arr = arr[tuple(slices)]
     if arr.shape != expected_shape:
         arr = np.broadcast_to(arr, expected_shape).astype(np.float32).copy()
     if fill_value:
