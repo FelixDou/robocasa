@@ -214,6 +214,97 @@ def _set_instruction_in_observation(observation, instruction):
     return obs
 
 
+def _as_batched_language(value, batch_size):
+    arr = np.asarray(value, dtype=object)
+    if arr.ndim == 0:
+        text = str(arr.item())
+        return [[text] for _ in range(batch_size)]
+    if arr.ndim == 1:
+        return [[str(v)] for v in arr.tolist()]
+    return arr.tolist()
+
+
+def _normalize_rldx_observation(observation):
+    """Convert official flat RoboCasa obs keys to the nested RLDX server shape.
+
+    This does not change the rollout protocol: observations still come from the
+    official RLDX MultiStepWrapper and actions still go straight into the
+    official env.step(actions). It only mirrors flat keys such as
+    ``video.robot0_agentview_left`` into ``observation["video"][...]`` for RLDX
+    server builds that require nested modality groups.
+    """
+    if not isinstance(observation, dict) or "video" in observation:
+        return observation
+
+    obs = dict(observation)
+    video = {}
+    state = {}
+    language = {}
+
+    for key, value in observation.items():
+        if key.startswith("video."):
+            short_key = key.split(".", 1)[1]
+            video[short_key] = value
+        elif key.startswith("state."):
+            short_key = key.split(".", 1)[1]
+            state[short_key] = value
+
+    video_aliases = {
+        "robot0_agentview_left": "res256_image_side_0",
+        "robot0_agentview_right": "res256_image_side_1",
+        "robot0_eye_in_hand": "res256_image_wrist_0",
+    }
+    for src, dst in video_aliases.items():
+        if src in video and dst not in video:
+            video[dst] = video[src]
+        if dst in video and src not in video:
+            video[src] = video[dst]
+
+    batch_size = 1
+    for value in video.values():
+        arr = np.asarray(value)
+        if arr.ndim:
+            batch_size = int(arr.shape[0])
+            break
+
+    language_keys = (
+        "annotation.human.task_description",
+        "annotation.human.action.task_description",
+        "language.instruction",
+        "language.task_description",
+        "language",
+        "task",
+    )
+    for key in language_keys:
+        if key in observation:
+            short_key = key.split(".", 1)[1] if key.startswith("language.") else key
+            language[short_key] = _as_batched_language(observation[key], batch_size)
+
+    if "annotation.human.task_description" in observation:
+        task_desc = _as_batched_language(
+            observation["annotation.human.task_description"], batch_size
+        )
+        language.setdefault("instruction", task_desc)
+        language.setdefault("task_description", task_desc)
+        language.setdefault("annotation.human.task_description", task_desc)
+        language.setdefault("annotation.human.action.task_description", task_desc)
+        obs.setdefault("annotation.human.action.task_description", task_desc)
+        obs["annotation"] = {
+            "human": {
+                "task_description": task_desc,
+                "action": {"task_description": task_desc},
+            }
+        }
+
+    if video:
+        obs["video"] = video
+    if state:
+        obs["state"] = state
+    if language:
+        obs["language"] = language
+    return obs
+
+
 def _set_env_instruction(env, instruction):
     if instruction is None:
         return
@@ -270,7 +361,8 @@ def _step_official(vec_env, policy, observations, is_first_step, session_id):
         "reset_memory": [bool(is_first_step)],
         "session_ids": [session_id],
     }
-    actions, _ = policy.get_action(observations, options=options)
+    policy_observations = _normalize_rldx_observation(observations)
+    actions, _ = policy.get_action(policy_observations, options=options)
     next_obs, rewards, terminations, truncations, infos = vec_env.step(actions)
     info = _env_info_for_single_env(infos)
     done = _bool_from_vector(terminations) or _bool_from_vector(truncations)
