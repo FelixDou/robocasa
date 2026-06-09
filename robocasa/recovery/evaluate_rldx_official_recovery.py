@@ -527,6 +527,22 @@ def _ordered_current_subtask_from_eval(subtask_eval):
     return entry.get("ordered_current_subtask") or entry.get("current_subtask_estimate")
 
 
+def _safe_get_subtask_eval(env, warnings, context):
+    from robocasa.recovery.subtask_eval import get_subtask_eval
+
+    try:
+        return get_subtask_eval(env)
+    except Exception as exc:
+        warnings.append(
+            {
+                "context": context,
+                "type": type(exc).__name__,
+                "message": str(exc),
+            }
+        )
+        return None
+
+
 def run_one_official_rldx_recovery_rollout(
     env_name,
     policy,
@@ -549,7 +565,6 @@ def run_one_official_rldx_recovery_rollout(
         _capture_state,
     )
     from robocasa.recovery.subtask_eval import (
-        get_subtask_eval,
         summarize_subtask_rollout,
     )
 
@@ -571,8 +586,11 @@ def run_one_official_rldx_recovery_rollout(
             policy.reset()
         session_id = f"{env_name}_env0_{uuid.uuid4().hex[:8]}"
         is_first_step = True
+        subtask_eval_warnings = []
 
-        subtask_evals = [get_subtask_eval(single_env)]
+        subtask_evals = [
+            _safe_get_subtask_eval(single_env, subtask_eval_warnings, "initial")
+        ]
         initial_trace_entry = _latest_ordered_trace_entry(subtask_evals) or {}
         best_ordered_count = len(
             initial_trace_entry.get("ordered_completed_subtasks", [])
@@ -597,9 +615,14 @@ def run_one_official_rldx_recovery_rollout(
                 session_id=session_id,
             )
             is_first_step = False
+            if step_success or reward > 0:
+                high_level_success = True
+                break
             current_eval = _get_info_value(info, "subtask_eval")
             if current_eval is None:
-                current_eval = get_subtask_eval(single_env)
+                current_eval = _safe_get_subtask_eval(
+                    single_env, subtask_eval_warnings, f"high_level_step_{step_i}"
+                )
             subtask_evals.append(current_eval)
 
             trace_entry = _latest_ordered_trace_entry(subtask_evals) or {}
@@ -610,9 +633,6 @@ def run_one_official_rldx_recovery_rollout(
                 last_good_state = _capture_state(single_env)
                 last_good_step = high_level_steps
 
-            if step_success or reward > 0:
-                high_level_success = True
-                break
             if done:
                 break
 
@@ -630,6 +650,7 @@ def run_one_official_rldx_recovery_rollout(
         high_level_summary["policy_steps_since_last_good_progress"] = (
             high_level_steps - last_good_step
         )
+        high_level_summary["subtask_eval_warnings"] = subtask_eval_warnings
 
         result = {
             "high_level": high_level_summary,
@@ -651,7 +672,9 @@ def run_one_official_rldx_recovery_rollout(
         )
 
         recovery_meta = apply_recovery_mode(single_env, mode, last_good_state)
-        recovery_start_eval = get_subtask_eval(single_env)
+        recovery_start_eval = _safe_get_subtask_eval(
+            single_env, subtask_eval_warnings, "recovery_start"
+        )
         subtask_name = (
             _ordered_current_subtask_from_eval(recovery_start_eval)
             or high_level_subtask_name
@@ -688,7 +711,9 @@ def run_one_official_rldx_recovery_rollout(
             is_first_step = False
             current_eval = _get_info_value(info, "subtask_eval")
             if current_eval is None:
-                current_eval = get_subtask_eval(single_env)
+                current_eval = _safe_get_subtask_eval(
+                    single_env, subtask_eval_warnings, f"recovery_step_{step_i}"
+                )
             retry_evals.append(current_eval)
             retry_success = _subtask_is_complete(current_eval, subtask_name)
             if done:
