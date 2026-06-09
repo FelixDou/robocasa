@@ -305,6 +305,100 @@ def _normalize_rldx_observation(observation):
     return obs
 
 
+def _batched_action_like(value, batch_size, shape, fill_value=0.0):
+    arr = np.asarray(value, dtype=np.float32)
+    if arr.ndim == 0:
+        arr = arr.reshape(1)
+    if arr.shape[:1] != (batch_size,):
+        arr = np.broadcast_to(arr, (batch_size,) + tuple(arr.shape)).copy()
+    expected_shape = (batch_size,) + tuple(shape)
+    if arr.shape != expected_shape:
+        arr = np.broadcast_to(arr, expected_shape).astype(np.float32).copy()
+    if fill_value:
+        arr[...] = fill_value
+    return arr
+
+
+def _zero_action_for_space(space, batch_size):
+    return np.zeros((batch_size,) + tuple(space.shape), dtype=np.float32)
+
+
+def _one_action_for_space(space, batch_size):
+    return np.ones((batch_size,) + tuple(space.shape), dtype=np.float32)
+
+
+def _normalize_actions_for_env(actions, vec_env):
+    """Map RLDX action aliases to the official RoboCasa Gym action keys."""
+    if not isinstance(actions, dict):
+        return actions
+
+    action_space = getattr(vec_env, "single_action_space", None)
+    if action_space is None:
+        action_space = getattr(vec_env, "action_space", None)
+    required_spaces = getattr(action_space, "spaces", None)
+    if not required_spaces:
+        return actions
+
+    normalized = dict(actions)
+    batch_size = int(getattr(vec_env, "num_envs", 1))
+    aliases = {
+        "action.end_effector_position": (
+            "action.end_effector_position",
+            "end_effector_position",
+            "action.eef_pos_delta",
+            "eef_pos_delta",
+        ),
+        "action.end_effector_rotation": (
+            "action.end_effector_rotation",
+            "end_effector_rotation",
+            "action.eef_rot_delta",
+            "eef_rot_delta",
+        ),
+        "action.gripper_close": (
+            "action.gripper_close",
+            "gripper_close",
+        ),
+        "action.base_motion": (
+            "action.base_motion",
+            "base_motion",
+        ),
+        "action.control_mode": (
+            "action.control_mode",
+            "control_mode",
+        ),
+    }
+
+    for required_key, key_aliases in aliases.items():
+        if required_key in normalized or required_key not in required_spaces:
+            continue
+        for alias in key_aliases:
+            if alias in normalized:
+                normalized[required_key] = normalized[alias]
+                break
+
+    if (
+        "action.gripper_close" in required_spaces
+        and "action.gripper_close" not in normalized
+        and "action.gripper" in normalized
+    ):
+        normalized["action.gripper_close"] = 1.0 - np.asarray(
+            normalized["action.gripper"], dtype=np.float32
+        )
+
+    for required_key, space in required_spaces.items():
+        if required_key in normalized:
+            normalized[required_key] = _batched_action_like(
+                normalized[required_key], batch_size, space.shape
+            )
+            continue
+        if required_key == "action.base_motion":
+            normalized[required_key] = _zero_action_for_space(space, batch_size)
+        elif required_key == "action.control_mode":
+            normalized[required_key] = _one_action_for_space(space, batch_size)
+
+    return normalized
+
+
 def _set_env_instruction(env, instruction):
     if instruction is None:
         return
@@ -363,6 +457,7 @@ def _step_official(vec_env, policy, observations, is_first_step, session_id):
     }
     policy_observations = _normalize_rldx_observation(observations)
     actions, _ = policy.get_action(policy_observations, options=options)
+    actions = _normalize_actions_for_env(actions, vec_env)
     next_obs, rewards, terminations, truncations, infos = vec_env.step(actions)
     info = _env_info_for_single_env(infos)
     done = _bool_from_vector(terminations) or _bool_from_vector(truncations)
