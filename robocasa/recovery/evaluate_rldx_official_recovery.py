@@ -176,6 +176,20 @@ def _env_info_for_single_env(infos):
     return out
 
 
+def _get_info_value(info, key):
+    if not isinstance(info, dict) or key not in info:
+        return None
+    value = info[key]
+    if isinstance(value, np.ndarray):
+        if value.shape[:1] == (1,):
+            return value[0]
+        if value.dtype == object and value.size:
+            return value.reshape(-1)[0]
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        return value[0]
+    return value
+
+
 def _bool_from_vector(value):
     if isinstance(value, np.ndarray):
         return bool(np.any(value))
@@ -583,7 +597,9 @@ def run_one_official_rldx_recovery_rollout(
                 session_id=session_id,
             )
             is_first_step = False
-            current_eval = info.get("subtask_eval") or get_subtask_eval(single_env)
+            current_eval = _get_info_value(info, "subtask_eval")
+            if current_eval is None:
+                current_eval = get_subtask_eval(single_env)
             subtask_evals.append(current_eval)
 
             trace_entry = _latest_ordered_trace_entry(subtask_evals) or {}
@@ -670,7 +686,9 @@ def run_one_official_rldx_recovery_rollout(
                 session_id=session_id,
             )
             is_first_step = False
-            current_eval = info.get("subtask_eval") or get_subtask_eval(single_env)
+            current_eval = _get_info_value(info, "subtask_eval")
+            if current_eval is None:
+                current_eval = get_subtask_eval(single_env)
             retry_evals.append(current_eval)
             retry_success = _subtask_is_complete(current_eval, subtask_name)
             if done:
