@@ -552,6 +552,50 @@ def _same_env_state(state):
     return state
 
 
+def _direct_restore_same_sim(env, state):
+    if state is None:
+        return False, "no_state"
+    sim = getattr(getattr(env, "unwrapped", env), "sim", None)
+    if sim is None and hasattr(env, "get_wrapper_attr"):
+        try:
+            sim = env.get_wrapper_attr("sim")
+        except Exception:
+            sim = None
+    if sim is None:
+        return False, "no_sim"
+
+    qpos = state.get("_sim_state_qpos")
+    qvel = state.get("_sim_state_qvel")
+    if qpos is not None and qvel is not None:
+        current = sim.get_state()
+        if len(qpos) != len(current.qpos) or len(qvel) != len(current.qvel):
+            return False, (
+                "state_dim_mismatch:"
+                f" qpos {len(qpos)}->{len(current.qpos)},"
+                f" qvel {len(qvel)}->{len(current.qvel)}"
+            )
+        try:
+            current.qpos[:] = qpos
+            current.qvel[:] = qvel
+            sim.set_state(current)
+        except Exception:
+            if not hasattr(current, "_replace"):
+                raise
+            sim.set_state(current._replace(qpos=qpos, qvel=qvel))
+        sim.forward()
+        return True, None
+
+    flat_state = state.get("states")
+    if flat_state is None:
+        return False, "no_sim_state"
+    try:
+        sim.set_state_from_flattened(flat_state)
+    except ValueError as exc:
+        return False, f"state_dim_mismatch: {exc}"
+    sim.forward()
+    return True, None
+
+
 def _apply_recovery_mode_same_env(env, mode, last_good_state):
     from robocasa.recovery.recovery_rollout import (
         RecoveryMode,
@@ -566,8 +610,26 @@ def _apply_recovery_mode_same_env(env, mode, last_good_state):
     if last_good_state is None:
         return {"mode": mode.value, "state_restored": False, "reason": "no_state"}
     if mode == RecoveryMode.ENV_TO_LAST_GOOD:
-        _reset_to_state(env, _same_env_state(last_good_state))
-        return {"mode": mode.value, "state_restored": True, "same_env_state_only": True}
+        restored, reason = _direct_restore_same_sim(env, last_good_state)
+        if restored:
+            return {
+                "mode": mode.value,
+                "state_restored": True,
+                "same_env_direct_sim_state": True,
+            }
+        try:
+            _reset_to_state(env, _same_env_state(last_good_state))
+            return {
+                "mode": mode.value,
+                "state_restored": True,
+                "same_env_state_only": True,
+            }
+        except ValueError as exc:
+            return {
+                "mode": mode.value,
+                "state_restored": False,
+                "reason": reason or str(exc),
+            }
     if mode == RecoveryMode.EEF_TO_LAST_GOOD:
         _restore_robot_state_only(env, last_good_state)
         return {"mode": mode.value, "state_restored": True, "robot_only": True}
