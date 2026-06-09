@@ -543,6 +543,37 @@ def _safe_get_subtask_eval(env, warnings, context):
         return None
 
 
+def _same_env_state(state):
+    if state is None:
+        return None
+    state = copy.deepcopy(state)
+    state.pop("model", None)
+    state.pop("ep_meta", None)
+    return state
+
+
+def _apply_recovery_mode_same_env(env, mode, last_good_state):
+    from robocasa.recovery.recovery_rollout import (
+        RecoveryMode,
+        normalize_recovery_mode,
+        _reset_to_state,
+        _restore_robot_state_only,
+    )
+
+    mode = normalize_recovery_mode(mode)
+    if mode == RecoveryMode.CONTINUE_FROM_FAILURE:
+        return {"mode": mode.value, "state_restored": False}
+    if last_good_state is None:
+        return {"mode": mode.value, "state_restored": False, "reason": "no_state"}
+    if mode == RecoveryMode.ENV_TO_LAST_GOOD:
+        _reset_to_state(env, _same_env_state(last_good_state))
+        return {"mode": mode.value, "state_restored": True, "same_env_state_only": True}
+    if mode == RecoveryMode.EEF_TO_LAST_GOOD:
+        _restore_robot_state_only(env, last_good_state)
+        return {"mode": mode.value, "state_restored": True, "robot_only": True}
+    raise ValueError(f"Unhandled recovery mode: {mode}")
+
+
 def run_one_official_rldx_recovery_rollout(
     env_name,
     policy,
@@ -561,7 +592,6 @@ def run_one_official_rldx_recovery_rollout(
     import gymnasium as gym
 
     from robocasa.recovery.recovery_rollout import (
-        apply_recovery_mode,
         _capture_state,
     )
     from robocasa.recovery.subtask_eval import (
@@ -671,7 +701,9 @@ def run_one_official_rldx_recovery_rollout(
             final_eval, high_level_subtask_name
         )
 
-        recovery_meta = apply_recovery_mode(single_env, mode, last_good_state)
+        recovery_meta = _apply_recovery_mode_same_env(
+            single_env, mode, last_good_state
+        )
         recovery_start_eval = _safe_get_subtask_eval(
             single_env, subtask_eval_warnings, "recovery_start"
         )
