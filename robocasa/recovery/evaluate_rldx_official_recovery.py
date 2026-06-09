@@ -1,0 +1,686 @@
+"""Evaluate RLDX recovery while reusing the official RLDX rollout path.
+
+This script is intentionally separate from ``evaluate_recovery_benchmark.py``.
+The generic recovery benchmark calls a policy adapter as ``policy(obs)``; that
+is fragile for RLDX because the official evaluator owns the MultiStepWrapper,
+temporal video history, action chunk execution, and policy memory options.
+
+Here the high-level rollout follows the official RLDX loop:
+
+    actions, _ = policy.get_action(observations, options=options)
+    observations, rewards, terminations, truncations, infos = env.step(actions)
+
+Recovery hooks are inserted around that loop for a single environment
+(``n_envs=1``): track ordered subtask progress, restore the requested state
+after high-level failure, change the language instruction to the failed subtask,
+then continue stepping through the same official RLDX policy/env path.
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import importlib
+import json
+from pathlib import Path
+import random
+import sys
+import traceback
+import uuid
+
+import numpy as np
+
+try:
+    from termcolor import colored
+except ImportError:
+    def colored(text, color=None):
+        return text
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(iterable, **kwargs):
+        return iterable
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+
+def json_default(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Path):
+        return str(value)
+    return str(value)
+
+
+def parse_policy_args(values):
+    parsed = {}
+    for value in values or []:
+        if "=" not in value:
+            raise ValueError(f"Policy args must be key=value, got {value!r}")
+        key, raw = value.split("=", 1)
+        parsed[key] = raw
+    return parsed
+
+
+def resolve_tasks(task_set, envs):
+    from robocasa.utils.dataset_registry import TARGET_TASKS
+
+    if envs:
+        return envs
+    if task_set == "all_composite":
+        return TARGET_TASKS["composite_seen"] + TARGET_TASKS["composite_unseen"]
+    if task_set == "all_target":
+        return (
+            TARGET_TASKS["atomic_seen"]
+            + TARGET_TASKS["composite_seen"]
+            + TARGET_TASKS["composite_unseen"]
+        )
+    return list(TARGET_TASKS[task_set])
+
+
+def summarize_results(results):
+    valid = [r for r in results if "error" not in r]
+    attempted = [r for r in valid if r.get("recovery_attempted")]
+    high_level_successes = [
+        r for r in valid if (r.get("high_level") or {}).get("success")
+    ]
+    recovery_successes = [
+        r for r in attempted if (r.get("subtask") or {}).get("success")
+    ]
+    return {
+        "num_rollouts": len(valid),
+        "high_level_success_count": len(high_level_successes),
+        "high_level_success_rate": len(high_level_successes) / len(valid)
+        if valid
+        else 0.0,
+        "recovery_attempt_count": len(attempted),
+        "recovery_subtask_success_count": len(recovery_successes),
+        "recovery_subtask_success_rate": len(recovery_successes) / len(attempted)
+        if attempted
+        else 0.0,
+    }
+
+
+def _load_official_rldx_rollout_module(rldx_repo):
+    if rldx_repo:
+        repo = Path(rldx_repo).expanduser().resolve()
+        if str(repo) not in sys.path:
+            sys.path.insert(0, str(repo))
+    return importlib.import_module("rldx.eval.rollout_policy")
+
+
+def _make_wrapper_configs(rollout_policy, policy, max_episode_steps, n_action_steps):
+    modality_configs = policy.get_modality_config()
+    video_delta_indices = np.array(modality_configs["video"].delta_indices)
+    state_delta_indices = (
+        np.array(modality_configs["state"].delta_indices)
+        if "state" in modality_configs
+        else None
+    )
+    print(f"Using video_delta_indices: {video_delta_indices}")
+    if state_delta_indices is not None:
+        print(f"Using state_delta_indices: {state_delta_indices}")
+
+    return rollout_policy.WrapperConfigs(
+        video=rollout_policy.VideoConfig(
+            video_dir=None,
+            max_episode_steps=max_episode_steps,
+            n_action_steps=n_action_steps,
+        ),
+        multistep=rollout_policy.MultiStepConfig(
+            video_delta_indices=video_delta_indices,
+            state_delta_indices=state_delta_indices,
+            n_action_steps=n_action_steps,
+            max_episode_steps=max_episode_steps,
+            terminate_on_success=False,
+        ),
+    )
+
+
+def _single_env_from_vector(vec_env):
+    envs = getattr(vec_env, "envs", None)
+    if not envs or len(envs) != 1:
+        raise RuntimeError("RLDX recovery evaluator requires a SyncVectorEnv with one env")
+    return envs[0]
+
+
+def _unbatch(value):
+    if isinstance(value, np.ndarray) and value.shape[:1] == (1,):
+        return value[0]
+    if isinstance(value, dict):
+        return {k: _unbatch(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        return value[0]
+    return value
+
+
+def _env_info_for_single_env(infos):
+    if not isinstance(infos, dict):
+        return infos or {}
+    out = {}
+    for key, value in infos.items():
+        if key.startswith("_"):
+            continue
+        if isinstance(value, np.ndarray) and value.shape[:1] == (1,):
+            out[key] = value[0]
+        elif isinstance(value, (list, tuple)) and len(value) == 1:
+            out[key] = value[0]
+        else:
+            out[key] = value
+    return out
+
+
+def _bool_from_vector(value):
+    if isinstance(value, np.ndarray):
+        return bool(np.any(value))
+    if isinstance(value, (list, tuple)):
+        return bool(any(_bool_from_vector(v) for v in value))
+    return bool(value)
+
+
+def _scalar_from_vector(value):
+    if isinstance(value, np.ndarray):
+        return float(np.asarray(value).reshape(-1)[0])
+    if isinstance(value, (list, tuple)):
+        return float(value[0])
+    return float(value)
+
+
+def _set_instruction_in_observation(observation, instruction):
+    if instruction is None:
+        return observation
+    obs = copy.deepcopy(observation)
+    keys = (
+        "annotation.human.task_description",
+        "annotation.human.action.task_description",
+        "language",
+        "task",
+    )
+    for key in keys:
+        if key in obs:
+            value = obs[key]
+            if isinstance(value, np.ndarray):
+                obs[key] = np.asarray([[instruction]], dtype=object)
+            elif isinstance(value, list):
+                obs[key] = [[instruction]]
+            else:
+                obs[key] = instruction
+    return obs
+
+
+def _set_env_instruction(env, instruction):
+    if instruction is None:
+        return
+    setter = getattr(env, "set_task_description", None)
+    if setter is not None:
+        setter(instruction)
+        return
+    getter = getattr(env, "get_wrapper_attr", None)
+    if getter is not None:
+        try:
+            getter("set_task_description")(instruction)
+        except Exception:
+            pass
+
+
+def _refresh_multistep_observation(env, instruction=None):
+    """Refresh the official wrapped observation after a simulator state change.
+
+    RLDX's official MultiStepWrapper owns the temporal observation stacks. The
+    wrapper API is not guaranteed to expose a public reset-to-current-state
+    method, so try the known non-destructive observation paths and fail loudly if
+    none are available.
+    """
+    candidates = (
+        "get_current_observation",
+        "_get_observation",
+        "_get_obs",
+        "get_observation",
+    )
+    for name in candidates:
+        method = getattr(env, name, None)
+        if method is None and hasattr(env, "get_wrapper_attr"):
+            try:
+                method = env.get_wrapper_attr(name)
+            except Exception:
+                method = None
+        if method is None:
+            continue
+        try:
+            obs = method()
+        except TypeError:
+            continue
+        if obs is not None:
+            return _set_instruction_in_observation(obs, instruction)
+    raise RuntimeError(
+        "Could not refresh official RLDX MultiStepWrapper observation after "
+        "state recovery. Inspect the cluster's MultiStepWrapper for a current "
+        "observation method and add it to _refresh_multistep_observation()."
+    )
+
+
+def _step_official(vec_env, policy, observations, is_first_step, session_id):
+    options = {
+        "reset_memory": [bool(is_first_step)],
+        "session_ids": [session_id],
+    }
+    actions, _ = policy.get_action(observations, options=options)
+    next_obs, rewards, terminations, truncations, infos = vec_env.step(actions)
+    info = _env_info_for_single_env(infos)
+    done = _bool_from_vector(terminations) or _bool_from_vector(truncations)
+    reward = _scalar_from_vector(rewards)
+    success = False
+    if "success" in info:
+        success = _bool_from_vector(info["success"])
+    if "final_info" in infos and infos["final_info"][0] is not None:
+        final_info = infos["final_info"][0]
+        if "success" in final_info:
+            success = success or _bool_from_vector(final_info["success"])
+    return next_obs, reward, done, info, success
+
+
+def _latest_ordered_trace_entry(subtask_evals):
+    from robocasa.recovery.subtask_eval import build_subtask_trace
+
+    trace = build_subtask_trace(subtask_evals)
+    for entry in reversed(trace):
+        if entry.get("subtask_eval_available"):
+            return entry
+    return None
+
+
+def _subtask_is_complete(subtask_eval, subtask_name):
+    if subtask_name is None:
+        return False
+    predicate = (subtask_eval or {}).get("predicates", {}).get(subtask_name, {})
+    return bool(predicate.get("value", False))
+
+
+def _subtask_instruction(subtask_eval, subtask_name):
+    if subtask_name is None:
+        return None
+    predicate = (subtask_eval or {}).get("predicates", {}).get(subtask_name, {})
+    return predicate.get("description") or f"Complete this subtask: {subtask_name}."
+
+
+def _ordered_current_subtask_from_eval(subtask_eval):
+    entry = _latest_ordered_trace_entry([subtask_eval])
+    if not entry:
+        return None
+    return entry.get("ordered_current_subtask") or entry.get("current_subtask_estimate")
+
+
+def run_one_official_rldx_recovery_rollout(
+    env_name,
+    policy,
+    rollout_policy,
+    wrapper_configs,
+    mode,
+    split,
+    seed,
+    high_level_horizon,
+    subtask_horizon,
+    match_recovery_horizon_to_no_progress,
+    stuck_patience,
+    include_trace,
+    n_action_steps,
+):
+    import gymnasium as gym
+
+    from robocasa.recovery.recovery_rollout import (
+        apply_recovery_mode,
+        _capture_state,
+    )
+    from robocasa.recovery.subtask_eval import (
+        get_subtask_eval,
+        summarize_subtask_rollout,
+    )
+
+    env_fn = lambda: rollout_policy.create_eval_env(
+        env_name=f"robocasa/{env_name}",
+        env_idx=0,
+        total_n_envs=1,
+        wrapper_configs=wrapper_configs,
+        start_episode_id=0,
+        seed=seed,
+        robocasa_split=split,
+    )
+    vec_env = gym.vector.SyncVectorEnv([env_fn])
+    single_env = None
+    try:
+        observations, _ = vec_env.reset()
+        single_env = _single_env_from_vector(vec_env)
+        if hasattr(policy, "reset"):
+            policy.reset()
+        session_id = f"{env_name}_env0_{uuid.uuid4().hex[:8]}"
+        is_first_step = True
+
+        subtask_evals = [get_subtask_eval(single_env)]
+        initial_trace_entry = _latest_ordered_trace_entry(subtask_evals) or {}
+        best_ordered_count = len(
+            initial_trace_entry.get("ordered_completed_subtasks", [])
+        )
+        last_good_subtask = (
+            initial_trace_entry.get("ordered_completed_subtasks", [])[-1]
+            if best_ordered_count
+            else None
+        )
+        last_good_state = _capture_state(single_env)
+        last_good_step = 0
+        high_level_success = False
+        high_level_steps = 0
+
+        for step_i in range(high_level_horizon):
+            high_level_steps = step_i + 1
+            observations, reward, done, info, step_success = _step_official(
+                vec_env,
+                policy,
+                observations,
+                is_first_step=is_first_step,
+                session_id=session_id,
+            )
+            is_first_step = False
+            current_eval = info.get("subtask_eval") or get_subtask_eval(single_env)
+            subtask_evals.append(current_eval)
+
+            trace_entry = _latest_ordered_trace_entry(subtask_evals) or {}
+            ordered_completed = trace_entry.get("ordered_completed_subtasks", [])
+            if len(ordered_completed) > best_ordered_count:
+                best_ordered_count = len(ordered_completed)
+                last_good_subtask = ordered_completed[-1] if ordered_completed else None
+                last_good_state = _capture_state(single_env)
+                last_good_step = high_level_steps
+
+            if step_success or reward > 0:
+                high_level_success = True
+                break
+            if done:
+                break
+
+        high_level_summary = summarize_subtask_rollout(
+            subtask_evals,
+            stuck_patience=stuck_patience,
+            include_trace=include_trace,
+        )
+        high_level_summary["success"] = high_level_success
+        high_level_summary["num_policy_steps"] = high_level_steps
+        high_level_summary["num_action_steps_estimate"] = high_level_steps * n_action_steps
+        high_level_summary["last_good_ordered_subtask"] = last_good_subtask
+        high_level_summary["last_good_ordered_subtask_count"] = best_ordered_count
+        high_level_summary["last_good_policy_step"] = last_good_step
+        high_level_summary["policy_steps_since_last_good_progress"] = (
+            high_level_steps - last_good_step
+        )
+
+        result = {
+            "high_level": high_level_summary,
+            "recovery_attempted": False,
+            "recovery": None,
+            "subtask": None,
+        }
+        if high_level_success:
+            return result
+
+        final_eval = high_level_summary.get("final_subtask_eval")
+        high_level_subtask_name = (
+            high_level_summary.get("ordered_current_subtask")
+            or high_level_summary.get("current_subtask_estimate")
+            or high_level_summary.get("stuck_subtask")
+        )
+        high_level_instruction = _subtask_instruction(
+            final_eval, high_level_subtask_name
+        )
+
+        recovery_meta = apply_recovery_mode(single_env, mode, last_good_state)
+        recovery_start_eval = get_subtask_eval(single_env)
+        subtask_name = (
+            _ordered_current_subtask_from_eval(recovery_start_eval)
+            or high_level_subtask_name
+        )
+        instruction = _subtask_instruction(recovery_start_eval, subtask_name)
+        recovery_meta["high_level_target_subtask"] = high_level_subtask_name
+        recovery_meta["high_level_target_instruction"] = high_level_instruction
+        recovery_meta["recovery_start_target_subtask"] = subtask_name
+        recovery_meta["recovery_start_target_instruction"] = instruction
+        _set_env_instruction(single_env, instruction)
+        observations = _refresh_multistep_observation(single_env, instruction)
+        is_first_step = True
+        session_id = f"{env_name}_recovery_{uuid.uuid4().hex[:8]}"
+
+        retry_evals = [recovery_start_eval]
+        retry_success = _subtask_is_complete(retry_evals[-1], subtask_name)
+        retry_steps = 0
+        retry_horizon = (
+            max(1, high_level_steps - last_good_step)
+            if match_recovery_horizon_to_no_progress
+            else subtask_horizon
+        )
+        for step_i in range(retry_horizon):
+            if retry_success:
+                break
+            retry_steps = step_i + 1
+            observations, reward, done, info, _ = _step_official(
+                vec_env,
+                policy,
+                observations,
+                is_first_step=is_first_step,
+                session_id=session_id,
+            )
+            is_first_step = False
+            current_eval = info.get("subtask_eval") or get_subtask_eval(single_env)
+            retry_evals.append(current_eval)
+            retry_success = _subtask_is_complete(current_eval, subtask_name)
+            if done:
+                break
+
+        retry_summary = summarize_subtask_rollout(
+            retry_evals,
+            stuck_patience=stuck_patience,
+            include_trace=include_trace,
+        )
+        retry_summary["success"] = retry_success
+        retry_summary["num_policy_steps"] = retry_steps
+        retry_summary["num_action_steps_estimate"] = retry_steps * n_action_steps
+        retry_summary["horizon"] = retry_horizon
+        retry_summary["horizon_unit"] = "policy_steps"
+        retry_summary["horizon_source"] = (
+            "policy_steps_since_last_good_progress"
+            if match_recovery_horizon_to_no_progress
+            else "fixed_subtask_horizon"
+        )
+        retry_summary["target_subtask"] = subtask_name
+        retry_summary["target_instruction"] = instruction
+        result.update(
+            {
+                "recovery_attempted": True,
+                "recovery": recovery_meta,
+                "subtask": retry_summary,
+            }
+        )
+        return result
+    finally:
+        try:
+            vec_env.close()
+        except Exception:
+            if single_env is not None:
+                single_env.close()
+
+
+def run_benchmark(args):
+    from robocasa.utils.dataset_registry_utils import get_task_horizon
+
+    rollout_policy = _load_official_rldx_rollout_module(args.rldx_repo)
+    policy = rollout_policy.create_rldx_sim_policy(
+        model_path=args.model_path,
+        embodiment_tag=rollout_policy.EmbodimentTag.GENERAL_EMBODIMENT,
+        policy_client_host=args.policy_client_host,
+        policy_client_port=args.policy_client_port,
+    )
+    wrapper_configs = _make_wrapper_configs(
+        rollout_policy,
+        policy,
+        max_episode_steps=args.max_episode_steps,
+        n_action_steps=args.n_action_steps,
+    )
+    tasks = resolve_tasks(args.task_set, args.envs)
+    output = {
+        "config": vars(args),
+        "tasks": tasks,
+        "high_level_horizon_by_task": {
+            task: (
+                args.high_level_horizon
+                if args.high_level_horizon is not None
+                else get_task_horizon(task)
+            )
+            for task in tasks
+        },
+        "modes": {},
+        "uses_official_rldx_rollout_path": True,
+    }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+
+    def update_mode_output(mode, mode_results, completed=False):
+        output["modes"][mode] = {
+            "summary": summarize_results(mode_results),
+            "num_errors": sum(1 for result in mode_results if "error" in result),
+            "rollouts": mode_results,
+            "completed": bool(completed),
+        }
+
+    def write_output(partial=True):
+        output["partial"] = bool(partial)
+        with args.output.open("w") as f:
+            json.dump(output, f, indent=2, default=json_default)
+
+    for mode in args.modes:
+        mode_results = []
+        update_mode_output(mode, mode_results, completed=False)
+        write_output(partial=True)
+        print(colored(f"Evaluating official RLDX recovery mode: {mode}", "green"))
+        for task_name in tasks:
+            print(colored(f"  Task: {task_name}", "cyan"))
+            for rollout_i in tqdm(range(args.num_rollouts), leave=False):
+                seed = args.seed + rollout_i
+                try:
+                    random.seed(seed)
+                    np.random.seed(seed)
+                    high_level_horizon = (
+                        args.high_level_horizon
+                        if args.high_level_horizon is not None
+                        else get_task_horizon(task_name)
+                    )
+                    # The official MultiStepWrapper counts policy steps, each
+                    # executing n_action_steps raw env steps.
+                    high_level_policy_horizon = max(
+                        1, int(np.ceil(high_level_horizon / args.n_action_steps))
+                    )
+                    result = run_one_official_rldx_recovery_rollout(
+                        env_name=task_name,
+                        policy=policy,
+                        rollout_policy=rollout_policy,
+                        wrapper_configs=wrapper_configs,
+                        mode=mode,
+                        split=args.split,
+                        seed=seed,
+                        high_level_horizon=high_level_policy_horizon,
+                        subtask_horizon=args.subtask_horizon,
+                        match_recovery_horizon_to_no_progress=(
+                            args.match_recovery_horizon_to_no_progress
+                        ),
+                        stuck_patience=args.stuck_patience,
+                        include_trace=args.include_trace,
+                        n_action_steps=args.n_action_steps,
+                    )
+                    result["task"] = task_name
+                    result["rollout_index"] = rollout_i
+                    result["seed"] = seed
+                    result["mode"] = mode
+                    result["resolved_high_level_horizon"] = high_level_horizon
+                    result["resolved_high_level_policy_horizon"] = (
+                        high_level_policy_horizon
+                    )
+                    result["n_action_steps"] = args.n_action_steps
+                    mode_results.append(result)
+                except KeyboardInterrupt:
+                    raise
+                except Exception:
+                    mode_results.append(
+                        {
+                            "task": task_name,
+                            "rollout_index": rollout_i,
+                            "seed": seed,
+                            "mode": mode,
+                            "error": traceback.format_exc(),
+                        }
+                    )
+                update_mode_output(mode, mode_results, completed=False)
+                write_output(partial=True)
+
+        update_mode_output(mode, mode_results, completed=True)
+        write_output(partial=True)
+
+    write_output(partial=False)
+    print(colored(f"Wrote official RLDX recovery results to {args.output}", "yellow"))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--rldx-repo", type=str, default=None)
+    parser.add_argument("--model-path", type=str, default="")
+    parser.add_argument("--policy-client-host", type=str, default="")
+    parser.add_argument("--policy-client-port", type=int, default=None)
+    parser.add_argument(
+        "--task-set",
+        choices=[
+            "atomic_seen",
+            "composite_seen",
+            "composite_unseen",
+            "all_composite",
+            "all_target",
+        ],
+        default="atomic_seen",
+    )
+    parser.add_argument("--envs", nargs="+", default=None)
+    parser.add_argument(
+        "--modes",
+        nargs="+",
+        default=["env_to_last_good"],
+        choices=["env_to_last_good", "eef_to_last_good", "continue_from_failure"],
+    )
+    parser.add_argument("--split", default="target", choices=["pretrain", "target"])
+    parser.add_argument("--num-rollouts", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--max-episode-steps", type=int, default=720)
+    parser.add_argument("--n-action-steps", type=int, default=8)
+    parser.add_argument("--high-level-horizon", type=int, default=None)
+    parser.add_argument("--subtask-horizon", type=int, default=120)
+    parser.add_argument(
+        "--match-recovery-horizon-to-no-progress",
+        action="store_true",
+    )
+    parser.add_argument("--stuck-patience", type=int, default=10)
+    parser.add_argument("--include-trace", action="store_true")
+    args = parser.parse_args()
+
+    if bool(args.model_path) == bool(args.policy_client_host or args.policy_client_port):
+        parser.error(
+            "Provide exactly one policy source: either --model-path for in-process "
+            "RLDX or --policy-client-host/--policy-client-port for a server."
+        )
+    if (args.policy_client_host and args.policy_client_port is None) or (
+        args.policy_client_port is not None and not args.policy_client_host
+    ):
+        parser.error("--policy-client-host and --policy-client-port must be passed together")
+
+    run_benchmark(args)
+
+
+if __name__ == "__main__":
+    main()
