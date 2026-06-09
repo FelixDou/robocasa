@@ -210,7 +210,7 @@ def _set_instruction_in_observation(observation, instruction):
     if instruction is None:
         return observation
     obs = copy.deepcopy(observation)
-    batched_instruction = [[instruction]]
+    batched_instruction = [instruction]
     keys = (
         "annotation.human.task_description",
         "annotation.human.action.task_description",
@@ -258,10 +258,12 @@ def _as_batched_language(value, batch_size):
     arr = np.asarray(value, dtype=object)
     if arr.ndim == 0:
         text = str(arr.item())
-        return [[text] for _ in range(batch_size)]
+        return [text for _ in range(batch_size)]
     if arr.ndim == 1:
-        return [[str(v)] for v in arr.tolist()]
-    return arr.tolist()
+        return [str(v) for v in arr.tolist()]
+    if arr.ndim == 2 and arr.shape[1:] == (1,):
+        return [str(v) for v in arr[:, 0].tolist()]
+    return [str(v) for v in arr.reshape(-1)[:batch_size].tolist()]
 
 
 def _normalize_video_array(value, history_len):
