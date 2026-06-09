@@ -210,6 +210,7 @@ def _set_instruction_in_observation(observation, instruction):
     if instruction is None:
         return observation
     obs = copy.deepcopy(observation)
+    batched_instruction = [[instruction]]
     keys = (
         "annotation.human.task_description",
         "annotation.human.action.task_description",
@@ -222,9 +223,34 @@ def _set_instruction_in_observation(observation, instruction):
             if isinstance(value, np.ndarray):
                 obs[key] = np.asarray([[instruction]], dtype=object)
             elif isinstance(value, list):
-                obs[key] = [[instruction]]
+                obs[key] = batched_instruction
+            elif isinstance(value, dict):
+                updated = copy.deepcopy(value)
+                for nested_key in (
+                    "instruction",
+                    "task_description",
+                    "annotation.human.task_description",
+                    "annotation.human.action.task_description",
+                ):
+                    if nested_key in updated:
+                        updated[nested_key] = batched_instruction
+                obs[key] = updated
             else:
-                obs[key] = instruction
+                obs[key] = batched_instruction
+    obs["annotation.human.task_description"] = batched_instruction
+    obs["annotation.human.action.task_description"] = batched_instruction
+    obs["language"] = {
+        "instruction": batched_instruction,
+        "task_description": batched_instruction,
+        "annotation.human.task_description": batched_instruction,
+        "annotation.human.action.task_description": batched_instruction,
+    }
+    obs["annotation"] = {
+        "human": {
+            "task_description": batched_instruction,
+            "action": {"task_description": batched_instruction},
+        }
+    }
     return obs
 
 
@@ -282,7 +308,8 @@ def _normalize_rldx_observation(observation, video_history=4):
         for key, value in observation["state"].items():
             state[key] = _normalize_state_array(value)
     if isinstance(observation.get("language"), dict):
-        language.update(observation["language"])
+        for key, value in observation["language"].items():
+            language[key] = _as_batched_language(value, 1)
 
     for key, value in observation.items():
         if key.startswith("video."):
@@ -331,7 +358,8 @@ def _normalize_rldx_observation(observation, video_history=4):
         language.setdefault("task_description", task_desc)
         language.setdefault("annotation.human.task_description", task_desc)
         language.setdefault("annotation.human.action.task_description", task_desc)
-        obs.setdefault("annotation.human.action.task_description", task_desc)
+        obs["annotation.human.task_description"] = task_desc
+        obs["annotation.human.action.task_description"] = task_desc
         obs["annotation"] = {
             "human": {
                 "task_description": task_desc,
