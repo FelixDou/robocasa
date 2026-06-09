@@ -238,7 +238,27 @@ def _as_batched_language(value, batch_size):
     return arr.tolist()
 
 
-def _normalize_rldx_observation(observation):
+def _normalize_video_array(value, history_len):
+    arr = np.asarray(value)
+    if arr.ndim == 3:
+        arr = arr[None, None, ...]
+    elif arr.ndim == 4:
+        arr = arr[None, ...]
+    if arr.ndim == 5 and arr.shape[1] == 1 and history_len > 1:
+        arr = np.repeat(arr, history_len, axis=1)
+    return arr
+
+
+def _normalize_state_array(value):
+    arr = np.asarray(value)
+    if arr.ndim == 1:
+        arr = arr[None, None, ...]
+    elif arr.ndim == 2:
+        arr = arr[:, None, ...]
+    return arr
+
+
+def _normalize_rldx_observation(observation, video_history=4):
     """Convert official flat RoboCasa obs keys to the nested RLDX server shape.
 
     This does not change the rollout protocol: observations still come from the
@@ -258,10 +278,10 @@ def _normalize_rldx_observation(observation):
     for key, value in observation.items():
         if key.startswith("video."):
             short_key = key.split(".", 1)[1]
-            video[short_key] = value
+            video[short_key] = _normalize_video_array(value, video_history)
         elif key.startswith("state."):
             short_key = key.split(".", 1)[1]
-            state[short_key] = value
+            state[short_key] = _normalize_state_array(value)
 
     video_aliases = {
         "robot0_agentview_left": "res256_image_side_0",
@@ -474,12 +494,21 @@ def _refresh_multistep_observation(env, instruction=None):
     )
 
 
-def _step_official(vec_env, policy, observations, is_first_step, session_id):
+def _step_official(
+    vec_env,
+    policy,
+    observations,
+    is_first_step,
+    session_id,
+    video_history=4,
+):
     options = {
         "reset_memory": [bool(is_first_step)],
         "session_ids": [session_id],
     }
-    policy_observations = _normalize_rldx_observation(observations)
+    policy_observations = _normalize_rldx_observation(
+        observations, video_history=video_history
+    )
     actions, _ = policy.get_action(policy_observations, options=options)
     actions = _normalize_actions_for_env(actions, vec_env)
     next_obs, rewards, terminations, truncations, infos = vec_env.step(actions)
@@ -671,6 +700,7 @@ def run_one_official_rldx_recovery_rollout(
     )
     vec_env = gym.vector.SyncVectorEnv([env_fn])
     single_env = None
+    video_history = int(len(wrapper_configs.multistep.video_delta_indices))
     try:
         observations, _ = vec_env.reset()
         single_env = _single_env_from_vector(vec_env)
@@ -705,6 +735,7 @@ def run_one_official_rldx_recovery_rollout(
                 observations,
                 is_first_step=is_first_step,
                 session_id=session_id,
+                video_history=video_history,
             )
             is_first_step = False
             if step_success or reward > 0:
@@ -801,6 +832,7 @@ def run_one_official_rldx_recovery_rollout(
                 observations,
                 is_first_step=is_first_step,
                 session_id=session_id,
+                video_history=video_history,
             )
             is_first_step = False
             current_eval = _get_info_value(info, "subtask_eval")
