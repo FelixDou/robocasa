@@ -267,13 +267,22 @@ def _normalize_rldx_observation(observation, video_history=4):
     ``video.robot0_agentview_left`` into ``observation["video"][...]`` for RLDX
     server builds that require nested modality groups.
     """
-    if not isinstance(observation, dict) or "video" in observation:
+    if not isinstance(observation, dict):
         return observation
 
     obs = dict(observation)
     video = {}
     state = {}
     language = {}
+
+    if isinstance(observation.get("video"), dict):
+        for key, value in observation["video"].items():
+            video[key] = _normalize_video_array(value, video_history)
+    if isinstance(observation.get("state"), dict):
+        for key, value in observation["state"].items():
+            state[key] = _normalize_state_array(value)
+    if isinstance(observation.get("language"), dict):
+        language.update(observation["language"])
 
     for key, value in observation.items():
         if key.startswith("video."):
