@@ -341,8 +341,12 @@ def _normalize_rldx_observation(observation, video_history=4):
 
     if video:
         obs["video"] = video
+        for key, value in video.items():
+            obs[f"video.{key}"] = value
     if state:
         obs["state"] = state
+        for key, value in state.items():
+            obs[f"state.{key}"] = value
     if language:
         obs["language"] = language
     return obs
