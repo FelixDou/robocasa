@@ -342,6 +342,7 @@ def run_benchmark(args):
                         video_camera_name=args.video_camera_name,
                         video_height=args.video_height,
                         video_width=args.video_width,
+                        video_direct_sim_render=args.video_direct_sim_render,
                     )
                     result["task"] = task_name
                     result["rollout_index"] = rollout_i
@@ -442,6 +443,15 @@ def main():
     parser.add_argument("--video-height", type=int, default=512)
     parser.add_argument("--video-width", type=int, default=768)
     parser.add_argument("--video-fps", type=int, default=20)
+    parser.add_argument(
+        "--video-direct-sim-render",
+        action="store_true",
+        help=(
+            "Render video frames directly from sim.render(camera_name=...) instead "
+            "of env.render(). Use this when wrapper-rendered MP4s show corrupted "
+            "or stale frames."
+        ),
+    )
     parser.add_argument(
         "--video-separator-frames",
         type=int,

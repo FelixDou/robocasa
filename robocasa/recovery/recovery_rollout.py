@@ -337,14 +337,50 @@ def _is_likely_corrupt_video_frame(frame):
 
 
 def _append_video_frame(env, video_writer, camera_name, height, width, previous_frame=None):
+    return _append_video_frame_from_env(
+        env,
+        video_writer,
+        camera_name=camera_name,
+        height=height,
+        width=width,
+        previous_frame=previous_frame,
+        prefer_env_render=True,
+    )
+
+
+def _normalize_video_frame(frame):
+    frame = np.asarray(frame)
+    if frame.ndim == 2:
+        frame = np.repeat(frame[..., None], 3, axis=2)
+    if frame.ndim == 3 and frame.shape[2] > 3:
+        frame = frame[..., :3]
+    if frame.dtype != np.uint8:
+        if np.issubdtype(frame.dtype, np.floating):
+            max_value = float(np.nanmax(frame)) if frame.size else 1.0
+            if max_value <= 1.0:
+                frame = frame * 255.0
+        frame = np.clip(frame, 0, 255).astype(np.uint8)
+    return np.ascontiguousarray(frame)
+
+
+def _append_video_frame_from_env(
+    env,
+    video_writer,
+    camera_name,
+    height,
+    width,
+    previous_frame=None,
+    prefer_env_render=True,
+):
     if video_writer is None:
         return None
 
-    try:
-        video_img = env.render()
-        video_img = np.ascontiguousarray(video_img)
-    except Exception:
-        video_img = None
+    video_img = None
+    if prefer_env_render:
+        try:
+            video_img = env.render()
+        except Exception:
+            video_img = None
 
     if video_img is None:
         sim = _get_sim(env)
@@ -352,10 +388,18 @@ def _append_video_frame(env, video_writer, camera_name, height, width, previous_
             return None
         video_img = sim.render(height=height, width=width, camera_name=camera_name)[::-1]
 
+    try:
+        video_img = _normalize_video_frame(video_img)
+    except Exception:
+        video_img = None
+
+    if video_img is None:
+        return None
+
     if _is_likely_corrupt_video_frame(video_img) and previous_frame is not None:
         video_img = previous_frame
 
-    video_img = np.ascontiguousarray(video_img)
+    video_img = _normalize_video_frame(video_img)
     video_writer.append_data(video_img)
     return video_img
 
@@ -540,6 +584,7 @@ def run_recovery_after_failed_rollout(
     video_camera_name="robot0_agentview_center",
     video_height=512,
     video_width=768,
+    video_direct_sim_render=False,
 ):
     """
     Run a high-level rollout, then retry only the failed subtask if needed.
@@ -587,13 +632,14 @@ def run_recovery_after_failed_rollout(
         high_level_steps = step_i + 1
         action = call_policy(policy, obs)
         obs, reward, done, info = _step_env(env, action)
-        video_frame = _append_video_frame(
+        video_frame = _append_video_frame_from_env(
             env,
             video_writer,
             camera_name=video_camera_name,
             height=video_height,
             width=video_width,
             previous_frame=last_video_frame,
+            prefer_env_render=not video_direct_sim_render,
         )
         if video_frame is not None:
             last_video_frame = video_frame
@@ -689,13 +735,14 @@ def run_recovery_after_failed_rollout(
         retry_steps = step_i + 1
         action = call_policy(policy, obs, instruction=instruction)
         obs, reward, done, info = _step_env(env, action)
-        video_frame = _append_video_frame(
+        video_frame = _append_video_frame_from_env(
             env,
             video_writer,
             camera_name=video_camera_name,
             height=video_height,
             width=video_width,
             previous_frame=last_video_frame,
+            prefer_env_render=not video_direct_sim_render,
         )
         if video_frame is not None:
             last_video_frame = video_frame
