@@ -997,11 +997,11 @@ def run_benchmark(args):
                 try:
                     random.seed(seed)
                     np.random.seed(seed)
-                    # The official MultiStepWrapper counts policy steps, each
-                    # executing n_action_steps raw env steps.
-                    high_level_policy_horizon = max(
-                        1, int(np.ceil(task_high_level_horizon / args.n_action_steps))
-                    )
+                    # Match the official rollout script: pass the task horizon
+                    # to the wrapper and use the same raw horizon as the outer
+                    # safety bound. The MultiStepWrapper owns action chunking
+                    # via n_action_steps and terminates/truncates as needed.
+                    high_level_policy_horizon = max(1, int(task_high_level_horizon))
                     result = run_one_official_rldx_recovery_rollout(
                         env_name=task_name,
                         policy=policy,
