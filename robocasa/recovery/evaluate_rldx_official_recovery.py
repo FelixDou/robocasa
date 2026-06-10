@@ -931,12 +931,6 @@ def run_benchmark(args):
         policy_client_host=args.policy_client_host,
         policy_client_port=args.policy_client_port,
     )
-    wrapper_configs = _make_wrapper_configs(
-        rollout_policy,
-        policy,
-        max_episode_steps=args.max_episode_steps,
-        n_action_steps=args.n_action_steps,
-    )
     tasks = resolve_tasks(args.task_set, args.envs)
     output = {
         "config": vars(args),
@@ -974,26 +968,37 @@ def run_benchmark(args):
         print(colored(f"Evaluating official RLDX recovery mode: {mode}", "green"))
         for task_name in tasks:
             print(colored(f"  Task: {task_name}", "cyan"))
+            task_high_level_horizon = (
+                args.high_level_horizon
+                if args.high_level_horizon is not None
+                else get_task_horizon(task_name)
+            )
+            task_max_episode_steps = (
+                args.max_episode_steps
+                if args.max_episode_steps is not None
+                else task_high_level_horizon
+            )
+            task_wrapper_configs = _make_wrapper_configs(
+                rollout_policy,
+                policy,
+                max_episode_steps=task_max_episode_steps,
+                n_action_steps=args.n_action_steps,
+            )
             for rollout_i in tqdm(range(args.num_rollouts), leave=False):
                 seed = args.seed + rollout_i
                 try:
                     random.seed(seed)
                     np.random.seed(seed)
-                    high_level_horizon = (
-                        args.high_level_horizon
-                        if args.high_level_horizon is not None
-                        else get_task_horizon(task_name)
-                    )
                     # The official MultiStepWrapper counts policy steps, each
                     # executing n_action_steps raw env steps.
                     high_level_policy_horizon = max(
-                        1, int(np.ceil(high_level_horizon / args.n_action_steps))
+                        1, int(np.ceil(task_high_level_horizon / args.n_action_steps))
                     )
                     result = run_one_official_rldx_recovery_rollout(
                         env_name=task_name,
                         policy=policy,
                         rollout_policy=rollout_policy,
-                        wrapper_configs=wrapper_configs,
+                        wrapper_configs=task_wrapper_configs,
                         mode=mode,
                         split=args.split,
                         seed=seed,
@@ -1010,7 +1015,8 @@ def run_benchmark(args):
                     result["rollout_index"] = rollout_i
                     result["seed"] = seed
                     result["mode"] = mode
-                    result["resolved_high_level_horizon"] = high_level_horizon
+                    result["resolved_high_level_horizon"] = task_high_level_horizon
+                    result["resolved_max_episode_steps"] = task_max_episode_steps
                     result["resolved_high_level_policy_horizon"] = (
                         high_level_policy_horizon
                     )
@@ -1066,7 +1072,7 @@ def main():
     parser.add_argument("--split", default="target", choices=["pretrain", "target"])
     parser.add_argument("--num-rollouts", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--max-episode-steps", type=int, default=720)
+    parser.add_argument("--max-episode-steps", type=int, default=None)
     parser.add_argument("--n-action-steps", type=int, default=8)
     parser.add_argument("--high-level-horizon", type=int, default=None)
     parser.add_argument("--subtask-horizon", type=int, default=120)
