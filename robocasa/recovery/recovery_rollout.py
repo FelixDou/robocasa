@@ -371,6 +371,7 @@ def _append_video_frame_from_env(
     width,
     previous_frame=None,
     prefer_env_render=True,
+    reuse_corrupt_previous=True,
 ):
     if video_writer is None:
         return None
@@ -396,7 +397,11 @@ def _append_video_frame_from_env(
     if video_img is None:
         return None
 
-    if _is_likely_corrupt_video_frame(video_img) and previous_frame is not None:
+    if (
+        reuse_corrupt_previous
+        and _is_likely_corrupt_video_frame(video_img)
+        and previous_frame is not None
+    ):
         video_img = previous_frame
 
     video_img = _normalize_video_frame(video_img)
@@ -707,6 +712,18 @@ def run_recovery_after_failed_rollout(
         text=separator_text,
     )
     recovery_meta = apply_recovery_mode(env, mode, last_good_state)
+    video_frame = _append_video_frame_from_env(
+        env,
+        video_writer,
+        camera_name=video_camera_name,
+        height=video_height,
+        width=video_width,
+        previous_frame=last_video_frame,
+        prefer_env_render=not video_direct_sim_render,
+        reuse_corrupt_previous=False,
+    )
+    if video_frame is not None:
+        last_video_frame = video_frame
     recovery_start_eval = get_subtask_eval(env)
     subtask_name = (
         _ordered_current_subtask_from_eval(recovery_start_eval)
@@ -743,6 +760,7 @@ def run_recovery_after_failed_rollout(
             width=video_width,
             previous_frame=last_video_frame,
             prefer_env_render=not video_direct_sim_render,
+            reuse_corrupt_previous=False,
         )
         if video_frame is not None:
             last_video_frame = video_frame
