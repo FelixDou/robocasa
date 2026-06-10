@@ -366,10 +366,10 @@ _TASK_PREDICATE_DESCRIPTION_OVERRIDES = {
         "gripper_released": "Release object.",
     },
     "PickPlaceDrawerToCounter": {
-        "object_grasped": "Pick object.",
-        "object_on_counter": "Move object to counter.",
-        "final_placement_valid": "Keep object on counter and release it.",
-        "gripper_released": "Release object.",
+        "object_grasped": "Pick the target object from the drawer.",
+        "object_on_counter": "Move the target object from the drawer to the counter.",
+        "final_placement_valid": "Keep the target object from the drawer on the counter and release it.",
+        "gripper_released": "Release the target object from the drawer.",
     },
     "PickPlaceSinkToCounter": {
         "object_grasped": "Pick object.",
