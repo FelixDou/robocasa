@@ -544,16 +544,20 @@ def _step_official(
     is_first_step,
     session_id,
     video_history=4,
+    normalize_policy_io=False,
 ):
     options = {
         "reset_memory": [bool(is_first_step)],
         "session_ids": [session_id],
     }
-    policy_observations = _normalize_rldx_observation(
-        observations, video_history=video_history
-    )
+    policy_observations = observations
+    if normalize_policy_io:
+        policy_observations = _normalize_rldx_observation(
+            observations, video_history=video_history
+        )
     actions, _ = policy.get_action(policy_observations, options=options)
-    actions = _normalize_actions_for_env(actions, vec_env)
+    if normalize_policy_io:
+        actions = _normalize_actions_for_env(actions, vec_env)
     next_obs, rewards, terminations, truncations, infos = vec_env.step(actions)
     info = _env_info_for_single_env(infos)
     done = _bool_from_vector(terminations) or _bool_from_vector(truncations)
@@ -725,6 +729,7 @@ def run_one_official_rldx_recovery_rollout(
     stuck_patience,
     include_trace,
     n_action_steps,
+    normalize_policy_io,
 ):
     import gymnasium as gym
 
@@ -782,6 +787,7 @@ def run_one_official_rldx_recovery_rollout(
                 is_first_step=is_first_step,
                 session_id=session_id,
                 video_history=video_history,
+                normalize_policy_io=normalize_policy_io,
             )
             is_first_step = False
             if step_success or reward > 0:
@@ -879,6 +885,7 @@ def run_one_official_rldx_recovery_rollout(
                 is_first_step=is_first_step,
                 session_id=session_id,
                 video_history=video_history,
+                normalize_policy_io=normalize_policy_io,
             )
             is_first_step = False
             current_eval = _get_info_value(info, "subtask_eval")
@@ -1021,6 +1028,7 @@ def run_benchmark(args):
                         stuck_patience=args.stuck_patience,
                         include_trace=args.include_trace,
                         n_action_steps=args.n_action_steps,
+                        normalize_policy_io=args.compat_normalize_policy_io,
                     )
                     result["task"] = task_name
                     result["rollout_index"] = rollout_i
@@ -1120,6 +1128,15 @@ def main():
     )
     parser.add_argument("--stuck-patience", type=int, default=10)
     parser.add_argument("--include-trace", action="store_true")
+    parser.add_argument(
+        "--compat-normalize-policy-io",
+        action="store_true",
+        help=(
+            "Compatibility mode for non-official servers: normalize observation "
+            "and action dictionaries around policy.get_action/env.step. Leave "
+            "disabled to match the official RLDX rollout loop."
+        ),
+    )
     args = parser.parse_args()
 
     if bool(args.model_path) == bool(args.policy_client_host or args.policy_client_port):
