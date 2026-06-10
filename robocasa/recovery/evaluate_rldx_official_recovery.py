@@ -863,6 +863,11 @@ def run_one_official_rldx_recovery_rollout(
         recovery_meta["recovery_start_target_instruction"] = instruction
         _set_env_instruction(single_env, instruction)
         observations = _refresh_multistep_observation(single_env, instruction)
+        # The high-level phase uses the official raw vector-env observations.
+        # After recovery we refresh from the single env state, which can return
+        # single-frame images; normalize only this retry phase back to RLDX's
+        # expected batched multistep policy input.
+        retry_normalize_policy_io = True
         is_first_step = True
         session_id = f"{env_name}_recovery_{uuid.uuid4().hex[:8]}"
 
@@ -885,7 +890,8 @@ def run_one_official_rldx_recovery_rollout(
                 is_first_step=is_first_step,
                 session_id=session_id,
                 video_history=video_history,
-                normalize_policy_io=normalize_policy_io,
+                normalize_policy_io=normalize_policy_io
+                or retry_normalize_policy_io,
             )
             is_first_step = False
             current_eval = _get_info_value(info, "subtask_eval")
