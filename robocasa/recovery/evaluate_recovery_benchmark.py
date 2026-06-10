@@ -9,6 +9,7 @@ import importlib
 import inspect
 import json
 from pathlib import Path
+import re
 import sys
 import traceback
 
@@ -47,6 +48,70 @@ def make_video_path(video_dir, mode, task_name, rollout_i, seed):
     safe_mode = mode.replace("/", "_")
     safe_task = task_name.replace("/", "_")
     return video_dir / safe_mode / safe_task / f"rollout_{rollout_i:04d}_seed_{seed}.mp4"
+
+
+def safe_filename_part(value, max_len=80):
+    text = "none" if value is None else str(value)
+    text = re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("_")
+    return (text or "none")[:max_len]
+
+
+def recovery_video_label(result):
+    if "error" in result:
+        return "ERROR"
+    if (result.get("high_level") or {}).get("success"):
+        return "HIGH_LEVEL_SUCCESS"
+    if result.get("recovery_attempted"):
+        subtask_success = (result.get("subtask") or {}).get("success")
+        progress_count = (
+            (result.get("high_level") or {}).get("last_good_ordered_subtask_count")
+            or 0
+        )
+        if subtask_success and progress_count > 0:
+            return "RECOVERY_SUCCESS_WITH_PROGRESS"
+        if subtask_success:
+            return "RECOVERY_SUCCESS"
+        return "RECOVERY_FAILED"
+    return "HIGH_LEVEL_FAILED"
+
+
+def make_labeled_video_path(video_path, result):
+    if video_path is None:
+        return None
+    label = recovery_video_label(result)
+    task = safe_filename_part(result.get("task"))
+    rollout_i = result.get("rollout_index")
+    seed = result.get("seed")
+    parts = [
+        label,
+        task,
+        f"rollout{int(rollout_i):04d}" if rollout_i is not None else "rolloutNA",
+        f"seed{seed}",
+    ]
+
+    high_level = result.get("high_level") or {}
+    completed = high_level.get("ordered_completed_subtasks") or []
+    if completed:
+        parts.append("completed_" + safe_filename_part("_then_".join(completed), 120))
+
+    target = (result.get("subtask") or {}).get("target_subtask")
+    if target:
+        parts.append("recover_" + safe_filename_part(target, 80))
+
+    return video_path.with_name("__".join(parts) + video_path.suffix)
+
+
+def rename_video_with_result(video_path, result):
+    if video_path is None or not video_path.exists():
+        return video_path
+    labeled_path = make_labeled_video_path(video_path, result)
+    if labeled_path == video_path:
+        return video_path
+    labeled_path.parent.mkdir(parents=True, exist_ok=True)
+    if labeled_path.exists():
+        labeled_path.unlink()
+    video_path.rename(labeled_path)
+    return labeled_path
 
 
 def open_video_writer(video_path, fps):
@@ -231,6 +296,7 @@ def run_benchmark(args):
                 env = None
                 video_path = None
                 video_writer = None
+                record = None
                 try:
                     seed = args.seed + rollout_i
                     video_path = make_video_path(args.video_dir, mode, task_name, rollout_i, seed)
@@ -284,23 +350,27 @@ def run_benchmark(args):
                     result["resolved_high_level_horizon"] = high_level_horizon
                     if video_path is not None:
                         result["video_path"] = str(video_path)
-                    mode_results.append(result)
+                    record = result
+                    mode_results.append(record)
                 except KeyboardInterrupt:
                     raise
                 except Exception:
-                    mode_results.append(
-                        {
-                            "task": task_name,
-                            "rollout_index": rollout_i,
-                            "seed": args.seed + rollout_i,
-                            "mode": mode,
-                            "video_path": str(video_path) if video_path else None,
-                            "error": traceback.format_exc(),
-                        }
-                    )
+                    record = {
+                        "task": task_name,
+                        "rollout_index": rollout_i,
+                        "seed": args.seed + rollout_i,
+                        "mode": mode,
+                        "video_path": str(video_path) if video_path else None,
+                        "error": traceback.format_exc(),
+                    }
+                    mode_results.append(record)
                 finally:
                     if video_writer is not None:
                         video_writer.close()
+                    if video_path is not None and record is not None:
+                        labeled_path = rename_video_with_result(video_path, record)
+                        if labeled_path is not None:
+                            record["video_path"] = str(labeled_path)
                     if env is not None:
                         env.close()
                 update_mode_output(mode, mode_results, completed=False)
