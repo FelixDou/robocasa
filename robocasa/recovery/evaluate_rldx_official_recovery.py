@@ -716,6 +716,9 @@ def run_one_official_rldx_recovery_rollout(
     mode,
     split,
     seed,
+    env_idx,
+    total_n_envs,
+    start_episode_id,
     high_level_horizon,
     subtask_horizon,
     match_recovery_horizon_to_no_progress,
@@ -734,10 +737,10 @@ def run_one_official_rldx_recovery_rollout(
 
     env_fn = lambda: rollout_policy.create_eval_env(
         env_name=f"robocasa/{env_name}",
-        env_idx=0,
-        total_n_envs=1,
+        env_idx=env_idx,
+        total_n_envs=total_n_envs,
         wrapper_configs=wrapper_configs,
-        start_episode_id=0,
+        start_episode_id=start_episode_id,
         seed=seed,
         robocasa_split=split,
     )
@@ -749,7 +752,7 @@ def run_one_official_rldx_recovery_rollout(
         single_env = _single_env_from_vector(vec_env)
         if hasattr(policy, "reset"):
             policy.reset()
-        session_id = f"{env_name}_env0_{uuid.uuid4().hex[:8]}"
+        session_id = f"{env_name}_env{env_idx}_ep{start_episode_id}_{uuid.uuid4().hex[:8]}"
         is_first_step = True
         subtask_eval_warnings = []
 
@@ -985,7 +988,12 @@ def run_benchmark(args):
                 n_action_steps=args.n_action_steps,
             )
             for rollout_i in tqdm(range(args.num_rollouts), leave=False):
-                seed = args.seed + rollout_i
+                seed = args.seed if args.seed_mode == "fixed" else args.seed + rollout_i
+                start_episode_id = (
+                    args.start_episode_id + rollout_i
+                    if args.start_episode_id_mode == "rollout_index"
+                    else args.start_episode_id
+                )
                 try:
                     random.seed(seed)
                     np.random.seed(seed)
@@ -1002,6 +1010,9 @@ def run_benchmark(args):
                         mode=mode,
                         split=args.split,
                         seed=seed,
+                        env_idx=args.env_idx,
+                        total_n_envs=args.total_n_envs,
+                        start_episode_id=start_episode_id,
                         high_level_horizon=high_level_policy_horizon,
                         subtask_horizon=args.subtask_horizon,
                         match_recovery_horizon_to_no_progress=(
@@ -1014,6 +1025,9 @@ def run_benchmark(args):
                     result["task"] = task_name
                     result["rollout_index"] = rollout_i
                     result["seed"] = seed
+                    result["env_idx"] = args.env_idx
+                    result["total_n_envs"] = args.total_n_envs
+                    result["start_episode_id"] = start_episode_id
                     result["mode"] = mode
                     result["resolved_high_level_horizon"] = task_high_level_horizon
                     result["resolved_max_episode_steps"] = task_max_episode_steps
@@ -1030,6 +1044,9 @@ def run_benchmark(args):
                             "task": task_name,
                             "rollout_index": rollout_i,
                             "seed": seed,
+                            "env_idx": args.env_idx,
+                            "total_n_envs": args.total_n_envs,
+                            "start_episode_id": start_episode_id,
                             "mode": mode,
                             "error": traceback.format_exc(),
                         }
@@ -1071,7 +1088,28 @@ def main():
     )
     parser.add_argument("--split", default="target", choices=["pretrain", "target"])
     parser.add_argument("--num-rollouts", type=int, default=1)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--seed-mode",
+        choices=["fixed", "rollout_index"],
+        default="fixed",
+        help=(
+            "Official RLDX eval keeps a fixed env seed and advances episode ids. "
+            "Use rollout_index to reproduce older recovery runs that used seed+i."
+        ),
+    )
+    parser.add_argument("--env-idx", type=int, default=0)
+    parser.add_argument("--total-n-envs", type=int, default=1)
+    parser.add_argument("--start-episode-id", type=int, default=0)
+    parser.add_argument(
+        "--start-episode-id-mode",
+        choices=["fixed", "rollout_index"],
+        default="rollout_index",
+        help=(
+            "Official-style single-env evaluation advances start_episode_id for "
+            "rollout i. Use fixed only for old debugging behavior."
+        ),
+    )
     parser.add_argument("--max-episode-steps", type=int, default=None)
     parser.add_argument("--n-action-steps", type=int, default=8)
     parser.add_argument("--high-level-horizon", type=int, default=None)
