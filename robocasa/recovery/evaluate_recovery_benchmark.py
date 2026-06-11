@@ -123,6 +123,194 @@ def open_video_writer(video_path, fps):
     return imageio.get_writer(str(video_path), fps=fps)
 
 
+class DeferredVideoWriter:
+    """Render stored simulator states after rollout using a fresh env.
+
+    Live offscreen rendering can corrupt after long failing rollouts on some
+    EGL setups. This writer keeps the policy loop render-free and performs a
+    separate playback-style render pass at close().
+    """
+
+    def __init__(
+        self,
+        video_path,
+        fps,
+        camera_name,
+        height,
+        width,
+        render_env_factory,
+    ):
+        self.video_path = video_path
+        self.fps = fps
+        self.camera_name = camera_name
+        self.height = height
+        self.width = width
+        self.render_env_factory = render_env_factory
+        self.entries = []
+        self.closed = False
+
+    def placeholder_frame(self, height=None, width=None):
+        return np.zeros(
+            (int(height or self.height), int(width or self.width), 3),
+            dtype=np.uint8,
+        )
+
+    def append_env_state(self, state):
+        if state is not None:
+            self.entries.append(("state", state))
+
+    def append_separator_text(self, text, num_frames=0):
+        if num_frames > 0:
+            self.entries.append(("separator", str(text or ""), int(num_frames)))
+
+    def append_data(self, frame):
+        frame = self._normalize_frame(frame)
+        if frame is not None:
+            self.entries.append(("frame", frame))
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        if self.video_path is None or not self.entries:
+            return
+
+        import imageio
+        from robocasa.recovery.recovery_rollout import _make_separator_frame
+
+        self.video_path.parent.mkdir(parents=True, exist_ok=True)
+        writer = imageio.get_writer(str(self.video_path), fps=self.fps)
+        env = None
+        last_frame = None
+        loaded_model = None
+        try:
+            env = self.render_env_factory()
+            for entry in self.entries:
+                kind = entry[0]
+                if kind == "state":
+                    frame, loaded_model = self._render_state(
+                        env, entry[1], loaded_model=loaded_model
+                    )
+                    if frame is None:
+                        continue
+                    writer.append_data(frame)
+                    last_frame = frame
+                elif kind == "frame":
+                    frame = entry[1]
+                    writer.append_data(frame)
+                    last_frame = frame
+                elif kind == "separator":
+                    _, text, num_frames = entry
+                    base = last_frame if last_frame is not None else self.placeholder_frame()
+                    separator = _make_separator_frame(base, text)
+                    for _ in range(num_frames):
+                        writer.append_data(separator)
+                    last_frame = separator
+        finally:
+            writer.close()
+            if env is not None:
+                env.close()
+
+    def _render_state(self, env, state, loaded_model=None):
+        if state is None:
+            return None, loaded_model
+
+        model = state.get("model") if isinstance(state, dict) else None
+        try:
+            if model is not None and model != loaded_model:
+                env.reset_to(self._clean_state(state))
+                loaded_model = model
+            elif isinstance(state, dict) and "states" in state:
+                self._set_flattened_state(env, state["states"])
+            else:
+                env.reset_to(self._clean_state(state))
+        except Exception:
+            try:
+                env.reset_to(self._clean_state(state))
+                loaded_model = model
+            except Exception:
+                return None, loaded_model
+
+        sim = self._get_sim(env)
+        if sim is None:
+            return None, loaded_model
+        try:
+            frame = sim.render(
+                height=self.height,
+                width=self.width,
+                camera_name=self.camera_name,
+            )[::-1]
+        except Exception:
+            return None, loaded_model
+        return self._normalize_frame(frame), loaded_model
+
+    @staticmethod
+    def _clean_state(state):
+        return {
+            key: value for key, value in state.items()
+            if not str(key).startswith("_sim_state_")
+        }
+
+    @staticmethod
+    def _get_sim(env):
+        inner = getattr(env, "env", env)
+        sim_holder = inner if hasattr(inner, "sim") else getattr(inner, "env", inner)
+        return getattr(sim_holder, "sim", None)
+
+    @classmethod
+    def _set_flattened_state(cls, env, state):
+        sim = cls._get_sim(env)
+        if sim is None:
+            raise RuntimeError("Render environment does not expose sim")
+        sim.set_state_from_flattened(state)
+        sim.forward()
+        inner = getattr(env, "env", env)
+        for attr in ("update_sites", "update_state"):
+            fn = getattr(inner, attr, None)
+            if fn is not None:
+                try:
+                    fn()
+                except Exception:
+                    pass
+
+    def _normalize_frame(self, frame):
+        if frame is None:
+            return None
+        frame = np.asarray(frame)
+        if frame.ndim == 2:
+            frame = np.repeat(frame[..., None], 3, axis=2)
+        if frame.ndim == 3 and frame.shape[2] > 3:
+            frame = frame[..., :3]
+        if frame.dtype != np.uint8:
+            if np.issubdtype(frame.dtype, np.floating):
+                max_value = float(np.nanmax(frame)) if frame.size else 1.0
+                if max_value <= 1.0:
+                    frame = frame * 255.0
+            frame = np.clip(frame, 0, 255).astype(np.uint8)
+        return np.ascontiguousarray(frame)
+
+
+def open_deferred_video_writer(
+    video_path,
+    fps,
+    camera_name,
+    height,
+    width,
+    render_env_factory,
+):
+    if video_path is None:
+        return None
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    return DeferredVideoWriter(
+        video_path=video_path,
+        fps=fps,
+        camera_name=camera_name,
+        height=height,
+        width=width,
+        render_env_factory=render_env_factory,
+    )
+
+
 def parse_policy_args(values):
     parsed = {}
     for value in values or []:
@@ -307,7 +495,29 @@ def run_benchmark(args):
                         seed=seed,
                         enable_render=args.enable_render or video_path is not None,
                     )
-                    video_writer = open_video_writer(video_path, args.video_fps)
+                    if args.video_render_source == "deferred":
+                        def render_env_factory(
+                            task_name=task_name,
+                            seed=seed,
+                        ):
+                            return make_env(
+                                task_name,
+                                env_interface=args.env_interface,
+                                split=args.split,
+                                seed=seed,
+                                enable_render=True,
+                            )
+
+                        video_writer = open_deferred_video_writer(
+                            video_path,
+                            fps=args.video_fps,
+                            camera_name=args.video_camera_name,
+                            height=args.video_height,
+                            width=args.video_width,
+                            render_env_factory=render_env_factory,
+                        )
+                    else:
+                        video_writer = open_video_writer(video_path, args.video_fps)
                     policy = (
                         RandomPolicy(env)
                         if args.random_policy
@@ -367,6 +577,12 @@ def run_benchmark(args):
                     }
                     mode_results.append(record)
                 finally:
+                    if (
+                        env is not None
+                        and args.video_render_source == "deferred"
+                    ):
+                        env.close()
+                        env = None
                     if video_writer is not None:
                         video_writer.close()
                     if video_path is not None and record is not None:
@@ -455,12 +671,14 @@ def main():
     )
     parser.add_argument(
         "--video-render-source",
-        choices=["auto", "obs", "sim"],
+        choices=["auto", "obs", "sim", "deferred"],
         default="auto",
         help=(
             "Frame source for rollout videos. Use 'obs' to record the policy "
             "camera observations without live EGL rendering. Use 'sim' to match "
-            "the historical non-recovery video path: sim.render(...)[::-1]."
+            "the historical non-recovery video path: sim.render(...)[::-1]. "
+            "Use 'deferred' to store simulator states during rollout and render "
+            "them after the rollout from a fresh environment."
         ),
     )
     parser.add_argument(

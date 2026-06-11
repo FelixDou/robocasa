@@ -611,6 +611,13 @@ def _append_video_frame_from_env(
     if video_writer is None:
         return None
 
+    if render_source == "deferred":
+        if hasattr(video_writer, "append_env_state"):
+            video_writer.append_env_state(_capture_state(env))
+        if hasattr(video_writer, "placeholder_frame"):
+            return video_writer.placeholder_frame(height=height, width=width)
+        return np.zeros((height, width, 3), dtype=np.uint8)
+
     if render_source == "sim":
         sim = _get_sim(env)
         if sim is None:
@@ -792,7 +799,12 @@ def _make_separator_frame(frame, text):
 def _append_video_separator(video_writer, frame, num_frames=0, text=""):
     if video_writer is None:
         return
-    if frame is None or num_frames <= 0:
+    if num_frames <= 0:
+        return
+    if hasattr(video_writer, "append_separator_text"):
+        video_writer.append_separator_text(text, num_frames=num_frames)
+        return
+    if frame is None:
         return
     separator_frame = _make_separator_frame(frame, text)
     for _ in range(num_frames):
