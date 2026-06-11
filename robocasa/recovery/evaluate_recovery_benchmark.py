@@ -101,6 +101,114 @@ def make_labeled_video_path(video_path, result):
     return video_path.with_name("__".join(parts) + video_path.suffix)
 
 
+def infer_atomic_recovery_task_name(
+    subtask_eval,
+    subtask_name,
+    instruction,
+    recovery_target_kind,
+):
+    task_name = (subtask_eval or {}).get("task_name")
+    if recovery_target_kind == "atomic_task" and task_name:
+        return task_name
+
+    text = str(instruction or "").strip().lower()
+    name = str(subtask_name or "").strip().lower()
+    signal = f"{name} {text}"
+
+    exact_prompt_matches = {
+        "open drawer.": "OpenDrawer",
+        "close drawer.": "CloseDrawer",
+        "open cabinet.": "OpenCabinet",
+        "close cabinet.": "CloseCabinet",
+        "open fridge.": "OpenFridge",
+        "close fridge.": "CloseFridge",
+        "open microwave.": "OpenMicrowave",
+        "close microwave.": "CloseMicrowave",
+        "open dishwasher.": "OpenDishwasher",
+        "close dishwasher.": "CloseDishwasher",
+        "open toaster oven.": "OpenToasterOvenDoor",
+        "close toaster oven.": "CloseToasterOvenDoor",
+        "turn on water.": "TurnOnSinkFaucet",
+        "turn off water.": "TurnOffSinkFaucet",
+        "turn on burner.": "TurnOnStove",
+        "turn off burner.": "TurnOffStove",
+        "start microwave.": "TurnOnMicrowave",
+        "start coffee machine.": "StartCoffeeMachine",
+        "start toaster.": "TurnOnToaster",
+        "open freezer.": "OpenFridge",
+    }
+    if text in exact_prompt_matches:
+        return exact_prompt_matches[text]
+
+    if "dishwasher_rack" in name or "dishwasher rack" in text:
+        return "SlideDishwasherRack"
+    if "coffee" in signal and ("mug" in signal or "dispenser" in signal):
+        return "CoffeeSetupMug"
+    if "microwave" in signal and ("start" in signal or "started" in name):
+        return "TurnOnMicrowave"
+    if "sink" in signal or "water" in signal:
+        if "off" in signal:
+            return "TurnOffSinkFaucet"
+        if "on" in signal:
+            return "TurnOnSinkFaucet"
+    if "burner" in signal or "stove" in signal:
+        if "off" in signal:
+            return "TurnOffStove"
+        if "on" in signal:
+            return "TurnOnStove"
+        return "PickPlaceCounterToStove"
+    if "cabinet" in signal:
+        if "open" in signal:
+            return "OpenCabinet"
+        if "close" in signal or "closed" in signal:
+            return "CloseCabinet"
+        if "counter" in signal:
+            return "PickPlaceCabinetToCounter"
+        return "PickPlaceCounterToCabinet"
+    if "drawer" in signal:
+        if "open" in signal:
+            return "OpenDrawer"
+        if "close" in signal or "closed" in signal:
+            return "CloseDrawer"
+        if "counter" in signal:
+            return "PickPlaceDrawerToCounter"
+        return "PickPlaceCounterToDrawer"
+    if "fridge" in signal or "freezer" in signal:
+        if "open" in signal:
+            return "OpenFridge"
+        if "close" in signal or "closed" in signal:
+            return "CloseFridge"
+        if "shelf" in signal:
+            return "PickPlaceFridgeDrawerToShelf"
+    if "microwave" in signal:
+        if "open" in signal:
+            return "OpenMicrowave"
+        if "close" in signal or "closed" in signal:
+            return "CloseMicrowave"
+        if "counter" in signal:
+            return "PickPlaceMicrowaveToCounter"
+        return "PickPlaceCounterToMicrowave"
+    if "toaster oven" in signal:
+        if "open" in signal:
+            return "OpenToasterOvenDoor"
+        if "close" in signal or "closed" in signal:
+            return "CloseToasterOvenDoor"
+        if "counter" in signal:
+            return "PickPlaceToasterOvenToCounter"
+        return "PickPlaceCounterToToasterOven"
+    if "sink" in signal:
+        if "counter" in signal:
+            return "PickPlaceSinkToCounter"
+        return "PickPlaceCounterToSink"
+    if "toaster" in signal:
+        if "start" in signal or "started" in name:
+            return "TurnOnToaster"
+        if "counter" in signal:
+            return "PickPlaceToasterToCounter"
+
+    return None
+
+
 def rename_video_with_result(video_path, result):
     if video_path is None or not video_path.exists():
         return video_path
@@ -533,6 +641,26 @@ def run_benchmark(args):
         "continue_from_failure",
     ]
     tasks = resolve_tasks(args)
+
+    def resolve_atomic_recovery_horizon(
+        subtask_eval,
+        subtask_name,
+        instruction,
+        recovery_target_kind,
+    ):
+        atomic_task_name = infer_atomic_recovery_task_name(
+            subtask_eval,
+            subtask_name,
+            instruction,
+            recovery_target_kind,
+        )
+        if not atomic_task_name:
+            return None
+        try:
+            return atomic_task_name, get_task_horizon(atomic_task_name)
+        except Exception:
+            return None
+
     policy_factory = None if args.random_policy else load_factory(args.policy_module)
     policy_args = parse_policy_args(args.policy_arg)
 
@@ -634,6 +762,7 @@ def run_benchmark(args):
                             recovery_level=args.recovery_level,
                             high_level_horizon=high_level_horizon,
                             subtask_horizon=args.subtask_horizon,
+                            recovery_horizon_resolver=resolve_atomic_recovery_horizon,
                             match_recovery_horizon_to_no_progress=(
                                 args.match_recovery_horizon_to_no_progress
                             ),

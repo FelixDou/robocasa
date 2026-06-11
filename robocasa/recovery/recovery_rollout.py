@@ -50,6 +50,7 @@ class RecoveryConfig:
     recovery_level: str = "atomic"
     high_level_horizon: int = 400
     subtask_horizon: int = 120
+    recovery_horizon_resolver: object = None
     match_recovery_horizon_to_no_progress: bool = False
     stuck_patience: int = 10
     include_trace: bool = True
@@ -459,6 +460,42 @@ def _resolve_recovery_target(
         _subtask_instruction(subtask_eval, proposed_subtask_name),
         "single_predicate",
     )
+
+
+def _resolve_recovery_horizon(
+    config,
+    subtask_eval,
+    subtask_name,
+    instruction,
+    recovery_target_kind,
+    high_level_steps,
+    last_good_step,
+):
+    if config.match_recovery_horizon_to_no_progress:
+        return (
+            max(1, high_level_steps - last_good_step),
+            "steps_since_last_good_progress",
+            None,
+        )
+
+    resolver = getattr(config, "recovery_horizon_resolver", None)
+    if resolver is not None:
+        resolved = resolver(
+            subtask_eval=subtask_eval,
+            subtask_name=subtask_name,
+            instruction=instruction,
+            recovery_target_kind=recovery_target_kind,
+        )
+        if resolved:
+            atomic_task_name, atomic_horizon = resolved
+            if atomic_horizon is not None:
+                return (
+                    max(1, int(atomic_horizon)),
+                    "matched_atomic_task_horizon",
+                    atomic_task_name,
+                )
+
+    return max(1, int(config.subtask_horizon)), "fixed_subtask_horizon", None
 
 
 def _ordered_current_subtask_from_eval(subtask_eval):
@@ -1215,11 +1252,20 @@ def run_recovery_after_failed_rollout(
     retry_evals = [recovery_start_eval]
     retry_success = _subtask_is_complete(retry_evals[-1], subtask_name)
     retry_steps = 0
-    retry_horizon = (
-        max(1, high_level_steps - last_good_step)
-        if config.match_recovery_horizon_to_no_progress
-        else config.subtask_horizon
+    retry_horizon, retry_horizon_source, recovery_atomic_task_name = (
+        _resolve_recovery_horizon(
+            config,
+            recovery_start_eval,
+            subtask_name,
+            instruction,
+            recovery_target_kind,
+            high_level_steps,
+            last_good_step,
+        )
     )
+    recovery_meta["recovery_atomic_task_name"] = recovery_atomic_task_name
+    recovery_meta["resolved_recovery_horizon"] = retry_horizon
+    recovery_meta["recovery_horizon_source"] = retry_horizon_source
     for step_i in range(retry_horizon):
         if retry_success:
             break
@@ -1259,11 +1305,8 @@ def run_recovery_after_failed_rollout(
     retry_summary["success"] = retry_success
     retry_summary["num_steps"] = retry_steps
     retry_summary["horizon"] = retry_horizon
-    retry_summary["horizon_source"] = (
-        "steps_since_last_good_progress"
-        if config.match_recovery_horizon_to_no_progress
-        else "fixed_subtask_horizon"
-    )
+    retry_summary["horizon_source"] = retry_horizon_source
+    retry_summary["atomic_task_name"] = recovery_atomic_task_name
     retry_summary["target_subtask"] = subtask_name
     retry_summary["target_instruction"] = instruction
 
