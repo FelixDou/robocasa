@@ -357,6 +357,99 @@ def _is_likely_corrupt_video_frame(frame):
     return (high_dx > 0.25 and high_dy > 0.25) or (mean_dx > 30 and mean_dy > 30)
 
 
+def _resize_video_frame(frame, height, width):
+    if height is None or width is None:
+        return frame
+    height = int(height)
+    width = int(width)
+    if frame.shape[:2] == (height, width):
+        return np.ascontiguousarray(frame)
+    try:
+        from PIL import Image
+
+        image = Image.fromarray(frame)
+        try:
+            resample = Image.Resampling.BILINEAR
+        except AttributeError:
+            resample = Image.BILINEAR
+        return np.ascontiguousarray(np.asarray(image.resize((width, height), resample)))
+    except Exception:
+        return np.ascontiguousarray(frame)
+
+
+def _coerce_obs_video_frame(value):
+    try:
+        frame = np.asarray(value)
+    except Exception:
+        return None
+    if not np.issubdtype(frame.dtype, np.number):
+        return None
+
+    while frame.ndim > 3:
+        if frame.shape[0] == 1:
+            frame = frame[0]
+        else:
+            frame = frame[-1]
+
+    if frame.ndim == 3 and frame.shape[-1] in (1, 3, 4):
+        return frame
+    if frame.ndim == 3 and frame.shape[0] in (1, 3, 4):
+        return np.moveaxis(frame, 0, -1)
+    if frame.ndim == 2:
+        return frame
+    return None
+
+
+def _obs_video_key_candidates(obs, camera_name):
+    candidates = []
+    if camera_name:
+        candidates.extend(
+            [
+                f"video.{camera_name}",
+                f"{camera_name}_image",
+                camera_name,
+            ]
+        )
+        if camera_name.endswith("_image"):
+            candidates.append(camera_name[: -len("_image")])
+        if camera_name.startswith("video."):
+            candidates.append(camera_name[len("video.") :])
+
+    # The OpenPI Gym wrapper exposes left/right/wrist cameras as observations,
+    # while the historical video default used a render-only center camera.
+    candidates.extend(
+        [
+            "video.robot0_agentview_left",
+            "video.robot0_agentview_right",
+            "video.robot0_eye_in_hand",
+            "robot0_agentview_left_image",
+            "robot0_agentview_right_image",
+            "robot0_eye_in_hand_image",
+        ]
+    )
+
+    for key in obs.keys():
+        if (
+            isinstance(key, str)
+            and (key.startswith("video.") or key.endswith("_image"))
+            and key not in candidates
+        ):
+            candidates.append(key)
+    return candidates
+
+
+def _extract_video_frame_from_obs(obs, camera_name):
+    if not isinstance(obs, dict):
+        return None
+    for key in _obs_video_key_candidates(obs, camera_name):
+        if key not in obs:
+            continue
+        frame = _coerce_obs_video_frame(obs[key])
+        if frame is not None:
+            return frame
+    return None
+
+
 def _append_video_frame(env, video_writer, camera_name, height, width, previous_frame=None):
     return _append_video_frame_from_env(
         env,
@@ -390,6 +483,7 @@ def _append_video_frame_from_env(
     camera_name,
     height,
     width,
+    obs=None,
     previous_frame=None,
     prefer_env_render=True,
     reuse_corrupt_previous=True,
@@ -400,9 +494,10 @@ def _append_video_frame_from_env(
 
     video_img = None
     for attempt_i in range(max(1, int(render_attempts))):
+        video_img = _extract_video_frame_from_obs(obs, camera_name)
         if attempt_i:
             _refresh_sim_visuals(env)
-        if prefer_env_render:
+        if video_img is None and prefer_env_render:
             try:
                 video_img = env.render()
             except Exception:
@@ -426,6 +521,7 @@ def _append_video_frame_from_env(
 
         if video_img is None:
             continue
+        video_img = _resize_video_frame(video_img, height, width)
         if not _is_likely_corrupt_video_frame(video_img):
             break
         if reuse_corrupt_previous and previous_frame is not None:
@@ -438,6 +534,7 @@ def _append_video_frame_from_env(
         return None
 
     video_img = _normalize_video_frame(video_img)
+    video_img = _resize_video_frame(video_img, height, width)
     video_writer.append_data(video_img)
     return video_img
 
@@ -676,6 +773,7 @@ def run_recovery_after_failed_rollout(
             camera_name=video_camera_name,
             height=video_height,
             width=video_width,
+            obs=obs,
             previous_frame=last_video_frame,
             prefer_env_render=not video_direct_sim_render,
         )
@@ -746,12 +844,14 @@ def run_recovery_after_failed_rollout(
     )
     recovery_meta = apply_recovery_mode(env, mode, last_good_state)
     _refresh_sim_visuals(env, num_forwards=3)
+    obs = _get_obs_after_state_change(env, fallback_obs=obs)
     video_frame = _append_video_frame_from_env(
         env,
         video_writer,
         camera_name=video_camera_name,
         height=video_height,
         width=video_width,
+        obs=obs,
         previous_frame=last_video_frame,
         prefer_env_render=not video_direct_sim_render,
         reuse_corrupt_previous=False,
@@ -794,6 +894,7 @@ def run_recovery_after_failed_rollout(
             camera_name=video_camera_name,
             height=video_height,
             width=video_width,
+            obs=obs,
             previous_frame=last_video_frame,
             prefer_env_render=not video_direct_sim_render,
             reuse_corrupt_previous=False,
