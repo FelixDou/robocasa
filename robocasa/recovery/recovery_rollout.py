@@ -440,7 +440,7 @@ def _coerce_obs_video_frame(value):
     return None
 
 
-def _obs_video_key_candidates(obs, camera_name):
+def _obs_video_key_candidates(obs, camera_name, include_fallback=True):
     candidates = []
     if camera_name in {"all", "obs_all", "obs_grid"}:
         camera_name = None
@@ -456,6 +456,9 @@ def _obs_video_key_candidates(obs, camera_name):
             candidates.append(camera_name[: -len("_image")])
         if camera_name.startswith("video."):
             candidates.append(camera_name[len("video.") :])
+
+    if not include_fallback:
+        return candidates
 
     # The OpenPI Gym wrapper exposes left/right/wrist cameras as observations,
     # while the historical video default used a render-only center camera.
@@ -525,12 +528,16 @@ def _extract_video_grid_from_obs(obs):
     return np.concatenate(normalized, axis=1)
 
 
-def _extract_video_frame_from_obs(obs, camera_name):
+def _extract_video_frame_from_obs(obs, camera_name, include_fallback=True):
     if not isinstance(obs, dict):
         return None
     if camera_name in {"all", "obs_all", "obs_grid"}:
         return _extract_video_grid_from_obs(obs)
-    for key in _obs_video_key_candidates(obs, camera_name):
+    for key in _obs_video_key_candidates(
+        obs,
+        camera_name,
+        include_fallback=include_fallback,
+    ):
         if key not in obs:
             continue
         frame = _coerce_obs_video_frame(obs[key])
@@ -632,8 +639,12 @@ def _append_video_frame_from_env(
         video_writer.append_data(video_img)
         return video_img
 
-    if render_source == "obs":
-        video_img = _extract_video_frame_from_obs(obs, camera_name)
+    if render_source in {"obs", "obs_exact"}:
+        video_img = _extract_video_frame_from_obs(
+            obs,
+            camera_name,
+            include_fallback=(render_source == "obs"),
+        )
         if video_img is None:
             return None
         video_img = _normalize_video_frame(video_img)

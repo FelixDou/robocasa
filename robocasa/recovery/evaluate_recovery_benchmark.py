@@ -764,11 +764,13 @@ def main():
     )
     parser.add_argument(
         "--video-render-source",
-        choices=["auto", "obs", "sim", "deferred"],
+        choices=["auto", "obs", "obs_exact", "sim", "deferred"],
         default="auto",
         help=(
             "Frame source for rollout videos. Use 'obs' to record the policy "
-            "camera observations without live EGL rendering. Use 'sim' to match "
+            "camera observations without live EGL rendering. Use 'obs_exact' "
+            "to require --video-camera-name to resolve to an observation key "
+            "with no fallback camera. Use 'sim' to match "
             "the historical non-recovery video path: sim.render(...)[::-1]. "
             "Use 'deferred' to store simulator states during rollout and render "
             "them after the rollout from a fresh environment."
