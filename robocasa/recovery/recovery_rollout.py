@@ -126,6 +126,27 @@ def _get_sim(env):
     return getattr(sim_holder, "sim", None)
 
 
+def _refresh_sim_visuals(env, num_forwards=1):
+    sim = _get_sim(env)
+    sim_holder = _sim_env(env)
+    if sim is not None:
+        for _ in range(max(1, int(num_forwards))):
+            try:
+                sim.forward()
+            except Exception:
+                break
+    if hasattr(sim_holder, "update_sites"):
+        try:
+            sim_holder.update_sites()
+        except Exception:
+            pass
+    if hasattr(sim_holder, "update_state"):
+        try:
+            sim_holder.update_state()
+        except Exception:
+            pass
+
+
 def _capture_state(env):
     if hasattr(env, "get_state"):
         state = env.get_state()
@@ -372,37 +393,49 @@ def _append_video_frame_from_env(
     previous_frame=None,
     prefer_env_render=True,
     reuse_corrupt_previous=True,
+    render_attempts=1,
 ):
     if video_writer is None:
         return None
 
     video_img = None
-    if prefer_env_render:
+    for attempt_i in range(max(1, int(render_attempts))):
+        if attempt_i:
+            _refresh_sim_visuals(env)
+        if prefer_env_render:
+            try:
+                video_img = env.render()
+            except Exception:
+                video_img = None
+
+        if video_img is None:
+            sim = _get_sim(env)
+            if sim is None:
+                return None
+            try:
+                video_img = sim.render(
+                    height=height, width=width, camera_name=camera_name
+                )[::-1]
+            except Exception:
+                video_img = None
+
         try:
-            video_img = env.render()
+            video_img = _normalize_video_frame(video_img)
         except Exception:
             video_img = None
 
-    if video_img is None:
-        sim = _get_sim(env)
-        if sim is None:
-            return None
-        video_img = sim.render(height=height, width=width, camera_name=camera_name)[::-1]
-
-    try:
-        video_img = _normalize_video_frame(video_img)
-    except Exception:
+        if video_img is None:
+            continue
+        if not _is_likely_corrupt_video_frame(video_img):
+            break
+        if reuse_corrupt_previous and previous_frame is not None:
+            video_img = previous_frame
+            break
         video_img = None
+
 
     if video_img is None:
         return None
-
-    if (
-        reuse_corrupt_previous
-        and _is_likely_corrupt_video_frame(video_img)
-        and previous_frame is not None
-    ):
-        video_img = previous_frame
 
     video_img = _normalize_video_frame(video_img)
     video_writer.append_data(video_img)
@@ -712,6 +745,7 @@ def run_recovery_after_failed_rollout(
         text=separator_text,
     )
     recovery_meta = apply_recovery_mode(env, mode, last_good_state)
+    _refresh_sim_visuals(env, num_forwards=3)
     video_frame = _append_video_frame_from_env(
         env,
         video_writer,
@@ -721,6 +755,7 @@ def run_recovery_after_failed_rollout(
         previous_frame=last_video_frame,
         prefer_env_render=not video_direct_sim_render,
         reuse_corrupt_previous=False,
+        render_attempts=5,
     )
     if video_frame is not None:
         last_video_frame = video_frame
@@ -752,6 +787,7 @@ def run_recovery_after_failed_rollout(
         retry_steps = step_i + 1
         action = call_policy(policy, obs, instruction=instruction)
         obs, reward, done, info = _step_env(env, action)
+        _refresh_sim_visuals(env)
         video_frame = _append_video_frame_from_env(
             env,
             video_writer,
@@ -761,6 +797,7 @@ def run_recovery_after_failed_rollout(
             previous_frame=last_video_frame,
             prefer_env_render=not video_direct_sim_render,
             reuse_corrupt_previous=False,
+            render_attempts=3,
         )
         if video_frame is not None:
             last_video_frame = video_frame
