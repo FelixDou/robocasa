@@ -190,6 +190,11 @@ class DeferredVideoWriter:
                 if kind == "state":
                     frame, error = self._render_state(env, entry[1])
                     if frame is None:
+                        if env is not None:
+                            env.close()
+                        env = self.render_env_factory()
+                        frame, error = self._render_state(env, entry[1])
+                    if frame is None:
                         render_failure_count += 1
                         if render_failure_count <= 3:
                             base = (
@@ -228,20 +233,9 @@ class DeferredVideoWriter:
             return None, "state is None"
 
         try:
-            if hasattr(env, "reset_to"):
-                env.reset_to(self._clean_state(state))
-            elif isinstance(state, dict) and "states" in state:
-                self._set_flattened_state(env, state["states"])
-            else:
-                return None, "environment has no reset_to and state has no states"
-        except Exception:
-            try:
-                if isinstance(state, dict) and "states" in state:
-                    self._set_flattened_state(env, state["states"])
-                else:
-                    raise
-            except Exception as fallback_exc:
-                return None, f"{type(fallback_exc).__name__}: {fallback_exc}"
+            self._restore_state_like_playback(env, self._clean_state(state))
+        except Exception as exc:
+            return None, f"{type(exc).__name__}: {exc}"
 
         sim = self._get_sim(env)
         if sim is None:
@@ -256,6 +250,52 @@ class DeferredVideoWriter:
         except Exception as exc:
             return None, f"{type(exc).__name__}: {exc}"
         return self._normalize_frame(frame), None
+
+    @classmethod
+    def _restore_state_like_playback(cls, env, state):
+        inner = getattr(env, "env", env)
+        if "model" in state:
+            if state.get("ep_meta", None) is not None:
+                import json
+
+                ep_meta = json.loads(state["ep_meta"])
+            else:
+                ep_meta = {}
+            if hasattr(inner, "set_attrs_from_ep_meta"):
+                inner.set_attrs_from_ep_meta(ep_meta)
+            elif hasattr(inner, "set_ep_meta"):
+                inner.set_ep_meta(ep_meta)
+
+            inner.reset()
+            try:
+                import robosuite
+
+                robosuite_version_id = int(robosuite.__version__.split(".")[1])
+            except Exception:
+                robosuite_version_id = 4
+            if robosuite_version_id <= 3:
+                from robosuite.utils.mjcf_utils import postprocess_model_xml
+
+                xml = postprocess_model_xml(state["model"])
+            elif hasattr(inner, "edit_model_xml"):
+                xml = inner.edit_model_xml(state["model"])
+            else:
+                xml = state["model"]
+
+            inner.reset_from_xml_string(xml)
+            inner.sim.reset()
+
+        if "states" not in state:
+            raise RuntimeError("Captured state does not contain flattened simulator state")
+        inner.sim.set_state_from_flattened(state["states"])
+        inner.sim.forward()
+        for attr in ("update_sites", "update_state"):
+            fn = getattr(inner, attr, None)
+            if fn is not None:
+                try:
+                    fn()
+                except Exception:
+                    pass
 
     @staticmethod
     def _clean_state(state):
