@@ -182,18 +182,24 @@ class DeferredVideoWriter:
         writer = imageio.get_writer(str(self.video_path), fps=self.fps)
         env = None
         last_frame = None
+        loaded_model = None
         render_failure_count = 0
         try:
             env = self.render_env_factory()
             for entry in self.entries:
                 kind = entry[0]
                 if kind == "state":
-                    frame, error = self._render_state(env, entry[1])
+                    frame, error, loaded_model = self._render_state(
+                        env, entry[1], loaded_model=loaded_model
+                    )
                     if frame is None:
                         if env is not None:
                             env.close()
                         env = self.render_env_factory()
-                        frame, error = self._render_state(env, entry[1])
+                        loaded_model = None
+                        frame, error, loaded_model = self._render_state(
+                            env, entry[1], loaded_model=loaded_model
+                        )
                     if frame is None:
                         render_failure_count += 1
                         if render_failure_count <= 3:
@@ -228,18 +234,34 @@ class DeferredVideoWriter:
             if env is not None:
                 env.close()
 
-    def _render_state(self, env, state):
+    def _render_state(self, env, state, loaded_model=None):
         if state is None:
-            return None, "state is None"
+            return None, "state is None", loaded_model
 
+        clean_state = self._clean_state(state)
+        model = clean_state.get("model") if isinstance(clean_state, dict) else None
         try:
-            self._restore_state_like_playback(env, self._clean_state(state))
+            loaded_model = self._restore_state_like_playback(
+                env,
+                clean_state,
+                loaded_model=loaded_model,
+            )
         except Exception as exc:
-            return None, f"{type(exc).__name__}: {exc}"
+            if model is not None:
+                try:
+                    loaded_model = self._restore_state_like_playback(
+                        env,
+                        clean_state,
+                        loaded_model=None,
+                    )
+                except Exception as retry_exc:
+                    return None, f"{type(retry_exc).__name__}: {retry_exc}", loaded_model
+            else:
+                return None, f"{type(exc).__name__}: {exc}", loaded_model
 
         sim = self._get_sim(env)
         if sim is None:
-            return None, "render environment does not expose sim"
+            return None, "render environment does not expose sim", loaded_model
         try:
             sim.forward()
             frame = sim.render(
@@ -248,13 +270,14 @@ class DeferredVideoWriter:
                 camera_name=self.camera_name,
             )[::-1]
         except Exception as exc:
-            return None, f"{type(exc).__name__}: {exc}"
-        return self._normalize_frame(frame), None
+            return None, f"{type(exc).__name__}: {exc}", loaded_model
+        return self._normalize_frame(frame), None, loaded_model
 
     @classmethod
-    def _restore_state_like_playback(cls, env, state):
+    def _restore_state_like_playback(cls, env, state, loaded_model=None):
         inner = getattr(env, "env", env)
-        if "model" in state:
+        model = state.get("model") if isinstance(state, dict) else None
+        if model is not None and model != loaded_model:
             if state.get("ep_meta", None) is not None:
                 import json
 
@@ -284,6 +307,7 @@ class DeferredVideoWriter:
 
             inner.reset_from_xml_string(xml)
             inner.sim.reset()
+            loaded_model = model
 
         if "states" not in state:
             raise RuntimeError("Captured state does not contain flattened simulator state")
@@ -296,6 +320,7 @@ class DeferredVideoWriter:
                     fn()
                 except Exception:
                     pass
+        return loaded_model
 
     @staticmethod
     def _clean_state(state):
