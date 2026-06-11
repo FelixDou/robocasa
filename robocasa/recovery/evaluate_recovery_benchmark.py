@@ -631,6 +631,7 @@ def run_benchmark(args):
                         env,
                         RecoveryConfig(
                             mode=mode,
+                            recovery_level=args.recovery_level,
                             high_level_horizon=high_level_horizon,
                             subtask_horizon=args.subtask_horizon,
                             match_recovery_horizon_to_no_progress=(
@@ -721,6 +722,17 @@ def main():
     parser.add_argument("--modes", nargs="+", default=None)
     parser.add_argument("--split", default="test")
     parser.add_argument("--num-rollouts", type=int, default=1)
+    parser.add_argument(
+        "--recovery-level",
+        choices=["atomic", "subtask"],
+        default="atomic",
+        help=(
+            "Granularity of the recovery retry. 'atomic' keeps subtask-level "
+            "diagnostics but retries with the dataset-style atomic task "
+            "instruction and monitors task success. 'subtask' retries the "
+            "currently failed predicate-level subtask."
+        ),
+    )
     parser.add_argument(
         "--high-level-horizon",
         type=int,

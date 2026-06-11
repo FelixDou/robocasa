@@ -47,6 +47,7 @@ class RecoveryConfig:
     """Configuration for a recovery-after-failure rollout."""
 
     mode: object = RecoveryMode.CONTINUE_FROM_FAILURE
+    recovery_level: str = "atomic"
     high_level_horizon: int = 400
     subtask_horizon: int = 120
     match_recovery_horizon_to_no_progress: bool = False
@@ -315,6 +316,8 @@ def _is_task_success(info, reward=None, env=None):
 def _subtask_is_complete(subtask_eval, subtask_name):
     if subtask_name is None:
         return False
+    if subtask_name == "task_success":
+        return bool((subtask_eval or {}).get("task_success", False))
     predicate = (subtask_eval or {}).get("predicates", {}).get(subtask_name, {})
     return bool(predicate.get("value", False))
 
@@ -324,6 +327,23 @@ def _subtask_instruction(subtask_eval, subtask_name):
         return None
     predicate = (subtask_eval or {}).get("predicates", {}).get(subtask_name, {})
     return predicate.get("description") or f"Complete this subtask: {subtask_name}."
+
+
+def _env_task_instruction(env):
+    inner = _inner_env(env)
+    for source in (env, inner):
+        if hasattr(source, "override_task_description"):
+            value = getattr(source, "override_task_description", None)
+            if value:
+                return value
+        if hasattr(source, "get_ep_meta"):
+            try:
+                value = source.get_ep_meta().get("lang", "")
+            except Exception:
+                value = ""
+            if value:
+                return value
+    return None
 
 
 def _is_pick_place_predicate_set(subtask_eval):
@@ -352,7 +372,13 @@ def _pick_place_recovery_predicates(subtask_eval):
     return selected
 
 
-def _resolve_recovery_target(subtask_eval, proposed_subtask_name, high_level_summary=None):
+def _resolve_recovery_target(
+    subtask_eval,
+    proposed_subtask_name,
+    high_level_summary=None,
+    recovery_level="atomic",
+    atomic_instruction=None,
+):
     """Choose the predicate to monitor and language prompt for recovery.
 
     Pick-place predicates are too coupled to retry as isolated micro-actions:
@@ -362,6 +388,23 @@ def _resolve_recovery_target(subtask_eval, proposed_subtask_name, high_level_sum
     """
     if proposed_subtask_name is None:
         return None, None, "none"
+
+    if recovery_level == "atomic":
+        instruction = atomic_instruction
+        if not instruction and _is_pick_place_predicate_set(subtask_eval):
+            group_names = _pick_place_recovery_predicates(subtask_eval)
+            descriptions = [
+                _predicate_description(subtask_eval, name).rstrip(".")
+                for name in group_names
+            ]
+            instruction = "; then ".join(descriptions)
+            if instruction:
+                instruction = instruction[0].upper() + instruction[1:]
+                if not instruction.endswith("."):
+                    instruction += "."
+        if not instruction:
+            instruction = _subtask_instruction(subtask_eval, proposed_subtask_name)
+        return "task_success", instruction, "atomic_task"
 
     predicates = (subtask_eval or {}).get("predicates", {})
     proposed_stage = predicates.get(proposed_subtask_name, {}).get("stage")
@@ -1000,6 +1043,7 @@ def run_recovery_after_failed_rollout(
         obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
     else:
         obs = initial_obs
+    atomic_instruction = _env_task_instruction(env)
 
     subtask_evals = [get_subtask_eval(env)]
     last_good_state = _capture_state(env)
@@ -1088,6 +1132,8 @@ def run_recovery_after_failed_rollout(
         final_eval,
         high_level_subtask_name,
         high_level_summary=high_level_summary,
+        recovery_level=config.recovery_level,
+        atomic_instruction=atomic_instruction,
     )
 
     separator_header = config.video_separator_text or _recovery_separator_header(mode)
@@ -1130,12 +1176,16 @@ def run_recovery_after_failed_rollout(
         recovery_start_eval,
         proposed_recovery_start_subtask,
         high_level_summary=high_level_summary,
+        recovery_level=config.recovery_level,
+        atomic_instruction=atomic_instruction,
     )
     recovery_meta["high_level_target_subtask"] = high_level_subtask_name
     recovery_meta["high_level_target_instruction"] = high_level_instruction
     recovery_meta["high_level_recovery_target_subtask"] = high_level_recovery_target_name
     recovery_meta["high_level_recovery_target_kind"] = high_level_recovery_target_kind
     recovery_meta["proposed_recovery_start_subtask"] = proposed_recovery_start_subtask
+    recovery_meta["recovery_level"] = config.recovery_level
+    recovery_meta["atomic_instruction"] = atomic_instruction
     recovery_meta["recovery_start_target_subtask"] = subtask_name
     recovery_meta["recovery_start_target_instruction"] = instruction
     recovery_meta["recovery_target_kind"] = recovery_target_kind
