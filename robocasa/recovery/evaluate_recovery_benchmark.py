@@ -182,16 +182,28 @@ class DeferredVideoWriter:
         writer = imageio.get_writer(str(self.video_path), fps=self.fps)
         env = None
         last_frame = None
-        loaded_model = None
+        render_failure_count = 0
         try:
             env = self.render_env_factory()
             for entry in self.entries:
                 kind = entry[0]
                 if kind == "state":
-                    frame, loaded_model = self._render_state(
-                        env, entry[1], loaded_model=loaded_model
-                    )
+                    frame, error = self._render_state(env, entry[1])
                     if frame is None:
+                        render_failure_count += 1
+                        if render_failure_count <= 3:
+                            base = (
+                                last_frame
+                                if last_frame is not None
+                                else self.placeholder_frame()
+                            )
+                            failure = _make_separator_frame(
+                                base,
+                                "Deferred video render failed\n"
+                                f"{error or 'unknown error'}",
+                            )
+                            writer.append_data(failure)
+                            last_frame = failure
                         continue
                     writer.append_data(frame)
                     last_frame = frame
@@ -211,38 +223,39 @@ class DeferredVideoWriter:
             if env is not None:
                 env.close()
 
-    def _render_state(self, env, state, loaded_model=None):
+    def _render_state(self, env, state):
         if state is None:
-            return None, loaded_model
+            return None, "state is None"
 
-        model = state.get("model") if isinstance(state, dict) else None
         try:
-            if model is not None and model != loaded_model:
+            if hasattr(env, "reset_to"):
                 env.reset_to(self._clean_state(state))
-                loaded_model = model
             elif isinstance(state, dict) and "states" in state:
                 self._set_flattened_state(env, state["states"])
             else:
-                env.reset_to(self._clean_state(state))
+                return None, "environment has no reset_to and state has no states"
         except Exception:
             try:
-                env.reset_to(self._clean_state(state))
-                loaded_model = model
-            except Exception:
-                return None, loaded_model
+                if isinstance(state, dict) and "states" in state:
+                    self._set_flattened_state(env, state["states"])
+                else:
+                    raise
+            except Exception as fallback_exc:
+                return None, f"{type(fallback_exc).__name__}: {fallback_exc}"
 
         sim = self._get_sim(env)
         if sim is None:
-            return None, loaded_model
+            return None, "render environment does not expose sim"
         try:
+            sim.forward()
             frame = sim.render(
                 height=self.height,
                 width=self.width,
                 camera_name=self.camera_name,
             )[::-1]
-        except Exception:
-            return None, loaded_model
-        return self._normalize_frame(frame), loaded_model
+        except Exception as exc:
+            return None, f"{type(exc).__name__}: {exc}"
+        return self._normalize_frame(frame), None
 
     @staticmethod
     def _clean_state(state):
