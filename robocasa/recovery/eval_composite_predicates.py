@@ -470,7 +470,9 @@ def _safe(default, fn):
         return default
 
 
-def _p(value, required=True, stage="object_state", source="eval_composite_predicate"):
+def _p(value, required=None, stage="object_state", source="eval_composite_predicate"):
+    if required is None:
+        required = stage != "transient"
     return {
         "value": bool(value),
         "required": required,
