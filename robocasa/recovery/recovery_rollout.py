@@ -347,14 +347,43 @@ def _is_likely_corrupt_video_frame(frame):
     frame = np.asarray(frame)
     if frame.ndim < 3 or frame.shape[0] < 2 or frame.shape[1] < 2:
         return True
-    sample = frame[::4, ::4, :3].astype(np.float32)
+    frame = _normalize_video_frame(frame)
+    rgb = frame[..., :3].astype(np.float32)
+    luminance = rgb.mean(axis=2)
+    channel_spread = rgb.max(axis=2) - rgb.min(axis=2)
+
+    dark_ratio = float((luminance < 12).mean())
+    bright_ratio = float((luminance > 50).mean())
+    color_speck_ratio = float(((channel_spread > 35) & (luminance > 20)).mean())
+    saturated_speck_ratio = float(
+        ((channel_spread > 50) & (rgb.max(axis=2) > 80) & (luminance < 120)).mean()
+    )
+
+    # EGL framebuffer garbage often appears as a mostly black image with sparse
+    # colored RGB speckles or horizontal text-like bands.
+    if dark_ratio > 0.80 and (
+        bright_ratio > 0.01
+        or color_speck_ratio > 0.005
+        or saturated_speck_ratio > 0.002
+    ):
+        return True
+
+    if dark_ratio > 0.98:
+        return True
+
+    sample = rgb[::4, ::4]
     dx = np.abs(sample[:, 1:] - sample[:, :-1])
     dy = np.abs(sample[1:] - sample[:-1])
     high_dx = float((dx > 40).mean())
     high_dy = float((dy > 40).mean())
     mean_dx = float(dx.mean())
     mean_dy = float(dy.mean())
-    return (high_dx > 0.25 and high_dy > 0.25) or (mean_dx > 30 and mean_dy > 30)
+    return (
+        (high_dx > 0.25 and high_dy > 0.25)
+        or (mean_dx > 30 and mean_dy > 30)
+        or (high_dx > 0.45 and mean_dx > 20)
+        or (high_dy > 0.45 and mean_dy > 20)
+    )
 
 
 def _resize_video_frame(frame, height, width):
@@ -524,7 +553,11 @@ def _append_video_frame_from_env(
         video_img = _resize_video_frame(video_img, height, width)
         if not _is_likely_corrupt_video_frame(video_img):
             break
-        if reuse_corrupt_previous and previous_frame is not None:
+        if (
+            reuse_corrupt_previous
+            and previous_frame is not None
+            and not _is_likely_corrupt_video_frame(previous_frame)
+        ):
             video_img = previous_frame
             break
         video_img = None
