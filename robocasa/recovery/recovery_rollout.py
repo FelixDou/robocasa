@@ -326,6 +326,79 @@ def _subtask_instruction(subtask_eval, subtask_name):
     return predicate.get("description") or f"Complete this subtask: {subtask_name}."
 
 
+def _is_pick_place_predicate_set(subtask_eval):
+    predicates = (subtask_eval or {}).get("predicates", {})
+    required = set((subtask_eval or {}).get("required_predicates", []))
+    stages = {
+        name: predicate.get("stage")
+        for name, predicate in predicates.items()
+        if name in required
+    }
+    return (
+        any(stage == "transient" for stage in stages.values())
+        and any(stage == "placement" for stage in stages.values())
+        and any(stage == "release" for stage in stages.values())
+    )
+
+
+def _pick_place_recovery_predicates(subtask_eval):
+    predicates = (subtask_eval or {}).get("predicates", {})
+    required = (subtask_eval or {}).get("required_predicates", [])
+    selected = []
+    for name in required:
+        stage = predicates.get(name, {}).get("stage")
+        if stage in {"transient", "placement", "release"}:
+            selected.append(name)
+    return selected
+
+
+def _resolve_recovery_target(subtask_eval, proposed_subtask_name, high_level_summary=None):
+    """Choose the predicate to monitor and language prompt for recovery.
+
+    Pick-place predicates are too coupled to retry as isolated micro-actions:
+    after a slip, wrong-object interaction, or wrong placement, "release" alone
+    is usually not meaningful. In that case we prompt the full manipulation
+    primitive while monitoring the task-success predicate when available.
+    """
+    if proposed_subtask_name is None:
+        return None, None, "none"
+
+    predicates = (subtask_eval or {}).get("predicates", {})
+    proposed_stage = predicates.get(proposed_subtask_name, {}).get("stage")
+    failure_modes = set((high_level_summary or {}).get("failure_modes", []))
+    use_pick_place_group = (
+        _is_pick_place_predicate_set(subtask_eval)
+        and (
+            proposed_stage in {"placement", "release", "task_success"}
+            or "wrong_object" in failure_modes
+            or "object_slipped" in failure_modes
+        )
+    )
+    if use_pick_place_group:
+        group_names = _pick_place_recovery_predicates(subtask_eval)
+        descriptions = [
+            _predicate_description(subtask_eval, name).rstrip(".")
+            for name in group_names
+        ]
+        instruction = "; then ".join(descriptions)
+        if instruction:
+            instruction = instruction[0].upper() + instruction[1:]
+            if not instruction.endswith("."):
+                instruction += "."
+        monitor_name = (
+            "final_placement_valid"
+            if "final_placement_valid" in predicates
+            else proposed_subtask_name
+        )
+        return monitor_name, instruction, "pick_place_group"
+
+    return (
+        proposed_subtask_name,
+        _subtask_instruction(subtask_eval, proposed_subtask_name),
+        "single_predicate",
+    )
+
+
 def _ordered_current_subtask_from_eval(subtask_eval):
     entry = _latest_ordered_trace_entry([subtask_eval])
     if not entry:
@@ -1007,13 +1080,21 @@ def run_recovery_after_failed_rollout(
         or high_level_summary.get("current_subtask_estimate")
         or high_level_summary.get("stuck_subtask")
     )
-    high_level_instruction = _subtask_instruction(final_eval, high_level_subtask_name)
+    (
+        high_level_recovery_target_name,
+        high_level_instruction,
+        high_level_recovery_target_kind,
+    ) = _resolve_recovery_target(
+        final_eval,
+        high_level_subtask_name,
+        high_level_summary=high_level_summary,
+    )
 
     separator_header = config.video_separator_text or _recovery_separator_header(mode)
     separator_text = _make_recovery_separator_text(
         separator_header,
         high_level_summary,
-        high_level_subtask_name,
+        high_level_recovery_target_name or high_level_subtask_name,
         high_level_instruction,
     )
     _append_video_separator(
@@ -1041,15 +1122,23 @@ def run_recovery_after_failed_rollout(
     if video_frame is not None:
         last_video_frame = video_frame
     recovery_start_eval = get_subtask_eval(env)
-    subtask_name = (
+    proposed_recovery_start_subtask = (
         _ordered_current_subtask_from_eval(recovery_start_eval)
         or high_level_subtask_name
     )
-    instruction = _subtask_instruction(recovery_start_eval, subtask_name)
+    subtask_name, instruction, recovery_target_kind = _resolve_recovery_target(
+        recovery_start_eval,
+        proposed_recovery_start_subtask,
+        high_level_summary=high_level_summary,
+    )
     recovery_meta["high_level_target_subtask"] = high_level_subtask_name
     recovery_meta["high_level_target_instruction"] = high_level_instruction
+    recovery_meta["high_level_recovery_target_subtask"] = high_level_recovery_target_name
+    recovery_meta["high_level_recovery_target_kind"] = high_level_recovery_target_kind
+    recovery_meta["proposed_recovery_start_subtask"] = proposed_recovery_start_subtask
     recovery_meta["recovery_start_target_subtask"] = subtask_name
     recovery_meta["recovery_start_target_instruction"] = instruction
+    recovery_meta["recovery_target_kind"] = recovery_target_kind
     _set_env_instruction(env, instruction)
     obs = _get_obs_after_state_change(env, fallback_obs=obs)
     obs = set_observation_instruction(obs, instruction)
