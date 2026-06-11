@@ -382,6 +382,19 @@ def _pick_place_recovery_predicates(subtask_eval):
     return selected
 
 
+def _is_composite_task_eval(subtask_eval):
+    task_name = (subtask_eval or {}).get("task_name")
+    if not task_name:
+        return False
+    try:
+        from robocasa.recovery.eval_composite_predicates import (
+            EVAL_COMPOSITE_PREDICATES,
+        )
+    except Exception:
+        return False
+    return task_name in EVAL_COMPOSITE_PREDICATES
+
+
 def _resolve_recovery_target(
     subtask_eval,
     proposed_subtask_name,
@@ -400,21 +413,17 @@ def _resolve_recovery_target(
         return None, None, "none"
 
     if recovery_level == "atomic":
-        instruction = atomic_instruction
-        if not instruction and _is_pick_place_predicate_set(subtask_eval):
-            group_names = _pick_place_recovery_predicates(subtask_eval)
-            descriptions = [
-                _predicate_description(subtask_eval, name).rstrip(".")
-                for name in group_names
-            ]
-            instruction = "; then ".join(descriptions)
-            if instruction:
-                instruction = instruction[0].upper() + instruction[1:]
-                if not instruction.endswith("."):
-                    instruction += "."
-        if not instruction:
-            instruction = _subtask_instruction(subtask_eval, proposed_subtask_name)
-        return "task_success", instruction, "atomic_task"
+        if _is_composite_task_eval(subtask_eval):
+            return (
+                proposed_subtask_name,
+                _subtask_instruction(subtask_eval, proposed_subtask_name),
+                "atomic_predicate",
+            )
+        return (
+            "task_success",
+            atomic_instruction or _subtask_instruction(subtask_eval, proposed_subtask_name),
+            "atomic_task",
+        )
 
     predicates = (subtask_eval or {}).get("predicates", {})
     proposed_stage = predicates.get(proposed_subtask_name, {}).get("stage")

@@ -1611,6 +1611,7 @@ class Kitchen(ManipulationEnv, metaclass=KitchenEnvMeta):
         total = len(required_names)
         completed = len(completed_required)
         return {
+            "task_name": self.__class__.__name__,
             "predicates": predicates,
             "required_predicates": required_names,
             "completed_required_predicates": completed_required,
