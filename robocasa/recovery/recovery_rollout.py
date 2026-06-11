@@ -577,18 +577,22 @@ def _append_video_frame_from_env(
         return video_img
 
     if render_source == "obs":
-        video_img = _extract_valid_video_frame_from_obs(obs, camera_name, height, width)
+        video_img = _extract_video_frame_from_obs(obs, camera_name)
         if video_img is None:
             return None
+        video_img = _normalize_video_frame(video_img)
+        video_img = _resize_video_frame(video_img, height, width)
         video_writer.append_data(video_img)
         return video_img
 
     video_img = None
     observation_video_available = _has_video_frame_in_obs(obs, camera_name)
     if observation_video_available:
-        video_img = _extract_valid_video_frame_from_obs(obs, camera_name, height, width)
+        video_img = _extract_video_frame_from_obs(obs, camera_name)
         if video_img is None:
             return None
+        video_img = _normalize_video_frame(video_img)
+        video_img = _resize_video_frame(video_img, height, width)
         video_writer.append_data(video_img)
         return video_img
 

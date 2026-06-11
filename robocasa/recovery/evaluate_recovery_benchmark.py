@@ -458,8 +458,9 @@ def main():
         choices=["auto", "obs", "sim"],
         default="auto",
         help=(
-            "Frame source for rollout videos. Use 'sim' to match the historical "
-            "non-recovery video path: sim.render(...)[::-1]."
+            "Frame source for rollout videos. Use 'obs' to record the policy "
+            "camera observations without live EGL rendering. Use 'sim' to match "
+            "the historical non-recovery video path: sim.render(...)[::-1]."
         ),
     )
     parser.add_argument(
