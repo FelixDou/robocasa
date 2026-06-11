@@ -490,6 +490,25 @@ def _extract_video_frame_from_obs(obs, camera_name):
     return None
 
 
+def _extract_valid_video_frame_from_obs(obs, camera_name, height, width):
+    if not isinstance(obs, dict):
+        return None
+    for key in _obs_video_key_candidates(obs, camera_name):
+        if key not in obs:
+            continue
+        frame = _coerce_obs_video_frame(obs[key])
+        if frame is None:
+            continue
+        try:
+            frame = _normalize_video_frame(frame)
+            frame = _resize_video_frame(frame, height, width)
+        except Exception:
+            continue
+        if not _is_likely_corrupt_video_frame(frame):
+            return frame
+    return None
+
+
 def _has_video_frame_in_obs(obs, camera_name):
     if not isinstance(obs, dict):
         return False
@@ -543,17 +562,23 @@ def _append_video_frame_from_env(
 
     video_img = None
     observation_video_available = _has_video_frame_in_obs(obs, camera_name)
+    if observation_video_available:
+        video_img = _extract_valid_video_frame_from_obs(obs, camera_name, height, width)
+        if video_img is None:
+            return None
+        video_writer.append_data(video_img)
+        return video_img
+
     for attempt_i in range(max(1, int(render_attempts))):
-        video_img = _extract_video_frame_from_obs(obs, camera_name)
         if attempt_i:
             _refresh_sim_visuals(env)
-        if video_img is None and not observation_video_available and prefer_env_render:
+        if video_img is None and prefer_env_render:
             try:
                 video_img = env.render()
             except Exception:
                 video_img = None
 
-        if video_img is None and not observation_video_available:
+        if video_img is None:
             sim = _get_sim(env)
             if sim is None:
                 return None
