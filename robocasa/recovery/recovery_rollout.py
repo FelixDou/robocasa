@@ -368,6 +368,17 @@ def _is_likely_corrupt_video_frame(frame):
     ):
         return True
 
+    if dark_ratio > 0.50 and color_speck_ratio > 0.08:
+        return True
+
+    top_luminance = luminance[: max(1, luminance.shape[0] // 2)]
+    bottom_luminance = luminance[luminance.shape[0] // 2 :]
+    if bottom_luminance.size:
+        top_mean = float(top_luminance.mean())
+        bottom_dark_ratio = float((bottom_luminance < 12).mean())
+        if top_mean > 35 and bottom_dark_ratio > 0.95:
+            return True
+
     if dark_ratio > 0.98:
         return True
 
@@ -479,6 +490,15 @@ def _extract_video_frame_from_obs(obs, camera_name):
     return None
 
 
+def _has_video_frame_in_obs(obs, camera_name):
+    if not isinstance(obs, dict):
+        return False
+    for key in _obs_video_key_candidates(obs, camera_name):
+        if key in obs and _coerce_obs_video_frame(obs[key]) is not None:
+            return True
+    return False
+
+
 def _append_video_frame(env, video_writer, camera_name, height, width, previous_frame=None):
     return _append_video_frame_from_env(
         env,
@@ -522,17 +542,18 @@ def _append_video_frame_from_env(
         return None
 
     video_img = None
+    observation_video_available = _has_video_frame_in_obs(obs, camera_name)
     for attempt_i in range(max(1, int(render_attempts))):
         video_img = _extract_video_frame_from_obs(obs, camera_name)
         if attempt_i:
             _refresh_sim_visuals(env)
-        if video_img is None and prefer_env_render:
+        if video_img is None and not observation_video_available and prefer_env_render:
             try:
                 video_img = env.render()
             except Exception:
                 video_img = None
 
-        if video_img is None:
+        if video_img is None and not observation_video_available:
             sim = _get_sim(env)
             if sim is None:
                 return None
