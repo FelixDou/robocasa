@@ -527,6 +527,7 @@ def _append_video_frame(env, video_writer, camera_name, height, width, previous_
         width=width,
         previous_frame=previous_frame,
         prefer_env_render=True,
+        render_source="auto",
     )
 
 
@@ -556,9 +557,31 @@ def _append_video_frame_from_env(
     prefer_env_render=True,
     reuse_corrupt_previous=True,
     render_attempts=1,
+    render_source="auto",
 ):
     if video_writer is None:
         return None
+
+    if render_source == "sim":
+        sim = _get_sim(env)
+        if sim is None:
+            return None
+        try:
+            video_img = sim.render(
+                height=height, width=width, camera_name=camera_name
+            )[::-1]
+            video_img = _normalize_video_frame(video_img)
+        except Exception:
+            return None
+        video_writer.append_data(video_img)
+        return video_img
+
+    if render_source == "obs":
+        video_img = _extract_valid_video_frame_from_obs(obs, camera_name, height, width)
+        if video_img is None:
+            return None
+        video_writer.append_data(video_img)
+        return video_img
 
     video_img = None
     observation_video_available = _has_video_frame_in_obs(obs, camera_name)
@@ -799,6 +822,7 @@ def run_recovery_after_failed_rollout(
     video_height=512,
     video_width=768,
     video_direct_sim_render=False,
+    video_render_source="auto",
 ):
     """
     Run a high-level rollout, then retry only the failed subtask if needed.
@@ -855,6 +879,7 @@ def run_recovery_after_failed_rollout(
             obs=obs,
             previous_frame=last_video_frame,
             prefer_env_render=not video_direct_sim_render,
+            render_source=video_render_source,
         )
         if video_frame is not None:
             last_video_frame = video_frame
@@ -935,6 +960,7 @@ def run_recovery_after_failed_rollout(
         prefer_env_render=not video_direct_sim_render,
         reuse_corrupt_previous=False,
         render_attempts=5,
+        render_source=video_render_source,
     )
     if video_frame is not None:
         last_video_frame = video_frame
@@ -978,6 +1004,7 @@ def run_recovery_after_failed_rollout(
             prefer_env_render=not video_direct_sim_render,
             reuse_corrupt_previous=False,
             render_attempts=3,
+            render_source=video_render_source,
         )
         if video_frame is not None:
             last_video_frame = video_frame

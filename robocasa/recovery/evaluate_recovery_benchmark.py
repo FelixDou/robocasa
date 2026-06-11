@@ -343,6 +343,7 @@ def run_benchmark(args):
                         video_height=args.video_height,
                         video_width=args.video_width,
                         video_direct_sim_render=args.video_direct_sim_render,
+                        video_render_source=args.video_render_source,
                     )
                     result["task"] = task_name
                     result["rollout_index"] = rollout_i
@@ -450,6 +451,15 @@ def main():
             "Render video frames directly from sim.render(camera_name=...) instead "
             "of env.render(). Use this when wrapper-rendered MP4s show corrupted "
             "or stale frames."
+        ),
+    )
+    parser.add_argument(
+        "--video-render-source",
+        choices=["auto", "obs", "sim"],
+        default="auto",
+        help=(
+            "Frame source for rollout videos. Use 'sim' to match the historical "
+            "non-recovery video path: sim.render(...)[::-1]."
         ),
     )
     parser.add_argument(
