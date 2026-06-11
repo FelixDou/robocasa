@@ -442,6 +442,8 @@ def _coerce_obs_video_frame(value):
 
 def _obs_video_key_candidates(obs, camera_name):
     candidates = []
+    if camera_name in {"all", "obs_all", "obs_grid"}:
+        camera_name = None
     if camera_name:
         candidates.extend(
             [
@@ -478,9 +480,56 @@ def _obs_video_key_candidates(obs, camera_name):
     return candidates
 
 
+def _obs_grid_video_keys(obs):
+    preferred = [
+        "video.robot0_agentview_left",
+        "video.robot0_agentview_right",
+        "video.robot0_eye_in_hand",
+        "robot0_agentview_left_image",
+        "robot0_agentview_right_image",
+        "robot0_eye_in_hand_image",
+    ]
+    keys = [key for key in preferred if key in obs]
+    for key in obs.keys():
+        if (
+            isinstance(key, str)
+            and (key.startswith("video.") or key.endswith("_image"))
+            and key not in keys
+        ):
+            keys.append(key)
+    return keys
+
+
+def _extract_video_grid_from_obs(obs):
+    if not isinstance(obs, dict):
+        return None
+    frames = []
+    for key in _obs_grid_video_keys(obs):
+        frame = _coerce_obs_video_frame(obs[key])
+        if frame is None:
+            continue
+        try:
+            frames.append(_normalize_video_frame(frame))
+        except Exception:
+            continue
+    if not frames:
+        return None
+
+    min_height = min(frame.shape[0] for frame in frames)
+    normalized = []
+    for frame in frames:
+        if frame.shape[0] != min_height:
+            width = max(1, round(frame.shape[1] * min_height / frame.shape[0]))
+            frame = _resize_video_frame(frame, min_height, width)
+        normalized.append(frame)
+    return np.concatenate(normalized, axis=1)
+
+
 def _extract_video_frame_from_obs(obs, camera_name):
     if not isinstance(obs, dict):
         return None
+    if camera_name in {"all", "obs_all", "obs_grid"}:
+        return _extract_video_grid_from_obs(obs)
     for key in _obs_video_key_candidates(obs, camera_name):
         if key not in obs:
             continue
