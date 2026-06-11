@@ -344,6 +344,10 @@ class RoboCasaGymEnv(gym.Env):
                 if hasattr(self.env, "edit_model_xml")
                 else state["model"]
             )
+            # Match the robomimic/playback reset_to path: reset_from_xml_string
+            # performs a soft reset, so first force the environment through its
+            # normal reset path to keep model and offscreen render state in sync.
+            self.env.reset()
             self.env.reset_from_xml_string(model_xml)
             self.env.sim.reset()
         if "states" in state:
