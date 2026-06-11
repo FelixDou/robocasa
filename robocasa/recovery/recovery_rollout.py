@@ -111,6 +111,16 @@ def set_observation_instruction(obs, instruction):
     return obs
 
 
+def _observation_instruction(obs):
+    if not isinstance(obs, dict):
+        return None
+    for key in ("annotation.human.task_description", "language"):
+        value = obs.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 def _inner_env(env):
     return getattr(env, "env", env)
 
@@ -1043,7 +1053,7 @@ def run_recovery_after_failed_rollout(
         obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
     else:
         obs = initial_obs
-    atomic_instruction = _env_task_instruction(env)
+    atomic_instruction = _observation_instruction(obs) or _env_task_instruction(env)
 
     subtask_evals = [get_subtask_eval(env)]
     last_good_state = _capture_state(env)
