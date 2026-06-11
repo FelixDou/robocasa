@@ -182,23 +182,23 @@ class DeferredVideoWriter:
         writer = imageio.get_writer(str(self.video_path), fps=self.fps)
         env = None
         last_frame = None
-        loaded_model = None
+        loaded_state_size = None
         render_failure_count = 0
         try:
             env = self.render_env_factory()
             for entry in self.entries:
                 kind = entry[0]
                 if kind == "state":
-                    frame, error, loaded_model = self._render_state(
-                        env, entry[1], loaded_model=loaded_model
+                    frame, error, loaded_state_size = self._render_state(
+                        env, entry[1], loaded_state_size=loaded_state_size
                     )
                     if frame is None:
                         if env is not None:
                             env.close()
                         env = self.render_env_factory()
-                        loaded_model = None
-                        frame, error, loaded_model = self._render_state(
-                            env, entry[1], loaded_model=loaded_model
+                        loaded_state_size = None
+                        frame, error, loaded_state_size = self._render_state(
+                            env, entry[1], loaded_state_size=loaded_state_size
                         )
                     if frame is None:
                         render_failure_count += 1
@@ -234,34 +234,34 @@ class DeferredVideoWriter:
             if env is not None:
                 env.close()
 
-    def _render_state(self, env, state, loaded_model=None):
+    def _render_state(self, env, state, loaded_state_size=None):
         if state is None:
-            return None, "state is None", loaded_model
+            return None, "state is None", loaded_state_size
 
         clean_state = self._clean_state(state)
         model = clean_state.get("model") if isinstance(clean_state, dict) else None
         try:
-            loaded_model = self._restore_state_like_playback(
+            loaded_state_size = self._restore_state_like_playback(
                 env,
                 clean_state,
-                loaded_model=loaded_model,
+                loaded_state_size=loaded_state_size,
             )
         except Exception as exc:
             if model is not None:
                 try:
-                    loaded_model = self._restore_state_like_playback(
+                    loaded_state_size = self._restore_state_like_playback(
                         env,
                         clean_state,
-                        loaded_model=None,
+                        loaded_state_size=None,
                     )
                 except Exception as retry_exc:
-                    return None, f"{type(retry_exc).__name__}: {retry_exc}", loaded_model
+                    return None, f"{type(retry_exc).__name__}: {retry_exc}", loaded_state_size
             else:
-                return None, f"{type(exc).__name__}: {exc}", loaded_model
+                return None, f"{type(exc).__name__}: {exc}", loaded_state_size
 
         sim = self._get_sim(env)
         if sim is None:
-            return None, "render environment does not expose sim", loaded_model
+            return None, "render environment does not expose sim", loaded_state_size
         try:
             sim.forward()
             frame = sim.render(
@@ -270,14 +270,31 @@ class DeferredVideoWriter:
                 camera_name=self.camera_name,
             )[::-1]
         except Exception as exc:
-            return None, f"{type(exc).__name__}: {exc}", loaded_model
-        return self._normalize_frame(frame), None, loaded_model
+            return None, f"{type(exc).__name__}: {exc}", loaded_state_size
+        return self._normalize_frame(frame), None, loaded_state_size
 
     @classmethod
-    def _restore_state_like_playback(cls, env, state, loaded_model=None):
+    def _restore_state_like_playback(cls, env, state, loaded_state_size=None):
         inner = getattr(env, "env", env)
+        if "states" not in state:
+            raise RuntimeError("Captured state does not contain flattened simulator state")
+
+        target_state_size = int(np.asarray(state["states"]).size)
+        current_state_size = None
+        try:
+            current_state_size = int(np.asarray(inner.sim.get_state().flatten()).size)
+        except Exception:
+            pass
+
         model = state.get("model") if isinstance(state, dict) else None
-        if model is not None and model != loaded_model:
+        needs_model_reload = (
+            model is not None
+            and (
+                loaded_state_size != target_state_size
+                or current_state_size != target_state_size
+            )
+        )
+        if needs_model_reload:
             if state.get("ep_meta", None) is not None:
                 import json
 
@@ -307,10 +324,8 @@ class DeferredVideoWriter:
 
             inner.reset_from_xml_string(xml)
             inner.sim.reset()
-            loaded_model = model
+            loaded_state_size = target_state_size
 
-        if "states" not in state:
-            raise RuntimeError("Captured state does not contain flattened simulator state")
         inner.sim.set_state_from_flattened(state["states"])
         inner.sim.forward()
         for attr in ("update_sites", "update_state"):
@@ -320,7 +335,7 @@ class DeferredVideoWriter:
                     fn()
                 except Exception:
                     pass
-        return loaded_model
+        return target_state_size
 
     @staticmethod
     def _clean_state(state):
