@@ -51,6 +51,8 @@ class RecoveryConfig:
     high_level_horizon: int = 400
     subtask_horizon: int = 120
     recovery_horizon_resolver: object = None
+    recovery_horizon_use_original_task: bool = False
+    original_task_horizon: int | None = None
     match_recovery_horizon_to_no_progress: bool = False
     stuck_patience: int = 10
     include_trace: bool = True
@@ -471,6 +473,10 @@ def _resolve_recovery_horizon(
     high_level_steps,
     last_good_step,
 ):
+    if config.recovery_horizon_use_original_task:
+        horizon = config.original_task_horizon or config.high_level_horizon
+        return max(1, int(horizon)), "original_task_horizon", None
+
     if config.match_recovery_horizon_to_no_progress:
         return (
             max(1, high_level_steps - last_good_step),

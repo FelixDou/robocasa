@@ -884,6 +884,10 @@ def run_benchmark(args):
                             high_level_horizon=high_level_horizon,
                             subtask_horizon=args.subtask_horizon,
                             recovery_horizon_resolver=resolve_atomic_recovery_horizon,
+                            recovery_horizon_use_original_task=(
+                                args.recovery_horizon_use_original_task
+                            ),
+                            original_task_horizon=high_level_horizon,
                             match_recovery_horizon_to_no_progress=(
                                 args.match_recovery_horizon_to_no_progress
                             ),
@@ -1053,6 +1057,15 @@ def main():
         ),
     )
     parser.add_argument("--subtask-horizon", type=int, default=120)
+    parser.add_argument(
+        "--recovery-horizon-use-original-task",
+        action="store_true",
+        help=(
+            "Use the evaluated task's original task horizon as the recovery "
+            "retry horizon. This overrides matched atomic-task and fixed "
+            "subtask horizons."
+        ),
+    )
     parser.add_argument(
         "--match-recovery-horizon-to-no-progress",
         action="store_true",
