@@ -231,6 +231,76 @@ def open_video_writer(video_path, fps):
     return imageio.get_writer(str(video_path), fps=fps)
 
 
+class LazyVideoWriter:
+    """Open the underlying writer only when the first frame is appended."""
+
+    def __init__(self, writer_factory):
+        self._writer_factory = writer_factory
+        self._writer = None
+
+    def _get_writer(self):
+        if self._writer is None:
+            self._writer = self._writer_factory()
+        return self._writer
+
+    def append_data(self, frame):
+        self._get_writer().append_data(frame)
+
+    def close(self):
+        if self._writer is not None:
+            self._writer.close()
+
+    def __getattr__(self, name):
+        return getattr(self._get_writer(), name)
+
+
+def make_split_video_paths(video_path):
+    if video_path is None:
+        return None, None, None
+    return (
+        video_path,
+        video_path.with_name(video_path.stem + "__high_level_tmp" + video_path.suffix),
+        video_path.with_name(video_path.stem + "__recovery_tmp" + video_path.suffix),
+    )
+
+
+def merge_video_clips(video_paths, output_path, fps):
+    if output_path is None:
+        return None
+    existing_paths = [
+        Path(path)
+        for path in video_paths
+        if path is not None and Path(path).exists() and Path(path).stat().st_size > 0
+    ]
+    if not existing_paths:
+        return None
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists():
+        output_path.unlink()
+    if len(existing_paths) == 1:
+        existing_paths[0].replace(output_path)
+        return output_path
+
+    import imageio
+
+    writer = imageio.get_writer(str(output_path), fps=fps)
+    try:
+        for clip_path in existing_paths:
+            reader = imageio.get_reader(str(clip_path))
+            try:
+                for frame in reader:
+                    writer.append_data(frame)
+            finally:
+                reader.close()
+    finally:
+        writer.close()
+    for clip_path in existing_paths:
+        if clip_path != output_path and clip_path.exists():
+            clip_path.unlink()
+    return output_path
+
+
 class DeferredVideoWriter:
     """Render stored simulator states after rollout using a fresh env.
 
@@ -704,11 +774,22 @@ def run_benchmark(args):
             for rollout_i in tqdm(range(args.num_rollouts), leave=False):
                 env = None
                 video_path = None
+                high_level_video_path = None
+                recovery_video_path = None
                 video_writer = None
+                recovery_video_writer = None
                 record = None
                 try:
                     seed = args.seed + rollout_i
                     video_path = make_video_path(args.video_dir, mode, task_name, rollout_i, seed)
+                    if args.split_recovery_video:
+                        (
+                            video_path,
+                            high_level_video_path,
+                            recovery_video_path,
+                        ) = make_split_video_paths(video_path)
+                    else:
+                        high_level_video_path = video_path
                     env = make_env(
                         task_name,
                         env_interface=args.env_interface,
@@ -730,15 +811,33 @@ def run_benchmark(args):
                             )
 
                         video_writer = open_deferred_video_writer(
-                            video_path,
+                            high_level_video_path,
                             fps=args.video_fps,
                             camera_name=args.video_camera_name,
                             height=args.video_height,
                             width=args.video_width,
                             render_env_factory=render_env_factory,
                         )
+                        if args.split_recovery_video and recovery_video_path is not None:
+                            recovery_video_writer = LazyVideoWriter(
+                                lambda recovery_video_path=recovery_video_path: open_deferred_video_writer(
+                                    recovery_video_path,
+                                    fps=args.video_fps,
+                                    camera_name=args.video_camera_name,
+                                    height=args.video_height,
+                                    width=args.video_width,
+                                    render_env_factory=render_env_factory,
+                                )
+                            )
                     else:
-                        video_writer = open_video_writer(video_path, args.video_fps)
+                        video_writer = open_video_writer(high_level_video_path, args.video_fps)
+                        if args.split_recovery_video and recovery_video_path is not None:
+                            recovery_video_writer = LazyVideoWriter(
+                                lambda recovery_video_path=recovery_video_path: open_video_writer(
+                                    recovery_video_path,
+                                    args.video_fps,
+                                )
+                            )
                     policy = (
                         RandomPolicy(env)
                         if args.random_policy
@@ -772,6 +871,7 @@ def run_benchmark(args):
                             video_separator_text=args.video_separator_text,
                         ),
                         video_writer=video_writer,
+                        recovery_video_writer=recovery_video_writer,
                         video_camera_name=args.video_camera_name,
                         video_height=args.video_height,
                         video_width=args.video_width,
@@ -785,6 +885,11 @@ def run_benchmark(args):
                     result["resolved_high_level_horizon"] = high_level_horizon
                     if video_path is not None:
                         result["video_path"] = str(video_path)
+                    if high_level_video_path is not None:
+                        result["high_level_video_path"] = str(high_level_video_path)
+                    if recovery_video_path is not None:
+                        result["recovery_video_path"] = str(recovery_video_path)
+                        result["video_assembly"] = "split_high_level_recovery_concat"
                     record = result
                     mode_results.append(record)
                 except KeyboardInterrupt:
@@ -796,6 +901,12 @@ def run_benchmark(args):
                         "seed": args.seed + rollout_i,
                         "mode": mode,
                         "video_path": str(video_path) if video_path else None,
+                        "high_level_video_path": (
+                            str(high_level_video_path) if high_level_video_path else None
+                        ),
+                        "recovery_video_path": (
+                            str(recovery_video_path) if recovery_video_path else None
+                        ),
                         "error": traceback.format_exc(),
                     }
                     mode_results.append(record)
@@ -808,6 +919,20 @@ def run_benchmark(args):
                         env = None
                     if video_writer is not None:
                         video_writer.close()
+                    if recovery_video_writer is not None:
+                        recovery_video_writer.close()
+                    if (
+                        args.split_recovery_video
+                        and video_path is not None
+                        and record is not None
+                    ):
+                        merged_path = merge_video_clips(
+                            [high_level_video_path, recovery_video_path],
+                            video_path,
+                            args.video_fps,
+                        )
+                        if merged_path is not None:
+                            record["video_path"] = str(merged_path)
                     if video_path is not None and record is not None:
                         labeled_path = rename_video_with_result(video_path, record)
                         if labeled_path is not None:
@@ -915,6 +1040,16 @@ def main():
             "the historical non-recovery video path: sim.render(...)[::-1]. "
             "Use 'deferred' to store simulator states during rollout and render "
             "them after the rollout from a fresh environment."
+        ),
+    )
+    parser.add_argument(
+        "--split-recovery-video",
+        action="store_true",
+        help=(
+            "Record the high-level rollout and recovery retry into separate "
+            "temporary clips, then concatenate them into the final labeled video. "
+            "This keeps the working high-level video path isolated from "
+            "reset/recovery rendering."
         ),
     )
     parser.add_argument(

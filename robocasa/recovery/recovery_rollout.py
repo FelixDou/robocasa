@@ -1066,6 +1066,7 @@ def run_recovery_after_failed_rollout(
     config=None,
     initial_obs=None,
     video_writer=None,
+    recovery_video_writer=None,
     video_camera_name="robot0_agentview_center",
     video_height=512,
     video_width=768,
@@ -1082,7 +1083,12 @@ def run_recovery_after_failed_rollout(
         initial_obs: Optional already-reset observation. If omitted, ``env.reset()``
             is called.
         video_writer: Optional imageio writer. Frames are appended after each
-            high-level and recovery step.
+            high-level step. If ``recovery_video_writer`` is omitted, this writer
+            also receives separator and recovery frames for backwards
+            compatibility.
+        recovery_video_writer: Optional imageio writer for separator and recovery
+            frames. Use a separate writer to avoid carrying a video stream across
+            simulator reset/recovery boundaries.
 
     Returns:
         A dictionary with the high-level rollout summary, chosen subtask prompt,
@@ -1174,6 +1180,9 @@ def run_recovery_after_failed_rollout(
     if high_level_success:
         return result
 
+    recovery_writer = recovery_video_writer or video_writer
+    last_recovery_video_frame = last_video_frame
+
     final_eval = high_level_summary.get("final_subtask_eval")
     high_level_subtask_name = (
         high_level_summary.get("ordered_current_subtask")
@@ -1200,7 +1209,7 @@ def run_recovery_after_failed_rollout(
         high_level_instruction,
     )
     _append_video_separator(
-        video_writer,
+        recovery_writer,
         last_video_frame,
         num_frames=config.video_separator_frames,
         text=separator_text,
@@ -1210,19 +1219,19 @@ def run_recovery_after_failed_rollout(
     obs = _get_obs_after_state_change(env, fallback_obs=obs)
     video_frame = _append_video_frame_from_env(
         env,
-        video_writer,
+        recovery_writer,
         camera_name=video_camera_name,
         height=video_height,
         width=video_width,
         obs=obs,
-        previous_frame=last_video_frame,
+        previous_frame=last_recovery_video_frame,
         prefer_env_render=not video_direct_sim_render,
         reuse_corrupt_previous=False,
         render_attempts=5,
         render_source=video_render_source,
     )
     if video_frame is not None:
-        last_video_frame = video_frame
+        last_recovery_video_frame = video_frame
     recovery_start_eval = get_subtask_eval(env)
     proposed_recovery_start_subtask = (
         _ordered_current_subtask_from_eval(recovery_start_eval)
@@ -1275,19 +1284,19 @@ def run_recovery_after_failed_rollout(
         _refresh_sim_visuals(env)
         video_frame = _append_video_frame_from_env(
             env,
-            video_writer,
+            recovery_writer,
             camera_name=video_camera_name,
             height=video_height,
             width=video_width,
             obs=obs,
-            previous_frame=last_video_frame,
+            previous_frame=last_recovery_video_frame,
             prefer_env_render=not video_direct_sim_render,
             reuse_corrupt_previous=False,
             render_attempts=3,
             render_source=video_render_source,
         )
         if video_frame is not None:
-            last_video_frame = video_frame
+            last_recovery_video_frame = video_frame
         obs = set_observation_instruction(obs, instruction)
         current_eval = info.get("subtask_eval") if info else None
         if current_eval is None:
