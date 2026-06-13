@@ -101,6 +101,15 @@ def make_labeled_video_path(video_path, result):
     return video_path.with_name("__".join(parts) + video_path.suffix)
 
 
+def make_labeled_video_part_path(video_path, result, part):
+    labeled_path = make_labeled_video_path(video_path, result)
+    if labeled_path is None:
+        return None
+    return labeled_path.with_name(
+        safe_filename_part(part, 40) + "__" + labeled_path.name
+    )
+
+
 def infer_atomic_recovery_task_name(
     subtask_eval,
     subtask_name,
@@ -213,6 +222,19 @@ def rename_video_with_result(video_path, result):
     if video_path is None or not video_path.exists():
         return video_path
     labeled_path = make_labeled_video_path(video_path, result)
+    if labeled_path == video_path:
+        return video_path
+    labeled_path.parent.mkdir(parents=True, exist_ok=True)
+    if labeled_path.exists():
+        labeled_path.unlink()
+    video_path.rename(labeled_path)
+    return labeled_path
+
+
+def rename_video_part_with_result(video_path, result, part):
+    if video_path is None or not video_path.exists():
+        return None
+    labeled_path = make_labeled_video_part_path(video_path, result, part)
     if labeled_path == video_path:
         return video_path
     labeled_path.parent.mkdir(parents=True, exist_ok=True)
@@ -889,7 +911,11 @@ def run_benchmark(args):
                         result["high_level_video_path"] = str(high_level_video_path)
                     if recovery_video_path is not None:
                         result["recovery_video_path"] = str(recovery_video_path)
-                        result["video_assembly"] = "split_high_level_recovery_concat"
+                        result["video_assembly"] = (
+                            "split_high_level_recovery_parts"
+                            if args.no_merge_split_video
+                            else "split_high_level_recovery_concat"
+                        )
                     record = result
                     mode_results.append(record)
                 except KeyboardInterrupt:
@@ -926,14 +952,44 @@ def run_benchmark(args):
                         and video_path is not None
                         and record is not None
                     ):
-                        merged_path = merge_video_clips(
-                            [high_level_video_path, recovery_video_path],
-                            video_path,
-                            args.video_fps,
+                        if args.no_merge_split_video:
+                            high_level_labeled_path = rename_video_part_with_result(
+                                high_level_video_path,
+                                record,
+                                "HIGH_LEVEL_CLIP",
+                            )
+                            recovery_labeled_path = rename_video_part_with_result(
+                                recovery_video_path,
+                                record,
+                                "RECOVERY_CLIP",
+                            )
+                            if high_level_labeled_path is not None:
+                                record["high_level_video_path"] = str(
+                                    high_level_labeled_path
+                                )
+                                record["video_path"] = str(high_level_labeled_path)
+                            if (
+                                recovery_labeled_path is not None
+                                and recovery_labeled_path.exists()
+                            ):
+                                record["recovery_video_path"] = str(
+                                    recovery_labeled_path
+                                )
+                        else:
+                            merged_path = merge_video_clips(
+                                [high_level_video_path, recovery_video_path],
+                                video_path,
+                                args.video_fps,
+                            )
+                            if merged_path is not None:
+                                record["video_path"] = str(merged_path)
+                    if (
+                        video_path is not None
+                        and record is not None
+                        and not (
+                            args.split_recovery_video and args.no_merge_split_video
                         )
-                        if merged_path is not None:
-                            record["video_path"] = str(merged_path)
-                    if video_path is not None and record is not None:
+                    ):
                         labeled_path = rename_video_with_result(video_path, record)
                         if labeled_path is not None:
                             record["video_path"] = str(labeled_path)
@@ -1053,6 +1109,14 @@ def main():
         ),
     )
     parser.add_argument(
+        "--no-merge-split-video",
+        action="store_true",
+        help=(
+            "With --split-recovery-video, keep separate high-level and recovery "
+            "clips instead of concatenating them into one MP4."
+        ),
+    )
+    parser.add_argument(
         "--video-separator-frames",
         type=int,
         default=None,
@@ -1079,6 +1143,8 @@ def main():
 
     if not args.random_policy and args.policy_module is None:
         parser.error("Pass --policy-module module:callable or --random-policy")
+    if args.no_merge_split_video and not args.split_recovery_video:
+        parser.error("Pass --split-recovery-video with --no-merge-split-video")
 
     run_benchmark(args)
 
