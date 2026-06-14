@@ -398,6 +398,45 @@ def _is_composite_task_eval(subtask_eval):
     return task_name in EVAL_COMPOSITE_PREDICATES
 
 
+def _composite_atomic_recovery_target(
+    subtask_eval,
+    proposed_subtask_name,
+    high_level_summary=None,
+):
+    predicates = (subtask_eval or {}).get("predicates", {})
+    invalid_targets = {None, "task_success", "official_success"}
+    if proposed_subtask_name not in invalid_targets and proposed_subtask_name in predicates:
+        return proposed_subtask_name
+
+    summary = high_level_summary or {}
+    candidate_fields = (
+        "ordered_current_subtask",
+        "current_subtask_estimate",
+        "stuck_subtask",
+    )
+    for field in candidate_fields:
+        candidate = summary.get(field)
+        if candidate not in invalid_targets and candidate in predicates:
+            return candidate
+
+    for field in (
+        "failed_required_subtasks_ordered",
+        "failed_required_predicates_final",
+    ):
+        for candidate in summary.get(field) or []:
+            if candidate not in invalid_targets and candidate in predicates:
+                return candidate
+
+    required = [
+        name
+        for name in (subtask_eval or {}).get("required_predicates", [])
+        if name not in invalid_targets and name in predicates
+    ]
+    if required:
+        return required[0]
+    return proposed_subtask_name
+
+
 def _resolve_recovery_target(
     subtask_eval,
     proposed_subtask_name,
@@ -417,9 +456,14 @@ def _resolve_recovery_target(
 
     if recovery_level == "atomic":
         if _is_composite_task_eval(subtask_eval):
-            return (
+            atomic_target = _composite_atomic_recovery_target(
+                subtask_eval,
                 proposed_subtask_name,
-                _subtask_instruction(subtask_eval, proposed_subtask_name),
+                high_level_summary=high_level_summary,
+            )
+            return (
+                atomic_target,
+                _subtask_instruction(subtask_eval, atomic_target),
                 "atomic_predicate",
             )
         return (
