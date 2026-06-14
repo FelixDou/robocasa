@@ -340,7 +340,88 @@ def _subtask_instruction(subtask_eval, subtask_name):
     if subtask_name is None:
         return None
     predicate = (subtask_eval or {}).get("predicates", {}).get(subtask_name, {})
-    return predicate.get("description") or f"Complete this subtask: {subtask_name}."
+    return predicate.get("description") or _fallback_subtask_instruction(subtask_name)
+
+
+def _fallback_subtask_instruction(subtask_name):
+    predicate_descriptions = {
+        "drawer_open": "Open the drawer.",
+        "drawer_closed": "Close the drawer.",
+        "fridge_open": "Open the fridge.",
+        "fridge_closed": "Close the fridge.",
+        "freezer_open": "Open the freezer.",
+        "cabinet_open": "Open the cabinet.",
+        "cabinet_closed": "Close the cabinet.",
+        "dishwasher_open": "Open the dishwasher.",
+        "dishwasher_closed": "Close the dishwasher.",
+        "microwave_open": "Open the microwave.",
+        "microwave_closed": "Close the microwave.",
+        "toaster_oven_open": "Open the toaster oven.",
+        "toaster_oven_closed": "Close the toaster oven.",
+        "water_on": "Turn on the water.",
+        "water_off": "Turn off the water.",
+        "burner_on": "Turn on the burner.",
+        "burner_off": "Turn off the burner.",
+        "microwave_started": "Start the microwave.",
+        "toaster_started": "Start the toaster.",
+        "coffee_started": "Start the coffee machine.",
+        "gripper_released": "Release the object.",
+        "final_placement_valid": "Complete the final placement.",
+        "object_at_target_and_released": "Move the object to the target and release it.",
+    }
+    if subtask_name in predicate_descriptions:
+        return predicate_descriptions[subtask_name]
+
+    object_labels = {
+        "ice_cube1": "the first ice cube",
+        "ice_cube2": "the second ice cube",
+        "ice": "the ice cube",
+        "lemon": "the lemon wedge",
+        "lemon_wedge": "the lemon wedge",
+        "straw": "the straw",
+        "mug": "the mug",
+        "cup": "the cup",
+        "glass": "the glass",
+        "glass_cup": "the glass",
+        "kettle": "the kettle",
+        "bread": "the bread",
+        "knife": "the knife",
+        "sponge": "the sponge",
+        "pan": "the pan",
+        "bowl": "the bowl",
+        "plate": "the plate",
+        "lettuce": "the lettuce",
+        "fruit": "the fruit",
+        "meat": "the meat",
+        "vegetable": "the vegetable",
+        "obj": "the object",
+        "object": "the object",
+    }
+
+    def label(name):
+        return object_labels.get(name, name.replace("_", " "))
+
+    if subtask_name.endswith("_grasped"):
+        return f"Pick {label(subtask_name.removesuffix('_grasped'))}."
+    if subtask_name.endswith("_released"):
+        return f"Release {label(subtask_name.removesuffix('_released'))}."
+    if subtask_name.endswith("_open"):
+        return f"Open {label(subtask_name.removesuffix('_open'))}."
+    if subtask_name.endswith("_closed"):
+        return f"Close {label(subtask_name.removesuffix('_closed'))}."
+    if subtask_name.endswith("_started"):
+        return f"Start {label(subtask_name.removesuffix('_started'))}."
+    for relation, text in (
+        ("_in_", "to"),
+        ("_on_", "to"),
+        ("_under_", "under"),
+        ("_next_to_", "next to"),
+    ):
+        if relation in subtask_name:
+            left, right = subtask_name.split(relation, 1)
+            return f"Move {label(left)} {text} {label(right)}."
+
+    return f"Complete the subtask condition: {subtask_name.replace('_', ' ')}."
 
 
 def _env_task_instruction(env):
