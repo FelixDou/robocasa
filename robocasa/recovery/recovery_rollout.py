@@ -389,6 +389,7 @@ def _is_composite_task_eval(subtask_eval):
     task_name = (subtask_eval or {}).get("task_name")
     if not task_name:
         return False
+    task_name = str(task_name).split("/")[-1]
     try:
         from robocasa.recovery.eval_composite_predicates import (
             EVAL_COMPOSITE_PREDICATES,
