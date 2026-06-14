@@ -340,7 +340,38 @@ def _subtask_instruction(subtask_eval, subtask_name):
     if subtask_name is None:
         return None
     predicate = (subtask_eval or {}).get("predicates", {}).get(subtask_name, {})
-    return predicate.get("description") or _fallback_subtask_instruction(subtask_name)
+    return (
+        _exact_atomic_subtask_instruction(subtask_name)
+        or predicate.get("description")
+        or _fallback_subtask_instruction(subtask_name)
+    )
+
+
+def _exact_atomic_subtask_instruction(subtask_name):
+    """Use benchmark-style atomic instructions when a predicate maps cleanly."""
+    exact_instructions = {
+        "drawer_open": "Open the drawer.",
+        "drawer_closed": "Close the drawer.",
+        "fridge_open": "Open the fridge.",
+        "fridge_closed": "Close the fridge.",
+        "freezer_open": "Open the freezer.",
+        "cabinet_open": "Open the cabinet.",
+        "cabinet_closed": "Close the cabinet.",
+        "dishwasher_open": "Open the dishwasher.",
+        "dishwasher_closed": "Close the dishwasher.",
+        "microwave_open": "Open the microwave.",
+        "microwave_closed": "Close the microwave.",
+        "toaster_oven_open": "Open the toaster oven door.",
+        "toaster_oven_closed": "Close the toaster oven door.",
+        "water_on": "Turn on the sink faucet.",
+        "water_off": "Turn off the sink faucet.",
+        "burner_on": "Turn on the stove.",
+        "burner_off": "Turn off the stove.",
+        "microwave_started": "Turn on the microwave.",
+        "toaster_started": "Turn on the toaster.",
+        "coffee_started": "Start the coffee machine.",
+    }
+    return exact_instructions.get(subtask_name)
 
 
 def _fallback_subtask_instruction(subtask_name):
