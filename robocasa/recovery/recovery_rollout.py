@@ -48,6 +48,7 @@ class RecoveryConfig:
 
     mode: object = RecoveryMode.CONTINUE_FROM_FAILURE
     recovery_level: str = "atomic"
+    evaluated_task_name: str | None = None
     high_level_horizon: int = 400
     subtask_horizon: int = 120
     recovery_horizon_resolver: object = None
@@ -385,8 +386,8 @@ def _pick_place_recovery_predicates(subtask_eval):
     return selected
 
 
-def _is_composite_task_eval(subtask_eval):
-    task_name = (subtask_eval or {}).get("task_name")
+def _is_composite_task_eval(subtask_eval, task_name=None):
+    task_name = task_name or (subtask_eval or {}).get("task_name")
     if not task_name:
         return False
     task_name = str(task_name).split("/")[-1]
@@ -444,6 +445,7 @@ def _resolve_recovery_target(
     high_level_summary=None,
     recovery_level="atomic",
     atomic_instruction=None,
+    evaluated_task_name=None,
 ):
     """Choose the predicate to monitor and language prompt for recovery.
 
@@ -456,7 +458,10 @@ def _resolve_recovery_target(
         return None, None, "none"
 
     if recovery_level == "atomic":
-        if _is_composite_task_eval(subtask_eval):
+        if _is_composite_task_eval(
+            subtask_eval,
+            task_name=evaluated_task_name,
+        ):
             atomic_target = _composite_atomic_recovery_target(
                 subtask_eval,
                 proposed_subtask_name,
@@ -1250,6 +1255,7 @@ def run_recovery_after_failed_rollout(
         high_level_summary=high_level_summary,
         recovery_level=config.recovery_level,
         atomic_instruction=atomic_instruction,
+        evaluated_task_name=config.evaluated_task_name,
     )
 
     separator_header = config.video_separator_text or _recovery_separator_header(mode)
@@ -1294,6 +1300,7 @@ def run_recovery_after_failed_rollout(
         high_level_summary=high_level_summary,
         recovery_level=config.recovery_level,
         atomic_instruction=atomic_instruction,
+        evaluated_task_name=config.evaluated_task_name,
     )
     recovery_meta["high_level_target_subtask"] = high_level_subtask_name
     recovery_meta["high_level_target_instruction"] = high_level_instruction

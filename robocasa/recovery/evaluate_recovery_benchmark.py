@@ -881,6 +881,7 @@ def run_benchmark(args):
                         RecoveryConfig(
                             mode=mode,
                             recovery_level=args.recovery_level,
+                            evaluated_task_name=task_name,
                             high_level_horizon=high_level_horizon,
                             subtask_horizon=args.subtask_horizon,
                             recovery_horizon_resolver=resolve_atomic_recovery_horizon,
