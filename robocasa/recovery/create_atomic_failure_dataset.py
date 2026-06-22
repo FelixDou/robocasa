@@ -493,22 +493,65 @@ def build_sample(
     }
 
 
-def summarize_dataset(samples, errors):
+def summarize_dataset(
+    samples,
+    errors,
+    attempted_by_task=None,
+    successes_by_task=None,
+    failures_by_task=None,
+):
+    attempted_by_task = attempted_by_task or {}
+    successes_by_task = successes_by_task or {}
+    failures_by_task = failures_by_task or {}
     by_task = {}
+    all_tasks = (
+        set(attempted_by_task)
+        | set(successes_by_task)
+        | set(failures_by_task)
+        | {sample["task_name"] for sample in samples}
+    )
+    for task_name in sorted(all_tasks):
+        by_task[task_name] = {
+            "attempted": int(attempted_by_task.get(task_name, 0)),
+            "recorded_samples": 0,
+            "recorded_failures": 0,
+            "recorded_successes": 0,
+            "rollout_successes": int(successes_by_task.get(task_name, 0)),
+            "rollout_failures": int(failures_by_task.get(task_name, 0)),
+        }
     for sample in samples:
         entry = by_task.setdefault(
             sample["task_name"],
-            {"samples": 0, "failures": 0, "successes": 0},
+            {
+                "attempted": 0,
+                "recorded_samples": 0,
+                "recorded_failures": 0,
+                "recorded_successes": 0,
+                "rollout_successes": 0,
+                "rollout_failures": 0,
+            },
         )
-        entry["samples"] += 1
+        entry["recorded_samples"] += 1
         if sample.get("success"):
-            entry["successes"] += 1
+            entry["recorded_successes"] += 1
         else:
-            entry["failures"] += 1
+            entry["recorded_failures"] += 1
+    num_attempted = sum(attempted_by_task.values())
+    num_rollout_successes = sum(successes_by_task.values())
+    num_rollout_failures = sum(failures_by_task.values())
+    num_recorded_successes = sum(1 for sample in samples if sample.get("success"))
+    num_recorded_failures = sum(1 for sample in samples if not sample.get("success"))
     return {
+        "num_attempted_rollouts": int(num_attempted),
+        "num_recorded_samples": len(samples),
+        "num_recorded_failures": int(num_recorded_failures),
+        "num_recorded_successes": int(num_recorded_successes),
+        "num_rollout_failures": int(num_rollout_failures),
+        "num_rollout_successes": int(num_rollout_successes),
+        "num_discarded_successes": int(num_rollout_successes - num_recorded_successes),
         "num_samples": len(samples),
-        "num_failures": sum(1 for sample in samples if not sample.get("success")),
-        "num_successes": sum(1 for sample in samples if sample.get("success")),
+        "num_failures": int(num_recorded_failures),
+        "num_successes": int(num_recorded_successes),
         "num_errors": len(errors),
         "by_task": by_task,
     }
@@ -541,6 +584,7 @@ def run_dataset_creation(args):
 
     samples = []
     errors = []
+    attempted_by_task = {task_name: 0 for task_name in tasks}
     failures_by_task = {task_name: 0 for task_name in tasks}
     successes_by_task = {task_name: 0 for task_name in tasks}
 
@@ -557,7 +601,13 @@ def run_dataset_creation(args):
     }
 
     def write_manifest(partial=True):
-        manifest["summary"] = summarize_dataset(samples, errors)
+        manifest["summary"] = summarize_dataset(
+            samples,
+            errors,
+            attempted_by_task=attempted_by_task,
+            successes_by_task=successes_by_task,
+            failures_by_task=failures_by_task,
+        )
         manifest["partial"] = bool(partial)
         with manifest_path.open("w") as f:
             json.dump(manifest, f, indent=2, default=json_default)
@@ -590,6 +640,7 @@ def run_dataset_creation(args):
             video_path = None
             action_path = None
             try:
+                attempted_by_task[task_name] += 1
                 paths = make_artifact_paths(output_dir, task_name, rollout_i, seed)
                 video_path = paths["video"] if args.record_videos else None
                 action_path = paths["actions"] if args.record_actions else None
