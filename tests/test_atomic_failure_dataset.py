@@ -207,6 +207,24 @@ class TestAtomicFailureDataset(unittest.TestCase):
         self.assertEqual(sample["completed_atomic_steps"], [])
         self.assertEqual(sample["failed_atomic_step"], "PickPlaceCounterToCabinet")
         self.assertEqual(sample["atomic_step_progress"], 0.0)
+        self.assertEqual(
+            sample["completed_subtasks"],
+            [
+                {
+                    "subtask_id": "object_grasped",
+                    "instruction": "Pick object.",
+                    "predicate_names": ["object_grasped"],
+                }
+            ],
+        )
+        self.assertEqual(
+            sample["failed_subtask"],
+            {
+                "subtask_id": "object_at_target_and_released",
+                "instruction": "Place and release.",
+                "predicate_names": ["object_at_target_and_released"],
+            },
+        )
         self.assertEqual(sample["max_subtask_progress"], 0.5)
 
     def test_validate_atomic_tasks_rejects_unknown_by_default(self):

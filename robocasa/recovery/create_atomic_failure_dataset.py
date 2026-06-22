@@ -361,6 +361,36 @@ def atomic_step_progress(summary):
     return 1.0 if summary.get("task_success") else 0.0
 
 
+def completed_subtasks(summary, task_name):
+    return [
+        {
+            "subtask_id": entry["subtask_id"],
+            "instruction": entry["instruction"],
+            "predicate_names": entry["predicate_names"],
+        }
+        for entry in mapped_subtask_sequence(summary, task_name)
+        if entry.get("success")
+    ]
+
+
+def failed_subtask(summary, task_name):
+    for entry in mapped_subtask_sequence(summary, task_name):
+        if entry.get("failed"):
+            return {
+                "subtask_id": entry["subtask_id"],
+                "instruction": entry["instruction"],
+                "predicate_names": entry["predicate_names"],
+            }
+    for entry in mapped_subtask_sequence(summary, task_name):
+        if entry.get("required", True) and not entry.get("success"):
+            return {
+                "subtask_id": entry["subtask_id"],
+                "instruction": entry["instruction"],
+                "predicate_names": entry["predicate_names"],
+            }
+    return None
+
+
 def infer_failure_stage(summary):
     if summary.get("task_success"):
         return "success"
@@ -605,6 +635,8 @@ def build_sample(
         "atomic_step_progress": atomic_step_progress(summary),
         "completed_atomic_steps": completed_atomic_steps(summary, task_name),
         "failed_atomic_step": failed_atomic_step(summary, task_name),
+        "completed_subtasks": completed_subtasks(summary, task_name),
+        "failed_subtask": failed_subtask(summary, task_name),
         "completed_subtask_predicates": summary.get(
             "ordered_completed_required_subtasks", []
         ),
