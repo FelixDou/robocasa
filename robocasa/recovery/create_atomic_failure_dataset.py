@@ -262,6 +262,63 @@ def runtime_subtask_sequence(summary):
     return sequence
 
 
+def mapped_atomic_step_sequence(summary, task_plan, task_name, instruction):
+    """Return the semantic step layer for an atomic-task failure sample.
+
+    The runtime monitor exposes predicate names such as ``object_grasped``.
+    Those are useful diagnostics, but the training/evaluation unit for this
+    dataset is the mapped atomic task itself.
+    """
+    final_eval = summary.get("final_subtask_eval") or {}
+    predicates = final_eval.get("predicates") or {}
+    required = list(final_eval.get("required_predicates") or [])
+    task_success = bool(summary.get("task_success"))
+    atomic_skill = infer_atomic_skill_from_plan(task_plan)
+    if atomic_skill is None:
+        atomic_skill = infer_atomic_skill_from_task(task_name, summary=summary)
+
+    return [
+        {
+            "index": 1,
+            "step_id": task_name,
+            "kind": "atomic_task",
+            "atomic_task": task_name,
+            "skill_id": atomic_skill,
+            "instruction": instruction,
+            "success": task_success,
+            "value_final": task_success,
+            "predicate_names": required,
+            "predicate_descriptions": [
+                (predicates.get(name) or {}).get("description") for name in required
+            ],
+            "completed_predicates": list(
+                summary.get("ordered_completed_required_subtasks", [])
+            ),
+            "failed_predicates": (
+                []
+                if task_success
+                else list(summary.get("failed_required_predicates_final", []))
+            ),
+        }
+    ]
+
+
+def completed_atomic_steps(summary, task_name):
+    if summary.get("task_success"):
+        return [task_name]
+    return []
+
+
+def failed_atomic_step(summary, task_name):
+    if summary.get("task_success"):
+        return None
+    return task_name
+
+
+def atomic_step_progress(summary):
+    return 1.0 if summary.get("task_success") else 0.0
+
+
 def infer_failure_stage(summary):
     if summary.get("task_success"):
         return "success"
@@ -305,6 +362,7 @@ def build_failure_diagnostic(summary, task_plan, task_name):
         "diagnostic_source": "predicate_progress",
         "label_status": "weak_auto",
         "failed_atomic": task_name if not summary.get("task_success") else None,
+        "failed_atomic_step": failed_atomic_step(summary, task_name),
         "atomic_skill": atomic_skill,
         "failed_subtask": failed_subtask,
         "failed_subtask_predicate": failed_subtask,
@@ -460,6 +518,7 @@ def build_sample(
     )
     diagnostic = build_failure_diagnostic(summary, task_plan, task_name)
     final_eval = summary.get("final_subtask_eval") or {}
+    instruction = rollout.get("instruction")
     return {
         "sample_id": f"{task_name}::{rollout_i:04d}::seed{seed}",
         "task_granularity": "atomic",
@@ -479,8 +538,12 @@ def build_sample(
         "num_steps": rollout["num_steps"],
         "success": bool(rollout["success"]),
         "failure_step": None if rollout["success"] else rollout["num_steps"],
-        "subtask_sequence_source": "runtime_required_predicates",
-        "subtask_sequence": runtime_subtask_sequence(summary),
+        "subtask_sequence_source": "atomic_task_mapping",
+        "subtask_sequence": mapped_atomic_step_sequence(
+            summary, task_plan, task_name, instruction
+        ),
+        "predicate_sequence_source": "runtime_required_predicates",
+        "predicate_sequence": runtime_subtask_sequence(summary),
         "derived_subtask_plan": compact_task_plan(task_plan),
         "initial_subtask_progress": (
             (rollout["subtask_evals"][0] or {}).get("subtask_progress")
@@ -489,6 +552,9 @@ def build_sample(
         ),
         "final_subtask_progress": final_eval.get("subtask_progress"),
         "max_subtask_progress": summary.get("max_subtask_progress", 0.0),
+        "atomic_step_progress": atomic_step_progress(summary),
+        "completed_atomic_steps": completed_atomic_steps(summary, task_name),
+        "failed_atomic_step": failed_atomic_step(summary, task_name),
         "completed_subtask_predicates": summary.get(
             "ordered_completed_required_subtasks", []
         ),

@@ -171,9 +171,22 @@ class TestAtomicFailureDataset(unittest.TestCase):
         self.assertEqual(sample["task_granularity"], "atomic")
         self.assertEqual(sample["failed_subtask_predicates"], ["object_at_target_and_released"])
         self.assertEqual(sample["failure_diagnostic"]["failed_atomic"], "PickPlaceCounterToCabinet")
+        self.assertEqual(sample["failure_diagnostic"]["failed_atomic_step"], "PickPlaceCounterToCabinet")
         self.assertEqual(sample["failure_diagnostic"]["failed_subtask"], "object_at_target_and_released")
-        self.assertEqual(sample["subtask_sequence_source"], "runtime_required_predicates")
-        self.assertEqual(sample["subtask_sequence"][0]["predicate"], "object_grasped")
+        self.assertEqual(sample["subtask_sequence_source"], "atomic_task_mapping")
+        self.assertEqual(sample["subtask_sequence"][0]["step_id"], "PickPlaceCounterToCabinet")
+        self.assertEqual(sample["subtask_sequence"][0]["kind"], "atomic_task")
+        self.assertEqual(sample["subtask_sequence"][0]["instruction"], "Pick and place object.")
+        self.assertFalse(sample["subtask_sequence"][0]["success"])
+        self.assertEqual(
+            sample["subtask_sequence"][0]["predicate_names"],
+            ["object_grasped", "object_at_target_and_released"],
+        )
+        self.assertEqual(sample["predicate_sequence_source"], "runtime_required_predicates")
+        self.assertEqual(sample["predicate_sequence"][0]["predicate"], "object_grasped")
+        self.assertEqual(sample["completed_atomic_steps"], [])
+        self.assertEqual(sample["failed_atomic_step"], "PickPlaceCounterToCabinet")
+        self.assertEqual(sample["atomic_step_progress"], 0.0)
         self.assertEqual(sample["max_subtask_progress"], 0.5)
 
     def test_validate_atomic_tasks_rejects_unknown_by_default(self):
