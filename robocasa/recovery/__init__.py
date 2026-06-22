@@ -15,6 +15,9 @@ from robocasa.recovery.recovery_rollout import (
     apply_recovery_mode,
     run_recovery_after_failed_rollout,
 )
+from robocasa.recovery.create_atomic_failure_dataset import (
+    run_dataset_creation,
+)
 
 __all__ = [
     "RecoveryConfig",
@@ -24,6 +27,7 @@ __all__ = [
     "get_eval_composite_subtask_predicates",
     "get_subtask_eval",
     "infer_stuck_subtask",
+    "run_dataset_creation",
     "run_recovery_after_failed_rollout",
     "summarize_subtask_rollout",
 ]
