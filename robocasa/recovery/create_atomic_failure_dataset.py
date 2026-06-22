@@ -177,6 +177,16 @@ def load_registered_atomic_task_names():
     return set(getattr(module, "ATOMIC_TASK_PREDICATES", {}))
 
 
+def load_task_subtask_description_overrides():
+    path = Path(__file__).with_name("eval_composite_predicates.py")
+    spec = importlib.util.spec_from_file_location("eval_composite_predicates", path)
+    if spec is None or spec.loader is None:
+        return {}
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return dict(getattr(module, "_TASK_PREDICATE_DESCRIPTION_OVERRIDES", {}))
+
+
 def validate_atomic_tasks(tasks, allow_unregistered=False):
     if allow_unregistered:
         return
@@ -262,15 +272,46 @@ def runtime_subtask_sequence(summary):
     return sequence
 
 
-def mapped_atomic_step_sequence(summary, task_plan, task_name, instruction):
-    """Return the semantic step layer for an atomic-task failure sample.
+def mapped_subtask_sequence(summary, task_name):
+    """Return the semantic subtask layer mapped from runtime predicates.
 
-    The runtime monitor exposes predicate names such as ``object_grasped``.
-    Those are useful diagnostics, but the training/evaluation unit for this
-    dataset is the mapped atomic task itself.
+    Runtime predicates are still exported separately in ``predicate_sequence``.
+    This layer gives each required predicate the recovery-facing subtask text
+    that we curated in ``eval_composite_predicates.py``.
     """
     final_eval = summary.get("final_subtask_eval") or {}
     predicates = final_eval.get("predicates") or {}
+    descriptions = load_task_subtask_description_overrides().get(task_name, {})
+    completed = set(summary.get("ordered_completed_required_subtasks", []))
+    failed = set(summary.get("failed_required_predicates_final", []))
+    sequence = []
+    for index, name in enumerate(final_eval.get("required_predicates") or [], start=1):
+        predicate = predicates.get(name, {})
+        success = bool(predicate.get("value", False)) or name in completed
+        sequence.append(
+            {
+                "index": index,
+                "subtask_id": name,
+                "kind": "semantic_subtask",
+                "instruction": (
+                    descriptions.get(name)
+                    or predicate.get("description")
+                    or name.replace("_", " ").capitalize() + "."
+                ),
+                "success": success,
+                "value_final": success,
+                "predicate_names": [name],
+                "stage": predicate.get("stage"),
+                "required": bool(predicate.get("required", True)),
+                "failed": name in failed,
+            }
+        )
+    return sequence
+
+
+def mapped_atomic_step_sequence(summary, task_plan, task_name, instruction):
+    """Return the atomic-task layer for an atomic-task failure sample."""
+    final_eval = summary.get("final_subtask_eval") or {}
     required = list(final_eval.get("required_predicates") or [])
     task_success = bool(summary.get("task_success"))
     atomic_skill = infer_atomic_skill_from_plan(task_plan)
@@ -288,8 +329,9 @@ def mapped_atomic_step_sequence(summary, task_plan, task_name, instruction):
             "success": task_success,
             "value_final": task_success,
             "predicate_names": required,
-            "predicate_descriptions": [
-                (predicates.get(name) or {}).get("description") for name in required
+            "subtask_ids": [
+                entry["subtask_id"]
+                for entry in mapped_subtask_sequence(summary, task_name)
             ],
             "completed_predicates": list(
                 summary.get("ordered_completed_required_subtasks", [])
@@ -522,6 +564,12 @@ def build_sample(
     return {
         "sample_id": f"{task_name}::{rollout_i:04d}::seed{seed}",
         "task_granularity": "atomic",
+        "granularity_levels": ["hl_task", "atomic_task", "subtask", "predicate"],
+        "hl_task": {
+            "task_name": task_name,
+            "instruction": instruction,
+            "success": bool(rollout["success"]),
+        },
         "task_name": task_name,
         "atomic_task": task_name,
         "atomic_skill": diagnostic.get("atomic_skill"),
@@ -538,10 +586,12 @@ def build_sample(
         "num_steps": rollout["num_steps"],
         "success": bool(rollout["success"]),
         "failure_step": None if rollout["success"] else rollout["num_steps"],
-        "subtask_sequence_source": "atomic_task_mapping",
-        "subtask_sequence": mapped_atomic_step_sequence(
+        "atomic_sequence_source": "atomic_task_mapping",
+        "atomic_sequence": mapped_atomic_step_sequence(
             summary, task_plan, task_name, instruction
         ),
+        "subtask_sequence_source": "task_predicate_description_mapping",
+        "subtask_sequence": mapped_subtask_sequence(summary, task_name),
         "predicate_sequence_source": "runtime_required_predicates",
         "predicate_sequence": runtime_subtask_sequence(summary),
         "derived_subtask_plan": compact_task_plan(task_plan),

@@ -169,19 +169,39 @@ class TestAtomicFailureDataset(unittest.TestCase):
         )
 
         self.assertEqual(sample["task_granularity"], "atomic")
+        self.assertEqual(
+            sample["granularity_levels"],
+            ["hl_task", "atomic_task", "subtask", "predicate"],
+        )
+        self.assertEqual(sample["hl_task"]["task_name"], "PickPlaceCounterToCabinet")
         self.assertEqual(sample["failed_subtask_predicates"], ["object_at_target_and_released"])
         self.assertEqual(sample["failure_diagnostic"]["failed_atomic"], "PickPlaceCounterToCabinet")
         self.assertEqual(sample["failure_diagnostic"]["failed_atomic_step"], "PickPlaceCounterToCabinet")
         self.assertEqual(sample["failure_diagnostic"]["failed_subtask"], "object_at_target_and_released")
-        self.assertEqual(sample["subtask_sequence_source"], "atomic_task_mapping")
-        self.assertEqual(sample["subtask_sequence"][0]["step_id"], "PickPlaceCounterToCabinet")
-        self.assertEqual(sample["subtask_sequence"][0]["kind"], "atomic_task")
-        self.assertEqual(sample["subtask_sequence"][0]["instruction"], "Pick and place object.")
-        self.assertFalse(sample["subtask_sequence"][0]["success"])
+        self.assertEqual(sample["atomic_sequence_source"], "atomic_task_mapping")
+        self.assertEqual(sample["atomic_sequence"][0]["step_id"], "PickPlaceCounterToCabinet")
+        self.assertEqual(sample["atomic_sequence"][0]["kind"], "atomic_task")
+        self.assertEqual(sample["atomic_sequence"][0]["instruction"], "Pick and place object.")
+        self.assertFalse(sample["atomic_sequence"][0]["success"])
         self.assertEqual(
-            sample["subtask_sequence"][0]["predicate_names"],
+            sample["atomic_sequence"][0]["predicate_names"],
             ["object_grasped", "object_at_target_and_released"],
         )
+        self.assertEqual(
+            sample["atomic_sequence"][0]["subtask_ids"],
+            ["object_grasped", "object_at_target_and_released"],
+        )
+        self.assertEqual(sample["subtask_sequence_source"], "task_predicate_description_mapping")
+        self.assertEqual(sample["subtask_sequence"][0]["subtask_id"], "object_grasped")
+        self.assertEqual(sample["subtask_sequence"][0]["kind"], "semantic_subtask")
+        self.assertEqual(sample["subtask_sequence"][0]["instruction"], "Pick object.")
+        self.assertEqual(sample["subtask_sequence"][0]["predicate_names"], ["object_grasped"])
+        self.assertTrue(sample["subtask_sequence"][0]["success"])
+        self.assertEqual(
+            sample["subtask_sequence"][1]["subtask_id"],
+            "object_at_target_and_released",
+        )
+        self.assertFalse(sample["subtask_sequence"][1]["success"])
         self.assertEqual(sample["predicate_sequence_source"], "runtime_required_predicates")
         self.assertEqual(sample["predicate_sequence"][0]["predicate"], "object_grasped")
         self.assertEqual(sample["completed_atomic_steps"], [])
