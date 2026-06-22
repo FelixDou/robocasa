@@ -89,6 +89,18 @@ class TestAtomicFailureDataset(unittest.TestCase):
         self.assertEqual(sequence[1]["stage"], "task_success")
         self.assertFalse(sequence[1]["value_final"])
 
+    def test_observation_instruction_reads_gym_language_field(self):
+        self.assertEqual(
+            self.module.observation_instruction(
+                {"annotation.human.task_description": "Open the drawer."}
+            ),
+            "Open the drawer.",
+        )
+        self.assertEqual(
+            self.module.observation_instruction({"language": "Turn on the faucet."}),
+            "Turn on the faucet.",
+        )
+
     def test_build_sample_records_atomic_failure_schema(self):
         summary = {
             "task_success": False,

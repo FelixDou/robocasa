@@ -372,7 +372,7 @@ def maybe_unlink(path):
 def run_atomic_rollout(policy, env, horizon, video_writer, args):
     reset_result = env.reset()
     obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
-    instruction = _env_task_instruction(env)
+    instruction = _env_task_instruction(env) or observation_instruction(obs)
     subtask_evals = [get_subtask_eval(env)]
     actions = []
     rewards = []
@@ -425,6 +425,20 @@ def run_atomic_rollout(policy, env, horizon, video_writer, args):
         "infos": infos,
         "subtask_evals": subtask_evals,
     }
+
+
+def observation_instruction(obs):
+    if not isinstance(obs, dict):
+        return None
+    for key in ("annotation.human.task_description", "language"):
+        value = obs.get(key)
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, np.ndarray) and value.shape == ():
+            value = value.item()
+            if isinstance(value, str) and value:
+                return value
+    return None
 
 
 def build_sample(
