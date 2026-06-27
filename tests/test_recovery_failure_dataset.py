@@ -279,6 +279,44 @@ class TestRecoveryFailureDataset(unittest.TestCase):
         )
         self.assertFalse(sequence[-1]["success"])
 
+    def test_subtask_completion_is_sequential_even_if_later_predicate_is_true(self):
+        summary = {
+            "task_success": False,
+            "final_subtask_eval": {
+                "required_predicates": [
+                    "blender_lid_on_blender",
+                    "gripper_released",
+                ],
+                "predicates": {
+                    "blender_lid_on_blender": {
+                        "value": False,
+                        "required": True,
+                    },
+                    "gripper_released": {
+                        "value": True,
+                        "required": True,
+                    },
+                },
+            },
+            "ordered_completed_required_subtasks": [],
+            "failed_required_predicates_final": ["blender_lid_on_blender"],
+        }
+
+        sequence = self.module.mapped_subtask_sequence(summary, "CloseBlenderLid")
+
+        self.assertFalse(sequence[0]["success"])
+        self.assertFalse(sequence[1]["success"])
+        self.assertTrue(sequence[1]["predicate_success"])
+        self.assertTrue(sequence[1]["blocked_by_previous"])
+        self.assertEqual(
+            self.module.completed_subtasks(summary, "CloseBlenderLid"),
+            [],
+        )
+        self.assertEqual(
+            self.module.failed_subtask(summary, "CloseBlenderLid")["subtask_id"],
+            "blender_lid_on_blender",
+        )
+
     def test_composite_atomic_task_sequence_uses_task_level_steps(self):
         summary = {
             "final_subtask_eval": {

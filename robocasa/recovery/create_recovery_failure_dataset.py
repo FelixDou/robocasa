@@ -460,15 +460,21 @@ def mapped_subtask_sequence(summary, task_name):
             for name in required_predicates
         ]
 
+    blocked_by_previous = False
     for index, group in enumerate(groups, start=1):
         predicate_names = group["predicate_names"]
         if not predicate_names:
             continue
         predicate_entries = [predicates.get(name, {}) for name in predicate_names]
-        success = all(
+        predicates_success = all(
             bool(predicate.get("value", False)) or name in completed
             for name, predicate in zip(predicate_names, predicate_entries)
         )
+        success = predicates_success and not blocked_by_previous
+        if not success and any(
+            bool(predicate.get("required", True)) for predicate in predicate_entries
+        ):
+            blocked_by_previous = True
         sequence.append(
             {
                 "index": index,
@@ -476,6 +482,8 @@ def mapped_subtask_sequence(summary, task_name):
                 "kind": "semantic_subtask",
                 "instruction": group["instruction"],
                 "success": success,
+                "predicate_success": predicates_success,
+                "blocked_by_previous": blocked_by_previous and predicates_success,
                 "value_final": success,
                 "predicate_names": predicate_names,
                 "stage": next(
@@ -506,12 +514,16 @@ def mapped_composite_atomic_task_sequence(summary, task_name):
     final_eval = summary.get("final_subtask_eval") or {}
     predicates = final_eval.get("predicates") or {}
     sequence = []
+    blocked_by_previous = False
     for index, step in enumerate(steps, start=1):
         predicate_names = list(step.get("predicate_names") or [])
-        success = all(
+        predicates_success = all(
             bool(predicates.get(name, {}).get("value", False)) or name in completed
             for name in predicate_names
         )
+        success = predicates_success and not blocked_by_previous
+        if not success:
+            blocked_by_previous = True
         sequence.append(
             {
                 "index": index,
@@ -524,6 +536,8 @@ def mapped_composite_atomic_task_sequence(summary, task_name):
                 "language_instruction": step.get("language_instruction"),
                 "instruction": step.get("language_instruction"),
                 "success": success,
+                "predicate_success": predicates_success,
+                "blocked_by_previous": blocked_by_previous and predicates_success,
                 "value_final": success,
                 "predicate_names": predicate_names,
                 "subtask_ids": [
@@ -827,6 +841,9 @@ def build_sample(
         stuck_patience=args.stuck_patience,
         include_trace=args.include_trace,
     )
+    stored_summary = dict(summary)
+    if not args.include_trace:
+        stored_summary.pop("subtask_trace", None)
     diagnostic = build_failure_diagnostic(summary, task_plan, task_name)
     final_eval = summary.get("final_subtask_eval") or {}
     instruction = rollout.get("instruction")
@@ -882,7 +899,7 @@ def build_sample(
         "failed_subtask_predicates": summary.get(
             "failed_required_predicates_final", []
         ),
-        "subtask_summary": summary,
+        "subtask_summary": stored_summary,
         "failure_diagnostic": diagnostic,
         "action_trajectory_path": str(action_path) if action_path else None,
         "video_path": str(video_path) if video_path else None,
