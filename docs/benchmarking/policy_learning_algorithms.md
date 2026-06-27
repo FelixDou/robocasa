@@ -2,6 +2,8 @@
 
 We provide official support for benchmarking the following policy learning algorithms: [Diffusion Policy](https://github.com/robocasa-benchmark/diffusion_policy), [Openpi](https://github.com/robocasa-benchmark/openpi), and [GR00T](https://github.com/robocasa-benchmark/Isaac-GR00T).
 
+RLDX-1 is evaluated through the official [RLDX-1](https://github.com/RLWRLD/RLDX-1) codebase. For recovery/subtask experiments in this RoboCasa checkout, run the RLDX model as a ZeroMQ policy server and pass `robocasa.recovery.rldx_zmq_policy:make_policy` to the recovery evaluator.
+
 -------
 ## Diffusion Policy
 We fork the official Diffusion Policy code base, hosted at [https://github.com/robocasa-benchmark/diffusion_policy](https://github.com/robocasa-benchmark/diffusion_policy).
@@ -126,3 +128,53 @@ python scripts/run_eval.py \
 python gr00t/eval/get_eval_stats.py \
 --dir <checkpoint-path>
 ```
+
+-------
+## RLDX-1
+RLDX-1 is hosted at [https://github.com/RLWRLD/RLDX-1](https://github.com/RLWRLD/RLDX-1). It is not vendored into this RoboCasa repository; keep the model server in the RLDX environment and run RoboCasa rollouts from the RoboCasa environment.
+
+### Key files
+- Model server: [rldx/eval/run_rldx_server.py](https://github.com/RLWRLD/RLDX-1/blob/main/rldx/eval/run_rldx_server.py)
+- Official simulator evaluation: [rldx/eval/rollout_policy.py](https://github.com/RLWRLD/RLDX-1/blob/main/rldx/eval/rollout_policy.py)
+- Recovery adapter in this repo: `robocasa/recovery/rldx_zmq_policy.py`
+- Recovery evaluator in this repo: `robocasa/recovery/evaluate_recovery_benchmark.py`
+
+### Official RLDX RoboCasa evaluation
+Start the RLDX server from the RLDX-1 checkout:
+```
+python rldx/eval/run_rldx_server.py \
+  --model-path <rldx-checkpoint-or-hf-model> \
+  --embodiment-tag general_embodiment \
+  --port 5555 \
+  --use-sim-policy-wrapper
+```
+
+Then run the official RLDX simulator evaluator:
+```
+python rldx/eval/rollout_policy.py \
+  --env-name robocasa/<task-name> \
+  --robocasa-split pretrain \
+  --policy-client-host 127.0.0.1 \
+  --policy-client-port 5555 \
+  --n-action-steps 8 \
+  --n-episodes <num-rollouts>
+```
+
+### RLDX recovery/subtask evaluation
+Start the same RLDX server, then run this repository's recovery evaluator:
+```
+python robocasa/recovery/evaluate_recovery_benchmark.py \
+  --output <output-dir>/results.json \
+  --policy-module robocasa.recovery.rldx_zmq_policy:make_policy \
+  --policy-arg host=127.0.0.1 \
+  --policy-arg port=5555 \
+  --policy-arg execution_horizon=8 \
+  --task-set all_target \
+  --split pretrain \
+  --num-rollouts 5 \
+  --modes env_to_last_good eef_to_last_good continue_from_failure \
+  --match-recovery-horizon-to-no-progress \
+  --video-dir <output-dir>/videos
+```
+
+The RLDX adapter maps RoboCasa Gym observations to the RLDX simulator-wrapper keys (`video.res256_image_side_0`, `video.res256_image_side_1`, `video.res256_image_wrist_0`, and `annotation.human.action.task_description`) and converts returned action chunks back to RoboCasa Gym action dictionaries.

@@ -15,7 +15,7 @@ from robocasa.recovery.recovery_rollout import (
     apply_recovery_mode,
     run_recovery_after_failed_rollout,
 )
-from robocasa.recovery.create_atomic_failure_dataset import (
+from robocasa.recovery.create_recovery_failure_dataset import (
     run_dataset_creation,
 )
 

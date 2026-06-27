@@ -110,6 +110,59 @@ _PREDICATE_DESCRIPTION_OVERRIDES = {
 }
 
 
+_TASK_HL_INSTRUCTION_OVERRIDES = {
+    "CloseBlenderLid": "Close the blender lid.",
+    "CloseFridge": "Close the fridge.",
+    "CloseToasterOvenDoor": "Close the toaster oven door.",
+    "CoffeeSetupMug": "Pick the mug and place it under the coffee machine dispenser.",
+    "NavigateKitchen": "Navigate to the target location in the kitchen.",
+    "OpenCabinet": "Open the cabinet.",
+    "OpenDrawer": "Open the drawer.",
+    "OpenStandMixerHead": "Open the stand mixer head.",
+    "PickPlaceCounterToCabinet": "Pick the object from the counter and place it in the cabinet.",
+    "PickPlaceCounterToStove": "Pick the object from the counter and place it on the stove.",
+    "PickPlaceDrawerToCounter": "Pick the object from the drawer and place it on the counter.",
+    "PickPlaceSinkToCounter": "Pick the object from the sink and place it on the counter.",
+    "PickPlaceToasterToCounter": "Pick the object from the toaster and place it on the counter.",
+    "SlideDishwasherRack": "Slide the dishwasher rack.",
+    "TurnOffStove": "Turn off the stove.",
+    "TurnOnElectricKettle": "Turn on the electric kettle.",
+    "TurnOnMicrowave": "Turn on the microwave.",
+    "TurnOnSinkFaucet": "Turn on the sink faucet.",
+    "ArrangeBreadBasket": "Open the cabinet, pick up the bread from the cabinet and place it in the basket. Then move the basket to the dining counter.",
+    "ArrangeTea": "Place the kettle and mug on the tray, then close the cabinet.",
+    "BreadSelection": "Place the croissant and jam on the cutting board.",
+    "CategorizeCondiments": "Place each condiment next to its matching counterpart in the cabinet.",
+    "CuttingToolSelection": "Open the drawer, select the correct cutting tool, and place it on the cutting board.",
+    "DeliverStraw": "Take a straw from the drawer in front and place it inside the glass cup on the dining counter.",
+    "GarnishPancake": "Open the fridge, pick the strawberry, and place it on the pancake.",
+    "GatherTableware": "Arrange the glasses together and separate the bowl from the glasses in the cabinet.",
+    "GetToastedBread": "Start the toaster, then place the toasted bread on the plate.",
+    "HeatKebabSandwich": "Place the kebab and baguette in the toaster oven, close it, and set the timer.",
+    "KettleBoiling": "Place the kettle on the stove burner and turn on the burner.",
+    "LoadDishwasher": "Pull out the dishwasher rack, place the dishes on it, and close the dishwasher.",
+    "MakeIceLemonade": "Grab a lemon wedge from the fridge and ice cubes from the ice bowl, and put them in the glass of lemonade.",
+    "PackIdenticalLunches": "Pack matching vegetable and meat portions into two tupperware containers.",
+    "PanTransfer": "Transfer the vegetables from the pan to the plate, then return the pan to the stove.",
+    "PortionHotDogs": "Prepare two plates, each with one bun and one sausage.",
+    "PreSoakPan": "Put the pan and sponge in the sink, then turn on the sink faucet.",
+    "PrepareCoffee": "Place the mug under the coffee dispenser and start the coffee machine.",
+    "RecycleBottlesByType": "Group plastic bottles with plastic bottles and glass bottles with glass bottles.",
+    "RinseSinkBasin": "Turn on the sink faucet and rinse the sink basin.",
+    "ScrubCuttingBoard": "Pick the sponge and scrub the cutting board.",
+    "SearingMeat": "Place the pan on the stove, place the meat in the pan, and turn on the burner.",
+    "SeparateFreezerRack": "Separate meat and vegetables into freezer containers and place them on the correct freezer racks.",
+    "SetUpCuttingStation": "Open the drawer, place the knife and meat on the cutting board.",
+    "StackBowlsCabinet": "Open the cabinet and stack the bowls inside it.",
+    "SteamInMicrowave": "Place the vegetable in the bowl, put the bowl in the microwave, close it, and start it.",
+    "StirVegetables": "Place the vegetables in the pot, pick the spatula, and stir the vegetables.",
+    "StoreLeftoversInBowl": "Pick the chicken drumstick and vegetable from their plates and place them in the bowl. Then put the bowl in the fridge.",
+    "WaffleReheat": "Put the waffle in the bowl, place the bowl in the microwave, close it, and start it.",
+    "WashFruitColander": "Place the colander in the sink, put the fruit in the colander, and rinse it.",
+    "WashLettuce": "Turn on the sink faucet and rinse the lettuce.",
+    "WeighIngredients": "Place the packaged food on the scale and close the cabinet.",
+}
+
 _TASK_PREDICATE_DESCRIPTION_OVERRIDES = {
     "DeliverStraw": {
         "drawer_open": "Open drawer.",
@@ -401,6 +454,1518 @@ _TASK_PREDICATE_DESCRIPTION_OVERRIDES = {
         "water_on": "Turn on water.",
     },
 }
+
+_TASK_SUBTASK_GROUP_OVERRIDES = {
+    # For pick-place atomics, final placement and release are one semantic step:
+    # the task is not really complete until the object is left at a valid target.
+    "PickPlaceCounterToCabinet": [
+        ("object_grasped", "Pick object from counter.", ["object_grasped"]),
+        ("object_in_cabinet", "Move object to cabinet.", ["object_in_cabinet"]),
+        (
+            "release_object_at_valid_cabinet_location",
+            "Release object at a valid cabinet location.",
+            ["final_placement_valid", "gripper_released"],
+        ),
+    ],
+    "PickPlaceCounterToStove": [
+        ("object_grasped", "Pick object from counter.", ["object_grasped"]),
+        ("object_in_pan", "Move object to pan.", ["object_in_pan"]),
+        (
+            "release_object_at_valid_pan_location",
+            "Release object at a valid pan location.",
+            ["final_placement_valid", "gripper_released"],
+        ),
+    ],
+    "PickPlaceDrawerToCounter": [
+        (
+            "object_grasped",
+            "Pick the target object from the drawer.",
+            ["object_grasped"],
+        ),
+        (
+            "object_on_counter",
+            "Move the target object from the drawer to the counter.",
+            ["object_on_counter"],
+        ),
+        (
+            "release_object_at_valid_counter_location",
+            "Release the target object at a valid counter location.",
+            ["final_placement_valid", "gripper_released"],
+        ),
+    ],
+    "PickPlaceSinkToCounter": [
+        ("object_grasped", "Pick object from sink.", ["object_grasped"]),
+        ("object_in_container", "Move object to container.", ["object_in_container"]),
+        (
+            "container_on_counter",
+            "Move container to counter.",
+            ["container_on_counter"],
+        ),
+        (
+            "release_object_at_valid_counter_location",
+            "Release object at a valid counter location.",
+            ["final_placement_valid", "gripper_released"],
+        ),
+    ],
+    "PickPlaceToasterToCounter": [
+        ("object_grasped", "Pick object from toaster.", ["object_grasped"]),
+        ("object_on_plate", "Move object to plate.", ["object_on_plate"]),
+        (
+            "release_object_at_valid_plate_location",
+            "Release object at a valid plate location.",
+            ["final_placement_valid", "gripper_released"],
+        ),
+    ],
+    "MakeIceLemonade": [
+        ("fridge_open", "Open fridge.", ["fridge_open"]),
+        (
+            "ingredients_grasped",
+            "Pick the lemon wedge and ice cubes.",
+            ["lemon_grasped", "ice_cube1_grasped", "ice_cube2_grasped"],
+        ),
+        (
+            "ingredients_in_glass",
+            "Move the lemon wedge and ice cubes to the glass.",
+            ["lemon_in_glass", "ice_in_glass", "gripper_released"],
+        ),
+    ],
+    "SteamInMicrowave": [
+        (
+            "vegetable_in_bowl",
+            "Pick the vegetable from the sink and place it in the bowl.",
+            ["vegetable_in_bowl"],
+        ),
+        (
+            "bowl_in_microwave",
+            "Pick the bowl and place it inside the microwave.",
+            ["bowl_in_microwave"],
+        ),
+        ("microwave_closed", "Close microwave.", ["microwave_closed"]),
+        ("microwave_started", "Start microwave.", ["microwave_started"]),
+    ],
+    "StoreLeftoversInBowl": [
+        (
+            "chicken_in_bowl",
+            "Pick the chicken drumstick and place it in the bowl.",
+            ["chicken_in_bowl"],
+        ),
+        (
+            "vegetable_in_bowl",
+            "Pick the vegetable and place it in the bowl.",
+            ["vegetable_in_bowl"],
+        ),
+        (
+            "bowl_in_fridge",
+            "Pick the bowl containing the leftovers and place it in the fridge.",
+            ["bowl_in_fridge", "gripper_released"],
+        ),
+    ],
+}
+
+_COMPOSITE_ATOMIC_TASK_OVERRIDES = {
+    # These are task-level recovery steps. ``atomic_task`` is an exact registered
+    # RoboCasa atomic task when one exists, otherwise it is a derived atomic task
+    # name following the same naming style as the registered atomic tasks.
+    "DeliverStraw": [
+        {
+            "atomic_task": "OpenDrawer",
+            "atomic_task_source": "registered",
+            "language_instruction": "Open the drawer.",
+            "predicate_names": ["drawer_open"],
+        },
+        {
+            "atomic_task": "PickPlaceDrawerToGlass",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the straw from the drawer and place it inside the glass.",
+            "predicate_names": ["straw_grasped", "straw_in_glass", "gripper_released"],
+        },
+    ],
+    "GetToastedBread": [
+        {
+            "atomic_task": "TurnOnToaster",
+            "atomic_task_source": "registered",
+            "language_instruction": "Start the toaster.",
+            "predicate_names": ["toaster_started"],
+        },
+        {
+            "atomic_task": "PickPlaceToasterToCounter",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the toasted bread from the toaster and place it on the plate.",
+            "predicate_names": ["bread_grasped", "bread_on_plate", "gripper_released"],
+        },
+    ],
+    "KettleBoiling": [
+        {
+            "atomic_task": "PickPlaceCounterToStove",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the kettle from the counter and place it on the stove burner.",
+            "predicate_names": ["kettle_grasped", "kettle_on_burner", "gripper_released"],
+        },
+        {
+            "atomic_task": "TurnOnStove",
+            "atomic_task_source": "registered",
+            "language_instruction": "Turn on the target stove burner.",
+            "predicate_names": ["burner_on"],
+        },
+    ],
+    "LoadDishwasher": [
+        {
+            "atomic_task": "SlideDishwasherRack",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pull out the dishwasher rack.",
+            "predicate_names": ["dishwasher_rack_accessible"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToDishwasherRack",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the dishes from the counter and place them on the dishwasher rack.",
+            "predicate_names": ["dishes_grasped", "dishes_on_rack"],
+        },
+        {
+            "atomic_task": "CloseDishwasher",
+            "atomic_task_source": "derived",
+            "language_instruction": "Close the dishwasher.",
+            "predicate_names": ["dishwasher_closed"],
+        },
+    ],
+    "MakeIceLemonade": [
+        {
+            "atomic_task": "OpenFridge",
+            "atomic_task_source": "registered",
+            "language_instruction": "Open the fridge.",
+            "predicate_names": ["fridge_open"],
+        },
+        {
+            "atomic_task": "PickPlaceLemonadeIngredientsToGlass",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the lemon wedge and ice cubes, then place them in the glass of lemonade.",
+            "predicate_names": [
+                "lemon_grasped",
+                "ice_cube1_grasped",
+                "ice_cube2_grasped",
+                "lemon_in_glass",
+                "ice_in_glass",
+                "gripper_released",
+            ],
+        },
+    ],
+    "PackIdenticalLunches": [
+        {
+            "atomic_task": "OpenFridge",
+            "atomic_task_source": "registered",
+            "language_instruction": "Open the fridge.",
+            "predicate_names": ["fridge_open"],
+        },
+        {
+            "atomic_task": "PickPlaceFridgeToTupperware",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the first vegetable and meat item from the fridge and place them in the first tupperware.",
+            "predicate_names": [
+                "tupperware0_has_one_vegetable",
+                "tupperware0_has_one_meat",
+            ],
+        },
+        {
+            "atomic_task": "PickPlaceFridgeToTupperware",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the second vegetable and meat item from the fridge and place them in the second tupperware.",
+            "predicate_names": [
+                "tupperware1_has_one_vegetable",
+                "tupperware1_has_one_meat",
+                "objects_not_duplicated",
+                "gripper_released",
+            ],
+        },
+    ],
+    "PreSoakPan": [
+        {
+            "atomic_task": "PickPlaceCounterToSink",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the pan from the counter and place it in the sink.",
+            "predicate_names": ["pan_grasped", "pan_in_sink"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToSink",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the sponge from the counter and place it in the sink.",
+            "predicate_names": ["sponge_grasped", "sponge_in_sink", "gripper_released"],
+        },
+        {
+            "atomic_task": "TurnOnSinkFaucet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Turn on the sink faucet.",
+            "predicate_names": ["water_on"],
+        },
+    ],
+    "PrepareCoffee": [
+        {
+            "atomic_task": "CoffeeSetupMug",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the mug and place it under the coffee machine dispenser.",
+            "predicate_names": ["mug_grasped", "mug_under_dispenser", "gripper_released"],
+        },
+        {
+            "atomic_task": "StartCoffeeMachine",
+            "atomic_task_source": "registered",
+            "language_instruction": "Start the coffee machine.",
+            "predicate_names": ["coffee_started"],
+        },
+    ],
+    "RinseSinkBasin": [
+        {
+            "atomic_task": "TurnOnSinkFaucet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Turn on the sink faucet.",
+            "predicate_names": ["water_on"],
+        },
+        {
+            "atomic_task": "TurnSinkSpout",
+            "atomic_task_source": "registered",
+            "language_instruction": "Move the sink spout to rinse the sink basin.",
+            "predicate_names": [
+                "left_basin_rinsed",
+                "center_basin_rinsed",
+                "right_basin_rinsed",
+            ],
+        },
+    ],
+    "ScrubCuttingBoard": [
+        {
+            "atomic_task": "PickPlaceCounterToCuttingBoard",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the sponge and scrub the cutting board.",
+            "predicate_names": [
+                "sponge_grasped",
+                "board_contact_count_reached",
+                "board_sweep_range_reached",
+                "gripper_released",
+            ],
+        },
+    ],
+    "SearingMeat": [
+        {
+            "atomic_task": "OpenCabinet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Open the cabinet.",
+            "predicate_names": ["cabinet_open"],
+        },
+        {
+            "atomic_task": "PickPlaceCabinetToStove",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the pan from the cabinet and place it on the target stove burner.",
+            "predicate_names": ["pan_grasped", "pan_on_target_burner"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToStove",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the meat from the counter and place it in the pan.",
+            "predicate_names": ["meat_grasped", "meat_in_pan", "gripper_released"],
+        },
+        {
+            "atomic_task": "TurnOnStove",
+            "atomic_task_source": "registered",
+            "language_instruction": "Turn on the target stove burner.",
+            "predicate_names": ["burner_on"],
+        },
+    ],
+    "SetUpCuttingStation": [
+        {
+            "atomic_task": "OpenDrawer",
+            "atomic_task_source": "registered",
+            "language_instruction": "Open the drawer.",
+            "predicate_names": ["drawer_open"],
+        },
+        {
+            "atomic_task": "PickPlaceDrawerToCounter",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the knife from the drawer and place it on the cutting board.",
+            "predicate_names": ["knife_grasped", "knife_on_cutting_board"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToCounter",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the meat from the plate and place it on the cutting board.",
+            "predicate_names": ["meat_grasped", "meat_on_cutting_board", "gripper_released"],
+        },
+    ],
+    "StackBowlsCabinet": [
+        {
+            "atomic_task": "OpenCabinet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Open the cabinet.",
+            "predicate_names": ["cabinet_open"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToCabinet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the bowls from the counter and place them in the cabinet.",
+            "predicate_names": [
+                "larger_bowl_in_cabinet",
+                "smaller_bowl_in_cabinet",
+                "bowls_stacked",
+                "gripper_released",
+            ],
+        },
+    ],
+    "SteamInMicrowave": [
+        {
+            "atomic_task": "PickPlaceSinkToBowl",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the vegetable from the sink and place it in the bowl.",
+            "predicate_names": ["vegetable_in_bowl"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToMicrowave",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the bowl and place it inside the microwave.",
+            "predicate_names": ["bowl_in_microwave"],
+        },
+        {
+            "atomic_task": "CloseMicrowave",
+            "atomic_task_source": "registered",
+            "language_instruction": "Close the microwave.",
+            "predicate_names": ["microwave_closed"],
+        },
+        {
+            "atomic_task": "TurnOnMicrowave",
+            "atomic_task_source": "registered",
+            "language_instruction": "Start the microwave.",
+            "predicate_names": ["microwave_started"],
+        },
+    ],
+    "StirVegetables": [
+        {
+            "atomic_task": "PickPlaceCounterToStove",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the first vegetable from the counter and place it in the pot.",
+            "predicate_names": ["vegetable1_in_pot"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToStove",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the second vegetable from the counter and place it in the pot.",
+            "predicate_names": ["vegetable2_in_pot"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToStove",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the spatula from the counter and place it in the pot.",
+            "predicate_names": ["spatula_grasped"],
+        },
+        {
+            "atomic_task": "StirVegetables",
+            "atomic_task_source": "derived",
+            "language_instruction": "Stir the vegetables in the pot with the spatula.",
+            "predicate_names": ["vegetables_stirred", "spatula_released"],
+        },
+    ],
+    "StoreLeftoversInBowl": [
+        {
+            "atomic_task": "PickPlaceCounterToBowl",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the chicken drumstick and place it in the bowl.",
+            "predicate_names": ["chicken_in_bowl"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToBowl",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the vegetable and place it in the bowl.",
+            "predicate_names": ["vegetable_in_bowl"],
+        },
+        {
+            "atomic_task": "PickPlaceBowlToFridge",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the bowl containing the leftovers and place it in the fridge.",
+            "predicate_names": ["bowl_in_fridge", "gripper_released"],
+        },
+    ],
+    "WashLettuce": [
+        {
+            "atomic_task": "TurnOnSinkFaucet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Turn on the sink faucet.",
+            "predicate_names": ["water_on"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToSink",
+            "atomic_task_source": "registered",
+            "language_instruction": "Move the lettuce under the running water and rinse it.",
+            "predicate_names": ["lettuce_under_water", "washed_time_reached"],
+        },
+    ],
+    "ArrangeBreadBasket": [
+        {
+            "atomic_task": "OpenCabinet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Open the cabinet.",
+            "predicate_names": ["cabinet_open"],
+        },
+        {
+            "atomic_task": "PickPlaceCabinetToCounter",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the bread from the cabinet and place it in the basket.",
+            "predicate_names": ["bread_in_basket"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToCounter",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the basket and place it on the dining counter.",
+            "predicate_names": ["basket_on_dining_counter", "gripper_released"],
+        },
+    ],
+    "ArrangeTea": [
+        {
+            "atomic_task": "PickPlaceCounterToCounter",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the kettle and place it on the tray.",
+            "predicate_names": ["kettle_on_tray"],
+        },
+        {
+            "atomic_task": "PickPlaceCabinetToCounter",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the mug from the cabinet and place it on the tray.",
+            "predicate_names": ["mug_on_tray", "gripper_released"],
+        },
+        {
+            "atomic_task": "CloseCabinet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Close the cabinet.",
+            "predicate_names": ["cabinet_closed"],
+        },
+    ],
+    "BreadSelection": [
+        {
+            "atomic_task": "PickPlaceCounterToCounter",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the croissant and place it on the cutting board.",
+            "predicate_names": ["croissant_on_cutting_board"],
+        },
+        {
+            "atomic_task": "PickPlaceCabinetToCounter",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the jam and place it on the cutting board.",
+            "predicate_names": ["jam_on_cutting_board", "gripper_released"],
+        },
+    ],
+    "CategorizeCondiments": [
+        {
+            "atomic_task": "PickPlaceCounterToCabinet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the condiment bottle and place it next to the matching bottle in the cabinet.",
+            "predicate_names": ["bottle_in_cabinet", "bottle_next_to_counterpart"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToCabinet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the shaker and place it next to the matching shaker in the cabinet.",
+            "predicate_names": ["shaker_in_cabinet", "shaker_next_to_counterpart", "gripper_released"],
+        },
+    ],
+    "CuttingToolSelection": [
+        {
+            "atomic_task": "OpenDrawer",
+            "atomic_task_source": "registered",
+            "language_instruction": "Open the drawer.",
+            "predicate_names": ["drawer_open"],
+        },
+        {
+            "atomic_task": "PickPlaceDrawerToCounter",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the correct cutting tool from the drawer and place it on the cutting board.",
+            "predicate_names": [
+                "correct_tool_grasped",
+                "correct_tool_on_cutting_board",
+                "wrong_tool_not_on_cutting_board",
+                "gripper_released",
+            ],
+        },
+    ],
+    "GarnishPancake": [
+        {
+            "atomic_task": "OpenFridge",
+            "atomic_task_source": "registered",
+            "language_instruction": "Open the fridge.",
+            "predicate_names": ["fridge_open"],
+        },
+        {
+            "atomic_task": "PickPlaceFridgeToCounter",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the strawberry from the fridge and place it on the pancake.",
+            "predicate_names": ["strawberry_grasped", "strawberry_on_pancake", "gripper_released"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToCounter",
+            "atomic_task_source": "derived",
+            "language_instruction": "Place the pancake on the plate and move the plate to the table.",
+            "predicate_names": ["pancake_on_plate", "plate_on_table"],
+        },
+    ],
+    "GatherTableware": [
+        {
+            "atomic_task": "OpenCabinet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Open the cabinets.",
+            "predicate_names": ["cabinets_open"],
+        },
+        {
+            "atomic_task": "PickPlaceCabinetToCabinet",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the third glass and place it in the cabinet with the other glasses.",
+            "predicate_names": ["glasses_clustered"],
+        },
+        {
+            "atomic_task": "PickPlaceCabinetToCabinet",
+            "atomic_task_source": "derived",
+            "language_instruction": "Move the bowl away from the glasses in the cabinet.",
+            "predicate_names": ["bowl_separated_from_glasses", "gripper_released"],
+        },
+    ],
+    "HeatKebabSandwich": [
+        {
+            "atomic_task": "PickPlaceCounterToToasterOven",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the kebab and place it inside the toaster oven.",
+            "predicate_names": ["kebab_in_toaster_oven"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToToasterOven",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the baguette and place it inside the toaster oven.",
+            "predicate_names": ["baguette_in_toaster_oven"],
+        },
+        {
+            "atomic_task": "CloseToasterOvenDoor",
+            "atomic_task_source": "registered",
+            "language_instruction": "Close the toaster oven door.",
+            "predicate_names": ["toaster_oven_closed"],
+        },
+        {
+            "atomic_task": "TurnOnToasterOven",
+            "atomic_task_source": "registered",
+            "language_instruction": "Set the toaster oven timer.",
+            "predicate_names": ["timer_set"],
+        },
+    ],
+    "PanTransfer": [
+        {
+            "atomic_task": "PickPlaceStoveToCounter",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the pan from the stove, keep holding it, and tilt it to dump the vegetable onto the plate.",
+            "predicate_names": ["pan_grasped", "vegetable_on_plate", "robot_did_not_touch_food"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToStove",
+            "atomic_task_source": "registered",
+            "language_instruction": "Return the pan to the stove and release it.",
+            "predicate_names": ["pan_on_stove", "gripper_released"],
+        },
+    ],
+    "PortionHotDogs": [
+        {
+            "atomic_task": "PickPlaceCounterToPlate",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick one bun and place it on the first plate.",
+            "predicate_names": ["plate1_has_one_bun"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToPlate",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick one sausage and place it on the first plate.",
+            "predicate_names": ["plate1_has_one_sausage"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToPlate",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the remaining bun and place it on the second plate.",
+            "predicate_names": ["plate2_has_one_bun"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToPlate",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the remaining sausage and place it on the second plate.",
+            "predicate_names": ["plate2_has_one_sausage", "gripper_released"],
+        },
+    ],
+    "RecycleBottlesByType": [
+        {
+            "atomic_task": "PickPlaceCounterToCounter",
+            "atomic_task_source": "derived",
+            "language_instruction": "Group the plastic bottles together.",
+            "predicate_names": ["plastic_bottles_clustered"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToCounter",
+            "atomic_task_source": "derived",
+            "language_instruction": "Group the glass bottles together.",
+            "predicate_names": ["glass_bottles_clustered"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToDiningTable",
+            "atomic_task_source": "derived",
+            "language_instruction": "Move the bottles to the table and release them.",
+            "predicate_names": ["bottles_on_table", "gripper_released"],
+        },
+    ],
+    "SeparateFreezerRack": [
+        {
+            "atomic_task": "OpenFreezer",
+            "atomic_task_source": "derived",
+            "language_instruction": "Open the freezer.",
+            "predicate_names": ["freezer_open"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToTupperware",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the meat and place it in the meat container.",
+            "predicate_names": ["meat_in_tupperware"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToTupperware",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the vegetables and place them in the vegetable container.",
+            "predicate_names": ["vegetables_in_tupperware"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToFreezer",
+            "atomic_task_source": "derived",
+            "language_instruction": "Move the meat and vegetable containers to their target freezer racks.",
+            "predicate_names": [
+                "meat_container_on_second_rack",
+                "vegetable_container_on_top_rack",
+                "gripper_released",
+            ],
+        },
+    ],
+    "WaffleReheat": [
+        {
+            "atomic_task": "OpenMicrowave",
+            "atomic_task_source": "registered",
+            "language_instruction": "Open the microwave.",
+            "predicate_names": ["microwave_open"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToBowl",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the waffle and place it in the bowl.",
+            "predicate_names": ["waffle_in_bowl"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToMicrowave",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the bowl and place it inside the microwave.",
+            "predicate_names": ["bowl_in_microwave"],
+        },
+        {
+            "atomic_task": "CloseMicrowave",
+            "atomic_task_source": "registered",
+            "language_instruction": "Close the microwave.",
+            "predicate_names": ["microwave_closed"],
+        },
+        {
+            "atomic_task": "TurnOnMicrowave",
+            "atomic_task_source": "registered",
+            "language_instruction": "Start the microwave.",
+            "predicate_names": ["microwave_started"],
+        },
+    ],
+    "WashFruitColander": [
+        {
+            "atomic_task": "PickPlaceCounterToSink",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the colander from the counter and place it in the sink.",
+            "predicate_names": ["colander_in_sink"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToSink",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the fruit from the counter and place it in the colander.",
+            "predicate_names": ["fruit_in_colander"],
+        },
+        {
+            "atomic_task": "TurnOnSinkFaucet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Move the colander under the sink water.",
+            "predicate_names": ["colander_under_water"],
+        },
+    ],
+    "WeighIngredients": [
+        {
+            "atomic_task": "PickPlaceCabinetToCounter",
+            "atomic_task_source": "registered",
+            "language_instruction": "Pick the packaged food from the cabinet and place it on the scale.",
+            "predicate_names": ["packaged_food_grasped", "packaged_food_on_scale", "packaged_food_upright", "gripper_released"],
+        },
+        {
+            "atomic_task": "CloseCabinet",
+            "atomic_task_source": "registered",
+            "language_instruction": "Close the cabinet.",
+            "predicate_names": ["cabinet_closed"],
+        },
+    ],
+}
+
+_TASK_SUBTASK_GROUP_OVERRIDES.update(
+    {
+        "MakeIceLemonade": [
+            ("fridge_open", "Open fridge.", ["fridge_open"]),
+            (
+                "lemon_grasped",
+                "Pick the lemon wedge from the fridge.",
+                ["lemon_grasped"],
+            ),
+            (
+                "lemon_in_glass",
+                "Move the lemon wedge to the glass.",
+                ["lemon_in_glass"],
+            ),
+            (
+                "ice_cube1_grasped",
+                "Pick the first ice cube from the ice bowl.",
+                ["ice_cube1_grasped"],
+            ),
+            (
+                "ice_cube1_in_glass",
+                "Move the first ice cube to the glass.",
+                ["ice_in_glass"],
+            ),
+            (
+                "ice_cube2_grasped",
+                "Pick the second ice cube from the ice bowl.",
+                ["ice_cube2_grasped"],
+            ),
+            (
+                "ingredients_released_in_glass",
+                "Move the second ice cube to the glass and release the ingredients.",
+                ["ice_in_glass", "gripper_released"],
+            ),
+        ],
+        "ScrubCuttingBoard": [
+            ("sponge_grasped", "Pick the sponge.", ["sponge_grasped"]),
+            (
+                "cutting_board_scrubbed",
+                "Scrub the cutting board with the sponge.",
+                [
+                    "board_contact_count_reached",
+                    "board_sweep_range_reached",
+                    "gripper_released",
+                ],
+            ),
+        ],
+        "StackBowlsCabinet": [
+            ("cabinet_open", "Open the cabinet.", ["cabinet_open"]),
+            (
+                "larger_bowl_grasped",
+                "Pick the larger bowl from the counter.",
+                ["larger_bowl_in_cabinet"],
+            ),
+            (
+                "larger_bowl_placed_in_cabinet",
+                "Place the larger bowl in the cabinet.",
+                ["larger_bowl_in_cabinet"],
+            ),
+            (
+                "larger_bowl_released_in_cabinet",
+                "Release the larger bowl in the cabinet.",
+                ["larger_bowl_in_cabinet"],
+            ),
+            (
+                "smaller_bowl_grasped",
+                "Pick the smaller bowl from the counter.",
+                ["smaller_bowl_in_cabinet"],
+            ),
+            (
+                "smaller_bowl_stacked_on_larger_bowl",
+                "Stack the smaller bowl on top of the larger bowl in the cabinet.",
+                ["smaller_bowl_in_cabinet", "bowls_stacked"],
+            ),
+            (
+                "smaller_bowl_released_on_stack",
+                "Release the smaller bowl on top of the larger bowl.",
+                ["smaller_bowl_in_cabinet", "bowls_stacked", "gripper_released"],
+            ),
+        ],
+        "StirVegetables": [
+            (
+                "first_vegetable_grasped",
+                "Pick the first vegetable from the counter.",
+                ["vegetable1_in_pot"],
+            ),
+            (
+                "first_vegetable_placed_in_pot",
+                "Place the first vegetable in the pot.",
+                ["vegetable1_in_pot"],
+            ),
+            (
+                "first_vegetable_released_in_pot",
+                "Release the first vegetable in the pot.",
+                ["vegetable1_in_pot"],
+            ),
+            (
+                "second_vegetable_grasped",
+                "Pick the second vegetable from the counter.",
+                ["vegetable2_in_pot"],
+            ),
+            (
+                "second_vegetable_placed_in_pot",
+                "Place the second vegetable in the pot.",
+                ["vegetable2_in_pot"],
+            ),
+            (
+                "second_vegetable_released_in_pot",
+                "Release the second vegetable in the pot.",
+                ["vegetable2_in_pot"],
+            ),
+            ("spatula_grasped", "Pick the spatula.", ["spatula_grasped"]),
+            (
+                "vegetables_stirred",
+                "Stir the vegetables in the pot with the spatula.",
+                ["vegetables_stirred", "spatula_released"],
+            ),
+        ],
+        "StoreLeftoversInBowl": [
+            (
+                "chicken_grasped",
+                "Pick the chicken drumstick.",
+                ["chicken_in_bowl"],
+            ),
+            (
+                "chicken_placed_in_bowl",
+                "Place the chicken drumstick in the bowl.",
+                ["chicken_in_bowl"],
+            ),
+            (
+                "chicken_released_in_bowl",
+                "Release the chicken drumstick in the bowl.",
+                ["chicken_in_bowl"],
+            ),
+            (
+                "vegetable_grasped",
+                "Pick the vegetable.",
+                ["vegetable_in_bowl"],
+            ),
+            (
+                "vegetable_placed_in_bowl",
+                "Place the vegetable in the bowl.",
+                ["vegetable_in_bowl"],
+            ),
+            (
+                "vegetable_released_in_bowl",
+                "Release the vegetable in the bowl.",
+                ["vegetable_in_bowl"],
+            ),
+            (
+                "bowl_with_leftovers_grasped",
+                "Pick the bowl containing the leftovers.",
+                ["bowl_in_fridge"],
+            ),
+            (
+                "bowl_with_leftovers_placed_in_fridge",
+                "Place the bowl containing the leftovers in the already-open fridge.",
+                ["bowl_in_fridge"],
+            ),
+            (
+                "bowl_with_leftovers_released_in_fridge",
+                "Release the bowl containing the leftovers in the fridge.",
+                ["bowl_in_fridge", "gripper_released"],
+            ),
+        ],
+        "GatherTableware": [
+            ("cabinets_open", "Open the cabinets.", ["cabinets_open"]),
+            (
+                "third_glass_grasped",
+                "Pick the third glass.",
+                ["glasses_clustered"],
+            ),
+            (
+                "third_glass_placed_with_others",
+                "Place the third glass in the cabinet with the other glasses.",
+                ["glasses_clustered"],
+            ),
+            (
+                "third_glass_released_with_others",
+                "Release the third glass in the cabinet with the other glasses.",
+                ["glasses_clustered"],
+            ),
+            (
+                "bowl_grasped",
+                "Pick the bowl.",
+                ["bowl_separated_from_glasses"],
+            ),
+            (
+                "bowl_placed_away_from_glasses",
+                "Place the bowl away from the glasses in the cabinet.",
+                ["bowl_separated_from_glasses"],
+            ),
+            (
+                "bowl_released_away_from_glasses",
+                "Release the bowl away from the glasses in the cabinet.",
+                ["bowl_separated_from_glasses", "gripper_released"],
+            ),
+        ],
+        "LoadDishwasher": [
+            (
+                "dishwasher_rack_accessible",
+                "Pull out the dishwasher rack.",
+                ["dishwasher_rack_accessible"],
+            ),
+            (
+                "dishes_grasped",
+                "Pick the cup and bowl from the counter.",
+                ["dishes_grasped"],
+            ),
+            (
+                "dishes_on_rack",
+                "Place the cup and bowl on the dishwasher rack.",
+                ["dishes_on_rack"],
+            ),
+            (
+                "dishes_released_on_rack",
+                "Release the cup and bowl on the dishwasher rack.",
+                ["dishes_on_rack"],
+            ),
+            ("dishwasher_closed", "Close the dishwasher.", ["dishwasher_closed"]),
+        ],
+        "PanTransfer": [
+            ("pan_grasped", "Pick the pan from the stove.", ["pan_grasped"]),
+            (
+                "pan_tilted_to_transfer_vegetable",
+                "Keep holding the pan and tilt it to dump the vegetable onto the plate without touching the food.",
+                ["vegetable_on_plate", "robot_did_not_touch_food"],
+            ),
+            (
+                "pan_replaced_on_stove",
+                "Place the pan back on the stove and release it.",
+                ["pan_on_stove", "gripper_released"],
+            ),
+        ],
+        "PackIdenticalLunches": [
+            ("fridge_open", "Open the fridge.", ["fridge_open"]),
+            (
+                "first_vegetable_grasped",
+                "Pick the first vegetable from the fridge.",
+                ["tupperware0_has_one_vegetable"],
+            ),
+            (
+                "first_vegetable_packed",
+                "Place the first vegetable in the first tupperware.",
+                ["tupperware0_has_one_vegetable"],
+            ),
+            (
+                "first_meat_grasped",
+                "Pick the first meat item from the fridge.",
+                ["tupperware0_has_one_meat"],
+            ),
+            (
+                "first_meat_packed",
+                "Place the first meat item in the first tupperware.",
+                ["tupperware0_has_one_meat"],
+            ),
+            (
+                "second_vegetable_grasped",
+                "Pick the second vegetable from the fridge.",
+                ["tupperware1_has_one_vegetable"],
+            ),
+            (
+                "second_vegetable_packed",
+                "Place the second vegetable in the second tupperware.",
+                ["tupperware1_has_one_vegetable"],
+            ),
+            (
+                "second_meat_grasped",
+                "Pick the second meat item from the fridge.",
+                ["tupperware1_has_one_meat"],
+            ),
+            (
+                "second_meat_packed",
+                "Place the second meat item in the second tupperware.",
+                ["tupperware1_has_one_meat"],
+            ),
+            (
+                "packed_lunches_released",
+                "Release the food after both tupperwares contain one vegetable and one meat item.",
+                [
+                    "tupperware0_has_one_vegetable",
+                    "tupperware0_has_one_meat",
+                    "tupperware1_has_one_vegetable",
+                    "tupperware1_has_one_meat",
+                    "objects_not_duplicated",
+                    "gripper_released",
+                ],
+            ),
+        ],
+        "PrepareCoffee": [
+            ("mug_grasped", "Pick the mug.", ["mug_grasped"]),
+            (
+                "mug_under_dispenser",
+                "Place the mug under the coffee machine dispenser.",
+                ["mug_under_dispenser"],
+            ),
+            (
+                "mug_released_under_dispenser",
+                "Release the mug under the coffee machine dispenser.",
+                ["mug_under_dispenser", "gripper_released"],
+            ),
+            ("coffee_started", "Start the coffee machine.", ["coffee_started"]),
+        ],
+        "RecycleBottlesByType": [
+            (
+                "middle_plastic_bottle_grasped",
+                "Pick the middle plastic bottle.",
+                ["plastic_bottles_clustered"],
+            ),
+            (
+                "middle_plastic_bottle_clustered",
+                "Place the middle plastic bottle with the plastic bottle group.",
+                ["plastic_bottles_clustered"],
+            ),
+            (
+                "middle_plastic_bottle_released",
+                "Release the middle plastic bottle with the plastic bottle group.",
+                ["plastic_bottles_clustered"],
+            ),
+            (
+                "middle_glass_bottle_grasped",
+                "Pick the middle glass bottle.",
+                ["glass_bottles_clustered"],
+            ),
+            (
+                "middle_glass_bottle_clustered",
+                "Place the middle glass bottle with the glass bottle group.",
+                ["glass_bottles_clustered"],
+            ),
+            (
+                "middle_glass_bottle_released",
+                "Release the middle glass bottle with the glass bottle group.",
+                ["glass_bottles_clustered"],
+            ),
+            (
+                "mystery_bottle_clustered",
+                "Identify the mystery bottle and place it with the matching bottle group.",
+                ["plastic_bottles_clustered", "glass_bottles_clustered"],
+            ),
+            (
+                "bottles_released_on_table",
+                "Release the bottles on the table.",
+                ["bottles_on_table", "gripper_released"],
+            ),
+        ],
+        "PortionHotDogs": [
+            (
+                "first_bun_grasped",
+                "Pick one bun from the bowl.",
+                ["plate1_has_one_bun"],
+            ),
+            (
+                "first_bun_on_plate",
+                "Place the bun on the first plate.",
+                ["plate1_has_one_bun"],
+            ),
+            (
+                "first_sausage_grasped",
+                "Pick one sausage from the bowl.",
+                ["plate1_has_one_sausage"],
+            ),
+            (
+                "first_sausage_on_plate",
+                "Place the sausage on the first plate.",
+                ["plate1_has_one_sausage"],
+            ),
+            (
+                "second_bun_grasped",
+                "Pick the remaining bun from the bowl.",
+                ["plate2_has_one_bun"],
+            ),
+            (
+                "second_bun_on_plate",
+                "Place the bun on the second plate.",
+                ["plate2_has_one_bun"],
+            ),
+            (
+                "second_sausage_grasped",
+                "Pick the remaining sausage from the bowl.",
+                ["plate2_has_one_sausage"],
+            ),
+            (
+                "second_sausage_on_plate",
+                "Place the sausage on the second plate.",
+                ["plate2_has_one_sausage"],
+            ),
+            (
+                "hot_dogs_released",
+                "Release the food after each plate has one bun and one sausage.",
+                [
+                    "plate1_has_one_bun",
+                    "plate1_has_one_sausage",
+                    "plate2_has_one_bun",
+                    "plate2_has_one_sausage",
+                    "gripper_released",
+                ],
+            ),
+        ],
+        "SteamInMicrowave": [
+            (
+                "vegetable_grasped",
+                "Pick the vegetable from the sink.",
+                ["vegetable_in_bowl"],
+            ),
+            (
+                "vegetable_placed_in_bowl",
+                "Place the vegetable in the bowl.",
+                ["vegetable_in_bowl"],
+            ),
+            (
+                "vegetable_released_in_bowl",
+                "Release the vegetable in the bowl.",
+                ["vegetable_in_bowl"],
+            ),
+            ("bowl_grasped", "Pick the bowl.", ["bowl_in_microwave"]),
+            (
+                "bowl_placed_in_microwave",
+                "Place the bowl inside the microwave.",
+                ["bowl_in_microwave"],
+            ),
+            (
+                "bowl_released_in_microwave",
+                "Release the bowl inside the microwave.",
+                ["bowl_in_microwave"],
+            ),
+            ("microwave_closed", "Close microwave.", ["microwave_closed"]),
+            ("microwave_started", "Start microwave.", ["microwave_started"]),
+        ],
+        "WashLettuce": [
+            ("water_on", "Turn on the sink faucet.", ["water_on"]),
+            (
+                "lettuce_rinsed",
+                "Move the lettuce under the running water and rinse it.",
+                ["lettuce_under_water", "washed_time_reached"],
+            ),
+        ],
+        "GarnishPancake": [
+            ("fridge_open", "Open the fridge.", ["fridge_open"]),
+            ("strawberry_grasped", "Pick the strawberry from the fridge.", ["strawberry_grasped"]),
+            (
+                "strawberry_on_pancake",
+                "Place the strawberry on the pancake.",
+                ["strawberry_on_pancake"],
+            ),
+            (
+                "strawberry_released_on_pancake",
+                "Release the strawberry on the pancake.",
+                ["strawberry_on_pancake", "gripper_released"],
+            ),
+            ("pancake_on_plate", "Place the pancake on the plate.", ["pancake_on_plate"]),
+            (
+                "plate_on_table",
+                "Move the plate with the pancake to the table.",
+                ["plate_on_table"],
+            ),
+        ],
+        "SeparateFreezerRack": [
+            ("freezer_open", "Open the freezer.", ["freezer_open"]),
+            (
+                "meat_container_ready",
+                "Verify the meat is in the meat container.",
+                ["meat_in_tupperware"],
+            ),
+            (
+                "vegetable_container_ready",
+                "Verify both vegetables are in the vegetable container.",
+                ["vegetables_in_tupperware"],
+            ),
+            (
+                "meat_container_grasped",
+                "Pick the meat container.",
+                ["meat_container_on_second_rack"],
+            ),
+            (
+                "meat_container_placed_on_second_rack",
+                "Place the meat container on the second freezer rack.",
+                ["meat_container_on_second_rack"],
+            ),
+            (
+                "vegetable_container_grasped",
+                "Pick the vegetable container.",
+                ["vegetable_container_on_top_rack"],
+            ),
+            (
+                "vegetable_container_placed_on_top_rack",
+                "Place the vegetable container on the top freezer rack.",
+                ["vegetable_container_on_top_rack"],
+            ),
+            (
+                "freezer_containers_released",
+                "Release the freezer containers on their target racks.",
+                [
+                    "meat_container_on_second_rack",
+                    "vegetable_container_on_top_rack",
+                    "gripper_released",
+                ],
+            ),
+        ],
+    }
+)
+
+_COMPOSITE_ATOMIC_TASK_OVERRIDES.update(
+    {
+        "MakeIceLemonade": [
+            {
+                "atomic_task": "OpenFridge",
+                "atomic_task_source": "registered",
+                "language_instruction": "Open the fridge.",
+                "predicate_names": ["fridge_open"],
+            },
+            {
+                "atomic_task": "PickPlaceFridgeToGlass",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the lemon wedge from the fridge and place it in the glass of lemonade.",
+                "predicate_names": ["lemon_grasped", "lemon_in_glass"],
+            },
+            {
+                "atomic_task": "PickPlaceCounterToGlass",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the first ice cube from the ice bowl and place it in the glass of lemonade.",
+                "predicate_names": ["ice_cube1_grasped", "ice_in_glass"],
+            },
+            {
+                "atomic_task": "PickPlaceCounterToGlass",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the second ice cube from the ice bowl and place it in the glass of lemonade.",
+                "predicate_names": [
+                    "ice_cube2_grasped",
+                    "ice_in_glass",
+                    "gripper_released",
+                ],
+            },
+        ],
+        "ScrubCuttingBoard": [
+            {
+                "atomic_task": "PickPlaceCounterToCuttingBoard",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the sponge from the counter.",
+                "predicate_names": ["sponge_grasped"],
+            },
+            {
+                "atomic_task": "ScrubCuttingBoard",
+                "atomic_task_source": "derived",
+                "language_instruction": "Scrub the cutting board with the sponge.",
+                "predicate_names": [
+                    "board_contact_count_reached",
+                    "board_sweep_range_reached",
+                    "gripper_released",
+                ],
+            },
+        ],
+        "StackBowlsCabinet": [
+            {
+                "atomic_task": "OpenCabinet",
+                "atomic_task_source": "registered",
+                "language_instruction": "Open the cabinet.",
+                "predicate_names": ["cabinet_open"],
+            },
+            {
+                "atomic_task": "PickPlaceCounterToCabinet",
+                "atomic_task_source": "registered",
+                "language_instruction": "Pick the larger bowl from the counter and place it in the cabinet.",
+                "predicate_names": ["larger_bowl_in_cabinet"],
+            },
+            {
+                "atomic_task": "PickPlaceCounterToCabinet",
+                "atomic_task_source": "registered",
+                "language_instruction": "Pick the smaller bowl from the counter and place it in the cabinet stacked on top of the larger bowl.",
+                "predicate_names": [
+                    "smaller_bowl_in_cabinet",
+                    "bowls_stacked",
+                    "gripper_released",
+                ],
+            },
+        ],
+        "StirVegetables": [
+            {
+                "atomic_task": "PickPlaceCounterToStove",
+                "atomic_task_source": "registered",
+                "language_instruction": "Pick the first vegetable from the counter and place it in the pot.",
+                "predicate_names": ["vegetable1_in_pot"],
+            },
+            {
+                "atomic_task": "PickPlaceCounterToStove",
+                "atomic_task_source": "registered",
+                "language_instruction": "Pick the second vegetable from the counter and place it in the pot.",
+                "predicate_names": ["vegetable2_in_pot"],
+            },
+            {
+                "atomic_task": "PickPlaceCounterToStove",
+                "atomic_task_source": "registered",
+                "language_instruction": "Pick the spatula from the counter and place it in the pot.",
+                "predicate_names": ["spatula_grasped"],
+            },
+            {
+                "atomic_task": "StirVegetables",
+                "atomic_task_source": "derived",
+                "language_instruction": "Stir the vegetables in the pot with the spatula.",
+                "predicate_names": ["vegetables_stirred", "spatula_released"],
+            },
+        ],
+        "StoreLeftoversInBowl": [
+            {
+                "atomic_task": "PickPlaceCounterToBowl",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the chicken drumstick and place it in the bowl.",
+                "predicate_names": ["chicken_in_bowl"],
+            },
+            {
+                "atomic_task": "PickPlaceCounterToBowl",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the vegetable and place it in the bowl.",
+                "predicate_names": ["vegetable_in_bowl"],
+            },
+            {
+                "atomic_task": "PickPlaceBowlToFridge",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the bowl containing the leftovers and place it in the already-open fridge.",
+                "predicate_names": ["bowl_in_fridge", "gripper_released"],
+            },
+        ],
+        "GatherTableware": [
+            {
+                "atomic_task": "OpenCabinet",
+                "atomic_task_source": "registered",
+                "language_instruction": "Open the cabinets.",
+                "predicate_names": ["cabinets_open"],
+            },
+            {
+                "atomic_task": "PickPlaceCabinetToCabinet",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the third glass and place it in the cabinet with the other glasses.",
+                "predicate_names": ["glasses_clustered"],
+            },
+            {
+                "atomic_task": "PickPlaceCabinetToCabinet",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the bowl and move it away from the glasses in the cabinet.",
+                "predicate_names": [
+                    "bowl_separated_from_glasses",
+                    "gripper_released",
+                ],
+            },
+        ],
+        "PackIdenticalLunches": [
+            {
+                "atomic_task": "OpenFridge",
+                "atomic_task_source": "registered",
+                "language_instruction": "Open the fridge.",
+                "predicate_names": ["fridge_open"],
+            },
+            {
+                "atomic_task": "PickPlaceFridgeToTupperware",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the first vegetable from the fridge and place it in the first tupperware.",
+                "predicate_names": ["tupperware0_has_one_vegetable"],
+            },
+            {
+                "atomic_task": "PickPlaceFridgeToTupperware",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the first meat item from the fridge and place it in the first tupperware.",
+                "predicate_names": ["tupperware0_has_one_meat"],
+            },
+            {
+                "atomic_task": "PickPlaceFridgeToTupperware",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the second vegetable from the fridge and place it in the second tupperware.",
+                "predicate_names": ["tupperware1_has_one_vegetable"],
+            },
+            {
+                "atomic_task": "PickPlaceFridgeToTupperware",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the second meat item from the fridge and place it in the second tupperware.",
+                "predicate_names": [
+                    "tupperware1_has_one_meat",
+                    "objects_not_duplicated",
+                    "gripper_released",
+                ],
+            },
+        ],
+        "PortionHotDogs": [
+            {
+                "atomic_task": "PickPlaceBowlToPlate",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick one bun from the bowl and place it on the first plate.",
+                "predicate_names": ["plate1_has_one_bun"],
+            },
+            {
+                "atomic_task": "PickPlaceBowlToPlate",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick one sausage from the bowl and place it on the first plate.",
+                "predicate_names": ["plate1_has_one_sausage"],
+            },
+            {
+                "atomic_task": "PickPlaceBowlToPlate",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the remaining bun from the bowl and place it on the second plate.",
+                "predicate_names": ["plate2_has_one_bun"],
+            },
+            {
+                "atomic_task": "PickPlaceBowlToPlate",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the remaining sausage from the bowl and place it on the second plate.",
+                "predicate_names": ["plate2_has_one_sausage", "gripper_released"],
+            },
+        ],
+        "RecycleBottlesByType": [
+            {
+                "atomic_task": "PickPlaceCounterToCounter",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the middle plastic bottle and place it with the plastic bottle group.",
+                "predicate_names": ["plastic_bottles_clustered"],
+            },
+            {
+                "atomic_task": "PickPlaceCounterToCounter",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the middle glass bottle and place it with the glass bottle group.",
+                "predicate_names": ["glass_bottles_clustered"],
+            },
+            {
+                "atomic_task": "PickPlaceCounterToCounter",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the mystery bottle and place it with the matching bottle group.",
+                "predicate_names": [
+                    "plastic_bottles_clustered",
+                    "glass_bottles_clustered",
+                    "bottles_on_table",
+                    "gripper_released",
+                ],
+            },
+        ],
+        "SeparateFreezerRack": [
+            {
+                "atomic_task": "OpenFreezer",
+                "atomic_task_source": "derived",
+                "language_instruction": "Open the freezer.",
+                "predicate_names": ["freezer_open"],
+            },
+            {
+                "atomic_task": "VerifyContainerContents",
+                "atomic_task_source": "derived",
+                "language_instruction": "Verify the meat is in the meat container and both vegetables are in the vegetable container.",
+                "predicate_names": ["meat_in_tupperware", "vegetables_in_tupperware"],
+            },
+            {
+                "atomic_task": "PickPlaceCounterToFreezer",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the meat container and place it on the second freezer rack.",
+                "predicate_names": ["meat_container_on_second_rack"],
+            },
+            {
+                "atomic_task": "PickPlaceCounterToFreezer",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the vegetable container and place it on the top freezer rack.",
+                "predicate_names": [
+                    "vegetable_container_on_top_rack",
+                    "gripper_released",
+                ],
+            },
+        ],
+    }
+)
 
 
 def _plain_label(name):

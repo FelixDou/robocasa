@@ -10,20 +10,20 @@ import numpy as np
 
 MODULE_PATH = (
     Path(__file__).resolve().parents[1]
-    / "robocasa/recovery/create_atomic_failure_dataset.py"
+    / "robocasa/recovery/create_recovery_failure_dataset.py"
 )
 
 
 def load_module():
     spec = importlib.util.spec_from_file_location(
-        "create_atomic_failure_dataset", MODULE_PATH
+        "create_recovery_failure_dataset", MODULE_PATH
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-class TestAtomicFailureDataset(unittest.TestCase):
+class TestRecoveryFailureDataset(unittest.TestCase):
     def setUp(self):
         self.module = load_module()
 
@@ -194,7 +194,10 @@ class TestAtomicFailureDataset(unittest.TestCase):
         self.assertEqual(sample["subtask_sequence_source"], "task_predicate_description_mapping")
         self.assertEqual(sample["subtask_sequence"][0]["subtask_id"], "object_grasped")
         self.assertEqual(sample["subtask_sequence"][0]["kind"], "semantic_subtask")
-        self.assertEqual(sample["subtask_sequence"][0]["instruction"], "Pick object.")
+        self.assertEqual(
+            sample["subtask_sequence"][0]["instruction"],
+            "Pick object from counter.",
+        )
         self.assertEqual(sample["subtask_sequence"][0]["predicate_names"], ["object_grasped"])
         self.assertTrue(sample["subtask_sequence"][0]["success"])
         self.assertEqual(
@@ -212,7 +215,7 @@ class TestAtomicFailureDataset(unittest.TestCase):
             [
                 {
                     "subtask_id": "object_grasped",
-                    "instruction": "Pick object.",
+                    "instruction": "Pick object from counter.",
                     "predicate_names": ["object_grasped"],
                 }
             ],
@@ -227,15 +230,238 @@ class TestAtomicFailureDataset(unittest.TestCase):
         )
         self.assertEqual(sample["max_subtask_progress"], 0.5)
 
+    def test_pickplace_final_placement_and_release_are_one_subtask(self):
+        summary = {
+            "task_success": False,
+            "final_subtask_eval": {
+                "required_predicates": [
+                    "object_grasped",
+                    "object_on_counter",
+                    "final_placement_valid",
+                    "gripper_released",
+                ],
+                "predicates": {
+                    "object_grasped": {"value": True, "required": True},
+                    "object_on_counter": {"value": True, "required": True},
+                    "final_placement_valid": {"value": False, "required": True},
+                    "gripper_released": {"value": False, "required": True},
+                },
+            },
+            "ordered_completed_required_subtasks": [
+                "object_grasped",
+                "object_on_counter",
+            ],
+            "failed_required_predicates_final": [
+                "final_placement_valid",
+                "gripper_released",
+            ],
+        }
+
+        sequence = self.module.mapped_subtask_sequence(
+            summary, "PickPlaceDrawerToCounter"
+        )
+
+        self.assertEqual(
+            [entry["subtask_id"] for entry in sequence],
+            [
+                "object_grasped",
+                "object_on_counter",
+                "release_object_at_valid_counter_location",
+            ],
+        )
+        self.assertEqual(
+            sequence[-1]["predicate_names"],
+            ["final_placement_valid", "gripper_released"],
+        )
+        self.assertEqual(
+            sequence[-1]["instruction"],
+            "Release the target object at a valid counter location.",
+        )
+        self.assertFalse(sequence[-1]["success"])
+
+    def test_composite_atomic_task_sequence_uses_task_level_steps(self):
+        summary = {
+            "final_subtask_eval": {
+                "required_predicates": [
+                    "vegetable_in_bowl",
+                    "bowl_in_microwave",
+                    "microwave_closed",
+                    "microwave_started",
+                ],
+                "predicates": {
+                    "vegetable_in_bowl": {"value": True},
+                    "bowl_in_microwave": {"value": False},
+                    "microwave_closed": {"value": False},
+                    "microwave_started": {"value": False},
+                },
+            },
+            "ordered_completed_required_subtasks": ["vegetable_in_bowl"],
+            "failed_required_predicates_final": ["bowl_in_microwave"],
+        }
+
+        sequence = self.module.mapped_composite_atomic_task_sequence(
+            summary, "SteamInMicrowave"
+        )
+
+        self.assertEqual(
+            [entry["step_id"] for entry in sequence],
+            [
+                "PickPlaceSinkToBowl",
+                "PickPlaceCounterToMicrowave",
+                "CloseMicrowave",
+                "TurnOnMicrowave",
+            ],
+        )
+        self.assertEqual(sequence[0]["atomic_task"], "PickPlaceSinkToBowl")
+        self.assertEqual(sequence[0]["atomic_task_source"], "derived")
+        self.assertFalse(sequence[0]["is_registered_atomic_task"])
+        self.assertEqual(
+            sequence[0]["language_instruction"],
+            "Pick the vegetable from the sink and place it in the bowl.",
+        )
+        self.assertTrue(sequence[0]["success"])
+        self.assertTrue(sequence[1]["is_registered_atomic_task"])
+        self.assertFalse(sequence[1]["success"])
+
+    def test_make_ice_lemonade_groups_pick_then_place_subtasks(self):
+        summary = {
+            "final_subtask_eval": {
+                "required_predicates": [
+                    "fridge_open",
+                    "lemon_grasped",
+                    "ice_cube1_grasped",
+                    "ice_cube2_grasped",
+                    "lemon_in_glass",
+                    "ice_in_glass",
+                    "gripper_released",
+                ],
+                "predicates": {
+                    name: {"value": False, "required": True}
+                    for name in [
+                        "fridge_open",
+                        "lemon_grasped",
+                        "ice_cube1_grasped",
+                        "ice_cube2_grasped",
+                        "lemon_in_glass",
+                        "ice_in_glass",
+                        "gripper_released",
+                    ]
+                },
+            },
+            "ordered_completed_required_subtasks": [],
+            "failed_required_predicates_final": ["lemon_grasped"],
+        }
+
+        atomic_sequence = self.module.mapped_composite_atomic_task_sequence(
+            summary, "MakeIceLemonade"
+        )
+        subtask_sequence = self.module.mapped_subtask_sequence(
+            summary, "MakeIceLemonade"
+        )
+
+        self.assertEqual(
+            [entry["step_id"] for entry in atomic_sequence],
+            [
+                "OpenFridge",
+                "PickPlaceFridgeToGlass",
+                "PickPlaceCounterToGlass",
+                "PickPlaceCounterToGlass",
+            ],
+        )
+        self.assertEqual(
+            atomic_sequence[1]["predicate_names"],
+            ["lemon_grasped", "lemon_in_glass"],
+        )
+        self.assertEqual(
+            atomic_sequence[2]["predicate_names"],
+            ["ice_cube1_grasped", "ice_in_glass"],
+        )
+        self.assertEqual(
+            atomic_sequence[3]["predicate_names"],
+            ["ice_cube2_grasped", "ice_in_glass", "gripper_released"],
+        )
+        self.assertEqual(
+            [entry["subtask_id"] for entry in subtask_sequence],
+            [
+                "fridge_open",
+                "lemon_grasped",
+                "lemon_in_glass",
+                "ice_cube1_grasped",
+                "ice_cube1_in_glass",
+                "ice_cube2_grasped",
+                "ingredients_released_in_glass",
+            ],
+        )
+        self.assertEqual(
+            subtask_sequence[3]["instruction"],
+            "Pick the first ice cube from the ice bowl.",
+        )
+        self.assertEqual(
+            subtask_sequence[-1]["predicate_names"],
+            ["ice_in_glass", "gripper_released"],
+        )
+
+    def test_composite_pick_place_steps_expand_to_atomic_subtasks(self):
+        summary = {
+            "final_subtask_eval": {
+                "required_predicates": [
+                    "cabinet_open",
+                    "bread_in_basket",
+                    "basket_on_dining_counter",
+                    "gripper_released",
+                ],
+                "predicates": {
+                    name: {"value": False, "required": True}
+                    for name in [
+                        "cabinet_open",
+                        "bread_in_basket",
+                        "basket_on_dining_counter",
+                        "gripper_released",
+                    ]
+                },
+            },
+            "ordered_completed_required_subtasks": [],
+            "failed_required_predicates_final": ["bread_in_basket"],
+        }
+
+        sequence = self.module.mapped_subtask_sequence(summary, "ArrangeBreadBasket")
+
+        self.assertEqual(sequence[0]["subtask_id"], "OpenCabinet_1")
+        self.assertEqual(
+            [entry["subtask_id"] for entry in sequence[1:4]],
+            [
+                "PickPlaceCabinetToCounter_2_pick",
+                "PickPlaceCabinetToCounter_2_place",
+                "PickPlaceCabinetToCounter_2_release",
+            ],
+        )
+        self.assertEqual(
+            sequence[1]["predicate_names"],
+            ["bread_in_basket"],
+        )
+        self.assertEqual(
+            sequence[3]["predicate_names"],
+            ["bread_in_basket"],
+        )
+
     def test_validate_atomic_tasks_rejects_unknown_by_default(self):
         self.module.load_registered_atomic_task_names = lambda: {"OpenDrawer"}
+        self.module.load_composite_atomic_task_overrides = lambda: {}
 
-        with self.assertRaisesRegex(ValueError, "Non-atomic or unknown"):
+        with self.assertRaisesRegex(ValueError, "Unknown task"):
             self.module.validate_atomic_tasks(["OpenDrawer", "PrepareCoffee"])
 
         self.module.validate_atomic_tasks(
             ["PrepareCoffee"], allow_unregistered=True
         )
+
+    def test_validate_dataset_tasks_accepts_curated_composite(self):
+        self.module.load_registered_atomic_task_names = lambda: {"OpenDrawer"}
+        self.module.load_composite_atomic_task_overrides = lambda: {
+            "PrepareCoffee": [{"atomic_task": "PickPlaceCounterToCounter"}]
+        }
+
+        self.module.validate_dataset_tasks(["OpenDrawer", "PrepareCoffee"])
 
     def test_run_dataset_creation_with_mock_atomic_env(self):
         class FakeEnv:
@@ -350,9 +576,10 @@ class TestAtomicFailureDataset(unittest.TestCase):
 
             self.module.run_dataset_creation(args)
 
-            manifest_path = output_dir / "atomic_failure_dataset.json"
+            manifest_path = output_dir / "recovery_failure_dataset.json"
             manifest = json.loads(manifest_path.read_text())
             self.assertFalse(manifest["partial"])
+            self.assertEqual(manifest["dataset_type"], "recovery_failure_dataset")
             self.assertEqual(manifest["summary"]["num_failures"], 1)
             sample = manifest["samples"][0]
             self.assertEqual(sample["task_name"], "OpenDrawer")
