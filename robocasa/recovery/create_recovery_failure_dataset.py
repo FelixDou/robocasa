@@ -471,9 +471,7 @@ def mapped_subtask_sequence(summary, task_name):
             for name, predicate in zip(predicate_names, predicate_entries)
         )
         success = predicates_success and not blocked_by_previous
-        if not success and any(
-            bool(predicate.get("required", True)) for predicate in predicate_entries
-        ):
+        if not success:
             blocked_by_previous = True
         sequence.append(
             {

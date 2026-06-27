@@ -317,6 +317,74 @@ class TestRecoveryFailureDataset(unittest.TestCase):
             "blender_lid_on_blender",
         )
 
+    def test_subtask_completion_is_prefix_ordered_for_all_known_tasks(self):
+        known_tasks = (
+            set(self.module.load_registered_atomic_task_names())
+            | set(self.module.load_composite_atomic_task_overrides())
+        )
+        self.assertEqual(len(known_tasks), 50)
+
+        group_overrides = self.module.load_task_subtask_group_overrides()
+        composite_overrides = self.module.load_composite_atomic_task_overrides()
+        description_overrides = self.module.load_task_subtask_description_overrides()
+
+        for task_name in sorted(known_tasks):
+            predicate_names = []
+            if task_name in group_overrides:
+                for _, _, names in group_overrides[task_name]:
+                    predicate_names.extend(names)
+            elif task_name in composite_overrides:
+                for step in composite_overrides[task_name]:
+                    predicate_names.extend(step.get("predicate_names") or [])
+            else:
+                predicate_names.extend(description_overrides.get(task_name, {}))
+
+            required_predicates = list(dict.fromkeys(predicate_names))
+            if len(required_predicates) < 2:
+                continue
+
+            all_true_summary = {
+                "task_success": False,
+                "final_subtask_eval": {
+                    "required_predicates": required_predicates,
+                    "predicates": {
+                        name: {"value": True, "required": True}
+                        for name in required_predicates
+                    },
+                },
+                "ordered_completed_required_subtasks": [],
+                "failed_required_predicates_final": [],
+            }
+            all_true_sequence = self.module.mapped_subtask_sequence(
+                all_true_summary, task_name
+            )
+            if len(all_true_sequence) < 2:
+                continue
+
+            first_predicates = set(all_true_sequence[0]["predicate_names"])
+            summary = {
+                "task_success": False,
+                "final_subtask_eval": {
+                    "required_predicates": required_predicates,
+                    "predicates": {
+                        name: {
+                            "value": name not in first_predicates,
+                            "required": True,
+                        }
+                        for name in required_predicates
+                    },
+                },
+                "ordered_completed_required_subtasks": [],
+                "failed_required_predicates_final": list(first_predicates),
+            }
+
+            sequence = self.module.mapped_subtask_sequence(summary, task_name)
+            self.assertFalse(sequence[0]["success"], task_name)
+            for entry in sequence[1:]:
+                self.assertFalse(entry["success"], task_name)
+                if entry["predicate_success"]:
+                    self.assertTrue(entry["blocked_by_previous"], task_name)
+
     def test_composite_atomic_task_sequence_uses_task_level_steps(self):
         summary = {
             "final_subtask_eval": {
