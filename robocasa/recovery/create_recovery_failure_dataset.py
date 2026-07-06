@@ -391,13 +391,14 @@ def mapped_subtask_sequence(summary, task_name):
     failed = set(summary.get("failed_required_predicates_final", []))
     sequence = []
     required_predicates = list(final_eval.get("required_predicates") or [])
+    available_predicates = set(predicates) | set(required_predicates)
     if group_overrides:
         groups = [
             {
                 "subtask_id": subtask_id,
                 "instruction": instruction,
                 "predicate_names": [
-                    name for name in predicate_names if name in required_predicates
+                    name for name in predicate_names if name in available_predicates
                 ],
             }
             for subtask_id, instruction, predicate_names in group_overrides
@@ -425,7 +426,7 @@ def mapped_subtask_sequence(summary, task_name):
         for index, step in enumerate(composite_atomic_steps, start=1):
             groups.extend(
                 _expand_composite_atomic_step_subtasks(
-                    step, index, required_predicates
+                    step, index, list(predicates)
                 )
             )
         grouped = {
@@ -447,6 +448,12 @@ def mapped_subtask_sequence(summary, task_name):
             if name not in grouped
         )
     else:
+        ordered_predicates = [
+            name for name in descriptions if name in available_predicates
+        ] or list(required_predicates)
+        ordered_predicates.extend(
+            name for name in required_predicates if name not in ordered_predicates
+        )
         groups = [
             {
                 "subtask_id": name,
@@ -457,7 +464,7 @@ def mapped_subtask_sequence(summary, task_name):
                 ),
                 "predicate_names": [name],
             }
-            for name in required_predicates
+            for name in ordered_predicates
         ]
 
     blocked_by_previous = False
@@ -470,6 +477,7 @@ def mapped_subtask_sequence(summary, task_name):
             bool(predicate.get("value", False)) or name in completed
             for name, predicate in zip(predicate_names, predicate_entries)
         )
+        failed_here = (not predicates_success) and not blocked_by_previous
         success = predicates_success and not blocked_by_previous
         if not success:
             blocked_by_previous = True
@@ -496,7 +504,7 @@ def mapped_subtask_sequence(summary, task_name):
                     bool(predicate.get("required", True))
                     for predicate in predicate_entries
                 ),
-                "failed": any(name in failed for name in predicate_names),
+                "failed": failed_here or any(name in failed for name in predicate_names),
             }
         )
     return sequence
@@ -562,12 +570,18 @@ def mapped_composite_atomic_task_sequence(summary, task_name):
 
 def mapped_atomic_step_sequence(summary, task_plan, task_name, instruction):
     """Return the atomic-task layer for an atomic-task failure sample."""
-    final_eval = summary.get("final_subtask_eval") or {}
-    required = list(final_eval.get("required_predicates") or [])
     task_success = bool(summary.get("task_success"))
     atomic_skill = infer_atomic_skill_from_plan(task_plan)
     if atomic_skill is None:
         atomic_skill = infer_atomic_skill_from_task(task_name, summary=summary)
+    semantic_sequence = mapped_subtask_sequence(summary, task_name)
+    semantic_predicates = list(
+        dict.fromkeys(
+            name
+            for entry in semantic_sequence
+            for name in entry.get("predicate_names", [])
+        )
+    )
 
     return [
         {
@@ -579,18 +593,27 @@ def mapped_atomic_step_sequence(summary, task_plan, task_name, instruction):
             "instruction": instruction,
             "success": task_success,
             "value_final": task_success,
-            "predicate_names": required,
-            "subtask_ids": [
-                entry["subtask_id"]
-                for entry in mapped_subtask_sequence(summary, task_name)
-            ],
+            "predicate_names": semantic_predicates,
+            "subtask_ids": [entry["subtask_id"] for entry in semantic_sequence],
             "completed_predicates": list(
-                summary.get("ordered_completed_required_subtasks", [])
+                dict.fromkeys(
+                    name
+                    for entry in semantic_sequence
+                    if entry.get("success")
+                    for name in entry.get("predicate_names", [])
+                )
             ),
             "failed_predicates": (
                 []
                 if task_success
-                else list(summary.get("failed_required_predicates_final", []))
+                else list(
+                    dict.fromkeys(
+                        name
+                        for entry in semantic_sequence
+                        if entry.get("failed")
+                        for name in entry.get("predicate_names", [])
+                    )
+                )
             ),
         }
     ]
@@ -640,6 +663,48 @@ def failed_subtask(summary, task_name):
                 "predicate_names": entry["predicate_names"],
             }
     return None
+
+
+def subtask_completion_steps(summary, task_name, subtask_evals):
+    """Return first successful frame for each sequential semantic subtask.
+
+    This keeps the dataset compact while preserving the timing information
+    needed to locate progress in the rollout video/actions. It uses the mapped
+    semantic subtask sequence, including transient predicates such as grasping,
+    and applies the same prefix-order rule as the final sample summary.
+    """
+    sequence = mapped_subtask_sequence(summary, task_name)
+    if not sequence:
+        return []
+
+    completion_steps = []
+    next_index = 0
+    for step_i, subtask_eval in enumerate(subtask_evals or []):
+        if not subtask_eval:
+            continue
+        predicates = subtask_eval.get("predicates") or {}
+        while next_index < len(sequence):
+            entry = sequence[next_index]
+            predicate_names = entry.get("predicate_names") or []
+            if not predicate_names:
+                break
+            predicate_success = all(
+                bool((predicates.get(name) or {}).get("value", False))
+                for name in predicate_names
+            )
+            if not predicate_success:
+                break
+            completion_steps.append(
+                {
+                    "subtask_id": entry["subtask_id"],
+                    "instruction": entry["instruction"],
+                    "predicate_names": predicate_names,
+                    "first_success_step": step_i,
+                    "first_success_frame": step_i,
+                }
+            )
+            next_index += 1
+    return completion_steps
 
 
 def infer_failure_stage(summary):
@@ -891,6 +956,9 @@ def build_sample(
         "failed_atomic_step": failed_atomic_step(summary, task_name),
         "completed_subtasks": completed_subtasks(summary, task_name),
         "failed_subtask": failed_subtask(summary, task_name),
+        "subtask_completion_steps": subtask_completion_steps(
+            summary, task_name, rollout.get("subtask_evals") or []
+        ),
         "completed_subtask_predicates": summary.get(
             "ordered_completed_required_subtasks", []
         ),

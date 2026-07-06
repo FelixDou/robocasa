@@ -162,7 +162,7 @@ Atomic-task decomposition:
 |---:|---|---|---|---|
 | 1 | `PickPlaceCounterToStove` | registered | Pick the first vegetable from the counter and place it in the pot. | `vegetable1_in_pot` |
 | 2 | `PickPlaceCounterToStove` | registered | Pick the second vegetable from the counter and place it in the pot. | `vegetable2_in_pot` |
-| 3 | `PickPlaceCounterToStove` | registered | Pick the spatula from the counter and place it in the pot. | `spatula_grasped` |
+| 3 | `PickSpatula` | derived | Pick the spatula from the counter. | `spatula_grasped` |
 | 4 | `StirVegetables` | derived | Stir the vegetables in the pot with the spatula. | `vegetables_stirred`, `spatula_released` |
 
 Subtask decomposition:
@@ -339,18 +339,22 @@ Atomic-task decomposition:
 | # | Atomic task | Source | Language instruction | Predicate(s) |
 |---:|---|---|---|---|
 | 1 | `SlideDishwasherRack` | registered | Pull out the dishwasher rack. | `dishwasher_rack_accessible` |
-| 2 | `PickPlaceCounterToDishwasherRack` | derived | Pick the dishes from the counter and place them on the dishwasher rack. | `dishes_grasped`, `dishes_on_rack` |
-| 3 | `CloseDishwasher` | derived | Close the dishwasher. | `dishwasher_closed` |
+| 2 | `PickPlaceCounterToDishwasherRack` | derived | Pick the cup from the counter and place it on the dishwasher rack. | `cup_grasped`, `cup_on_rack` |
+| 3 | `PickPlaceCounterToDishwasherRack` | derived | Pick the bowl from the counter and place it on the dishwasher rack. | `bowl_grasped`, `bowl_on_rack`, `dishes_on_rack` |
+| 4 | `CloseDishwasher` | derived | Close the dishwasher. | `dishwasher_closed` |
 
 Subtask decomposition:
 
 | # | Subtask | Predicate(s) |
 |---:|---|---|
 | 1 | Pull out the dishwasher rack. | `dishwasher_rack_accessible` |
-| 2 | Pick the cup and bowl from the counter. | `dishes_grasped` |
-| 3 | Place the cup and bowl on the dishwasher rack. | `dishes_on_rack` |
-| 4 | Release the cup and bowl on the dishwasher rack. | `dishes_on_rack` |
-| 5 | Close the dishwasher. | `dishwasher_closed` |
+| 2 | Pick the cup from the counter. | `cup_grasped` |
+| 3 | Place the cup on the dishwasher rack. | `cup_on_rack` |
+| 4 | Release the cup on the dishwasher rack. | `cup_on_rack` |
+| 5 | Pick the bowl from the counter. | `bowl_grasped` |
+| 6 | Place the bowl on the dishwasher rack. | `bowl_on_rack` |
+| 7 | Release the bowl on the dishwasher rack. | `bowl_on_rack`, `dishes_on_rack` |
+| 8 | Close the dishwasher. | `dishwasher_closed` |
 
 ### PrepareCoffee
 
@@ -708,18 +712,22 @@ Atomic-task decomposition:
 | # | Atomic task | Source | Language instruction | Predicate(s) |
 |---:|---|---|---|---|
 | 1 | `SlideDishwasherRack` | registered | Pull out the dishwasher rack. | `dishwasher_rack_accessible` |
-| 2 | `PickPlaceCounterToDishwasherRack` | derived | Pick the dishes from the counter and place them on the dishwasher rack. | `dishes_grasped`, `dishes_on_rack` |
-| 3 | `CloseDishwasher` | derived | Close the dishwasher. | `dishwasher_closed` |
+| 2 | `PickPlaceCounterToDishwasherRack` | derived | Pick the cup from the counter and place it on the dishwasher rack. | `cup_grasped`, `cup_on_rack` |
+| 3 | `PickPlaceCounterToDishwasherRack` | derived | Pick the bowl from the counter and place it on the dishwasher rack. | `bowl_grasped`, `bowl_on_rack`, `dishes_on_rack` |
+| 4 | `CloseDishwasher` | derived | Close the dishwasher. | `dishwasher_closed` |
 
 Subtask decomposition:
 
 | # | Subtask | Predicate(s) |
 |---:|---|---|
 | 1 | Pull out the dishwasher rack. | `dishwasher_rack_accessible` |
-| 2 | Pick the cup and bowl from the counter. | `dishes_grasped` |
-| 3 | Place the cup and bowl on the dishwasher rack. | `dishes_on_rack` |
-| 4 | Release the cup and bowl on the dishwasher rack. | `dishes_on_rack` |
-| 5 | Close the dishwasher. | `dishwasher_closed` |
+| 2 | Pick the cup from the counter. | `cup_grasped` |
+| 3 | Place the cup on the dishwasher rack. | `cup_on_rack` |
+| 4 | Release the cup on the dishwasher rack. | `cup_on_rack` |
+| 5 | Pick the bowl from the counter. | `bowl_grasped` |
+| 6 | Place the bowl on the dishwasher rack. | `bowl_on_rack` |
+| 7 | Release the bowl on the dishwasher rack. | `bowl_on_rack`, `dishes_on_rack` |
+| 8 | Close the dishwasher. | `dishwasher_closed` |
 
 ### MakeIceLemonade
 
@@ -976,7 +984,7 @@ Atomic-task decomposition:
 |---:|---|---|---|---|
 | 1 | `PickPlaceCounterToStove` | registered | Pick the first vegetable from the counter and place it in the pot. | `vegetable1_in_pot` |
 | 2 | `PickPlaceCounterToStove` | registered | Pick the second vegetable from the counter and place it in the pot. | `vegetable2_in_pot` |
-| 3 | `PickPlaceCounterToStove` | registered | Pick the spatula from the counter and place it in the pot. | `spatula_grasped` |
+| 3 | `PickSpatula` | derived | Pick the spatula from the counter. | `spatula_grasped` |
 | 4 | `StirVegetables` | derived | Stir the vegetables in the pot with the spatula. | `vegetables_stirred`, `spatula_released` |
 
 Subtask decomposition:

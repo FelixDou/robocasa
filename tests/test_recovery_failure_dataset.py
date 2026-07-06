@@ -317,6 +317,163 @@ class TestRecoveryFailureDataset(unittest.TestCase):
             "blender_lid_on_blender",
         )
 
+    def test_documented_transient_subtasks_are_not_dropped(self):
+        summary = {
+            "task_success": False,
+            "final_subtask_eval": {
+                "required_predicates": [
+                    "mug_under_dispenser",
+                    "gripper_released",
+                ],
+                "predicates": {
+                    "mug_grasped": {
+                        "value": True,
+                        "required": False,
+                        "stage": "transient",
+                    },
+                    "mug_under_dispenser": {
+                        "value": True,
+                        "required": True,
+                        "stage": "placement",
+                    },
+                    "gripper_released": {
+                        "value": False,
+                        "required": True,
+                        "stage": "release",
+                    },
+                },
+            },
+            "ordered_completed_required_subtasks": ["mug_under_dispenser"],
+            "failed_required_predicates_final": ["gripper_released"],
+        }
+
+        sequence = self.module.mapped_subtask_sequence(summary, "CoffeeSetupMug")
+
+        self.assertEqual(
+            [entry["subtask_id"] for entry in sequence],
+            ["mug_grasped", "mug_under_dispenser", "gripper_released"],
+        )
+        self.assertEqual(
+            [entry["instruction"] for entry in sequence],
+            ["Pick mug.", "Move mug under coffee dispenser.", "Release mug."],
+        )
+        self.assertTrue(sequence[0]["success"])
+        self.assertTrue(sequence[1]["success"])
+        self.assertFalse(sequence[2]["success"])
+        self.assertEqual(
+            self.module.completed_subtasks(summary, "CoffeeSetupMug"),
+            [
+                {
+                    "subtask_id": "mug_grasped",
+                    "instruction": "Pick mug.",
+                    "predicate_names": ["mug_grasped"],
+                },
+                {
+                    "subtask_id": "mug_under_dispenser",
+                    "instruction": "Move mug under coffee dispenser.",
+                    "predicate_names": ["mug_under_dispenser"],
+                },
+            ],
+        )
+
+        atomic_sequence = self.module.mapped_atomic_step_sequence(
+            summary,
+            task_plan=None,
+            task_name="CoffeeSetupMug",
+            instruction="Pick the mug and place it under the coffee machine dispenser.",
+        )
+        self.assertEqual(
+            atomic_sequence[0]["predicate_names"],
+            ["mug_grasped", "mug_under_dispenser", "gripper_released"],
+        )
+        self.assertEqual(
+            atomic_sequence[0]["completed_predicates"],
+            ["mug_grasped", "mug_under_dispenser"],
+        )
+        self.assertEqual(
+            atomic_sequence[0]["failed_predicates"],
+            ["gripper_released"],
+        )
+
+    def test_subtask_completion_steps_record_first_success_frame(self):
+        summary = {
+            "task_success": False,
+            "final_subtask_eval": {
+                "required_predicates": [
+                    "mug_under_dispenser",
+                    "gripper_released",
+                ],
+                "predicates": {
+                    "mug_grasped": {
+                        "value": True,
+                        "required": False,
+                        "stage": "transient",
+                    },
+                    "mug_under_dispenser": {
+                        "value": True,
+                        "required": True,
+                        "stage": "placement",
+                    },
+                    "gripper_released": {
+                        "value": False,
+                        "required": True,
+                        "stage": "release",
+                    },
+                },
+            },
+            "ordered_completed_required_subtasks": ["mug_under_dispenser"],
+            "failed_required_predicates_final": ["gripper_released"],
+        }
+        subtask_evals = [
+            {
+                "predicates": {
+                    "mug_grasped": {"value": False},
+                    "mug_under_dispenser": {"value": False},
+                    "gripper_released": {"value": False},
+                }
+            },
+            {
+                "predicates": {
+                    "mug_grasped": {"value": True},
+                    "mug_under_dispenser": {"value": False},
+                    "gripper_released": {"value": False},
+                }
+            },
+            {
+                "predicates": {
+                    "mug_grasped": {"value": True},
+                    "mug_under_dispenser": {"value": True},
+                    "gripper_released": {"value": False},
+                }
+            },
+            {
+                "predicates": {
+                    "mug_grasped": {"value": True},
+                    "mug_under_dispenser": {"value": True},
+                    "gripper_released": {"value": False},
+                }
+            },
+        ]
+
+        completion_steps = self.module.subtask_completion_steps(
+            summary, "CoffeeSetupMug", subtask_evals
+        )
+
+        self.assertEqual(
+            [
+                (entry["subtask_id"], entry["first_success_frame"])
+                for entry in completion_steps
+            ],
+            [
+                ("mug_grasped", 1),
+                ("mug_under_dispenser", 2),
+            ],
+        )
+        self.assertNotIn(
+            "gripper_released",
+            [entry["subtask_id"] for entry in completion_steps],
+        )
+
     def test_subtask_completion_is_prefix_ordered_for_all_known_tasks(self):
         known_tasks = (
             set(self.module.load_registered_atomic_task_names())
@@ -549,6 +706,90 @@ class TestRecoveryFailureDataset(unittest.TestCase):
             sequence[3]["predicate_names"],
             ["bread_in_basket"],
         )
+
+    def test_load_dishwasher_splits_cup_and_bowl_subtasks(self):
+        summary = {
+            "final_subtask_eval": {
+                "required_predicates": [
+                    "dishwasher_rack_accessible",
+                    "cup_on_rack",
+                    "bowl_on_rack",
+                    "dishes_on_rack",
+                    "dishwasher_closed",
+                ],
+                "predicates": {
+                    "dishwasher_rack_accessible": {
+                        "value": True,
+                        "required": True,
+                    },
+                    "cup_grasped": {
+                        "value": True,
+                        "required": False,
+                        "stage": "transient",
+                    },
+                    "cup_on_rack": {"value": True, "required": True},
+                    "bowl_grasped": {
+                        "value": False,
+                        "required": False,
+                        "stage": "transient",
+                    },
+                    "bowl_on_rack": {"value": False, "required": True},
+                    "dishes_on_rack": {"value": False, "required": True},
+                    "dishwasher_closed": {"value": False, "required": True},
+                },
+            },
+            "ordered_completed_required_subtasks": [
+                "dishwasher_rack_accessible",
+                "cup_on_rack",
+            ],
+            "failed_required_predicates_final": ["bowl_on_rack"],
+        }
+
+        atomic_sequence = self.module.mapped_composite_atomic_task_sequence(
+            summary, "LoadDishwasher"
+        )
+        subtask_sequence = self.module.mapped_subtask_sequence(
+            summary, "LoadDishwasher"
+        )
+
+        self.assertEqual(
+            [entry["language_instruction"] for entry in atomic_sequence],
+            [
+                "Pull out the dishwasher rack.",
+                "Pick the cup from the counter and place it on the dishwasher rack.",
+                "Pick the bowl from the counter and place it on the dishwasher rack.",
+                "Close the dishwasher.",
+            ],
+        )
+        self.assertEqual(
+            [entry["subtask_id"] for entry in subtask_sequence],
+            [
+                "dishwasher_rack_accessible",
+                "cup_grasped",
+                "cup_on_rack",
+                "cup_released_on_rack",
+                "bowl_grasped",
+                "bowl_on_rack",
+                "bowl_released_on_rack",
+                "dishwasher_closed",
+            ],
+        )
+        self.assertEqual(
+            [entry["instruction"] for entry in subtask_sequence],
+            [
+                "Pull out the dishwasher rack.",
+                "Pick the cup from the counter.",
+                "Place the cup on the dishwasher rack.",
+                "Release the cup on the dishwasher rack.",
+                "Pick the bowl from the counter.",
+                "Place the bowl on the dishwasher rack.",
+                "Release the bowl on the dishwasher rack.",
+                "Close the dishwasher.",
+            ],
+        )
+        self.assertTrue(subtask_sequence[1]["success"])
+        self.assertTrue(subtask_sequence[2]["success"])
+        self.assertFalse(subtask_sequence[4]["success"])
 
     def test_validate_atomic_tasks_rejects_unknown_by_default(self):
         self.module.load_registered_atomic_task_names = lambda: {"OpenDrawer"}

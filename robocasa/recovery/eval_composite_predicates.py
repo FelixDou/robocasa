@@ -184,8 +184,11 @@ _TASK_PREDICATE_DESCRIPTION_OVERRIDES = {
     },
     "LoadDishwasher": {
         "dishwasher_rack_accessible": "Open dishwasher.",
-        "dishes_grasped": "Pick dishes.",
-        "dishes_on_rack": "Move dishes to dishwasher rack.",
+        "cup_grasped": "Pick cup.",
+        "cup_on_rack": "Move cup to dishwasher rack.",
+        "bowl_grasped": "Pick bowl.",
+        "bowl_on_rack": "Move bowl to dishwasher rack.",
+        "dishes_on_rack": "Move all dishes to dishwasher rack.",
         "dishwasher_closed": "Close dishwasher.",
     },
     "MakeIceLemonade": {
@@ -618,8 +621,14 @@ _COMPOSITE_ATOMIC_TASK_OVERRIDES = {
         {
             "atomic_task": "PickPlaceCounterToDishwasherRack",
             "atomic_task_source": "derived",
-            "language_instruction": "Pick the dishes from the counter and place them on the dishwasher rack.",
-            "predicate_names": ["dishes_grasped", "dishes_on_rack"],
+            "language_instruction": "Pick the cup from the counter and place it on the dishwasher rack.",
+            "predicate_names": ["cup_grasped", "cup_on_rack"],
+        },
+        {
+            "atomic_task": "PickPlaceCounterToDishwasherRack",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the bowl from the counter and place it on the dishwasher rack.",
+            "predicate_names": ["bowl_grasped", "bowl_on_rack", "dishes_on_rack"],
         },
         {
             "atomic_task": "CloseDishwasher",
@@ -847,9 +856,9 @@ _COMPOSITE_ATOMIC_TASK_OVERRIDES = {
             "predicate_names": ["vegetable2_in_pot"],
         },
         {
-            "atomic_task": "PickPlaceCounterToStove",
-            "atomic_task_source": "registered",
-            "language_instruction": "Pick the spatula from the counter and place it in the pot.",
+            "atomic_task": "PickSpatula",
+            "atomic_task_source": "derived",
+            "language_instruction": "Pick the spatula from the counter.",
             "predicate_names": ["spatula_grasped"],
         },
         {
@@ -1409,19 +1418,34 @@ _TASK_SUBTASK_GROUP_OVERRIDES.update(
                 ["dishwasher_rack_accessible"],
             ),
             (
-                "dishes_grasped",
-                "Pick the cup and bowl from the counter.",
-                ["dishes_grasped"],
+                "cup_grasped",
+                "Pick the cup from the counter.",
+                ["cup_grasped"],
             ),
             (
-                "dishes_on_rack",
-                "Place the cup and bowl on the dishwasher rack.",
-                ["dishes_on_rack"],
+                "cup_on_rack",
+                "Place the cup on the dishwasher rack.",
+                ["cup_on_rack"],
             ),
             (
-                "dishes_released_on_rack",
-                "Release the cup and bowl on the dishwasher rack.",
-                ["dishes_on_rack"],
+                "cup_released_on_rack",
+                "Release the cup on the dishwasher rack.",
+                ["cup_on_rack"],
+            ),
+            (
+                "bowl_grasped",
+                "Pick the bowl from the counter.",
+                ["bowl_grasped"],
+            ),
+            (
+                "bowl_on_rack",
+                "Place the bowl on the dishwasher rack.",
+                ["bowl_on_rack"],
+            ),
+            (
+                "bowl_released_on_rack",
+                "Release the bowl on the dishwasher rack.",
+                ["bowl_on_rack", "dishes_on_rack"],
             ),
             ("dishwasher_closed", "Close the dishwasher.", ["dishwasher_closed"]),
         ],
@@ -1793,9 +1817,9 @@ _COMPOSITE_ATOMIC_TASK_OVERRIDES.update(
                 "predicate_names": ["vegetable2_in_pot"],
             },
             {
-                "atomic_task": "PickPlaceCounterToStove",
-                "atomic_task_source": "registered",
-                "language_instruction": "Pick the spatula from the counter and place it in the pot.",
+                "atomic_task": "PickSpatula",
+                "atomic_task_source": "derived",
+                "language_instruction": "Pick the spatula from the counter.",
                 "predicate_names": ["spatula_grasped"],
             },
             {
@@ -2188,17 +2212,17 @@ def _kettle_boiling(env):
 
 
 def _load_dishwasher(env):
-    dishes_on_rack = all(
-        _dishwasher_rack_contact(env, name) for name in ["dish0", "dish1"]
-    )
+    cup_on_rack = _dishwasher_rack_contact(env, "dish0")
+    bowl_on_rack = _dishwasher_rack_contact(env, "dish1")
+    dishes_on_rack = cup_on_rack and bowl_on_rack
     return {
         "dishwasher_rack_accessible": _p(
             _is_open(env, env.dishwasher), stage="diagnostic"
         ),
-        "dishes_grasped": _p(
-            _grasped(env, "dish0") or _grasped(env, "dish1"),
-            stage="transient",
-        ),
+        "cup_grasped": _p(_grasped(env, "dish0"), stage="transient"),
+        "cup_on_rack": _p(cup_on_rack, stage="placement"),
+        "bowl_grasped": _p(_grasped(env, "dish1"), stage="transient"),
+        "bowl_on_rack": _p(bowl_on_rack, stage="placement"),
         "dishes_on_rack": _p(dishes_on_rack, stage="placement"),
         "dishwasher_closed": _p(
             _is_closed(env, env.dishwasher, th=0.05), stage="fixture_state"
