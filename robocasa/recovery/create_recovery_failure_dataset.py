@@ -707,6 +707,21 @@ def subtask_completion_steps(summary, task_name, subtask_evals):
     return completion_steps
 
 
+def failed_subtask_after_completion_steps(summary, task_name, completion_steps):
+    """Return the first semantic subtask not completed in temporal prefix order."""
+    if summary.get("task_success"):
+        return None
+    completed_ids = {entry.get("subtask_id") for entry in completion_steps}
+    for entry in mapped_subtask_sequence(summary, task_name):
+        if entry["subtask_id"] not in completed_ids:
+            return {
+                "subtask_id": entry["subtask_id"],
+                "instruction": entry["instruction"],
+                "predicate_names": entry["predicate_names"],
+            }
+    return None
+
+
 def infer_failure_stage(summary):
     if summary.get("task_success"):
         return "success"
@@ -910,6 +925,9 @@ def build_sample(
     diagnostic = build_failure_diagnostic(summary, task_plan, task_name)
     final_eval = summary.get("final_subtask_eval") or {}
     instruction = rollout.get("instruction")
+    completion_steps = subtask_completion_steps(
+        summary, task_name, rollout.get("subtask_evals") or []
+    )
     return {
         "sample_id": f"{task_name}::{rollout_i:04d}::seed{seed}",
         "task_granularity": "composite" if is_composite_task(task_name) else "atomic",
@@ -955,10 +973,10 @@ def build_sample(
         "completed_atomic_steps": completed_atomic_steps(summary, task_name),
         "failed_atomic_step": failed_atomic_step(summary, task_name),
         "completed_subtasks": completed_subtasks(summary, task_name),
-        "failed_subtask": failed_subtask(summary, task_name),
-        "subtask_completion_steps": subtask_completion_steps(
-            summary, task_name, rollout.get("subtask_evals") or []
+        "failed_subtask": failed_subtask_after_completion_steps(
+            summary, task_name, completion_steps
         ),
+        "subtask_completion_steps": completion_steps,
         "completed_subtask_predicates": summary.get(
             "ordered_completed_required_subtasks", []
         ),

@@ -150,7 +150,15 @@ class TestRecoveryFailureDataset(unittest.TestCase):
             env_interface="gym",
         )
         rollout = {
-            "subtask_evals": [{"subtask_progress": 0.0}],
+            "subtask_evals": [
+                {
+                    "subtask_progress": 0.5,
+                    "predicates": {
+                        "object_grasped": {"value": True},
+                        "object_at_target_and_released": {"value": False},
+                    },
+                }
+            ],
             "instruction": "Pick and place object.",
             "num_steps": 12,
             "success": False,
@@ -473,6 +481,55 @@ class TestRecoveryFailureDataset(unittest.TestCase):
             "gripper_released",
             [entry["subtask_id"] for entry in completion_steps],
         )
+
+    def test_failed_subtask_uses_temporal_completion_prefix(self):
+        summary = {
+            "task_success": False,
+            "final_subtask_eval": {
+                "required_predicates": [
+                    "mug_under_dispenser",
+                    "gripper_released",
+                ],
+                "predicates": {
+                    "mug_grasped": {
+                        "value": False,
+                        "required": False,
+                        "stage": "transient",
+                    },
+                    "mug_under_dispenser": {
+                        "value": False,
+                        "required": True,
+                        "stage": "placement",
+                    },
+                    "gripper_released": {
+                        "value": True,
+                        "required": True,
+                        "stage": "release",
+                    },
+                },
+            },
+            "ordered_completed_required_subtasks": [],
+            "failed_required_predicates_final": [
+                "mug_under_dispenser",
+                "gripper_released",
+            ],
+        }
+        completion_steps = [
+            {
+                "subtask_id": "mug_grasped",
+                "instruction": "Pick mug.",
+                "predicate_names": ["mug_grasped"],
+                "first_success_step": 100,
+                "first_success_frame": 100,
+            }
+        ]
+
+        failed = self.module.failed_subtask_after_completion_steps(
+            summary, "CoffeeSetupMug", completion_steps
+        )
+
+        self.assertEqual(failed["subtask_id"], "mug_under_dispenser")
+        self.assertEqual(failed["instruction"], "Move mug under coffee dispenser.")
 
     def test_subtask_completion_is_prefix_ordered_for_all_known_tasks(self):
         known_tasks = (
