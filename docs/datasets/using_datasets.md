@@ -77,6 +77,14 @@ lerobot/
 </details>
 
 ### Retrieving dataset metadata
+
+<div class="admonition note">
+<p class="admonition-title">Horizon update (v1.0.1)</p>
+
+As of v1.0.1, all task horizon lengths have been increased by 1.5x for consistency. Please update to the latest version of RoboCasa for running evals.
+
+</div>
+
 We track each dataset with metadata (paths, task horizon length, etc.) in the [dataset registry](https://github.com/robocasa/robocasa/blob/main/robocasa/utils/dataset_registry.py). You can use the `get_ds_meta()` function to retrieve metadata for a specific task:
 
 ```py
@@ -247,11 +255,11 @@ for item in train_dataset:
 
 To get dataset statistics (filter keys, objects, task language, scenes):
 ```
-python robocasa/scripts/get_dataset_info.py --dataset <ds-path>
+python robocasa/scripts/dataset_scripts/get_dataset_info.py --dataset <ds-path>
 ```
 
 You can visualize dataset videos by looking at the `videos` folder under each lerobot dataset directory. To visualize a dataset and save a video:
 ```
-python robocasa/scripts/playback_dataset.py --n 10 --dataset <ds-path>
+python robocasa/scripts/dataset_scripts/playback_dataset.py --n 10 --dataset <ds-path>
 ```
 This will save a video of 10 random demonstrations in the same path as the dataset. You can play the full dataset by removing the `--n` flag.

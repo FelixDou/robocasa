@@ -14,6 +14,21 @@ This guide contains information about installation and setup. Please refer to th
 [**[Home page]**](https://robocasa.ai) &ensp; [**[Documentation]**](https://robocasa.ai/docs/introduction/overview.html) &ensp; [**[RoboCasa365 Paper]**](https://robocasa.ai/assets/robocasa365_iclr26.pdf) &ensp; [**[Original RoboCasa Paper]**](https://robocasa.ai/assets/robocasa_rss24.pdf) &ensp; [**[Leaderboard]**](https://robocasa.ai/leaderboard.html)
 
 -------
+## Updates
+* [7/7/2026] Our target composite task datasets have been updated to include per-frame **subtask annotations**. Every timestep is labeled with a subtask index, atomic-skill name, stage (i.e. pick / place / navigate), and a natural-language instruction, to support hierarchical policy learning.
+* [5/12/2026] **v1.0.1**: Updated horizon lengths (1.5x increase) across all tasks for consistency. Please update to the latest version for running evals.
+* [2/18/2026] **v1.0**: RoboCasa365 release, with 365 tasks, 2500+ kitchen scenes, 2200+ hours of robot demonstration data, and benchmarking support.
+* [10/31/2024] **v0.2**: using RoboSuite `v1.5` as the backend, with improved support for custom robot composition, composite controllers, more teleoperation devices, photo-realistic rendering.
+
+## Table of Contents
+- [Updates](#updates)
+- [Installation](#installation)
+- [Basic Usage](#basic-usage)
+- [Tasks, datasets, policy learning, and additional use cases](#tasks-datasets-policy-learning-and-additional-use-cases)
+- [License](#license)
+- [Citation](#citation)
+
+-------
 ## Installation
 RoboCasa works across all major computing platforms. The easiest way to set up is through the [Anaconda](https://www.anaconda.com/) package management system. Follow the instructions below to install:
 1. Set up conda environment:
@@ -102,11 +117,6 @@ Note: If using SpaceMouse, you may need to modify the product ID to your appropr
 -------
 ## Tasks, datasets, policy learning, and additional use cases
 Please refer to the [documentation page](https://robocasa.ai/docs/introduction/overview.html) for information about tasks, datasets, benchmarking, and more.
-
--------
-## Releases
-* [2/18/2026] **v1.0**: RoboCasa365 release, with 365 tasks, 2500+ kitchen scenes, 2200+ hours of robot demonstration data, and benchmarking support.
-* [10/31/2024] **v0.2**: using RoboSuite `v1.5` as the backend, with improved support for custom robot composition, composite controllers, more teleoperation devices, photo-realistic rendering.
 
 -------
 ## License

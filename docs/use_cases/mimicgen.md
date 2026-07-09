@@ -3,10 +3,10 @@
 Given a modest number of source demonstrations, we offer the ability to syntehsize new trajectories with [MimicGen](https://mimicgen.github.io/).
 
 ### Installation
-1. Clone and setup MimicGen under the `experimental/robocasa` branch:
+1. Clone and setup the RoboCasa MimicGen fork:
 
     ```sh
-    git clone https://github.com/NVlabs/mimicgen -b experimental/robocasa
+    git clone https://github.com/robocasa-benchmark/mimicgen
     cd mimicgen
     pip install -e .
     ```
@@ -29,7 +29,7 @@ We have set up MimicGen for 64/65 existing atomic tasks. Generating demonstratio
     ```
 2. Generate demonstartions:
     ```sh
-    python mimicgen/scripts/generate_dataset_multicore.py --source <hdf5-ds-path> --config mimicgen/exps/templates/robocasa/single_stage/kitchen_pick_place/PickPlaceCounterToSink.json
+    python mimicgen/scripts/generate_dataset_multicore.py --source <hdf5-ds-path> --config mimicgen/exps/templates/robocasa/single_stage/kitchen_pnp/PnPCounterToSink.json
     ```
 3. Extract image observations.
     You can then extract image datasets following the dataset extraction tutorial on [this guide](../use_cases/creating_datasets.html).
