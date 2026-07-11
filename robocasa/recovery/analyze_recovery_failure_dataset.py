@@ -417,18 +417,20 @@ def plot_failure_modes(samples: pd.DataFrame, output_dir: Path, formats: list[st
 
 
 def plot_task_matrix(samples: pd.DataFrame, output_dir: Path, formats: list[str]) -> None:
+    enriched = samples.copy()
+    enriched["made_ordered_progress"] = enriched["ordered_subtask_progress"] > 0
     matrix = (
-        samples.groupby(["task_name", "task_granularity"])
+        enriched.groupby(["task_name", "task_granularity"])
         .agg(
             ordered_subtask_progress=("ordered_subtask_progress", "mean"),
-            atomic_progress=("atomic_progress", "mean"),
-            normalized_failure_step=("normalized_failure_step", "mean"),
+            made_ordered_progress=("made_ordered_progress", "mean"),
+            final_subtask_progress=("final_subtask_progress", "mean"),
         )
         .reset_index()
         .sort_values(["task_granularity", "ordered_subtask_progress", "task_name"])
     )
     values = matrix[
-        ["ordered_subtask_progress", "atomic_progress", "normalized_failure_step"]
+        ["ordered_subtask_progress", "made_ordered_progress", "final_subtask_progress"]
     ].to_numpy(float)
     values = np.clip(np.nan_to_num(values), 0, 1)
 
@@ -437,10 +439,14 @@ def plot_task_matrix(samples: pd.DataFrame, output_dir: Path, formats: list[str]
     ax.set_yticks(np.arange(len(matrix)), matrix["task_name"], fontsize=8)
     ax.set_xticks(
         np.arange(3),
-        ["Ordered subtask\nprogress", "Atomic-step\nprogress", "Failure time /\nhorizon"],
+        [
+            "Mean ordered\nprogress",
+            "Samples with any\nordered progress",
+            "Mean final predicate\nprogress",
+        ],
     )
-    ax.set_title("Task-level progress and failure timing")
-    add_subtitle(ax, "Task means; all cells use a common 0-1 scale")
+    ax.set_title("Task-level progress before failure")
+    add_subtitle(ax, "Task means and rates; all cells use a common 0-1 scale")
     for row in range(values.shape[0]):
         for column in range(values.shape[1]):
             value = values[row, column]
@@ -457,6 +463,56 @@ def plot_task_matrix(samples: pd.DataFrame, output_dir: Path, formats: list[str]
     colorbar.set_label("Mean proportion")
     ax.tick_params(length=0)
     save_figure(fig, output_dir, "06_task_progress_timing_matrix", formats)
+
+
+def plot_completion_by_position(
+    opportunities: pd.DataFrame, output_dir: Path, formats: list[str]
+) -> pd.DataFrame:
+    position_stats = (
+        opportunities.groupby(["task_granularity", "subtask_position"], as_index=False)
+        .agg(
+            opportunities=("sample_id", "size"),
+            completions=("completed", "sum"),
+            failures=("failed_here", "sum"),
+        )
+    )
+    position_stats["completion_rate"] = (
+        position_stats["completions"] / position_stats["opportunities"]
+    )
+    position_stats["failure_assignment_rate"] = (
+        position_stats["failures"] / position_stats["opportunities"]
+    )
+
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    for granularity in ["atomic", "composite"]:
+        subset = position_stats[
+            position_stats["task_granularity"] == granularity
+        ].sort_values("subtask_position")
+        if subset.empty:
+            continue
+        ax.plot(
+            subset["subtask_position"],
+            subset["completion_rate"],
+            color=GRANULARITY_COLORS[granularity],
+            marker="o",
+            linewidth=2,
+            label=granularity,
+        )
+    ax.set_title("Subtask completion rate by sequence position")
+    add_subtitle(
+        ax,
+        "Completed at any time during failed rollouts; denominator is samples containing each position",
+    )
+    ax.set_xlabel("Subtask position")
+    ax.set_ylabel("Completion rate")
+    ax.set_ylim(0, 1)
+    ax.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+    ax.grid(color=GRID, linewidth=0.7)
+    ax.set_axisbelow(True)
+    ax.legend(frameon=False)
+    ax.spines[["top", "right"]].set_visible(False)
+    save_figure(fig, output_dir, "07_completion_rate_by_subtask_position", formats)
+    return position_stats
 
 
 def task_statistics(samples: pd.DataFrame) -> pd.DataFrame:
@@ -517,6 +573,9 @@ def write_markdown_summary(
     easiest["mean_ordered_subtask_progress"] = easiest[
         "mean_ordered_subtask_progress"
     ].map(lambda value: f"{value:.1%}")
+    horizon_rate = float((samples["normalized_failure_step"] >= 0.999).mean())
+    composite = samples[samples["task_granularity"] == "composite"]
+    multistep_atomic_rate = float((composite["num_atomic_steps"] > 1).mean()) if len(composite) else math.nan
 
     lines = [
         "# Recovery failure dataset analysis",
@@ -564,6 +623,8 @@ def write_markdown_summary(
         "- Ordered subtask progress counts only the contiguous completed prefix, preserving sequentiality.",
         "- Failed-subtask rates use samples containing that task-subtask pair as the denominator.",
         "- The dataset contains failed rollouts, so progress is not a task success rate.",
+        f"- Failures recorded at the full rollout horizon: **{horizon_rate:.1%}**.",
+        f"- Composite samples with more than one stored atomic step: **{multistep_atomic_rate:.1%}**.",
     ]
     output.write_text("\n".join(lines) + "\n")
 
@@ -594,6 +655,22 @@ def main() -> None:
             ("manifest_errors", len(manifest.get("errors", []))),
             ("video_coverage", float(samples["video_present"].mean())),
             ("action_coverage", float(samples["actions_present"].mean())),
+            (
+                "failure_at_horizon_rate",
+                float((samples["normalized_failure_step"] >= 0.999).mean()),
+            ),
+            (
+                "composite_multistep_atomic_coverage",
+                float(
+                    (
+                        samples.loc[
+                            samples["task_granularity"] == "composite",
+                            "num_atomic_steps",
+                        ]
+                        > 1
+                    ).mean()
+                ),
+            ),
         ],
         columns=["metric", "value"],
     )
@@ -607,6 +684,9 @@ def main() -> None:
     )
     modes = plot_failure_modes(samples, args.output_dir, args.formats)
     plot_task_matrix(samples, args.output_dir, args.formats)
+    position_stats = plot_completion_by_position(
+        subtasks, args.output_dir, args.formats
+    )
 
     atomic_stats = (
         atomics.groupby(
@@ -629,6 +709,9 @@ def main() -> None:
     subtask_stats.to_csv(args.output_dir / "subtask_statistics.csv", index=False)
     atomic_stats.to_csv(args.output_dir / "atomic_step_statistics.csv", index=False)
     modes.to_csv(args.output_dir / "failure_mode_occurrences.csv", index=False)
+    position_stats.to_csv(
+        args.output_dir / "subtask_position_statistics.csv", index=False
+    )
     write_markdown_summary(
         manifest,
         samples,
