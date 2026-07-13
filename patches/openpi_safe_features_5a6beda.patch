@@ -31,9 +31,9 @@
 -            v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
 +            # Official SAFE's pi0 feature: final action-expert suffix hidden
 +            # states for every action position, immediately before velocity projection.
-+            pre_velocity = suffix_out[:, -self.action_horizon :].astype(jnp.float32)
++            pre_velocity = suffix_out[:, -self.action_horizon :]
 +            if return_safe_features:
-+                features = features.at[:, step_index].set(pre_velocity)
++                features = features.at[:, step_index].set(pre_velocity.astype(jnp.float32))
 +            v_t = self.action_out_proj(pre_velocity)
  
 -            return x_t + dt * v_t, time + dt
@@ -146,3 +146,44 @@
          is_pytorch=is_pytorch,
          pytorch_device=pytorch_device if is_pytorch else None,
      )
+--- a/src/openpi/models/model_test.py
++++ b/src/openpi/models/model_test.py
+@@ -1,3 +1,4 @@
+ from flax import nnx
+ import jax
++import numpy as np
+ import pytest
+@@ -24,4 +25,31 @@
+     assert actions.shape == (batch_size, model.action_horizon, model.action_dim)
+-
+-
++
++
++def test_pi0_safe_feature_capture_preserves_actions():
++    key = jax.random.key(0)
++    config = pi0_config.Pi0Config()
++    model = config.create(key)
++
++    batch_size = 2
++    obs = config.fake_obs(batch_size)
++    noise = config.fake_act(batch_size)
++
++    actions = model.sample_actions(key, obs, noise=noise, num_steps=2)
++    safe_actions, safe_aux = model.sample_actions(
++        key,
++        obs,
++        noise=noise,
++        num_steps=2,
++        return_safe_features=True,
++    )
++
++    np.testing.assert_array_equal(np.asarray(safe_actions), np.asarray(actions))
++    assert safe_aux["pre_velocity"].shape[:3] == (
++        batch_size,
++        2,
++        model.action_horizon,
++    )
++    assert safe_aux["pre_velocity"].dtype == np.float32
++
++
+ def test_pi0_lora_model():

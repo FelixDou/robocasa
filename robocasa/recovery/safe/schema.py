@@ -38,6 +38,7 @@ class SafeRolloutMetadata:
     termination_reason: str = "unknown"
     timeout_horizon: int = 0
     video_path: str | None = None
+    environment_split: str | None = None
     unused_subtask_metadata: dict[str, Any] | None = None
     schema_version: int = SAFE_SCHEMA_VERSION
     feature_schema_version: int = SAFE_FEATURE_SCHEMA_VERSION
@@ -167,6 +168,7 @@ def compatibility_key(metadata: SafeRolloutMetadata) -> str:
         "feature_dtype": metadata.feature_dtype,
         "action_horizon": metadata.action_horizon,
         "flow_steps": metadata.flow_steps,
+        "environment_split": metadata.environment_split,
     }
     payload = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()[:16]

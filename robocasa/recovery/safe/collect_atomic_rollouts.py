@@ -246,6 +246,7 @@ def prepare_plan(args):
     policy_config = parse_policy_config(args.policy_config)
     robocasa_commit = args.robocasa_commit or current_robocasa_commit()
     identity = {
+        "split": args.split,
         "policy_name": args.policy_name,
         "policy_checkpoint": args.checkpoint,
         "policy_config": policy_config,
@@ -265,6 +266,7 @@ def prepare_plan(args):
     config = {
         "tasks": tasks,
         "seeds": seeds,
+        "split": args.split,
         "output_dir": str(args.output_dir),
         "policy_module": args.policy_module,
         "policy_name": args.policy_name,
@@ -290,6 +292,7 @@ def prepare_plan(args):
 def _assert_resume_compatible(previous, current):
     keys = (
         "tasks",
+        "split",
         "policy_module",
         "policy_name",
         "policy_checkpoint",
@@ -479,6 +482,7 @@ def run_collection(args, runtime=None):
                     task_name=task_name,
                     task_instruction=rollout["instruction"],
                     environment_seed=seed,
+                    environment_split=args.split,
                     policy_id=args.policy_name,
                     checkpoint=args.checkpoint,
                     failed=not rollout["success"],

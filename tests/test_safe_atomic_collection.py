@@ -11,6 +11,7 @@ from tests.safe_import_helper import install_lightweight_robocasa_packages
 install_lightweight_robocasa_packages()
 
 from robocasa.recovery.safe.collect_atomic_rollouts import (
+    _assert_resume_compatible,
     build_parser,
     prepare_plan,
     run_collection,
@@ -142,6 +143,23 @@ class TestSafeAtomicCollection(unittest.TestCase):
             self.assertEqual(len(result["attempts"]), 2)
             self.assertEqual(list(Path(tmp).iterdir()), [])
 
+    def test_environment_split_is_provenance_and_rollout_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            test_args = collection_args(tmp)
+            test_plan = prepare_plan(test_args)
+            pretrain_args = collection_args(tmp)
+            pretrain_args.split = "pretrain"
+            pretrain_plan = prepare_plan(pretrain_args)
+
+            self.assertEqual(test_plan["config"]["split"], "test")
+            self.assertEqual(test_plan["identity"]["split"], "test")
+            self.assertNotEqual(
+                test_plan["attempts"][0]["rollout_id"],
+                pretrain_plan["attempts"][0]["rollout_id"],
+            )
+            with self.assertRaisesRegex(ValueError, "split"):
+                _assert_resume_compatible(test_plan["config"], pretrain_plan["config"])
+
     def test_success_failure_schema_validation_and_actions(self):
         with tempfile.TemporaryDirectory() as tmp:
             result = run_collection(collection_args(tmp), runtime=fake_runtime())
@@ -153,6 +171,7 @@ class TestSafeAtomicCollection(unittest.TestCase):
             self.assertEqual([record.failed for record in records], [False, True])
             self.assertEqual(records[0].termination_reason, "success")
             self.assertEqual(records[1].termination_reason, "timeout")
+            self.assertTrue(all(record.environment_split == "test" for record in records))
             self.assertEqual(records[0].inference_env_steps, [0])
             self.assertEqual(records[1].inference_env_steps, [0, 2])
             for record in records:
