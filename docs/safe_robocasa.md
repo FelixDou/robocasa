@@ -37,7 +37,7 @@ The dedicated entry point is:
 python -m robocasa.recovery.safe.collect_atomic_rollouts
 ```
 
-It validates task names by parsing `ATOMIC_TASK_DATASETS` without importing RoboSuite. `--allow-unregistered-atomic-tasks` is available only for intentional custom environments. Important options include `--tasks`, `--num-rollouts`, `--seed`, `--seed-end`, `--output-dir`, `--policy-module`, repeatable `--policy-arg`, `--host`, `--port`, `--policy-name`, `--checkpoint`, `--policy-config`, `--horizon`, `--replan-steps`, `--record-videos`, `--record-actions`, `--record-safe-features`, `--continue-on-error`, `--resume`, `--success-quota`, `--failure-quota`, and `--dry-run`. Boolean options support their `--no-...` form.
+It validates task names and resolves each task's official horizon by parsing `ATOMIC_TASK_DATASETS` without importing RoboSuite. `--horizon` is an explicit all-task override; it is required with `--allow-unregistered-atomic-tasks`. Important options include `--tasks`, `--num-rollouts`, `--seed`, `--seed-end`, `--output-dir`, `--policy-module`, repeatable `--policy-arg`, `--host`, `--port`, `--policy-name`, `--checkpoint`, `--policy-config`, `--horizon`, `--replan-steps`, `--record-videos`, `--record-actions`, `--record-safe-features`, `--continue-on-error`, `--resume`, `--success-quota`, `--failure-quota`, and `--dry-run`. Boolean options support their `--no-...` form.
 
 The collector obtains the final task result from the simulator success predicate. It records executed actions separately from the full action chunks predicted at inference time. It only appends a manifest row after the video, executed-action file, and SAFE tensor file requested for that rollout have been finalized.
 
@@ -128,7 +128,6 @@ python -m robocasa.recovery.safe.collect_atomic_rollouts \
   --port 8120 \
   --split target \
   --replan-steps 5 \
-  --horizon 600 \
   --record-videos \
   --dry-run
 ```
@@ -148,7 +147,6 @@ python -m robocasa.recovery.safe.collect_atomic_rollouts \
   --port 8120 \
   --split target \
   --replan-steps 5 \
-  --horizon 600 \
   --record-actions \
   --record-videos \
   --record-safe-features
@@ -169,7 +167,6 @@ python -m robocasa.recovery.safe.collect_atomic_rollouts \
   --port 8120 \
   --split target \
   --replan-steps 5 \
-  --horizon 600 \
   --record-actions \
   --record-videos
 ```
@@ -191,7 +188,6 @@ python -m robocasa.recovery.safe.collect_atomic_rollouts \
   --port 8120 \
   --split target \
   --replan-steps 5 \
-  --horizon 600 \
   --record-actions \
   --record-videos
 ```
@@ -213,7 +209,6 @@ python -m robocasa.recovery.safe.collect_atomic_rollouts \
   --port 8120 \
   --split target \
   --replan-steps 5 \
-  --horizon 600 \
   --record-actions \
   --record-videos \
   --resume

@@ -160,6 +160,39 @@ class TestSafeAtomicCollection(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "split"):
                 _assert_resume_compatible(test_plan["config"], pretrain_plan["config"])
 
+    def test_official_task_horizons_are_resolved_per_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(tmp)
+            args.tasks = ["OpenCabinet", "TurnOnElectricKettle", TASK]
+            args.horizon = None
+            plan = prepare_plan(args)
+
+            self.assertEqual(
+                plan["config"]["task_horizons"],
+                {
+                    "OpenCabinet": 1050,
+                    "TurnOnElectricKettle": 450,
+                    TASK: 600,
+                },
+            )
+            self.assertEqual(
+                plan["config"]["horizon_source"],
+                "robocasa_dataset_registry",
+            )
+            self.assertEqual(
+                [attempt["rollout_horizon"] for attempt in plan["attempts"]],
+                [1050, 1050, 450, 450, 600, 600],
+            )
+
+    def test_unregistered_task_requires_explicit_horizon(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(tmp)
+            args.tasks = ["CustomAtomicTask"]
+            args.allow_unregistered_atomic_tasks = True
+            args.horizon = None
+            with self.assertRaisesRegex(ValueError, "--horizon is required"):
+                prepare_plan(args)
+
     def test_success_failure_schema_validation_and_actions(self):
         with tempfile.TemporaryDirectory() as tmp:
             result = run_collection(collection_args(tmp), runtime=fake_runtime())

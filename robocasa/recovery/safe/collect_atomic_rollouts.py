@@ -15,7 +15,7 @@ import traceback
 
 import numpy as np
 
-from .atomic_tasks import validate_atomic_tasks
+from .atomic_tasks import registered_atomic_task_horizons, validate_atomic_tasks
 from .collect_rollouts import collect_single_rollout
 from .dataset import MANIFEST_NAME, load_manifest, save_rollout
 from .schema import SAFE_SCHEMA_VERSION, SafeRolloutMetadata, compatibility_key
@@ -232,7 +232,7 @@ def _runtime():
 def prepare_plan(args):
     if args.replan_steps <= 0:
         raise ValueError("--replan-steps must be positive")
-    if args.horizon <= 0:
+    if args.horizon is not None and args.horizon <= 0:
         raise ValueError("--horizon must be positive")
     for name in ("success_quota", "failure_quota"):
         value = getattr(args, name)
@@ -242,6 +242,23 @@ def prepare_plan(args):
         args.tasks,
         allow_unregistered=args.allow_unregistered_atomic_tasks,
     )
+    if args.horizon is not None:
+        task_horizons = {task: args.horizon for task in tasks}
+        horizon_source = "command_line_override"
+    else:
+        if args.allow_unregistered_atomic_tasks:
+            raise ValueError(
+                "--horizon is required with --allow-unregistered-atomic-tasks"
+            )
+        registered_horizons = registered_atomic_task_horizons()
+        missing_horizons = [task for task in tasks if task not in registered_horizons]
+        if missing_horizons:
+            raise ValueError(
+                "Official horizons are missing for atomic tasks: "
+                + ", ".join(missing_horizons)
+            )
+        task_horizons = {task: registered_horizons[task] for task in tasks}
+        horizon_source = "robocasa_dataset_registry"
     seeds = planned_seeds(args)
     policy_config = parse_policy_config(args.policy_config)
     robocasa_commit = args.robocasa_commit or current_robocasa_commit()
@@ -251,14 +268,18 @@ def prepare_plan(args):
         "policy_checkpoint": args.checkpoint,
         "policy_config": policy_config,
         "replan_steps": args.replan_steps,
-        "rollout_horizon": args.horizon,
         "openpi_repository_commit": args.openpi_repository_commit,
     }
     attempts = [
         {
             "task_name": task,
             "environment_seed": seed,
-            "rollout_id": stable_rollout_id(task, seed, identity),
+            "rollout_horizon": task_horizons[task],
+            "rollout_id": stable_rollout_id(
+                task,
+                seed,
+                {**identity, "rollout_horizon": task_horizons[task]},
+            ),
         }
         for task in tasks
         for seed in seeds
@@ -275,7 +296,8 @@ def prepare_plan(args):
         "host": args.host,
         "port": args.port,
         "replan_steps": args.replan_steps,
-        "rollout_horizon": args.horizon,
+        "task_horizons": task_horizons,
+        "horizon_source": horizon_source,
         "record_actions": args.record_actions,
         "record_videos": args.record_videos,
         "record_safe_features": args.record_safe_features,
@@ -298,7 +320,8 @@ def _assert_resume_compatible(previous, current):
         "policy_checkpoint",
         "policy_config",
         "replan_steps",
-        "rollout_horizon",
+        "task_horizons",
+        "horizon_source",
         "record_actions",
         "record_videos",
         "record_safe_features",
@@ -365,6 +388,7 @@ def run_collection(args, runtime=None):
         for attempt_index, attempt in enumerate(task_attempts):
             rollout_id = attempt["rollout_id"]
             seed = attempt["environment_seed"]
+            rollout_horizon = attempt["rollout_horizon"]
             paths = artifact_paths(
                 output_dir,
                 task_name,
@@ -452,7 +476,7 @@ def run_collection(args, runtime=None):
                 rollout = collect_single_rollout(
                     policy,
                     env,
-                    horizon=args.horizon,
+                    horizon=rollout_horizon,
                     step_fn=runtime["step_fn"],
                     success_fn=runtime["success_fn"],
                     video_writer=writer,
@@ -499,7 +523,7 @@ def run_collection(args, runtime=None):
                     feature_shape=list(rollout["features"].shape),
                     flow_steps=int(rollout["features"].shape[1]),
                     termination_reason=rollout["termination_reason"],
-                    timeout_horizon=args.horizon,
+                    timeout_horizon=rollout_horizon,
                     video_path=(
                         str(paths["video"].relative_to(output_dir))
                         if paths["video"] is not None
@@ -509,7 +533,7 @@ def run_collection(args, runtime=None):
                         **plan["config"]["policy_config"],
                         "official_safe_openpi_commit": args.official_safe_openpi_commit,
                     },
-                    rollout_horizon=args.horizon,
+                    rollout_horizon=rollout_horizon,
                     action_path=(
                         str(paths["action"].relative_to(output_dir))
                         if paths["action"] is not None
@@ -584,7 +608,11 @@ def build_parser():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8120)
     parser.add_argument("--replan-steps", type=int, default=5)
-    parser.add_argument("--horizon", type=int, default=500)
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        help="Override the official registry horizon for every selected task",
+    )
     parser.add_argument("--env-interface", choices=["gym", "robosuite"], default="gym")
     parser.add_argument("--split", default="test")
     parser.add_argument("--record-safe-features", action=argparse.BooleanOptionalAction, default=True)

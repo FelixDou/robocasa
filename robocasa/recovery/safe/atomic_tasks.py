@@ -27,6 +27,41 @@ def registered_atomic_tasks(path: str | Path | None = None) -> set[str]:
     raise RuntimeError(f"Could not parse ATOMIC_TASK_DATASETS from {path}")
 
 
+def registered_atomic_task_horizons(
+    path: str | Path | None = None,
+) -> dict[str, int]:
+    """Parse official task horizons without importing RoboSuite or RoboCasa."""
+    path = Path(path) if path is not None else dataset_registry_path()
+    tree = ast.parse(path.read_text(), filename=str(path))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name) and target.id == "ATOMIC_TASK_DATASETS"
+            for target in node.targets
+        ):
+            continue
+        if not isinstance(node.value, ast.Call):
+            break
+        horizons = {}
+        for task_keyword in node.value.keywords:
+            if task_keyword.arg is None or not isinstance(task_keyword.value, ast.Call):
+                continue
+            for config_keyword in task_keyword.value.keywords:
+                if config_keyword.arg != "horizon":
+                    continue
+                value = ast.literal_eval(config_keyword.value)
+                if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                    raise RuntimeError(
+                        f"Invalid horizon for {task_keyword.arg} in {path}: {value!r}"
+                    )
+                horizons[task_keyword.arg] = value
+                break
+        if horizons:
+            return horizons
+    raise RuntimeError(f"Could not parse atomic task horizons from {path}")
+
+
 def validate_atomic_tasks(tasks, *, allow_unregistered=False, registry_path=None):
     tasks = list(tasks)
     if not tasks:
