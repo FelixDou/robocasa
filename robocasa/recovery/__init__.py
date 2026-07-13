@@ -1,33 +1,46 @@
-"""Utilities for deriving recovery-oriented task structure from RoboCasa tasks."""
+"""Recovery utilities with lazy imports for simulator-independent tooling."""
 
-from robocasa.recovery.subtask_eval import (
-    build_subtask_trace,
-    get_subtask_eval,
-    infer_stuck_subtask,
-    summarize_subtask_rollout,
-)
-from robocasa.recovery.eval_composite_predicates import (
-    get_eval_composite_subtask_predicates,
-)
-from robocasa.recovery.recovery_rollout import (
-    RecoveryConfig,
-    RecoveryMode,
-    apply_recovery_mode,
-    run_recovery_after_failed_rollout,
-)
-from robocasa.recovery.create_recovery_failure_dataset import (
-    run_dataset_creation,
-)
+from __future__ import annotations
 
-__all__ = [
-    "RecoveryConfig",
-    "RecoveryMode",
-    "apply_recovery_mode",
-    "build_subtask_trace",
-    "get_eval_composite_subtask_predicates",
-    "get_subtask_eval",
-    "infer_stuck_subtask",
-    "run_dataset_creation",
-    "run_recovery_after_failed_rollout",
-    "summarize_subtask_rollout",
-]
+from importlib import import_module
+
+
+_EXPORTS = {
+    "build_subtask_trace": ("robocasa.recovery.subtask_eval", "build_subtask_trace"),
+    "get_subtask_eval": ("robocasa.recovery.subtask_eval", "get_subtask_eval"),
+    "infer_stuck_subtask": ("robocasa.recovery.subtask_eval", "infer_stuck_subtask"),
+    "summarize_subtask_rollout": (
+        "robocasa.recovery.subtask_eval",
+        "summarize_subtask_rollout",
+    ),
+    "get_eval_composite_subtask_predicates": (
+        "robocasa.recovery.eval_composite_predicates",
+        "get_eval_composite_subtask_predicates",
+    ),
+    "RecoveryConfig": ("robocasa.recovery.recovery_rollout", "RecoveryConfig"),
+    "RecoveryMode": ("robocasa.recovery.recovery_rollout", "RecoveryMode"),
+    "apply_recovery_mode": (
+        "robocasa.recovery.recovery_rollout",
+        "apply_recovery_mode",
+    ),
+    "run_recovery_after_failed_rollout": (
+        "robocasa.recovery.recovery_rollout",
+        "run_recovery_after_failed_rollout",
+    ),
+    "run_dataset_creation": (
+        "robocasa.recovery.create_recovery_failure_dataset",
+        "run_dataset_creation",
+    ),
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name):
+    try:
+        module_name, attribute = _EXPORTS[name]
+    except KeyError as error:
+        raise AttributeError(name) from error
+    value = getattr(import_module(module_name), attribute)
+    globals()[name] = value
+    return value

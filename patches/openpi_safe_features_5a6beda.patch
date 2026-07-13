@@ -1,0 +1,148 @@
+--- a/src/openpi/models/pi0.py
++++ b/src/openpi/models/pi0.py
+@@ -221,6 +221,7 @@
+         *,
+         num_steps: int | at.Int[at.Array, ""] = 10,
+         noise: at.Float[at.Array, "b ah ad"] | None = None,
++        return_safe_features: bool = False,
+     ) -> _model.Actions:
+         observation = _model.preprocess_observation(None, observation, train=False)
+         # note that we use the convention more common in diffusion literature, where t=1 is noise and t=0 is the target
+@@ -236,8 +237,14 @@
+         positions = jnp.cumsum(prefix_mask, axis=1) - 1
+         _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
+ 
++        feature_dim = self.PaliGemma.llm.module.configs[1].width
++        safe_feature_steps = num_steps if return_safe_features else 0
++        safe_features = jnp.zeros(
++            (batch_size, safe_feature_steps, self.action_horizon, feature_dim), dtype=jnp.float32
++        )
++
+         def step(carry):
+-            x_t, time = carry
++            x_t, time, features, step_index = carry
+             suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
+                 observation, x_t, jnp.broadcast_to(time, batch_size)
+             )
+@@ -266,14 +273,23 @@
+                 adarms_cond=[None, adarms_cond],
+             )
+             assert prefix_out is None
+-            v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
++            # Official SAFE's pi0 feature: final action-expert suffix hidden
++            # states for every action position, immediately before velocity projection.
++            pre_velocity = suffix_out[:, -self.action_horizon :].astype(jnp.float32)
++            if return_safe_features:
++                features = features.at[:, step_index].set(pre_velocity)
++            v_t = self.action_out_proj(pre_velocity)
+ 
+-            return x_t + dt * v_t, time + dt
++            return x_t + dt * v_t, time + dt, features, step_index + 1
+ 
+         def cond(carry):
+-            x_t, time = carry
++            x_t, time, _, _ = carry
+             # robust to floating-point error
+             return time >= -dt / 2
+ 
+-        x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
++        x_0, _, safe_features, _ = jax.lax.while_loop(
++            cond, step, (noise, 1.0, safe_features, 0)
++        )
++        if return_safe_features:
++            return x_0, {"pre_velocity": safe_features}
+         return x_0
+--- a/src/openpi/policies/policy.py
++++ b/src/openpi/policies/policy.py
+@@ -54,6 +54,7 @@
+         self._metadata = metadata or {}
+         self._is_pytorch_model = is_pytorch
+         self._pytorch_device = pytorch_device
++        self._safe_supported = not is_pytorch and type(model).__name__ == "Pi0"
+ 
+         if self._is_pytorch_model:
+             self._model = self._model.to(pytorch_device)
+@@ -61,13 +62,21 @@
+             self._sample_actions = model.sample_actions
+         else:
+             # JAX model setup
+-            self._sample_actions = nnx_utils.module_jit(model.sample_actions)
++            if self._safe_supported:
++                self._sample_actions = nnx_utils.module_jit(
++                    model.sample_actions, static_argnames=("return_safe_features",)
++                )
++            else:
++                self._sample_actions = nnx_utils.module_jit(model.sample_actions)
+             self._rng = rng or jax.random.key(0)
+ 
+     @override
+     def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
+         # Make a copy since transformations may modify the inputs in place.
+         inputs = jax.tree.map(lambda x: x, obs)
++        request_safe_features = bool(inputs.pop("request_safe_features", False))
++        if request_safe_features and not self._safe_supported:
++            raise RuntimeError("Raw SAFE feature extraction is available only for JAX Pi0")
+         inputs = self._input_transform(inputs)
+         if not self._is_pytorch_model:
+             # Make a batch and convert to jax.Array.
+@@ -80,6 +89,8 @@
+ 
+         # Prepare kwargs for sample_actions
+         sample_kwargs = dict(self._sample_kwargs)
++        if self._safe_supported:
++            sample_kwargs["return_safe_features"] = request_safe_features
+         if noise is not None:
+             noise = torch.from_numpy(noise).to(self._pytorch_device) if self._is_pytorch_model else jnp.asarray(noise)
+ 
+@@ -89,9 +100,14 @@
+ 
+         observation = _model.Observation.from_dict(inputs)
+         start_time = time.monotonic()
++        sample_output = self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs)
++        if request_safe_features:
++            sampled_actions, safe_aux = sample_output
++        else:
++            sampled_actions, safe_aux = sample_output, None
+         outputs = {
+             "state": inputs["state"],
+-            "actions": self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs),
++            "actions": sampled_actions,
+         }
+         model_time = time.monotonic() - start_time
+         if self._is_pytorch_model:
+@@ -103,6 +119,24 @@
+         outputs["policy_timing"] = {
+             "infer_ms": model_time * 1000,
+         }
++        if request_safe_features:
++            features = np.asarray(safe_aux["pre_velocity"][0], dtype=np.float32)
++            if features.ndim != 3 or features.shape[1] != self._model.action_horizon:
++                raise RuntimeError(f"Invalid SAFE pre_velocity shape: {features.shape}")
++            if not np.isfinite(features).all():
++                raise RuntimeError("SAFE pre_velocity contains non-finite values")
++            outputs["safe_features"] = features
++            outputs["safe_feature_metadata"] = {
++                "schema_version": 1,
++                "model_id": type(self._model).__name__,
++                "checkpoint": self._metadata.get("safe_checkpoint", "unknown"),
++                "feature_layer": "action_expert_suffix_pre_action_out_proj",
++                "feature_shape": list(features.shape),
++                "feature_dtype": "float32",
++                "action_horizon": int(features.shape[1]),
++                "flow_steps": int(features.shape[0]),
++                "aggregation": "raw",
++            }
+         return outputs
+ 
+     @property
+--- a/src/openpi/policies/policy_config.py
++++ b/src/openpi/policies/policy_config.py
+@@ -104,7 +104,7 @@
+             *repack_transforms.outputs,
+         ],
+         sample_kwargs=sample_kwargs,
+-        metadata=train_config.policy_metadata,
++        metadata={**train_config.policy_metadata, "safe_checkpoint": str(checkpoint_dir)},
+         is_pytorch=is_pytorch,
+         pytorch_device=pytorch_device if is_pytorch else None,
+     )
