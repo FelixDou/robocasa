@@ -69,6 +69,28 @@ class TestSafeCollection(unittest.TestCase):
         self.assertEqual(result["policy_action_chunks"].shape, (2, 4, 12))
         self.assertFalse(np.array_equal(result["features"][0], result["features"][1]))
 
+    def test_video_frame_stride_matches_official_subsampling(self):
+        env = FakeEnv()
+
+        def never_done_step(environment, action):
+            environment.steps += 1
+            return {}, 0.0, False, False, {"success": False}
+
+        frames = []
+        result = collect_single_rollout(
+            FakePolicy(),
+            env,
+            horizon=6,
+            step_fn=never_done_step,
+            video_writer=object(),
+            frame_fn=lambda environment, writer, obs, previous: frames.append(
+                environment.steps
+            ),
+            video_frame_stride=2,
+        )
+        self.assertEqual(frames, [1, 3, 5, 6])
+        self.assertEqual(result["num_video_frames"], 4)
+
 
 if __name__ == "__main__":
     unittest.main()

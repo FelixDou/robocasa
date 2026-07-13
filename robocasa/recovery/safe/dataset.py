@@ -165,7 +165,7 @@ def generate_splits(
     train_fraction: float = 0.6,
     calibration_fraction: float = 0.2,
 ) -> dict:
-    """Split by `(task, environment_seed)` groups to prevent seed leakage."""
+    """Split by episode identity, including reset index for official OpenPI runs."""
     if not records:
         raise ValueError("Cannot split an empty dataset")
     if train_fraction <= 0 or calibration_fraction <= 0:
@@ -180,7 +180,14 @@ def generate_splits(
         raise ValueError(f"Unseen tasks are absent from dataset: {sorted(missing)}")
     grouped = defaultdict(list)
     for record in records:
-        grouped[(record.task_name, record.environment_seed)].append(record)
+        episode_identity = (
+            record.environment_reset_index
+            if record.seed_protocol == "official_openpi"
+            else None
+        )
+        grouped[
+            (record.task_name, record.environment_seed, episode_identity)
+        ].append(record)
     rng = random.Random(seed)
     result = {name: [] for name in ("train", "calibration", "seen_test", "unseen_test")}
     seen_groups = defaultdict(list)

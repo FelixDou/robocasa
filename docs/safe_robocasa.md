@@ -37,7 +37,9 @@ The dedicated entry point is:
 python -m robocasa.recovery.safe.collect_atomic_rollouts
 ```
 
-It validates task names and resolves each task's official horizon by parsing `ATOMIC_TASK_DATASETS` without importing RoboSuite. `--horizon` is an explicit all-task override; it is required with `--allow-unregistered-atomic-tasks`. Important options include `--tasks`, `--num-rollouts`, `--seed`, `--seed-end`, `--output-dir`, `--policy-module`, repeatable `--policy-arg`, `--host`, `--port`, `--policy-name`, `--checkpoint`, `--policy-config`, `--horizon`, `--replan-steps`, `--record-videos`, `--record-actions`, `--record-safe-features`, `--continue-on-error`, `--resume`, `--success-quota`, `--failure-quota`, and `--dry-run`. Boolean options support their `--no-...` form.
+It validates task names and resolves each task's official horizon by parsing `ATOMIC_TASK_DATASETS` without importing RoboSuite. `--horizon` is an explicit all-task override; it is required with `--allow-unregistered-atomic-tasks`. Important options include `--tasks`, `--num-rollouts`, `--seed`, `--seed-end`, `--seed-protocol`, `--output-dir`, `--policy-module`, repeatable `--policy-arg`, `--host`, `--port`, `--policy-name`, `--checkpoint`, `--policy-config`, `--horizon`, `--replan-steps`, `--record-videos`, `--video-frame-stride`, `--record-actions`, `--record-safe-features`, `--continue-on-error`, `--resume`, `--success-quota`, `--failure-quota`, and `--dry-run`. Boolean options support their `--no-...` form.
+
+The default `rollout_index` seed protocol creates a fresh environment with seed `seed + rollout_index`. For evaluation-parity experiments, `--seed-protocol official_openpi --seed 7` instead creates one environment per task and obtains episodes by repeatedly calling `reset()`, as the pinned official OpenPI RoboCasa evaluator does. Each manifest row records the shared base seed and its distinct `environment_reset_index`. The official evaluator also records every second environment step and writes at 20 FPS; use `--video-frame-stride 2 --video-fps 20` to match its video timing. For example, a full 1050-step `OpenCabinet` rollout becomes 526 frames, or approximately 26.3 seconds.
 
 The collector obtains the final task result from the simulator success predicate. It records executed actions separately from the full action chunks predicted at inference time. It only appends a manifest row after the video, executed-action file, and SAFE tensor file requested for that rollout have been finalized.
 
@@ -47,13 +49,14 @@ Each JSONL manifest row contains:
 
 ```text
 rollout_id, task_name, task_instruction, environment_seed
+seed_protocol, environment_reset_index, environment_split
 success, failed, failure_label, termination_reason
 num_environment_steps, num_policy_inferences, inference_environment_steps
 safe_feature_path, safe_feature_shape, safe_feature_dtype
 safe_feature_layer, safe_feature_aggregation
 policy_name, policy_checkpoint, policy_config
 replan_steps, action_horizon, rollout_horizon
-action_path, video_path
+action_path, video_path, video_frame_stride
 safe_repository_commit, openpi_repository_commit, robocasa_commit, created_at
 schema_version, feature_schema_version, collection_complete
 ```
@@ -74,7 +77,7 @@ dataset/
 
 Each rollout NPZ contains raw `features`, `inference_environment_steps`, `valid_length`, `rollout_id`, serialized feature metadata, the binary failure flag, and `policy_action_chunks`. The feature and action axes remain available to the official loader. Files use temporary names and atomic replacement where practical; the append-only manifest is fsynced after each complete rollout.
 
-Rollout IDs are deterministic hashes of task, seed, policy/checkpoint identity, policy config, horizon, `replan_steps`, and OpenPI revision. Resume refuses incompatible configuration, never overwrites a completed rollout, and never appends a second valid row for it. Existing artifacts without a valid manifest row are moved under `incomplete/` before recollection. Errors and every skipped seed are journaled. Success/failure quotas stop future attempts after both requested class counts are reached; already completed valid rollouts are never discarded.
+Rollout IDs are deterministic hashes of task, seed protocol, seed/reset index, policy/checkpoint identity, policy config, horizon, `replan_steps`, and OpenPI revision. Resume refuses incompatible configuration, never overwrites a completed rollout, and never appends a second valid row for it. Existing artifacts without a valid manifest row are moved under `incomplete/` before recollection. Errors and every skipped episode are journaled. Success/failure quotas stop future attempts after both requested class counts are reached; already completed valid rollouts are never discarded. An official-protocol comparison should start from a fresh policy server and run uninterrupted when possible, because resuming can reconstruct the environment reset sequence but cannot replay policy-server random-number consumption from skipped episodes.
 
 ## Prepare the SAFE-enabled OpenPI server
 
@@ -113,6 +116,29 @@ python -u scripts/serve_policy.py \
 ```
 
 ## Future collection commands
+
+Official OpenPI-parity smoke test (base seed 7, repeated resets, official horizon, and official video subsampling):
+
+```bash
+python -m robocasa.recovery.safe.collect_atomic_rollouts \
+  --output-dir "$SAFE_DATASET" \
+  --tasks OpenCabinet \
+  --num-rollouts 10 \
+  --seed 7 \
+  --seed-protocol official_openpi \
+  --policy-name pi0_robocasa_pretrain_human300 \
+  --checkpoint "$PI0_CHECKPOINT" \
+  --policy-config '{"config_name":"pi0_robocasa_pretrain_human300","step":74999}' \
+  --host 127.0.0.1 \
+  --port 8120 \
+  --split pretrain \
+  --replan-steps 5 \
+  --record-actions \
+  --record-videos \
+  --video-frame-stride 2 \
+  --video-fps 20 \
+  --record-safe-features
+```
 
 Planning is simulator-free and does not contact the OpenPI server:
 

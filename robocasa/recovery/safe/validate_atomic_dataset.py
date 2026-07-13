@@ -44,7 +44,7 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
         errors.append("Dataset contains no valid rollouts")
 
     registered = registered_atomic_tasks() if not allow_unregistered else set()
-    seen_task_seed = set()
+    seen_episode_identity = set()
     identities = set()
     feature_files = set()
     official_compatible = True
@@ -52,10 +52,16 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
         prefix = f"rollout {record.rollout_id}"
         if record.schema_version != SAFE_SCHEMA_VERSION:
             errors.append(f"{prefix}: unsupported schema_version")
-        pair = (record.task_name, record.environment_seed)
-        if pair in seen_task_seed:
-            errors.append(f"{prefix}: duplicate task/seed record {pair}")
-        seen_task_seed.add(pair)
+        episode_identity = (
+            record.task_name,
+            record.environment_seed,
+            record.environment_reset_index,
+        )
+        if episode_identity in seen_episode_identity:
+            errors.append(
+                f"{prefix}: duplicate task/seed/reset record {episode_identity}"
+            )
+        seen_episode_identity.add(episode_identity)
         if not allow_unregistered and record.task_name not in registered:
             errors.append(f"{prefix}: task is not a registered atomic task: {record.task_name}")
         if not record.collection_complete:

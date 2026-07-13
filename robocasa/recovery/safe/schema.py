@@ -39,6 +39,9 @@ class SafeRolloutMetadata:
     timeout_horizon: int = 0
     video_path: str | None = None
     environment_split: str | None = None
+    seed_protocol: str = "rollout_index"
+    environment_reset_index: int | None = None
+    video_frame_stride: int = 1
     unused_subtask_metadata: dict[str, Any] | None = None
     schema_version: int = SAFE_SCHEMA_VERSION
     feature_schema_version: int = SAFE_FEATURE_SCHEMA_VERSION
@@ -82,6 +85,19 @@ class SafeRolloutMetadata:
             raise ValueError("feature_shape horizon axis disagrees with action_horizon")
         if self.feature_dtype != "float32":
             raise ValueError("raw SAFE storage dtype must be float32")
+        if self.seed_protocol not in {"rollout_index", "official_openpi"}:
+            raise ValueError(f"Unsupported seed_protocol {self.seed_protocol!r}")
+        if self.seed_protocol == "official_openpi":
+            if self.environment_reset_index is None or self.environment_reset_index < 0:
+                raise ValueError(
+                    "official_openpi records require a non-negative environment_reset_index"
+                )
+        elif self.environment_reset_index is not None:
+            raise ValueError(
+                "environment_reset_index is only valid for official_openpi records"
+            )
+        if self.video_frame_stride < 1:
+            raise ValueError("video_frame_stride must be positive")
         if self.rollout_horizon is None:
             self.rollout_horizon = self.timeout_horizon
         if self.rollout_horizon < self.num_env_steps:

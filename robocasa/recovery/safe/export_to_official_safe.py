@@ -74,7 +74,16 @@ def export_to_official_safe(
         raise ValueError("Source dataset lacks fields required by the official SAFE π0 loader")
     records = sorted(
         load_manifest(dataset_dir),
-        key=lambda record: (record.task_name, record.environment_seed, record.rollout_id),
+        key=lambda record: (
+            record.task_name,
+            record.environment_seed,
+            (
+                record.environment_reset_index
+                if record.environment_reset_index is not None
+                else -1
+            ),
+            record.rollout_id,
+        ),
     )
     compatibility = assert_compatible(records)
     fingerprint = source_fingerprint(dataset_dir)
@@ -126,6 +135,9 @@ def export_to_official_safe(
             "episode_idx": episode_index,
             "episode_success": int(not record.failed),
             "environment_seed": record.environment_seed,
+            "environment_reset_index": record.environment_reset_index,
+            "seed_protocol": record.seed_protocol,
+            "video_frame_stride": record.video_frame_stride,
             "model_infer_times": record.valid_sequence_length,
             "replan_steps": record.replan_steps,
             "policy_name": record.policy_id,

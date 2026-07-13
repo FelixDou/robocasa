@@ -20,12 +20,22 @@ from robocasa.recovery.safe.dataset import (
 from robocasa.recovery.safe.schema import SafeRolloutMetadata
 
 
-def metadata(rollout_id, task="SeenTask", seed=0, failed=False):
+def metadata(
+    rollout_id,
+    task="SeenTask",
+    seed=0,
+    failed=False,
+    *,
+    seed_protocol="rollout_index",
+    reset_index=None,
+):
     return SafeRolloutMetadata(
         rollout_id=rollout_id,
         task_name=task,
         task_instruction="instruction",
         environment_seed=seed,
+        seed_protocol=seed_protocol,
+        environment_reset_index=reset_index,
         policy_id="pi0-robocasa",
         checkpoint="checkpoint-74999",
         failed=failed,
@@ -82,6 +92,25 @@ class TestSafeDataset(unittest.TestCase):
             for rollout_id in one[split]
         }
         self.assertEqual(len(split_by_id), len(records))
+
+    def test_official_reset_indices_are_distinct_episode_groups(self):
+        records = [
+            metadata(
+                f"official-{index}",
+                seed=7,
+                failed=bool(index % 2),
+                seed_protocol="official_openpi",
+                reset_index=index,
+            )
+            for index in range(20)
+        ]
+        splits = generate_splits(records, [], seed=7)
+        assigned = {
+            rollout_id
+            for split in ("train", "calibration", "seen_test")
+            for rollout_id in splits[split]
+        }
+        self.assertEqual(assigned, {record.rollout_id for record in records})
 
 
 if __name__ == "__main__":

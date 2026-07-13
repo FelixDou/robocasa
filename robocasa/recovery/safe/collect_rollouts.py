@@ -22,6 +22,7 @@ def collect_single_rollout(
     success_fn=None,
     video_writer=None,
     frame_fn=None,
+    video_frame_stride=1,
     require_safe_features=True,
 ):
     """Simulator-light collection core used by the live CLI and mocked tests."""
@@ -38,7 +39,11 @@ def collect_single_rollout(
     actions = []
     num_env_steps = 0
     step_fn = step_fn or (lambda environment, action: environment.step(action))
-    for _ in range(horizon):
+    video_frame_stride = int(video_frame_stride)
+    if video_frame_stride < 1:
+        raise ValueError("video_frame_stride must be positive")
+    num_video_frames = 0
+    for step_index in range(horizon):
         action = policy(obs, instruction=instruction)
         actions.append(action)
         pop_record = getattr(policy, "pop_inference_record", None)
@@ -52,9 +57,19 @@ def collect_single_rollout(
             done = terminated or truncated
         else:
             obs, reward, done, info = result
-        if video_writer is not None and frame_fn is not None:
-            previous_frame = frame_fn(env, video_writer, obs, previous_frame)
         success = bool(success_fn(info, reward, env) if success_fn else (info or {}).get("success", False))
+        if (
+            video_writer is not None
+            and frame_fn is not None
+            and (
+                step_index % video_frame_stride == 0
+                or step_index == horizon - 1
+                or done
+                or success
+            )
+        ):
+            previous_frame = frame_fn(env, video_writer, obs, previous_frame)
+            num_video_frames += 1
         if success:
             termination_reason = "success"
             break
@@ -106,6 +121,7 @@ def collect_single_rollout(
         "feature_metadata": metadata,
         "policy_action_chunks": policy_action_chunks,
         "actions": actions,
+        "num_video_frames": num_video_frames,
     }
 
 

@@ -28,9 +28,11 @@ class FakeEnv:
     def __init__(self, seed):
         self.seed = seed
         self.steps = 0
+        self.reset_calls = 0
         self.closed = False
 
     def reset(self):
+        self.reset_calls += 1
         self.steps = 0
         return {"annotation.human.task_description": "turn on the sink faucet"}, {}
 
@@ -83,11 +85,17 @@ class FakePolicy:
         return record
 
 
-def fake_runtime():
+def fake_runtime(tracker=None):
+    def make_env(task, interface, split, seed, render):
+        env = FakeEnv(seed)
+        if tracker is not None:
+            tracker.setdefault("envs", []).append(env)
+        return env
+
     return {
         "load_factory": lambda spec: FakePolicy,
         "parse_policy_args": lambda values: {},
-        "make_env": lambda task, interface, split, seed, render: FakeEnv(seed),
+        "make_env": make_env,
         "open_video_writer": lambda path, fps: None,
         "call_factory": lambda factory, env, args: factory(env, **args),
         "append_frame": lambda *args, **kwargs: None,
@@ -159,6 +167,51 @@ class TestSafeAtomicCollection(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "split"):
                 _assert_resume_compatible(test_plan["config"], pretrain_plan["config"])
+
+    def test_official_openpi_seed_protocol_reuses_one_environment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(tmp, num_rollouts=3)
+            args.seed = 7
+            args.seed_protocol = "official_openpi"
+            args.video_frame_stride = 2
+            plan = prepare_plan(args)
+
+            self.assertEqual(plan["config"]["seeds"], [7])
+            self.assertEqual(plan["config"]["environment_reset_indices"], [0, 1, 2])
+            self.assertEqual(
+                [attempt["environment_seed"] for attempt in plan["attempts"]],
+                [7, 7, 7],
+            )
+            self.assertEqual(
+                [attempt["environment_reset_index"] for attempt in plan["attempts"]],
+                [0, 1, 2],
+            )
+
+            tracker = {}
+            result = run_collection(args, runtime=fake_runtime(tracker))
+            records = load_manifest(tmp)
+            self.assertEqual(result["counts"]["valid_rollouts"], 3)
+            self.assertEqual(len(tracker["envs"]), 1)
+            self.assertEqual(tracker["envs"][0].reset_calls, 3)
+            self.assertTrue(tracker["envs"][0].closed)
+            self.assertEqual([record.environment_seed for record in records], [7, 7, 7])
+            self.assertEqual(
+                [record.environment_reset_index for record in records], [0, 1, 2]
+            )
+            self.assertTrue(
+                all(record.seed_protocol == "official_openpi" for record in records)
+            )
+            self.assertTrue(all(record.video_frame_stride == 2 for record in records))
+            validation = validate_atomic_dataset(tmp)
+            self.assertTrue(validation["valid"], validation["errors"])
+
+    def test_official_protocol_rejects_seed_end(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(tmp)
+            args.seed_protocol = "official_openpi"
+            args.seed_end = 9
+            with self.assertRaisesRegex(ValueError, "--seed-end is incompatible"):
+                prepare_plan(args)
 
     def test_official_task_horizons_are_resolved_per_task(self):
         with tempfile.TemporaryDirectory() as tmp:

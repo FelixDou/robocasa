@@ -188,13 +188,25 @@ def make_summary(config, records, errors, skipped, *, partial):
         },
         "per_task": {task: dict(counts) for task, counts in sorted(per_task.items())},
         "attempted": [
-            {key: event.get(key) for key in ("task_name", "environment_seed", "rollout_id", "status")}
+            {
+                key: event.get(key)
+                for key in (
+                    "task_name",
+                    "environment_seed",
+                    "environment_reset_index",
+                    "rollout_horizon",
+                    "rollout_id",
+                    "status",
+                )
+            }
             for event in errors + skipped
         ]
         + [
             {
                 "task_name": record.task_name,
                 "environment_seed": record.environment_seed,
+                "environment_reset_index": record.environment_reset_index,
+                "rollout_horizon": record.rollout_horizon,
                 "rollout_id": record.rollout_id,
                 "status": "valid",
             }
@@ -230,10 +242,18 @@ def _runtime():
 
 
 def prepare_plan(args):
+    if args.num_rollouts < 1:
+        raise ValueError("--num-rollouts must be positive")
     if args.replan_steps <= 0:
         raise ValueError("--replan-steps must be positive")
     if args.horizon is not None and args.horizon <= 0:
         raise ValueError("--horizon must be positive")
+    if args.video_frame_stride <= 0:
+        raise ValueError("--video-frame-stride must be positive")
+    if args.seed_protocol == "official_openpi" and args.seed_end is not None:
+        raise ValueError(
+            "--seed-end is incompatible with --seed-protocol official_openpi"
+        )
     for name in ("success_quota", "failure_quota"):
         value = getattr(args, name)
         if value is not None and value < 0:
@@ -259,34 +279,52 @@ def prepare_plan(args):
             )
         task_horizons = {task: registered_horizons[task] for task in tasks}
         horizon_source = "robocasa_dataset_registry"
-    seeds = planned_seeds(args)
+    if args.seed_protocol == "official_openpi":
+        seeds = [args.seed]
+        attempt_coordinates = [
+            (args.seed, reset_index) for reset_index in range(args.num_rollouts)
+        ]
+    else:
+        seeds = planned_seeds(args)
+        attempt_coordinates = [(seed, None) for seed in seeds]
     policy_config = parse_policy_config(args.policy_config)
     robocasa_commit = args.robocasa_commit or current_robocasa_commit()
     identity = {
         "split": args.split,
+        "seed_protocol": args.seed_protocol,
         "policy_name": args.policy_name,
         "policy_checkpoint": args.checkpoint,
         "policy_config": policy_config,
         "replan_steps": args.replan_steps,
         "openpi_repository_commit": args.openpi_repository_commit,
     }
-    attempts = [
-        {
-            "task_name": task,
-            "environment_seed": seed,
-            "rollout_horizon": task_horizons[task],
-            "rollout_id": stable_rollout_id(
-                task,
-                seed,
-                {**identity, "rollout_horizon": task_horizons[task]},
-            ),
-        }
-        for task in tasks
-        for seed in seeds
-    ]
+    attempts = []
+    for task in tasks:
+        for seed, reset_index in attempt_coordinates:
+            attempt_identity = {
+                **identity,
+                "rollout_horizon": task_horizons[task],
+                "environment_reset_index": reset_index,
+            }
+            attempts.append(
+                {
+                    "task_name": task,
+                    "environment_seed": seed,
+                    "environment_reset_index": reset_index,
+                    "rollout_horizon": task_horizons[task],
+                    "rollout_id": stable_rollout_id(task, seed, attempt_identity),
+                }
+            )
     config = {
         "tasks": tasks,
         "seeds": seeds,
+        "base_environment_seed": args.seed,
+        "seed_protocol": args.seed_protocol,
+        "environment_reset_indices": (
+            list(range(args.num_rollouts))
+            if args.seed_protocol == "official_openpi"
+            else None
+        ),
         "split": args.split,
         "output_dir": str(args.output_dir),
         "policy_module": args.policy_module,
@@ -300,6 +338,7 @@ def prepare_plan(args):
         "horizon_source": horizon_source,
         "record_actions": args.record_actions,
         "record_videos": args.record_videos,
+        "video_frame_stride": args.video_frame_stride,
         "record_safe_features": args.record_safe_features,
         "success_quota": args.success_quota,
         "failure_quota": args.failure_quota,
@@ -315,6 +354,9 @@ def _assert_resume_compatible(previous, current):
     keys = (
         "tasks",
         "split",
+        "base_environment_seed",
+        "seed_protocol",
+        "environment_reset_indices",
         "policy_module",
         "policy_name",
         "policy_checkpoint",
@@ -324,6 +366,7 @@ def _assert_resume_compatible(previous, current):
         "horizon_source",
         "record_actions",
         "record_videos",
+        "video_frame_stride",
         "record_safe_features",
         "openpi_repository_commit",
     )
@@ -385,6 +428,8 @@ def run_collection(args, runtime=None):
         attempts_by_task[attempt["task_name"]].append(attempt)
     for task_name in plan["config"]["tasks"]:
         task_attempts = attempts_by_task[task_name]
+        shared_env = None
+        shared_policy = None
         for attempt_index, attempt in enumerate(task_attempts):
             rollout_id = attempt["rollout_id"]
             seed = attempt["environment_seed"]
@@ -415,6 +460,34 @@ def run_collection(args, runtime=None):
                             f"Completed manifest record {rollout_id} has missing artifacts: "
                             f"{missing_completed}"
                         )
+                    later_collection_pending = any(
+                        later["rollout_id"] not in record_by_id
+                        for later in task_attempts[attempt_index + 1 :]
+                    )
+                    if (
+                        args.seed_protocol == "official_openpi"
+                        and later_collection_pending
+                    ):
+                        if shared_env is None:
+                            shared_env = runtime["make_env"](
+                                task_name,
+                                args.env_interface,
+                                args.split,
+                                seed,
+                                args.record_videos,
+                            )
+                            try:
+                                shared_policy = runtime["call_factory"](
+                                    factory, shared_env, policy_args
+                                )
+                            except Exception:
+                                shared_env.close()
+                                shared_env = None
+                                raise
+                        shared_env.reset()
+                        reset_policy = getattr(shared_policy, "reset", None)
+                        if reset_policy is not None:
+                            reset_policy()
                     event = {**attempt, "status": "resume_completed", "created_at": utc_now()}
                     append_jsonl(output_dir / SKIPPED_NAME, event)
                     skipped.append(event)
@@ -449,18 +522,32 @@ def run_collection(args, runtime=None):
                     skipped.append(event)
                 break
 
-            env = None
+            env = shared_env
             writer = None
             try:
-                env = runtime["make_env"](
-                    task_name,
-                    args.env_interface,
-                    args.split,
-                    seed,
-                    args.record_videos,
-                )
+                if env is None:
+                    env = runtime["make_env"](
+                        task_name,
+                        args.env_interface,
+                        args.split,
+                        seed,
+                        args.record_videos,
+                    )
+                if args.seed_protocol == "official_openpi":
+                    if shared_policy is None:
+                        try:
+                            shared_policy = runtime["call_factory"](
+                                factory, env, policy_args
+                            )
+                        except Exception:
+                            env.close()
+                            env = None
+                            raise
+                    shared_env = env
+                    policy = shared_policy
+                else:
+                    policy = runtime["call_factory"](factory, env, policy_args)
                 writer = runtime["open_video_writer"](paths["video"], args.video_fps)
-                policy = runtime["call_factory"](factory, env, policy_args)
 
                 def frame_fn(environment, video_writer, obs, previous):
                     return runtime["append_frame"](
@@ -481,6 +568,7 @@ def run_collection(args, runtime=None):
                     success_fn=runtime["success_fn"],
                     video_writer=writer,
                     frame_fn=frame_fn,
+                    video_frame_stride=args.video_frame_stride,
                     require_safe_features=True,
                 )
                 if writer is not None:
@@ -507,6 +595,9 @@ def run_collection(args, runtime=None):
                     task_instruction=rollout["instruction"],
                     environment_seed=seed,
                     environment_split=args.split,
+                    seed_protocol=args.seed_protocol,
+                    environment_reset_index=attempt["environment_reset_index"],
+                    video_frame_stride=args.video_frame_stride,
                     policy_id=args.policy_name,
                     checkpoint=args.checkpoint,
                     failed=not rollout["success"],
@@ -561,6 +652,10 @@ def run_collection(args, runtime=None):
                 counts[task_name]["failures" if metadata.failed else "successes"] += 1
                 compatibility_keys.add(new_compatibility_key)
             except KeyboardInterrupt:
+                if shared_env is not None:
+                    shared_env.close()
+                    shared_env = None
+                    env = None
                 raise
             except Exception:
                 if writer is not None:
@@ -577,16 +672,22 @@ def run_collection(args, runtime=None):
                 append_jsonl(output_dir / ERRORS_NAME, event)
                 errors.append(event)
                 if not args.continue_on_error:
+                    if shared_env is not None:
+                        shared_env.close()
+                        shared_env = None
+                        env = None
                     raise
             finally:
                 if writer is not None:
                     writer.close()
-                if env is not None:
+                if env is not None and env is not shared_env:
                     env.close()
                 atomic_write_json(
                     summary_path,
                     make_summary(plan["config"], records, errors, skipped, partial=True),
                 )
+        if shared_env is not None:
+            shared_env.close()
     summary = make_summary(plan["config"], records, errors, skipped, partial=False)
     atomic_write_json(summary_path, summary)
     return summary
@@ -600,6 +701,15 @@ def build_parser():
     parser.add_argument("--num-rollouts", type=int, default=1, help="Maximum attempts per task")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--seed-end", type=int)
+    parser.add_argument(
+        "--seed-protocol",
+        choices=("rollout_index", "official_openpi"),
+        default="rollout_index",
+        help=(
+            "Use a distinct seed per rollout, or match the official OpenPI evaluator "
+            "by creating one environment per task and repeatedly resetting it"
+        ),
+    )
     parser.add_argument("--policy-module", default="robocasa.recovery.openpi_websocket_policy:make_policy")
     parser.add_argument("--policy-arg", action="append", default=[])
     parser.add_argument("--policy-name", required=True)
@@ -627,6 +737,12 @@ def build_parser():
     parser.add_argument("--video-height", type=int, default=512)
     parser.add_argument("--video-width", type=int, default=768)
     parser.add_argument("--video-fps", type=int, default=20)
+    parser.add_argument(
+        "--video-frame-stride",
+        type=int,
+        default=1,
+        help="Record one frame every N environment steps (official OpenPI uses 2)",
+    )
     parser.add_argument("--safe-repository-commit", default=SAFE_COMMIT)
     parser.add_argument("--official-safe-openpi-commit", default=OFFICIAL_SAFE_OPENPI_COMMIT)
     parser.add_argument("--openpi-repository-commit", default=ROBOCASA_OPENPI_COMMIT)
