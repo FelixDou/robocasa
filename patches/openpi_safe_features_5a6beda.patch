@@ -142,7 +142,7 @@
          ],
          sample_kwargs=sample_kwargs,
 -        metadata=train_config.policy_metadata,
-+        metadata={**train_config.policy_metadata, "safe_checkpoint": str(checkpoint_dir)},
++        metadata={**(train_config.policy_metadata or {}), "safe_checkpoint": str(checkpoint_dir)},
          is_pytorch=is_pytorch,
          pytorch_device=pytorch_device if is_pytorch else None,
      )
