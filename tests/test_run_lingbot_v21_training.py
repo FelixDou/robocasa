@@ -22,12 +22,15 @@ class RunLingBotV21TrainingTest(unittest.TestCase):
     def setUp(self):
         self.base_dataset = types.ModuleType("base_dataset")
         self.base_dataset.LEROBOT_DATASET_API = "v3"
+        self.lerobot_constants = types.ModuleType("lerobot.constants")
+        self.lerobot_constants.HF_LEROBOT_HOME = Path("/tmp/lerobot")
         self.lerobot_dataset = types.ModuleType("lerobot.datasets.lerobot_dataset")
         self.lerobot_dataset.CODEBASE_VERSION = "v2.1"
         self.vla_data = types.ModuleType("lingbotvla.data.vla_data")
         self.vla_data.base_dataset = self.base_dataset
         self.modules = {
             "lerobot": types.ModuleType("lerobot"),
+            "lerobot.constants": self.lerobot_constants,
             "lerobot.datasets": types.ModuleType("lerobot.datasets"),
             "lerobot.datasets.lerobot_dataset": self.lerobot_dataset,
             "lingbotvla": types.ModuleType("lingbotvla"),
@@ -40,6 +43,9 @@ class RunLingBotV21TrainingTest(unittest.TestCase):
             MODULE, "version", return_value="0.3.3"
         ):
             result = MODULE.enable_lerobot_v21_layout()
+            self.assertIs(
+                sys.modules["lerobot.utils.constants"], self.lerobot_constants
+            )
 
         self.assertEqual(result, ("0.3.3", "v2.1"))
         self.assertEqual(self.base_dataset.LEROBOT_DATASET_API, "v2")

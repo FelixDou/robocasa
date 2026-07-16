@@ -21,8 +21,23 @@ import runpy
 import sys
 
 
+def install_lerobot_v21_import_compat() -> None:
+    """Expose the v0.3.3 constants module at the path LingBot imports.
+
+    LeRobot 0.3.3 keeps ``HF_LEROBOT_HOME`` in ``lerobot.constants`` while
+    LingBot tries only the older ``lerobot.common.constants`` and newer
+    ``lerobot.utils.constants`` paths.  Registering the latter as an alias is
+    sufficient; no package files are edited.
+    """
+    import lerobot.constants as constants
+
+    sys.modules.setdefault("lerobot.utils.constants", constants)
+
+
 def enable_lerobot_v21_layout() -> tuple[str, str]:
     from lerobot.datasets.lerobot_dataset import CODEBASE_VERSION
+
+    install_lerobot_v21_import_compat()
     from lingbotvla.data.vla_data import base_dataset
 
     package_version = version("lerobot")
