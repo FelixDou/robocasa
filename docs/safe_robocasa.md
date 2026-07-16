@@ -265,6 +265,21 @@ python -m robocasa.recovery.safe.export_to_official_safe \
   --output-dir "${SAFE_DATASET}_official"
 ```
 
+To preserve the complete source while producing an exact deterministic class
+balance for official training, select equal per-task class counts during export:
+
+```bash
+python -m robocasa.recovery.safe.export_to_official_safe \
+  --dataset-dir "$SAFE_DATASET" \
+  --output-dir "${SAFE_DATASET}_official_balanced_10x10" \
+  --successes-per-task 10 \
+  --failures-per-task 10 \
+  --selection-seed 0
+```
+
+The conversion report records the source counts, selected counts, and selection
+seed. The source manifest and artifacts are never modified.
+
 Resume an interrupted export with the same source manifest:
 
 ```bash

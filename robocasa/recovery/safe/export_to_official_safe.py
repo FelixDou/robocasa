@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import pickle
+import random
 
 import numpy as np
 
@@ -17,6 +18,84 @@ from .validate_atomic_dataset import validate_atomic_dataset
 
 
 REPORT_NAME = "conversion_report.json"
+
+
+def _record_sort_key(record):
+    return (
+        record.task_name,
+        record.environment_seed,
+        (
+            record.environment_reset_index
+            if record.environment_reset_index is not None
+            else -1
+        ),
+        record.rollout_id,
+    )
+
+
+def select_balanced_records(
+    records,
+    *,
+    successes_per_task=None,
+    failures_per_task=None,
+    seed=0,
+):
+    """Select an exact deterministic class balance without mutating source data."""
+    if successes_per_task is None and failures_per_task is None:
+        selected = sorted(records, key=_record_sort_key)
+        return selected, {
+            "mode": "all",
+            "source_num_rollouts": len(records),
+            "selected_num_rollouts": len(selected),
+        }
+    if successes_per_task is None or failures_per_task is None:
+        raise ValueError(
+            "--successes-per-task and --failures-per-task must be provided together"
+        )
+    if successes_per_task < 1 or failures_per_task < 1:
+        raise ValueError("Per-task success and failure counts must be positive")
+
+    rng = random.Random(seed)
+    tasks = sorted({record.task_name for record in records})
+    selected = []
+    per_task = {}
+    for task in tasks:
+        successes = sorted(
+            (record for record in records if record.task_name == task and not record.failed),
+            key=_record_sort_key,
+        )
+        failures = sorted(
+            (record for record in records if record.task_name == task and record.failed),
+            key=_record_sort_key,
+        )
+        if len(successes) < successes_per_task or len(failures) < failures_per_task:
+            raise ValueError(
+                f"Task {task} has {len(successes)} successes and {len(failures)} failures; "
+                f"requested {successes_per_task} and {failures_per_task}"
+            )
+        rng.shuffle(successes)
+        rng.shuffle(failures)
+        chosen_successes = successes[:successes_per_task]
+        chosen_failures = failures[:failures_per_task]
+        selected.extend(chosen_successes)
+        selected.extend(chosen_failures)
+        per_task[task] = {
+            "source_successes": len(successes),
+            "source_failures": len(failures),
+            "selected_successes": len(chosen_successes),
+            "selected_failures": len(chosen_failures),
+        }
+
+    selected.sort(key=_record_sort_key)
+    return selected, {
+        "mode": "per_task_class_balance",
+        "seed": int(seed),
+        "successes_per_task": int(successes_per_task),
+        "failures_per_task": int(failures_per_task),
+        "source_num_rollouts": len(records),
+        "selected_num_rollouts": len(selected),
+        "per_task": per_task,
+    }
 
 
 def atomic_pickle(path, value):
@@ -62,6 +141,9 @@ def export_to_official_safe(
     resume=False,
     dry_run=False,
     allow_unregistered=False,
+    successes_per_task=None,
+    failures_per_task=None,
+    selection_seed=0,
 ):
     dataset_dir = Path(dataset_dir).resolve()
     output_dir = Path(output_dir).resolve()
@@ -72,18 +154,12 @@ def export_to_official_safe(
         raise ValueError("Source dataset is invalid: " + "; ".join(validation["errors"]))
     if not validation["official_safe_loader_compatible"]:
         raise ValueError("Source dataset lacks fields required by the official SAFE π0 loader")
-    records = sorted(
-        load_manifest(dataset_dir),
-        key=lambda record: (
-            record.task_name,
-            record.environment_seed,
-            (
-                record.environment_reset_index
-                if record.environment_reset_index is not None
-                else -1
-            ),
-            record.rollout_id,
-        ),
+    source_records = load_manifest(dataset_dir)
+    records, selection = select_balanced_records(
+        source_records,
+        successes_per_task=successes_per_task,
+        failures_per_task=failures_per_task,
+        seed=selection_seed,
     )
     compatibility = assert_compatible(records)
     fingerprint = source_fingerprint(dataset_dir)
@@ -93,6 +169,7 @@ def export_to_official_safe(
         "output_dir": str(output_dir),
         "source_fingerprint": fingerprint,
         "compatibility_key": compatibility,
+        "selection": selection,
         "num_rollouts": len(records),
         "num_policy_records": sum(r.valid_sequence_length for r in records),
         "task_ids": task_ids,
@@ -106,6 +183,8 @@ def export_to_official_safe(
         previous = json.loads(report_path.read_text())
         if previous.get("source_fingerprint") != fingerprint:
             raise ValueError("Existing export report refers to a different source manifest")
+        if previous.get("selection") != selection:
+            raise ValueError("Existing export report uses a different rollout selection")
         if previous.get("complete"):
             expected_env = len(records)
             expected_policy = sum(r.valid_sequence_length for r in records)
@@ -217,6 +296,9 @@ def build_parser():
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--allow-unregistered-atomic-tasks", action="store_true")
+    parser.add_argument("--successes-per-task", type=int)
+    parser.add_argument("--failures-per-task", type=int)
+    parser.add_argument("--selection-seed", type=int, default=0)
     return parser
 
 
@@ -229,6 +311,9 @@ def main(argv=None):
             resume=args.resume,
             dry_run=args.dry_run,
             allow_unregistered=args.allow_unregistered_atomic_tasks,
+            successes_per_task=args.successes_per_task,
+            failures_per_task=args.failures_per_task,
+            selection_seed=args.selection_seed,
         )
     except (ValueError, FileExistsError) as error:
         raise SystemExit(f"error: {error}") from error

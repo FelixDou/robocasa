@@ -367,6 +367,55 @@ class TestSafeAtomicCollection(unittest.TestCase):
             self.assertTrue(resumed["complete"])
             self.assertEqual(len(list((Path(exported) / "policy_records").glob("*meta.pkl"))), 3)
 
+    def test_official_export_can_select_exact_per_task_class_balance(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as exported:
+            run_collection(
+                collection_args(tmp, num_rollouts=6),
+                runtime=fake_runtime(),
+            )
+            report = export_to_official_safe(
+                tmp,
+                exported,
+                successes_per_task=2,
+                failures_per_task=2,
+                selection_seed=7,
+            )
+            self.assertEqual(report["num_rollouts"], 4)
+            self.assertEqual(
+                report["selection"],
+                {
+                    "mode": "per_task_class_balance",
+                    "seed": 7,
+                    "successes_per_task": 2,
+                    "failures_per_task": 2,
+                    "source_num_rollouts": 6,
+                    "selected_num_rollouts": 4,
+                    "per_task": {
+                        TASK: {
+                            "source_successes": 3,
+                            "source_failures": 3,
+                            "selected_successes": 2,
+                            "selected_failures": 2,
+                        }
+                    },
+                },
+            )
+            labels = []
+            for path in sorted((Path(exported) / "env_records").glob("*.pkl")):
+                with path.open("rb") as stream:
+                    labels.append(pickle.load(stream)["episode_success"])
+            self.assertEqual(sorted(labels), [0, 0, 1, 1])
+
+            with self.assertRaisesRegex(ValueError, "different rollout selection"):
+                export_to_official_safe(
+                    tmp,
+                    exported,
+                    resume=True,
+                    successes_per_task=1,
+                    failures_per_task=1,
+                    selection_seed=7,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
