@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
 
 import numpy as np
@@ -50,6 +51,20 @@ class ComputeLingBotNormStatsTest(unittest.TestCase):
             MODULE.mapped_features(
                 np.zeros((2, 16), dtype=np.float32),
                 np.zeros((2, 11), dtype=np.float32),
+            )
+
+    def test_reads_lingbot_multi_dataset_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "datasets.txt"
+            path.write_text(
+                "# comment\n"
+                "robocasa_lerobot /datasets/one/lerobot\n"
+                "robocasa_lerobot /datasets/two/lerobot\n"
+            )
+
+            self.assertEqual(
+                MODULE.read_dataset_manifest(path),
+                [Path("/datasets/one/lerobot"), Path("/datasets/two/lerobot")],
             )
 
 

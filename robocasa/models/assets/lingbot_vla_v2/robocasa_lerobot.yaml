@@ -1,0 +1,58 @@
+# Training-only mapping for RoboCasa's released LeRobot parquet datasets.
+#
+# This differs from robocasa.yaml because the latter consumes simulator
+# controller-order actions. Released LeRobot actions are ordered as:
+#   base motion [0:4], control mode [4], EEF xyz [5:8], EEF rotation [8:11],
+#   and gripper [11]. The discrete control-mode column is not modeled.
+states:
+  - observation.state.end.position:
+      origin_keys:
+        - observation.state:
+            start: 7
+            end: 14
+  - observation.state.effector.position:
+      origin_keys:
+        - observation.state:
+            start: 14
+            end: 16
+  - observation.state.base.position:
+      origin_keys:
+        - observation.state:
+            start: 0
+            end: 3
+
+actions:
+  - action.end.position:
+      origin_keys:
+        - action:
+            start: 5
+            end: 11
+      subtract_state: false
+  - action.effector.position:
+      origin_keys:
+        - action:
+            start: 11
+            end: 12
+      subtract_state: false
+  - action.base.position:
+      origin_keys:
+        - action:
+            start: 0
+            end: 3
+      subtract_state: false
+  - action.waist.position:
+      origin_keys:
+        - action:
+            start: 3
+            end: 4
+      subtract_state: false
+
+images:
+  - observation.images.camera_top:
+      origin_keys: observation.images.robot0_agentview_left
+  - observation.images.camera_wrist_left:
+      origin_keys: observation.images.robot0_eye_in_hand
+  - observation.images.camera_wrist_right:
+      origin_keys: observation.images.robot0_agentview_right
+
+norm_stats: assets/norm_stats/robocasa_human300_meanstd.json

@@ -81,6 +81,24 @@ def find_parquet_files(dataset_roots: list[Path]) -> list[Path]:
     return sorted(files)
 
 
+def read_dataset_manifest(path: Path) -> list[Path]:
+    """Read LingBot ``<robot-config> <dataset-path>`` manifest entries."""
+    roots = []
+    for line_number, raw_line in enumerate(path.read_text().splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split(maxsplit=1)
+        if len(fields) != 2:
+            raise ValueError(
+                f"Malformed dataset manifest line {line_number} in {path}: {raw_line!r}"
+            )
+        roots.append(Path(fields[1]))
+    if not roots:
+        raise ValueError(f"Dataset manifest has no entries: {path}")
+    return roots
+
+
 def read_low_dimensional_columns(
     parquet_files: list[Path], batch_size: int
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -120,12 +138,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Compute data-only LingBot normalization for RoboCasa."
     )
-    parser.add_argument(
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument(
         "--dataset-root",
         type=Path,
         action="append",
-        required=True,
         help="LeRobot directory, its parent, or a parquet file. Repeat as needed.",
+    )
+    inputs.add_argument(
+        "--dataset-manifest",
+        type=Path,
+        help="LingBot multi-dataset text file containing robot config and path.",
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=65536)
@@ -134,7 +157,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
-    parquet_files = find_parquet_files(args.dataset_root)
+    dataset_roots = (
+        read_dataset_manifest(args.dataset_manifest)
+        if args.dataset_manifest is not None
+        else args.dataset_root
+    )
+    parquet_files = find_parquet_files(dataset_roots)
     if not parquet_files:
         raise FileNotFoundError("No LeRobot parquet files found under dataset roots")
 
@@ -159,7 +187,12 @@ def main(argv=None) -> None:
                 "task_annotations",
             ],
             "parquet_file_count": len(parquet_files),
-            "dataset_roots": [str(path.expanduser().resolve()) for path in args.dataset_root],
+            "dataset_roots": [str(path.expanduser().resolve()) for path in dataset_roots],
+            "dataset_manifest": (
+                str(args.dataset_manifest.expanduser().resolve())
+                if args.dataset_manifest is not None
+                else None
+            ),
         },
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
