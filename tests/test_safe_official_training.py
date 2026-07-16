@@ -1,3 +1,4 @@
+import csv
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,6 +22,12 @@ from robocasa.recovery.safe.run_official_grid import (
     generate_grid,
     train_command,
     validate_export_gate,
+)
+from robocasa.recovery.safe.report_official_grid import (
+    NUMERIC_CP_FIELDS,
+    aggregate_conformal,
+    build_report,
+    config_matches,
 )
 from robocasa.recovery.safe.summarize_official_grid import summarize_grid
 
@@ -192,6 +199,144 @@ class TestOfficialSafeGrid(unittest.TestCase):
         self.assertEqual(best["horizon_selector"], "1.0")
         self.assertEqual(best["num_runs"], 3)
         self.assertTrue(best["complete_seed_set"])
+
+    def test_final_report_matches_selected_config_and_aggregates_seeds(self):
+        provenance = {
+            "model": "lstm",
+            "dataset_config": {"horizon_idx_rel": 1.0, "diff_idx_rel": "concat-2"},
+            "model_config": {"lr": 1e-3, "lambda_reg": 1e-2},
+        }
+        selected = {
+            "model": "lstm",
+            "horizon_selector": "1.0",
+            "diffusion_selector": "concat-2",
+            "learning_rate": 1e-3,
+            "lambda_reg": 1e-2,
+        }
+        self.assertTrue(config_matches(provenance, selected))
+        records = []
+        for seed, tpr in ((0, 0.6), (1, 0.8), (2, 1.0)):
+            record = {
+                "model_architecture": "lstm",
+                "detect_method": "model",
+                "task": "all",
+                "time": "by earliest stop",
+                "alpha": 0.1,
+                "seed": seed,
+            }
+            for field in (
+                "avg_det_time", "tpr", "tnr", "fpr", "fnr", "acc",
+                "bal_acc", "f1", "false_alarms_per_successful_rollout",
+                "failed_rollouts_detected_fraction",
+            ):
+                record[field] = tpr
+            records.append(record)
+        row = aggregate_conformal(records)[0]
+        self.assertEqual(row["seeds"], [0, 1, 2])
+        self.assertAlmostEqual(row["tpr_mean"], 0.8)
+        self.assertEqual(row["num_seed_task_evaluations"], 3)
+
+    def test_final_report_writes_machine_readable_results_and_plots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "grid"
+            output = Path(tmp) / "report"
+            root.mkdir()
+            best = {}
+            for model in ("indep", "lstm"):
+                best[model] = {
+                    "model": model,
+                    "horizon_selector": "1.0",
+                    "diffusion_selector": "0.0",
+                    "learning_rate": 1e-4,
+                    "lambda_reg": 1e-2,
+                    "seeds": [0, 1, 2],
+                    "complete_seed_set": True,
+                    "num_runs": 3,
+                    "train_mean": 0.9,
+                    "train_std": 0.01,
+                    "val_seen_mean": 0.8,
+                    "val_seen_std": 0.02,
+                    "val_unseen_mean": 0.6,
+                    "val_unseen_std": 0.03,
+                }
+                for seed in (0, 1, 2):
+                    run = root / f"{model}-seed-{seed}"
+                    evaluation = run / "evaluation"
+                    evaluation.mkdir(parents=True)
+                    provenance = {
+                        "model": model,
+                        "seed": seed,
+                        "dataset_config": {
+                            "horizon_idx_rel": 1.0,
+                            "diff_idx_rel": 0.0,
+                        },
+                        "model_config": {"lr": 1e-4, "lambda_reg": 1e-2},
+                    }
+                    (evaluation / "provenance.json").write_text(json.dumps(provenance))
+                    metrics = {
+                        "scalar_metrics": {
+                            "falert_early_roc_auc/model_val_seen": 0.8,
+                            "falert_early_roc_auc/model_val_unseen": 0.6,
+                        },
+                        "duration_diagnostics": {"val_unseen": {"overall": {"duration_only_roc_auc": 1.0}}},
+                        "rollout_length_warnings": ["duration warning"],
+                    }
+                    (evaluation / "metrics.json").write_text(json.dumps(metrics))
+                    fields = [
+                        "detect_method", "task", "time", "alpha",
+                        *NUMERIC_CP_FIELDS,
+                    ]
+                    with (evaluation / "functional_conformal.csv").open("w", newline="") as stream:
+                        writer = csv.DictWriter(stream, fieldnames=fields)
+                        writer.writeheader()
+                        for method in ("model", "constant", "time_only"):
+                            for task in ("all", "TaskA"):
+                                for time in ("by final end", "by earliest stop"):
+                                    writer.writerow(
+                                        {
+                                            "detect_method": method,
+                                            "task": task,
+                                            "time": time,
+                                            "alpha": 0.1,
+                                            **{field: 0.5 for field in NUMERIC_CP_FIELDS},
+                                        }
+                                    )
+                    score_rows = [
+                        {
+                            "split": "val_unseen",
+                            "failed": False,
+                            "task_name": "TaskA",
+                            "task_min_step": 2,
+                            "scores": [0.1, 0.2],
+                        },
+                        {
+                            "split": "val_unseen",
+                            "failed": True,
+                            "task_name": "TaskA",
+                            "task_min_step": 2,
+                            "scores": [0.2, 0.8],
+                        },
+                    ]
+                    (evaluation / "scores.jsonl").write_text(
+                        "".join(json.dumps(row) + "\n" for row in score_rows)
+                    )
+                    np.savez_compressed(
+                        evaluation / "functional_bands.npz",
+                        **{"model_alpha_0.10": np.array([0.5, 0.5])},
+                    )
+            summary = {
+                "num_completed_runs": 810,
+                "num_configurations": 270,
+                "selection_rule": "test",
+                "selection_metric": "test",
+                "best_by_model": best,
+            }
+            (root / "selection_summary.json").write_text(json.dumps(summary))
+            report = build_report(root, output)
+            self.assertEqual(report["official_grid"]["completed_runs"], 810)
+            self.assertTrue((output / "final_report.json").is_file())
+            self.assertTrue((output / "selected_conformal_summary.csv").is_file())
+            self.assertGreaterEqual(len(list(output.glob("*.png"))), 6)
 
 
 if __name__ == "__main__":

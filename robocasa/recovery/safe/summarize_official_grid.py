@@ -121,6 +121,7 @@ def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--expected-seeds", nargs="+", type=int, default=[0, 1, 2])
+    parser.add_argument("--quiet", action="store_true")
     return parser
 
 
@@ -129,7 +130,8 @@ def main(argv=None):
     results = collect_grid_results(args.output_root)
     summary = summarize_grid(results, args.expected_seeds)
     save_summary(summary, args.output_root)
-    print(json.dumps(summary, indent=2, sort_keys=True))
+    if not args.quiet:
+        print(json.dumps(summary, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

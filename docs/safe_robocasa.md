@@ -476,11 +476,32 @@ configuration over seeds 0, 1, and 2 and maximizing `falert_early_roc_auc` on
 
 ```bash
 python -m robocasa.recovery.safe.summarize_official_grid \
-  --output-root "$SAFE_GRID_ROOT"
+  --output-root "$SAFE_GRID_ROOT" \
+  --quiet
 ```
 
 This writes `selection_summary.json` and `selection_summary.csv`. A
 configuration is eligible for selection only after all three seeds complete.
+
+Once all 810 evaluations are present, build the compact final scientific
+report for the selected MLP and LSTM configurations. Invoke this script by file
+path in the SAFE environment so RoboSuite is not required:
+
+```bash
+export SAFE_FINAL_REPORT="$SAFE_GRID_ROOT/final_report"
+
+python "$ROBOCASA_REPO/robocasa/recovery/safe/report_official_grid.py" \
+  --grid-root "$SAFE_GRID_ROOT" \
+  --output-dir "$SAFE_FINAL_REPORT" \
+  --expected-seeds 0 1 2 \
+  --quiet
+```
+
+The final directory contains `final_report.json`,
+`selected_conformal_summary.csv`, validation/held-out AUC, conformal tradeoff,
+per-task, representative score/band, ROC/PR, and detection-time plots. The
+report foregrounds matched-earliest metrics because full termination time is a
+perfect or near-perfect outcome proxy in this RoboCasa collection.
 
 ## Local structural validation
 
