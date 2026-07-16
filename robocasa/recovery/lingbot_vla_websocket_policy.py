@@ -130,6 +130,8 @@ class LingBotVLAWebsocketPolicy:
         replan_steps=8,
         fixed_control_mode=0.0,
         clip_actions=True,
+        wrist_right_source="agentview_right",
+        zero_base_motion=False,
         reset_on_connect=True,
         client=None,
     ):
@@ -140,6 +142,13 @@ class LingBotVLAWebsocketPolicy:
             raise ValueError("replan_steps must be positive")
         self.fixed_control_mode = float(fixed_control_mode)
         self.clip_actions = _as_bool(clip_actions)
+        self.wrist_right_source = str(wrist_right_source).strip().lower()
+        if self.wrist_right_source not in {"agentview_right", "eye_in_hand"}:
+            raise ValueError(
+                "wrist_right_source must be 'agentview_right' or 'eye_in_hand', "
+                f"got {wrist_right_source!r}"
+            )
+        self.zero_base_motion = _as_bool(zero_base_motion)
         self.action_plan = collections.deque()
         self.last_instruction = None
         if reset_on_connect:
@@ -200,13 +209,18 @@ class LingBotVLAWebsocketPolicy:
         )
         if state.shape != (16,):
             raise ValueError(f"Expected 16-D PandaOmron state, got {state.shape}")
+        wrist_right_key = (
+            "video.robot0_eye_in_hand"
+            if self.wrist_right_source == "eye_in_hand"
+            else "video.robot0_agentview_right"
+        )
         return {
             "observation.state": state,
             "observation.images.robot0_agentview_left": self._image(
                 obs["video.robot0_agentview_left"]
             ),
             "observation.images.robot0_agentview_right": self._image(
-                obs["video.robot0_agentview_right"]
+                obs[wrist_right_key]
             ),
             "observation.images.robot0_eye_in_hand": self._image(
                 obs["video.robot0_eye_in_hand"]
@@ -263,11 +277,14 @@ class LingBotVLAWebsocketPolicy:
         gripper_close = (
             np.clip(action[6:7], -1.0, 1.0) + np.float32(1.0)
         ) / np.float32(2.0)
+        base_motion = np.concatenate((action[7:10], action[10:11]))
+        if self.zero_base_motion:
+            base_motion = np.zeros(4, dtype=np.float32)
         return {
             "action.end_effector_position": action[0:3],
             "action.end_effector_rotation": action[3:6],
             "action.gripper_close": gripper_close,
-            "action.base_motion": np.concatenate((action[7:10], action[10:11])),
+            "action.base_motion": base_motion,
             "action.control_mode": np.asarray(
                 [self.fixed_control_mode], dtype=np.float32
             ),
@@ -282,6 +299,8 @@ def make_policy(
     replan_steps=8,
     fixed_control_mode=0.0,
     clip_actions=True,
+    wrist_right_source="agentview_right",
+    zero_base_motion=False,
 ):
     """Factory consumed by ``--policy-module module:make_policy``."""
     return LingBotVLAWebsocketPolicy(
@@ -291,4 +310,6 @@ def make_policy(
         replan_steps=replan_steps,
         fixed_control_mode=fixed_control_mode,
         clip_actions=clip_actions,
+        wrist_right_source=wrist_right_source,
+        zero_base_motion=zero_base_motion,
     )

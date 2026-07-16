@@ -395,6 +395,13 @@ The client adapter converts LingBot's signed normalized gripper convention
 wrapper applies its `0.5` threshold. Saved rollout actions therefore contain the
 gym-facing gripper command, not the signed LingBot output.
 
+Two optional training-free interface experiments are available through policy
+arguments. `wrist_right_source=eye_in_hand` duplicates RoboCasa's single wrist
+camera into LingBot's left/right wrist roles instead of treating an external
+agent view as a wrist camera. `zero_base_motion=true` masks all base and torso
+commands for stationary manipulation tasks. These variants must be reported
+separately from the default adapter.
+
 ## 8. Full 50-task zero-shot evaluation
 
 Run the three official target groups separately so their success rates cannot
