@@ -289,6 +289,87 @@ python -m robocasa.recovery.safe.export_to_official_safe \
   --resume
 ```
 
+## Validate with the unmodified official SAFE loader
+
+The source validator proves that the RoboCasa tensors and metadata can be
+exported, but the final compatibility gate is loading the materialized files
+through the official SAFE `failure_prob.data.pizero` implementation. Run this
+inside the dedicated SAFE environment after installing the pinned SAFE commit:
+
+```bash
+export SAFE_REPO=/gs/fs/tga-shinoda/felid/SAFE
+export SAFE_OFFICIAL="${SAFE_DATASET}_official_balanced_10x10"
+
+cd /gs/fs/tga-shinoda/felid/robocasa
+python -m robocasa.recovery.safe.validate_official_export \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --horizon-selector 0.0 \
+  --diffusion-selector 0.0 \
+  --expected-rollouts 100 \
+  --expected-successes 50 \
+  --expected-failures 50 \
+  --expected-task CloseFridge \
+  --expected-task OpenDrawer \
+  --expected-task PickPlaceCounterToCabinet \
+  --expected-task PickPlaceCounterToStove \
+  --expected-task TurnOnSinkFaucet \
+  --json-output "$SAFE_OFFICIAL/official_loader_validation.json"
+```
+
+This invokes the upstream loader itself, checks the post-aggregation tensors,
+and fails with status 1 if counts, task coverage, shapes, or finite-value checks
+do not match.
+
+## Official SAFE training smoke
+
+The official pi0 experiment is a validation-selected grid, not a single fixed
+hyperparameter configuration. Before launching that grid, verify the complete
+training path with a two-epoch SAFE-MLP run. Keep Hydra, W&B, logs, and weights
+under `/gs/bs` because the upstream defaults are relative to its source tree.
+
+```bash
+export RUN_TAG="safe_pi0_robocasa_smoke_$(date +%Y%m%d_%H%M%S)"
+export RUN_ROOT="/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/$RUN_TAG"
+mkdir -p "$RUN_ROOT"
+
+cd "$SAFE_REPO"
+CUDA_VISIBLE_DEVICES=0 WANDB_MODE=disabled WANDB_DISABLED=true \
+python -u -m failure_prob.train \
+  dataset=pizero \
+  dataset.data_path="$SAFE_OFFICIAL" \
+  dataset.horizon_idx_rel=0.0 \
+  dataset.diff_idx_rel=0.0 \
+  model=indep \
+  model.lr=1e-4 \
+  model.lambda_reg=1e-2 \
+  model.n_epochs=2 \
+  train.seed=0 \
+  train.eval_save_logs=true \
+  train.eval_save_ckpt=true \
+  train.logs_save_path="$RUN_ROOT/artifacts" \
+  train.wandb_dir="$RUN_ROOT/wandb" \
+  "hydra.run.dir=$RUN_ROOT/hydra" \
+  2>&1 | tee "$RUN_ROOT/train.log"
+
+test -s "$RUN_ROOT/artifacts/model_final.ckpt"
+test -s "$RUN_ROOT/artifacts/config.yaml"
+grep -E 'Loaded 100 rollouts|train:|val_seen:|val_unseen:' "$RUN_ROOT/train.log"
+```
+
+The pinned official pi0 SAFE-MLP sweep uses 1,000 epochs, batch size 512,
+Adam, a two-layer width-256 MLP, horizon and diffusion selectors
+`0.0,1.0,concat-2`, learning rates
+`1e-5,3e-5,1e-4,3e-4,1e-3`, regularization
+`1e-3,1e-2,1e-1`, and seeds `0,1,2`. That is 405 fits for SAFE-MLP alone.
+Select the final configuration by validation-seen ROC-AUC as in the official
+procedure. Do not describe the two-epoch command above as the final model.
+
+With only five tasks, the official 30% unseen-task split leaves three seen and
+two unseen tasks. This is a useful pilot of cross-task transfer, but it is not a
+high-powered unseen-task benchmark; report the actual task IDs assigned to each
+split for every seed.
+
 ## Local structural validation
 
 These checks require no GPU, RoboSuite, simulator, checkpoint, or server:
@@ -304,6 +385,7 @@ python -m unittest -v \
   tests.test_safe_dataset \
   tests.test_safe_collect_rollouts \
   tests.test_safe_atomic_collection \
+  tests.test_safe_official_export \
   tests.test_safe_cli
 ```
 
@@ -311,4 +393,4 @@ python -m unittest -v \
 
 A live smoke test still requires a RoboCasa environment with RoboSuite and assets, the π0 RoboCasa checkpoint, a checkout of the pinned OpenPI revision with the companion patch applied, and a reachable WebSocket server. The normal unit tests replace the simulator and policy with deterministic mocks and do not claim real SAFE performance.
 
-The current WebSocket transport sends the raw latent back with each inference. That is reliable and gives RoboCasa a direct outcome association, but it increases inference response size. The integration supports JAX π0 only, matching the inspected official feature. It intentionally does not create frame-level labels, convert expert demonstrations, collect composite tasks, train SAFE models, calibrate thresholds, evaluate performance, or trigger recovery.
+The current WebSocket transport sends the raw latent back with each inference. That is reliable and gives RoboCasa a direct outcome association, but it increases inference response size. The integration supports JAX π0 only, matching the inspected official feature. It intentionally does not create frame-level labels, convert expert demonstrations, collect composite tasks, or trigger recovery. Training uses the pinned unmodified official SAFE repository; the in-tree trainer remains an isolated structural baseline rather than the source of the official experiment result.
