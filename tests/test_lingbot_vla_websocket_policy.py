@@ -1,5 +1,7 @@
 import importlib.util
+import os
 from pathlib import Path
+import tempfile
 import unittest
 
 import numpy as np
@@ -19,6 +21,18 @@ SPEC.loader.exec_module(MODULE)
 LingBotVLAWebsocketPolicy = MODULE.LingBotVLAWebsocketPolicy
 _pack_array = MODULE._pack_array
 _unpack_array = MODULE._unpack_array
+
+SERVER_MODULE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "robocasa"
+    / "recovery"
+    / "serve_lingbot_vla.py"
+)
+SERVER_SPEC = importlib.util.spec_from_file_location(
+    "serve_lingbot_vla", SERVER_MODULE_PATH
+)
+SERVER_MODULE = importlib.util.module_from_spec(SERVER_SPEC)
+SERVER_SPEC.loader.exec_module(SERVER_MODULE)
 
 
 class FakeClient:
@@ -49,6 +63,21 @@ def observation(instruction="open the drawer"):
 
 
 class LingBotVLAWebsocketPolicyTest(unittest.TestCase):
+    def test_server_model_path_preserves_runtime_symlink(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            weights = root / "weights"
+            weights.mkdir()
+            runtime_link = root / "runtime" / "checkpoints" / "step" / "hf_ckpt"
+            runtime_link.parent.mkdir(parents=True)
+            runtime_link.symlink_to(weights, target_is_directory=True)
+
+            result = SERVER_MODULE.absolute_preserving_symlinks(runtime_link)
+
+            self.assertEqual(result, runtime_link)
+            self.assertNotEqual(result, weights)
+            self.assertTrue(os.path.samefile(result, weights))
+
     def test_numpy_messagepack_codec_round_trip_parts(self):
         value = np.arange(6, dtype=np.float32).reshape(2, 3)
         encoded = _pack_array(value)

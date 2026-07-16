@@ -23,6 +23,17 @@ def str_to_bool(value):
     raise argparse.ArgumentTypeError(f"Expected a boolean, got {value!r}")
 
 
+def absolute_preserving_symlinks(path):
+    """Return an absolute path without resolving its final symlink.
+
+    LingBot locates ``lingbotvla_cli.yaml`` relative to the model path supplied
+    by the caller. The zero-shot runtime deliberately exposes the downloaded
+    weights through a symlink with the directory depth expected by that loader,
+    so resolving the symlink here would break config discovery.
+    """
+    return Path(os.path.abspath(os.path.expanduser(path)))
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         description="Serve a LingBot-VLA-v2 checkpoint for zero-shot RoboCasa evaluation."
@@ -40,7 +51,7 @@ def build_parser():
 def main(argv=None):
     args = build_parser().parse_args(argv)
     lingbot_repo = args.lingbot_repo.resolve()
-    model_path = args.model_path.resolve()
+    model_path = absolute_preserving_symlinks(args.model_path)
     robot_norm_path = args.robot_norm_path.resolve()
     for path, label in (
         (lingbot_repo, "LingBot repository"),
