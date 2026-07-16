@@ -22,12 +22,16 @@ class RunLingBotV21TrainingTest(unittest.TestCase):
     def setUp(self):
         self.base_dataset = types.ModuleType("base_dataset")
         self.base_dataset.LEROBOT_DATASET_API = "v3"
+        self.base_dataset.decode_video_frames = mock.Mock(name="old_decoder")
+        self.video_utils = types.ModuleType("video_utils")
+        self.video_utils.decode_video_frames = mock.Mock(return_value="frames")
         self.lerobot_constants = types.ModuleType("lerobot.constants")
         self.lerobot_constants.HF_LEROBOT_HOME = Path("/tmp/lerobot")
         self.lerobot_dataset = types.ModuleType("lerobot.datasets.lerobot_dataset")
         self.lerobot_dataset.CODEBASE_VERSION = "v2.1"
         self.vla_data = types.ModuleType("lingbotvla.data.vla_data")
         self.vla_data.base_dataset = self.base_dataset
+        self.vla_data.video_utils = self.video_utils
         self.modules = {
             "lerobot": types.ModuleType("lerobot"),
             "lerobot.constants": self.lerobot_constants,
@@ -46,9 +50,16 @@ class RunLingBotV21TrainingTest(unittest.TestCase):
             self.assertIs(
                 sys.modules["lerobot.utils.constants"], self.lerobot_constants
             )
+            result_frames = self.base_dataset.decode_video_frames(
+                "episode.mp4", [0.0], 0.001, backend="torchcodec"
+            )
 
         self.assertEqual(result, ("0.3.3", "v2.1"))
         self.assertEqual(self.base_dataset.LEROBOT_DATASET_API, "v2")
+        self.assertEqual(result_frames, "frames")
+        self.video_utils.decode_video_frames.assert_called_once_with(
+            "episode.mp4", [0.0], 0.001, backend="pyav"
+        )
 
     def test_rejects_unexpected_lerobot_version(self):
         with mock.patch.dict(sys.modules, self.modules), mock.patch.object(

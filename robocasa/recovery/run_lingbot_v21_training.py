@@ -39,6 +39,7 @@ def enable_lerobot_v21_layout() -> tuple[str, str]:
 
     install_lerobot_v21_import_compat()
     from lingbotvla.data.vla_data import base_dataset
+    from lingbotvla.data.vla_data import video_utils
 
     package_version = version("lerobot")
     codebase_version = str(CODEBASE_VERSION)
@@ -50,6 +51,21 @@ def enable_lerobot_v21_layout() -> tuple[str, str]:
         )
 
     base_dataset.LEROBOT_DATASET_API = "v2"
+
+    # LingBot's dataset constructors currently default unconditionally to
+    # TorchCodec. The released environment can import torchcodec even when its
+    # FFmpeg shared libraries are unavailable on the host. PyAV is an official
+    # LingBot dependency and its existing decoder handles the v2.1 per-episode
+    # videos without requiring system FFmpeg libraries.
+    def decode_video_frames_pyav(video_path, timestamps, tolerance_s, backend=None):
+        return video_utils.decode_video_frames(
+            video_path,
+            timestamps,
+            tolerance_s,
+            backend="pyav",
+        )
+
+    base_dataset.decode_video_frames = decode_video_frames_pyav
     return package_version, codebase_version
 
 
