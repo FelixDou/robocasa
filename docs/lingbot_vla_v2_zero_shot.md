@@ -155,30 +155,53 @@ hf cache verify Qwen/Qwen3-VL-4B-Instruct \
   --local-dir "$QWEN3VL_PATH"
 ```
 
-The upstream loader expects the weight directory to be three levels below
-`lingbotvla_cli.yaml`. Create a runtime view with symlinks; this does not copy or
-alter model weights:
+The released Hugging Face snapshot contains the pretrained weights but does not
+contain `lingbotvla_cli.yaml`. The upstream loader nevertheless requires that
+file three levels above the weight directory. Create a runtime view using the
+upstream native-depth `real_robot.yaml` as the architecture description. Only
+runtime paths and the dataset label are changed; this does not copy or alter
+model weights and does not use RoboCasa training data:
 
 ```bash
 export LINGBOT_WEIGHT_SOURCE="$(
   find "$LINGBOT_DOWNLOAD" -type f -name '*.safetensors' -printf '%h\n' \
     | sort -u | head -n 1
 )"
-export LINGBOT_CONFIG_SOURCE="$(
-  find "$LINGBOT_DOWNLOAD" -type f -name lingbotvla_cli.yaml | head -n 1
-)"
+export LINGBOT_CONFIG_SOURCE="$LINGBOT_REPO/configs/vla/real_robot/real_robot.yaml"
 
 test -n "$LINGBOT_WEIGHT_SOURCE" || { echo "No safetensors found"; exit 1; }
-test -f "$LINGBOT_CONFIG_SOURCE" || { echo "No lingbotvla_cli.yaml found"; exit 1; }
+test -f "$LINGBOT_CONFIG_SOURCE" || { echo "No upstream real_robot.yaml found"; exit 1; }
 
 mkdir -p "$LINGBOT_RUNTIME/checkpoints/global_step_0"
 test -e "$LINGBOT_RUNTIME/checkpoints/global_step_0/hf_ckpt" || \
   ln -s "$LINGBOT_WEIGHT_SOURCE" \
     "$LINGBOT_RUNTIME/checkpoints/global_step_0/hf_ckpt"
-cp "$LINGBOT_CONFIG_SOURCE" "$LINGBOT_RUNTIME/lingbotvla_cli.yaml"
 export LINGBOT_MODEL_PATH="$LINGBOT_RUNTIME/checkpoints/global_step_0/hf_ckpt"
 
-test -n "$(find "$LINGBOT_MODEL_PATH" -maxdepth 1 -name '*.safetensors' -print -quit)"
+python - \
+  "$LINGBOT_CONFIG_SOURCE" \
+  "$LINGBOT_RUNTIME/lingbotvla_cli.yaml" \
+  "$LINGBOT_MODEL_PATH" \
+  "$QWEN3VL_PATH" \
+  "$LINGBOT_NORM" <<'PY'
+from pathlib import Path
+import sys
+import yaml
+
+src, dst, model_path, qwen_path, norm_path = map(Path, sys.argv[1:])
+with src.open() as stream:
+    config = yaml.safe_load(stream)
+
+config["model"]["model_path"] = str(model_path)
+config["model"]["tokenizer_path"] = str(qwen_path)
+config["data"]["data_name"] = "robocasa"
+config["data"]["norm_stats_file"] = str(norm_path)
+
+with dst.open("w") as stream:
+    yaml.safe_dump(config, stream, sort_keys=False)
+PY
+
+test -n "$(find -L "$LINGBOT_MODEL_PATH" -maxdepth 1 -name '*.safetensors' -print -quit)"
 test -f "$LINGBOT_RUNTIME/lingbotvla_cli.yaml"
 ```
 
@@ -192,7 +215,9 @@ feature map and identity statistics into the LingBot source tree:
 
 ```bash
 cd "$ROBOCASA_REPO"
-git pull origin main
+git fetch origin
+git switch codex/lingbot-vla-zero-shot
+git pull --ff-only origin codex/lingbot-vla-zero-shot
 
 mkdir -p \
   "$LINGBOT_REPO/configs/robot_configs" \
@@ -217,6 +242,8 @@ path.
 
 ```bash
 conda activate "$LINGBOT_ENV"
+export QWEN3VL_PATH
+export XFORMERS_DISABLED=1
 export SERVER_TAG=lingbot_vla_v2_pretrained_zero_shot_$(date +%Y%m%d_%H%M%S)
 export SERVER_LOG="$ROBOCASA_LOG_ROOT/eval/${SERVER_TAG}_${LINGBOT_PORT}.log"
 
