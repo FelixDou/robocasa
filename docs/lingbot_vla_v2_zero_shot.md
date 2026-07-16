@@ -63,6 +63,10 @@ export HF_HUB_CACHE="$HF_HOME/hub"
 export XDG_CACHE_HOME="$STORAGE_BS/xdg_cache"
 export PIP_CACHE_DIR="$STORAGE_BS/pip_cache"
 export CONDA_PKGS_DIRS="$STORAGE_BS/conda_pkgs"
+export TRITON_CACHE_DIR="/tmp/$USER_ID/lingbot_triton_cache"
+export TORCHINDUCTOR_CACHE_DIR="/tmp/$USER_ID/lingbot_torchinductor_cache"
+export CUDA_CACHE_PATH="/tmp/$USER_ID/lingbot_cuda_cache"
+export TMPDIR="/tmp/$USER_ID/lingbot_tmp"
 export WANDB_MODE=disabled
 export WANDB_DISABLED=true
 
@@ -71,7 +75,8 @@ mkdir -p \
   "$LINGBOT_CKPT_ROOT/downloads" \
   "$ROBOCASA_LOG_ROOT/eval" \
   "$ROBOCASA_ROLLOUT_ROOT" \
-  "$HF_HOME" "$XDG_CACHE_HOME" "$PIP_CACHE_DIR" "$CONDA_PKGS_DIRS"
+  "$HF_HOME" "$XDG_CACHE_HOME" "$PIP_CACHE_DIR" "$CONDA_PKGS_DIRS" \
+  "$TRITON_CACHE_DIR" "$TORCHINDUCTOR_CACHE_DIR" "$CUDA_CACHE_PATH" "$TMPDIR"
 ```
 
 ## 3. Install LingBot in a durable environment
@@ -253,6 +258,15 @@ path.
 conda activate "$LINGBOT_ENV"
 export QWEN3VL_PATH
 export XFORMERS_DISABLED=1
+export TRITON_CACHE_DIR="/tmp/$USER_ID/lingbot_triton_cache"
+export TORCHINDUCTOR_CACHE_DIR="/tmp/$USER_ID/lingbot_torchinductor_cache"
+export CUDA_CACHE_PATH="/tmp/$USER_ID/lingbot_cuda_cache"
+export TMPDIR="/tmp/$USER_ID/lingbot_tmp"
+mkdir -p \
+  "$TRITON_CACHE_DIR" \
+  "$TORCHINDUCTOR_CACHE_DIR" \
+  "$CUDA_CACHE_PATH" \
+  "$TMPDIR"
 export SERVER_TAG=lingbot_vla_v2_pretrained_zero_shot_$(date +%Y%m%d_%H%M%S)
 export SERVER_LOG="$ROBOCASA_LOG_ROOT/eval/${SERVER_TAG}_${LINGBOT_PORT}.log"
 
