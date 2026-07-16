@@ -58,6 +58,7 @@ def configure(base: dict, args: argparse.Namespace) -> dict:
             "use_wandb": False,
             "micro_batch_size": 1,
             "global_batch_size": args.global_batch_size,
+            "gradient_accumulation_steps": args.gradient_accumulation_steps,
             "max_steps": args.max_steps,
             "save_steps": args.save_steps,
             "lr": args.learning_rate,
@@ -93,6 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dino-config", type=Path, required=True)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--global-batch-size", type=int, default=16)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
     parser.add_argument("--max-steps", type=int, default=30000)
     parser.add_argument("--save-steps", type=int, default=5000)
     parser.add_argument("--learning-rate", type=float, default=1.0e-4)
@@ -113,6 +115,7 @@ def main(argv=None) -> None:
     print(f"config={args.output}")
     print("train_expert_only=true")
     print(f"global_batch_size={args.global_batch_size}")
+    print(f"gradient_accumulation_steps={args.gradient_accumulation_steps}")
     print(f"max_steps={args.max_steps}")
 
 

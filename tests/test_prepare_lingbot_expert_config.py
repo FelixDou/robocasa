@@ -43,6 +43,7 @@ class PrepareLingBotExpertConfigTest(unittest.TestCase):
             dino_config=Path("/teachers/dino.yaml"),
             num_workers=4,
             global_batch_size=16,
+            gradient_accumulation_steps=4,
             max_steps=30000,
             save_steps=5000,
             learning_rate=1.0e-4,
@@ -55,6 +56,7 @@ class PrepareLingBotExpertConfigTest(unittest.TestCase):
         self.assertTrue(config["train"]["freeze_vision_encoder"])
         self.assertEqual(config["train"]["token_num_experts"], 32)
         self.assertEqual(config["train"]["global_batch_size"], 16)
+        self.assertEqual(config["train"]["gradient_accumulation_steps"], 4)
         self.assertEqual(config["data"]["prompt_type"], "global")
         self.assertEqual(
             config["train"]["align_params"]["depth"]["moge_path"],
