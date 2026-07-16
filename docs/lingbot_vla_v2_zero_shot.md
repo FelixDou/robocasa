@@ -197,6 +197,15 @@ config["model"]["tokenizer_path"] = str(qwen_path)
 config["data"]["data_name"] = "robocasa"
 config["data"]["norm_stats_file"] = str(norm_path)
 
+# The deployment-time FeatureTransform calls ast.literal_eval() on these
+# values. Training CLI snapshots serialize them as strings even though the
+# source configuration expresses them as YAML mappings.
+for key in ("joints", "norm_type"):
+    config["data"][key] = [
+        repr(item) if isinstance(item, dict) else item
+        for item in config["data"][key]
+    ]
+
 with dst.open("w") as stream:
     yaml.safe_dump(config, stream, sort_keys=False)
 PY
