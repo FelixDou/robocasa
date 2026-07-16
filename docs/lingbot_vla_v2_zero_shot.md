@@ -376,8 +376,10 @@ assert video_path.is_file() and video_path.stat().st_size > 0
 with np.load(action_path) as actions:
     for key in actions.files:
         value = actions[key]
-        if np.issubdtype(value.dtype, np.number):
-            assert np.all(np.isfinite(value)), key
+        if not np.issubdtype(value.dtype, np.number):
+            print(f"skipping non-numeric metadata: {key} ({value.dtype})")
+            continue
+        assert np.all(np.isfinite(value)), key
 print("sample success:", sample["success"])
 print("actions:", action_path)
 print("video:", video_path)
