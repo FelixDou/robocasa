@@ -110,6 +110,7 @@ class TestOfficialSafeGrid(unittest.TestCase):
         args = SimpleNamespace(
             export_dir="/data/export",
             safe_repo="/src/SAFE",
+            robocasa_repo="/src/robocasa",
             epochs=1000,
             device="cuda",
         )
@@ -119,7 +120,10 @@ class TestOfficialSafeGrid(unittest.TestCase):
         self.assertIn("model.n_epochs=1000", train)
         self.assertIn("dataset.horizon_idx_rel=concat-2", train)
         self.assertIn("train.eval_save_ckpt=true", train)
-        self.assertIn("robocasa.recovery.safe.evaluate_official_safe", evaluate)
+        self.assertIn(
+            "/src/robocasa/robocasa/recovery/safe/evaluate_official_safe.py",
+            evaluate,
+        )
         self.assertIn(str(root / "artifacts" / "model_final.ckpt"), evaluate)
 
     def test_grid_requires_validated_balanced_export(self):

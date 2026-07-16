@@ -441,6 +441,10 @@ On a two-GPU allocation, launch deterministic disjoint shards. Each shard has
 is recorded in that run's `failure.json` and does not terminate the shard;
 subsequent resumes skip it unless `--retry-errors` is requested:
 
+The driver invokes the evaluator by file path rather than importing the root
+`robocasa` package. Official SAFE evaluation therefore does not require
+RoboSuite or simulator dependencies in the dedicated SAFE environment.
+
 ```bash
 export GRID_LOG_ROOT=/gs/bs/tga-shinoda/felid/robocasa_logs/eval
 mkdir -p "$SAFE_GRID_ROOT" "$GRID_LOG_ROOT"

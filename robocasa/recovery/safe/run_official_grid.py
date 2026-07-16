@@ -94,11 +94,17 @@ def train_command(run, args, run_root):
 
 def evaluation_command(run, args, run_root):
     artifacts = run_root / "artifacts"
+    evaluator = (
+        Path(args.robocasa_repo).resolve()
+        / "robocasa"
+        / "recovery"
+        / "safe"
+        / "evaluate_official_safe.py"
+    )
     return [
         sys.executable,
         "-u",
-        "-m",
-        "robocasa.recovery.safe.evaluate_official_safe",
+        str(evaluator),
         "--export-dir",
         str(Path(args.export_dir).resolve()),
         "--safe-repo",
