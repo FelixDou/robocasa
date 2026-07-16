@@ -12,10 +12,14 @@ from robocasa.recovery.safe import (
     conformal,
     dataset,
     evaluate,
+    evaluate_official_safe,
     export_to_official_safe,
     plots,
+    run_official_grid,
+    summarize_official_grid,
     train,
     validate_atomic_dataset,
+    validate_official_export,
 )
 
 
@@ -30,7 +34,11 @@ class TestSafeCLIHelp(unittest.TestCase):
             train,
             conformal,
             evaluate,
+            evaluate_official_safe,
             plots,
+            run_official_grid,
+            summarize_official_grid,
+            validate_official_export,
         ):
             with self.subTest(module=module.__name__):
                 with contextlib.redirect_stdout(io.StringIO()) as output:

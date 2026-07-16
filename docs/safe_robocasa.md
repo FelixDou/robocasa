@@ -370,6 +370,112 @@ two unseen tasks. This is a useful pilot of cross-task transfer, but it is not a
 high-powered unseen-task benchmark; report the actual task IDs assigned to each
 split for every seed.
 
+## Offline official evaluation and model selection
+
+The upstream trainer logs validation and conformal tables to W&B but does not
+persist them when W&B is disabled. The RoboCasa evaluator imports the pinned
+official loader, model, scalar metrics, and functional conformal implementation
+and writes durable local artifacts instead. It reproduces the official
+`train`/`val_seen`/`val_unseen` split for the checkpoint seed, calibrates on
+successful `val_seen` trajectories, edge-extends trajectories, uses the
+official 30/70 regression/modulation partition, and detects with `score >=
+upper_band`.
+
+Evaluate the completed two-epoch smoke checkpoints before starting the grid:
+
+```bash
+cd /gs/fs/tga-shinoda/felid/robocasa
+
+python -u -m robocasa.recovery.safe.evaluate_official_safe \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --checkpoint /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/safe_pi0_indep_smoke_20260716_145732/artifacts/model_final.ckpt \
+  --config /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/safe_pi0_indep_smoke_20260716_145732/artifacts/config.yaml \
+  --output-dir /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/safe_pi0_indep_smoke_20260716_145732/evaluation \
+  --device cuda
+```
+
+Every evaluation directory contains:
+
+```text
+metrics.json                 # official scalar metrics plus duration diagnostics
+split_manifest.json          # exact rollout IDs and per-task class counts
+scores.jsonl                 # one score trajectory per rollout
+functional_conformal.csv     # official alpha sweep and confusion/detection metrics
+functional_bands.npz         # saved model/constant/time-only upper bands
+provenance.json              # commits, hashes, selectors, model config, seed
+```
+
+`metrics.json` includes constant-score and causal absolute-time baselines. The
+time-only curve increases with inference index, so it exposes the case where
+failures are predictable merely because they run longer. The official
+`falert_early` metric is the matched per-task earliest-stop sensitivity check;
+the duration-only ROC-AUC is reported separately and triggers a warning at
+ROC-AUC at least 0.75 (or at most 0.25).
+
+## Resumable official MLP/LSTM grid
+
+The grid runner expands exactly the pinned SAFE pi0 grid: two models, three
+action-horizon selectors, three diffusion selectors, five learning rates,
+three regularization values, and three seeds, for 810 fits. Each fit uses the
+unmodified official model, loss, optimizer, class weights, batch size 512, and
+1,000 epochs, followed by the offline evaluator above. It never re-exports or
+modifies the dataset.
+
+Preview the complete plan without training:
+
+```bash
+export SAFE_GRID_ROOT=/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/safe_pi0_official_grid_$(date +%Y%m%d_%H%M%S)
+
+cd /gs/fs/tga-shinoda/felid/robocasa
+python -m robocasa.recovery.safe.run_official_grid \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --robocasa-repo "$PWD" \
+  --output-root "$SAFE_GRID_ROOT" \
+  --dry-run
+```
+
+On a two-GPU allocation, launch deterministic disjoint shards. Each shard has
+405 fits and can be restarted with `--resume`:
+
+```bash
+export GRID_LOG_ROOT=/gs/bs/tga-shinoda/felid/robocasa_logs/eval
+mkdir -p "$SAFE_GRID_ROOT" "$GRID_LOG_ROOT"
+
+CUDA_VISIBLE_DEVICES=0 nohup python -u -m robocasa.recovery.safe.run_official_grid \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --robocasa-repo /gs/fs/tga-shinoda/felid/robocasa \
+  --output-root "$SAFE_GRID_ROOT" \
+  --num-shards 2 \
+  --shard-index 0 \
+  --resume \
+  > "$GRID_LOG_ROOT/$(basename "$SAFE_GRID_ROOT")_shard0.log" 2>&1 &
+
+CUDA_VISIBLE_DEVICES=1 nohup python -u -m robocasa.recovery.safe.run_official_grid \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --robocasa-repo /gs/fs/tga-shinoda/felid/robocasa \
+  --output-root "$SAFE_GRID_ROOT" \
+  --num-shards 2 \
+  --shard-index 1 \
+  --resume \
+  > "$GRID_LOG_ROOT/$(basename "$SAFE_GRID_ROOT")_shard1.log" 2>&1 &
+```
+
+After all shards finish, reproduce official selection by averaging each
+configuration over seeds 0, 1, and 2 and maximizing `falert_early_roc_auc` on
+`val_seen`. `val_unseen` is reported but never used for selection:
+
+```bash
+python -m robocasa.recovery.safe.summarize_official_grid \
+  --output-root "$SAFE_GRID_ROOT"
+```
+
+This writes `selection_summary.json` and `selection_summary.csv`. A
+configuration is eligible for selection only after all three seeds complete.
+
 ## Local structural validation
 
 These checks require no GPU, RoboSuite, simulator, checkpoint, or server:
@@ -386,6 +492,7 @@ python -m unittest -v \
   tests.test_safe_collect_rollouts \
   tests.test_safe_atomic_collection \
   tests.test_safe_official_export \
+  tests.test_safe_official_training \
   tests.test_safe_cli
 ```
 

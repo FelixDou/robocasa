@@ -12,6 +12,7 @@ install_lightweight_robocasa_packages()
 from robocasa.recovery.safe.conformal import (
     calibrate_functional_threshold,
     first_detection,
+    select_protocol_trajectories,
     threshold_for_length,
 )
 from robocasa.recovery.safe.evaluate import evaluate_groups, save_results
@@ -23,13 +24,53 @@ class TestSafeConformal(unittest.TestCase):
         reference = [np.linspace(0.05, 0.1, 8), np.linspace(0.04, 0.11, 10)]
         calibration = [np.linspace(0.03, 0.12, 7), np.linspace(0.06, 0.1, 9)]
         result = calibrate_functional_threshold(
-            reference, calibration, alpha=0.2, normalized_length=20
+            reference,
+            calibration,
+            alpha=0.2,
+            normalized_length=20,
+            alignment="normalized_time",
         )
         self.assertEqual(len(result["threshold"]), 20)
         self.assertTrue(np.all(np.isfinite(result["threshold"])))
         threshold = threshold_for_length(result, 8)
         self.assertIsNone(first_detection(threshold - 0.01, result))
         self.assertEqual(first_detection(threshold + 0.01, result), 0)
+
+    def test_official_extend_quantile_and_inclusive_crossing(self):
+        reference = [np.array([0.1, 0.2]), np.array([0.2, 0.3, 0.4])]
+        calibration = [np.array([0.15, 0.25]), np.array([0.25, 0.35, 0.45])]
+        result = calibrate_functional_threshold(
+            reference,
+            calibration,
+            alpha=0.2,
+            alignment="extend",
+        )
+        self.assertEqual(result["alignment"], "extend")
+        self.assertEqual(result["aligned_length"], 3)
+        self.assertIn("greater than or equal", result["crossing_rule"])
+        threshold = np.asarray(result["threshold"])
+        self.assertEqual(first_detection(threshold, result), 0)
+        self.assertIsNone(first_detection(threshold - 1e-6, result))
+
+    def test_official_protocol_uses_only_held_out_successes(self):
+        data = []
+        for index in range(10):
+            data.append(
+                {
+                    "split": "calibration",
+                    "failed": False,
+                    "scores": [float(index)],
+                }
+            )
+        data.append({"split": "train", "failed": False, "scores": [99.0]})
+        data.append({"split": "calibration", "failed": True, "scores": [98.0]})
+        reference, calibration, alignment = select_protocol_trajectories(
+            data, "official_safe", seed=7
+        )
+        self.assertEqual((len(reference), len(calibration)), (3, 7))
+        self.assertEqual(alignment, "extend")
+        self.assertNotIn([99.0], reference + calibration)
+        self.assertNotIn([98.0], reference + calibration)
 
     def test_result_serialization(self):
         calibration = {
