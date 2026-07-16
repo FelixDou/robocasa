@@ -13,7 +13,14 @@ except ImportError:
 
 from robocasa.recovery.safe.render_score_videos import render_score_videos
 from robocasa.recovery.safe.summarize_seen_tasks import summarize
-from robocasa.recovery.safe.train_seen_tasks import MODEL_DEFAULTS, make_seen_split
+from robocasa.recovery.safe.summarize_seen_cv import summarize_seen_cv
+from robocasa.recovery.safe.run_seen_cv_grid import generate_cv_runs, make_inner_folds
+from robocasa.recovery.safe.train_seen_tasks import (
+    MODEL_DEFAULTS,
+    make_seen_split,
+    resolve_hyperparameters,
+    set_task_min_step_from_training,
+)
 
 
 class TestSeenTaskProtocol(unittest.TestCase):
@@ -60,6 +67,43 @@ class TestSeenTaskProtocol(unittest.TestCase):
         self.assertEqual(MODEL_DEFAULTS["lstm"]["diffusion_selector"], "concat-2")
         self.assertEqual(MODEL_DEFAULTS["lstm"]["learning_rate"], 1e-3)
 
+    def test_task_cutoff_uses_training_lengths_only(self):
+        train = [
+            SimpleNamespace(task_id=0, hidden_states=np.zeros((8, 1))),
+            SimpleNamespace(task_id=0, hidden_states=np.zeros((10, 1))),
+        ]
+        test = [SimpleNamespace(task_id=0, hidden_states=np.zeros((3, 1)))]
+        cutoffs = set_task_min_step_from_training(train, test)
+        self.assertEqual(cutoffs, {0: 8})
+        self.assertEqual([item.task_min_step for item in train], [8, 8])
+        self.assertEqual(test[0].task_min_step, 3)
+
+    def test_three_fold_cv_is_stratified_and_never_contains_outer_test(self):
+        rollouts = []
+        identity = {}
+        for task_id in range(5):
+            for success in (0, 1):
+                for index in range(10):
+                    rollout = SimpleNamespace(task_id=task_id, episode_success=success)
+                    rollout_id = f"task-{task_id}-success-{success}-{index}"
+                    rollouts.append(rollout)
+                    identity[id(rollout)] = (Path(f"{rollout_id}.pkl"), {"rollout_id": rollout_id})
+        outer_train, outer_test, _ = make_seen_split(rollouts, identity, train_per_class=7, split_seed=0)
+        folds = make_inner_folds(outer_train, identity, num_folds=3, seed=0)
+        outer_test_ids = {identity[id(item)][1]["rollout_id"] for item in outer_test}
+        validation_union = set()
+        self.assertEqual([len(validation) for _, validation in folds], [30, 20, 20])
+        for training, validation in folds:
+            ids = {identity[id(item)][1]["rollout_id"] for item in training + validation}
+            self.assertFalse(ids & outer_test_ids)
+            validation_union.update(identity[id(item)][1]["rollout_id"] for item in validation)
+        self.assertEqual(len(validation_union), 70)
+
+    def test_cv_grid_has_405_fits_per_architecture(self):
+        runs = generate_cv_runs("lstm")
+        self.assertEqual(len(runs), 405)
+        self.assertEqual(len({run.slug for run in runs}), 405)
+
     def test_summary_aggregates_three_fixed_split_model_seeds(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -80,6 +124,32 @@ class TestSeenTaskProtocol(unittest.TestCase):
             self.assertEqual(result["num_completed_runs"], 6)
             self.assertAlmostEqual(result["models"]["indep"]["test_roc_auc_mean"], 0.8)
             self.assertTrue((root / "summary.json").is_file())
+
+    def test_cv_selection_and_final_refit_selector_types(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for model in ("indep", "lstm"):
+                for config, score in (("low", 0.6), ("high", 0.8)):
+                    for fold in (0, 1, 2):
+                        run = root / f"{model}-{config}-{fold}"
+                        run.mkdir()
+                        record = {
+                            "status": "complete",
+                            "model": model,
+                            "horizon_selector": "1.0",
+                            "diffusion_selector": "concat-2" if config == "high" else "0.0",
+                            "learning_rate": 1e-3 if config == "high" else 1e-4,
+                            "lambda_reg": 1e-2,
+                            "fold": fold,
+                            "selection_value": score + 0.01 * fold,
+                        }
+                        (run / "metrics.json").write_text(json.dumps(record))
+            summary = summarize_seen_cv(root)
+            self.assertEqual(summary["num_completed_fits"], 12)
+            self.assertEqual(summary["best_by_model"]["lstm"]["diffusion_selector"], "concat-2")
+            resolved = resolve_hyperparameters("lstm", root / "cv_selection_summary.json")
+            self.assertEqual(resolved["horizon_selector"], 1.0)
+            self.assertEqual(resolved["diffusion_selector"], "concat-2")
 
 
 class TestScoreVideo(unittest.TestCase):

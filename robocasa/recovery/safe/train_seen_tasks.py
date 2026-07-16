@@ -35,6 +35,47 @@ MODEL_DEFAULTS = {
 }
 
 
+def set_task_min_step_from_training(train_rollouts, *other_splits):
+    """Freeze matched-horizon cutoffs from training data only."""
+    task_cutoffs = {}
+    for task_id in sorted({int(rollout.task_id) for rollout in train_rollouts}):
+        lengths = [
+            len(rollout.hidden_states)
+            for rollout in train_rollouts
+            if int(rollout.task_id) == task_id
+        ]
+        task_cutoffs[task_id] = min(lengths)
+    for rollout in train_rollouts:
+        rollout.task_min_step = task_cutoffs[int(rollout.task_id)]
+    for split in other_splits:
+        for rollout in split:
+            task_id = int(rollout.task_id)
+            if task_id not in task_cutoffs:
+                raise ValueError(f"Task {task_id} is absent from training cutoffs")
+            rollout.task_min_step = min(
+                task_cutoffs[task_id], len(rollout.hidden_states)
+            )
+    return task_cutoffs
+
+
+def resolve_hyperparameters(model_name, selection_summary=None):
+    if selection_summary is None:
+        return dict(MODEL_DEFAULTS[model_name])
+    summary = json.loads(Path(selection_summary).read_text())
+    selected = summary["best_by_model"][model_name]
+    def selector(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return str(value)
+    return {
+        "horizon_selector": selector(selected["horizon_selector"]),
+        "diffusion_selector": selector(selected["diffusion_selector"]),
+        "learning_rate": float(selected["learning_rate"]),
+        "lambda_reg": float(selected["lambda_reg"]),
+    }
+
+
 def json_value(value):
     if isinstance(value, dict):
         return {str(key): json_value(item) for key, item in value.items()}
@@ -133,7 +174,7 @@ def make_seen_split(rollouts, identity, *, train_per_class=7, split_seed=0):
     return train, test, per_task
 
 
-def make_config(export_dir, model_name, seed, epochs, device):
+def make_config(export_dir, model_name, seed, epochs, device, hyperparameters=None):
     from failure_prob.conf import (
         Config,
         IndepModelConfig,
@@ -142,7 +183,7 @@ def make_config(export_dir, model_name, seed, epochs, device):
         TrainConfig,
     )
 
-    defaults = MODEL_DEFAULTS[model_name]
+    defaults = hyperparameters or MODEL_DEFAULTS[model_name]
     dataset = PizeroDatasetConfig(
         data_path=str(Path(export_dir).resolve()),
         data_path_prefix="",
@@ -257,7 +298,15 @@ def train_seen_model(args):
     from failure_prob.utils.metrics import eval_scores_roc_prc
     from failure_prob.utils.random import seed_everything
 
-    cfg = make_config(args.export_dir, args.model, args.seed, args.epochs, args.device)
+    hyperparameters = resolve_hyperparameters(args.model, args.selection_summary)
+    cfg = make_config(
+        args.export_dir,
+        args.model,
+        args.seed,
+        args.epochs,
+        args.device,
+        hyperparameters,
+    )
     seed_everything(0)
     all_rollouts = load_rollouts_from_root(Path(args.export_dir), cfg)
     env_records = load_env_records(args.export_dir)
@@ -268,6 +317,7 @@ def train_seen_model(args):
         train_per_class=args.train_per_class,
         split_seed=args.split_seed,
     )
+    task_cutoffs = set_task_min_step_from_training(train_rollouts, test_rollouts)
     if cfg.dataset.load_to_cuda:
         all_rollouts = [rollout.to(args.device) for rollout in all_rollouts]
     rollouts_by_split = {"train": train_rollouts, "test": test_rollouts}
@@ -335,7 +385,14 @@ def train_seen_model(args):
         "seed": args.seed,
         "official_safe_commit": OFFICIAL_SAFE_COMMIT,
         "export_dir": str(Path(args.export_dir).resolve()),
-        "selected_hyperparameters": MODEL_DEFAULTS[args.model],
+        "selected_hyperparameters": hyperparameters,
+        "selection_summary": (
+            str(Path(args.selection_summary).resolve())
+            if args.selection_summary is not None
+            else None
+        ),
+        "task_min_step_source": "minimum inference length per task in the 70-rollout training split only",
+        "task_min_steps": {names[key]: value for key, value in task_cutoffs.items()},
         "counts": {
             "train": len(train_rollouts),
             "test": len(test_rollouts),
@@ -367,6 +424,7 @@ def build_parser():
     parser.add_argument("--train-per-class", type=int, default=7)
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--selection-summary")
     parser.add_argument("--resume", action="store_true")
     return parser
 

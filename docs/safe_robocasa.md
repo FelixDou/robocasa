@@ -594,6 +594,103 @@ python "$ROBOCASA_REPO/robocasa/recovery/safe/render_score_videos.py" \
 
 Omit `--max-videos` to render all 30 held-out videos.
 
+## Training-only inner-CV sweep for the all-five-seen protocol
+
+The first all-seen run reused hyperparameters selected by the official
+held-out-task protocol. To tune specifically for the 7+7 setting without
+leaking the fixed 3+3 test rollouts, run three-fold inner cross-validation only
+inside the 70-rollout training pool. Every task/outcome group contributes
+seven training-pool examples, partitioned 3/2/2 across the validation folds.
+The outer 30 rollouts are neither scored nor used for selection.
+
+The sweep keeps the official SAFE search space and model implementation:
+three horizon selectors, three diffusion selectors, five learning rates, three
+regularization values, and three folds. This is 405 fits per architecture and
+810 total. Matched-horizon cutoffs are frozen from the 70 outer-training
+rollouts only. Each GPU worker loads a feature-selector pair once and evaluates
+all 45 associated fits, avoiding 405 reloads of the 21 GB export.
+
+Before the full sweep, run a two-epoch, one-configuration-per-model smoke. It
+must create six fold metrics (three MLP and three LSTM) and zero failures:
+
+```bash
+export SAFE_CV_SMOKE_ROOT=/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/safe_all5_seen_innercv_smoke_$(date +%Y%m%d_%H%M%S)
+
+CUDA_VISIBLE_DEVICES=0 python -u \
+  "$ROBOCASA_REPO/robocasa/recovery/safe/run_seen_cv_grid.py" \
+  --export-dir "$SAFE_OFFICIAL" --safe-repo "$SAFE_REPO" \
+  --output-root "$SAFE_CV_SMOKE_ROOT" --model indep \
+  --horizon-selectors 1.0 --diffusion-selectors 0.0 \
+  --learning-rates 3e-4 --regularization 1e-3 \
+  --num-folds 3 --epochs 2 --device cuda --resume &
+
+CUDA_VISIBLE_DEVICES=1 python -u \
+  "$ROBOCASA_REPO/robocasa/recovery/safe/run_seen_cv_grid.py" \
+  --export-dir "$SAFE_OFFICIAL" --safe-repo "$SAFE_REPO" \
+  --output-root "$SAFE_CV_SMOKE_ROOT" --model lstm \
+  --horizon-selectors 1.0 --diffusion-selectors concat-2 \
+  --learning-rates 1e-3 --regularization 1e-2 \
+  --num-folds 3 --epochs 2 --device cuda --resume &
+
+wait
+test "$(find "$SAFE_CV_SMOKE_ROOT" -mindepth 2 -name metrics.json | wc -l)" -eq 6
+test "$(find "$SAFE_CV_SMOKE_ROOT" -name failure.json | wc -l)" -eq 0
+```
+
+```bash
+export SAFE_CV_TAG=safe_all5_seen_innercv_$(date +%Y%m%d_%H%M%S)
+export SAFE_CV_ROOT=/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/$SAFE_CV_TAG
+export SAFE_CV_LOG_ROOT=/gs/bs/tga-shinoda/felid/robocasa_logs/eval
+mkdir -p "$SAFE_CV_ROOT" "$SAFE_CV_LOG_ROOT"
+
+CUDA_VISIBLE_DEVICES=0 nohup python -u \
+  "$ROBOCASA_REPO/robocasa/recovery/safe/run_seen_cv_grid.py" \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --output-root "$SAFE_CV_ROOT" \
+  --model indep \
+  --train-per-class 7 \
+  --split-seed 0 \
+  --inner-seed 0 \
+  --num-folds 3 \
+  --epochs 1000 \
+  --device cuda \
+  --resume \
+  > "$SAFE_CV_LOG_ROOT/${SAFE_CV_TAG}_indep.log" 2>&1 &
+
+CUDA_VISIBLE_DEVICES=1 nohup python -u \
+  "$ROBOCASA_REPO/robocasa/recovery/safe/run_seen_cv_grid.py" \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --output-root "$SAFE_CV_ROOT" \
+  --model lstm \
+  --train-per-class 7 \
+  --split-seed 0 \
+  --inner-seed 0 \
+  --num-folds 3 \
+  --epochs 1000 \
+  --device cuda \
+  --resume \
+  > "$SAFE_CV_LOG_ROOT/${SAFE_CV_TAG}_lstm.log" 2>&1 &
+```
+
+After 810 successful fold metrics are present, select without printing all
+configurations:
+
+```bash
+python "$ROBOCASA_REPO/robocasa/recovery/safe/summarize_seen_cv.py" \
+  --root "$SAFE_CV_ROOT" \
+  --expected-folds 0 1 2 \
+  --quiet
+```
+
+Then refit three seeds per architecture on all 70 outer-training rollouts by
+passing `--selection-summary "$SAFE_CV_ROOT/cv_selection_summary.json"` to
+`train_seen_tasks.py`. Evaluate the fixed 30-rollout test set once through
+those final refits. The earlier all-seen result is exploratory because its
+matched cutoff was derived before this stricter training-only cutoff rule; the
+inner-CV refit supersedes it.
+
 ## Local structural validation
 
 These checks require no GPU, RoboSuite, simulator, checkpoint, or server:
