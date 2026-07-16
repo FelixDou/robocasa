@@ -503,6 +503,97 @@ per-task, representative score/band, ROC/PR, and detection-time plots. The
 report foregrounds matched-earliest metrics because full termination time is a
 perfect or near-perfect outcome proxy in this RoboCasa collection.
 
+## All-five-seen 7+7 training / 3+3 test protocol
+
+When the deployment task set is known, use the outcome-stratified same-task
+protocol rather than interpreting the official held-out-task split. For each of
+the five tasks, the fixed split places seven successes and seven failures in
+training and leaves the remaining three successes and three failures for test:
+70 training rollouts and 30 evaluation-only rollouts total. The same split is
+shared across model seeds. Hyperparameters are frozen from the completed
+official 810-fit sweep:
+
+- SAFE-MLP: horizon `1.0`, diffusion `0.0`, learning rate `3e-4`, regularization `1e-3`.
+- SAFE-LSTM: horizon `1.0`, diffusion `concat-2`, learning rate `1e-3`, regularization `1e-2`.
+
+This experiment reports matched-earliest ROC-AUC and PRC-AUC overall and per
+task. It deliberately does not fit a conformal threshold: using any of the 30
+test rollouts for calibration would contaminate the requested six-rollout
+evaluation set, while calibrating on model-training successes would give an
+optimistic false-alarm estimate. Collect fresh same-task successes later when
+an honest deployment threshold is needed.
+
+Run the three MLP seeds on GPU 0 and the three LSTM seeds on GPU 1. Invoke the
+standalone file so the SAFE environment does not need RoboSuite:
+
+```bash
+export SAFE_SEEN_ROOT=/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/safe_all5_seen_7x7_train_3x3_test_$(date +%Y%m%d_%H%M%S)
+export SAFE_SEEN_LOG_ROOT=/gs/bs/tga-shinoda/felid/robocasa_logs/eval
+mkdir -p "$SAFE_SEEN_ROOT" "$SAFE_SEEN_LOG_ROOT"
+
+CUDA_VISIBLE_DEVICES=0 nohup bash -lc '
+  set -euo pipefail
+  for seed in 0 1 2; do
+    python -u "$ROBOCASA_REPO/robocasa/recovery/safe/train_seen_tasks.py" \
+      --export-dir "$SAFE_OFFICIAL" \
+      --safe-repo "$SAFE_REPO" \
+      --output-dir "$SAFE_SEEN_ROOT/indep_seed${seed}" \
+      --model indep \
+      --seed "$seed" \
+      --split-seed 0 \
+      --train-per-class 7 \
+      --epochs 1000 \
+      --device cuda \
+      --resume
+  done
+' > "$SAFE_SEEN_LOG_ROOT/$(basename "$SAFE_SEEN_ROOT")_indep.log" 2>&1 &
+
+CUDA_VISIBLE_DEVICES=1 nohup bash -lc '
+  set -euo pipefail
+  for seed in 0 1 2; do
+    python -u "$ROBOCASA_REPO/robocasa/recovery/safe/train_seen_tasks.py" \
+      --export-dir "$SAFE_OFFICIAL" \
+      --safe-repo "$SAFE_REPO" \
+      --output-dir "$SAFE_SEEN_ROOT/lstm_seed${seed}" \
+      --model lstm \
+      --seed "$seed" \
+      --split-seed 0 \
+      --train-per-class 7 \
+      --epochs 1000 \
+      --device cuda \
+      --resume
+  done
+' > "$SAFE_SEEN_LOG_ROOT/$(basename "$SAFE_SEEN_ROOT")_lstm.log" 2>&1 &
+```
+
+After six `metrics.json` files appear, aggregate the same-task test result:
+
+```bash
+python "$ROBOCASA_REPO/robocasa/recovery/safe/summarize_seen_tasks.py" \
+  --root "$SAFE_SEEN_ROOT" \
+  --expected-seeds 0 1 2
+```
+
+### Score overlays on rollout videos
+
+`render_score_videos.py` maps video frames back to environment steps and then
+to genuine pi0 inference calls. The overlay shows the current causal SAFE
+score, maximum score so far, complete growing score trace, task, model, seed,
+and ground-truth outcome. It explicitly labels the visualization as score-only;
+it does not display a test-fitted threshold.
+
+Render six balanced test examples from a chosen run:
+
+```bash
+python "$ROBOCASA_REPO/robocasa/recovery/safe/render_score_videos.py" \
+  --scores "$SAFE_SEEN_ROOT/lstm_seed0/scores.jsonl" \
+  --output-dir "$SAFE_SEEN_ROOT/lstm_seed0/score_videos" \
+  --split test \
+  --max-videos 6
+```
+
+Omit `--max-videos` to render all 30 held-out videos.
+
 ## Local structural validation
 
 These checks require no GPU, RoboSuite, simulator, checkpoint, or server:

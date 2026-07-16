@@ -16,9 +16,12 @@ from robocasa.recovery.safe import (
     export_to_official_safe,
     plots,
     report_official_grid,
+    render_score_videos,
     run_official_grid,
+    summarize_seen_tasks,
     summarize_official_grid,
     train,
+    train_seen_tasks,
     validate_atomic_dataset,
     validate_official_export,
 )
@@ -38,8 +41,11 @@ class TestSafeCLIHelp(unittest.TestCase):
             evaluate_official_safe,
             plots,
             report_official_grid,
+            render_score_videos,
             run_official_grid,
+            summarize_seen_tasks,
             summarize_official_grid,
+            train_seen_tasks,
             validate_official_export,
         ):
             with self.subTest(module=module.__name__):
