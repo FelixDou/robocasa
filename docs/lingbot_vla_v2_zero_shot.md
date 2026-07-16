@@ -390,6 +390,11 @@ Success is not required for the plumbing smoke test. Required signals are a
 complete manifest, zero errors, finite actions, a non-empty video, and available
 subtask diagnostics.
 
+The client adapter converts LingBot's signed normalized gripper convention
+(`-1` open, `+1` closed) to the gym wrapper's `[0, 1]` close command before the
+wrapper applies its `0.5` threshold. Saved rollout actions therefore contain the
+gym-facing gripper command, not the signed LingBot output.
+
 ## 8. Full 50-task zero-shot evaluation
 
 Run the three official target groups separately so their success rates cannot

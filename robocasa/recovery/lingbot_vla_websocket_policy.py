@@ -256,10 +256,17 @@ class LingBotVLAWebsocketPolicy:
         action = np.asarray(action, dtype=np.float32)
         if self.clip_actions:
             action = np.clip(action, -1.0, 1.0)
+        # RoboCasa LeRobot trajectories store ``gripper_close`` in the signed
+        # controller convention (-1=open, +1=closed), which is therefore the
+        # convention used for LingBot normalization. RoboCasaGymEnv's dict API
+        # instead thresholds this field at 0.5 as a [0, 1] close command.
+        gripper_close = (
+            np.clip(action[6:7], -1.0, 1.0) + np.float32(1.0)
+        ) / np.float32(2.0)
         return {
             "action.end_effector_position": action[0:3],
             "action.end_effector_rotation": action[3:6],
-            "action.gripper_close": action[6:7],
+            "action.gripper_close": gripper_close,
             "action.base_motion": np.concatenate((action[7:10], action[10:11])),
             "action.control_mode": np.asarray(
                 [self.fixed_control_mode], dtype=np.float32

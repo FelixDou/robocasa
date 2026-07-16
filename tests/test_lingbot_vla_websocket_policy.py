@@ -114,8 +114,24 @@ class LingBotVLAWebsocketPolicyTest(unittest.TestCase):
         np.testing.assert_allclose(
             second["action.end_effector_rotation"], chunk[1, 3:6]
         )
+        np.testing.assert_allclose(
+            first["action.gripper_close"], (chunk[0, 6:7] + 1.0) / 2.0
+        )
         np.testing.assert_allclose(first["action.base_motion"], chunk[0, 7:11])
         np.testing.assert_allclose(first["action.control_mode"], [0.0])
+
+    def test_signed_gripper_is_converted_to_gym_close_command(self):
+        policy = LingBotVLAWebsocketPolicy(
+            client=FakeClient([]), reset_on_connect=False
+        )
+
+        outputs = []
+        for signed_value in (-1.0, 0.0, 1.0):
+            action = np.zeros(11, dtype=np.float32)
+            action[6] = signed_value
+            outputs.append(float(policy._convert_action(action)["action.gripper_close"][0]))
+
+        np.testing.assert_allclose(outputs, [0.0, 0.5, 1.0])
 
     def test_instruction_change_discards_cached_actions(self):
         client = FakeClient(
