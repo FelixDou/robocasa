@@ -232,8 +232,15 @@ def run_grid(args):
         checkpoint = run_root / "artifacts" / "model_final.ckpt"
         config = run_root / "artifacts" / "config.yaml"
         metrics = run_root / "evaluation" / "metrics.json"
+        failure = run_root / "failure.json"
         if args.resume and checkpoint.is_file() and config.is_file() and metrics.is_file():
             print(f"[{position}/{len(assigned)}] already complete: {run.slug}")
+            continue
+        if args.resume and failure.is_file() and not args.retry_errors:
+            print(
+                f"[{position}/{len(assigned)}] known invalid run (use --retry-errors): "
+                f"{run.slug}"
+            )
             continue
         run_root.mkdir(parents=True, exist_ok=True)
         started = datetime.now(timezone.utc).isoformat()
@@ -242,6 +249,7 @@ def run_grid(args):
             {"status": "started", "run": asdict(run), "slug": run.slug, "at": started},
         )
         print(f"[{position}/{len(assigned)}] training {run.slug}", flush=True)
+        stage = "training"
         try:
             if not (args.resume and checkpoint.is_file() and config.is_file()):
                 _run_logged(
@@ -250,6 +258,7 @@ def run_grid(args):
                     env=env,
                     log_path=run_root / "train.log",
                 )
+            stage = "evaluation"
             _run_logged(
                 evaluation_command(run, args, run_root),
                 cwd=robocasa_repo,
@@ -257,17 +266,31 @@ def run_grid(args):
                 log_path=run_root / "evaluate.log",
             )
         except subprocess.CalledProcessError as error:
+            failure_record = {
+                "schema_version": 1,
+                "status": "error",
+                "stage": stage,
+                "run": asdict(run),
+                "slug": run.slug,
+                "returncode": error.returncode,
+                "train_log": str(run_root / "train.log"),
+                "evaluate_log": str(run_root / "evaluate.log"),
+                "at": datetime.now(timezone.utc).isoformat(),
+            }
+            write_json(failure, failure_record)
             _append_event(
                 events_path,
-                {
-                    "status": "error",
-                    "run": asdict(run),
-                    "slug": run.slug,
-                    "returncode": error.returncode,
-                    "at": datetime.now(timezone.utc).isoformat(),
-                },
+                failure_record,
             )
-            raise
+            print(
+                f"[{position}/{len(assigned)}] ERROR during {stage}: {run.slug}; "
+                f"continuing (see {failure})",
+                flush=True,
+            )
+            if args.fail_fast:
+                raise
+            continue
+        failure.unlink(missing_ok=True)
         _append_event(
             events_path,
             {
@@ -298,6 +321,16 @@ def build_parser():
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--max-runs", type=int)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--retry-errors",
+        action="store_true",
+        help="Retry runs with a saved failure.json; otherwise --resume skips them.",
+    )
+    parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Stop the shard at the first failed run instead of recording and continuing.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser
 

@@ -437,7 +437,9 @@ python -m robocasa.recovery.safe.run_official_grid \
 ```
 
 On a two-GPU allocation, launch deterministic disjoint shards. Each shard has
-405 fits and can be restarted with `--resume`:
+405 fits and can be restarted with `--resume`. A numerically invalid grid point
+is recorded in that run's `failure.json` and does not terminate the shard;
+subsequent resumes skip it unless `--retry-errors` is requested:
 
 ```bash
 export GRID_LOG_ROOT=/gs/bs/tga-shinoda/felid/robocasa_logs/eval

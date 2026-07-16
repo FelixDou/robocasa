@@ -16,6 +16,7 @@ from robocasa.recovery.safe.evaluate_official_safe import (
 )
 from robocasa.recovery.safe.run_official_grid import (
     GridRun,
+    build_parser as build_grid_parser,
     evaluation_command,
     generate_grid,
     train_command,
@@ -138,6 +139,20 @@ class TestOfficialSafeGrid(unittest.TestCase):
                 )
             )
             self.assertTrue(validate_export_gate(export).is_file())
+
+    def test_grid_continues_errors_by_default_and_can_retry_or_fail_fast(self):
+        base = [
+            "--export-dir", "/data/export",
+            "--safe-repo", "/src/SAFE",
+            "--robocasa-repo", "/src/robocasa",
+            "--output-root", "/results",
+        ]
+        default = build_grid_parser().parse_args(base)
+        self.assertFalse(default.fail_fast)
+        self.assertFalse(default.retry_errors)
+        explicit = build_grid_parser().parse_args(base + ["--fail-fast", "--retry-errors"])
+        self.assertTrue(explicit.fail_fast)
+        self.assertTrue(explicit.retry_errors)
 
     def test_selection_uses_mean_val_seen_across_complete_seed_set(self):
         results = []
