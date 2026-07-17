@@ -142,6 +142,10 @@ class TestSafeAtomicCollection(unittest.TestCase):
             args.success_quota = -1
             with self.assertRaisesRegex(ValueError, "non-negative"):
                 prepare_plan(args)
+            args = collection_args(tmp)
+            args.max_errors = 0
+            with self.assertRaisesRegex(ValueError, "--max-errors must be positive"):
+                prepare_plan(args)
 
     def test_dry_run_is_simulator_free(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -338,6 +342,25 @@ class TestSafeAtomicCollection(unittest.TestCase):
             validation = validate_atomic_dataset(tmp)
             self.assertFalse(validation["valid"])
             self.assertTrue(any("partial" in error for error in validation["errors"]))
+
+    def test_max_errors_stops_runaway_collection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(tmp, num_rollouts=6)
+            args.max_errors = 2
+            runtime = fake_runtime()
+
+            def fail_factory(factory, env, values):
+                raise ConnectionError("mock server unavailable")
+
+            runtime["call_factory"] = fail_factory
+            with self.assertRaisesRegex(RuntimeError, "--max-errors=2"):
+                run_collection(args, runtime=runtime)
+
+            errors = [
+                json.loads(line)
+                for line in (Path(tmp) / "errors.jsonl").read_text().splitlines()
+            ]
+            self.assertEqual(len(errors), 2)
 
     def test_merge_atomic_dataset_shards_with_hardlinks(self):
         with tempfile.TemporaryDirectory() as tmp:

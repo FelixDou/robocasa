@@ -273,6 +273,8 @@ def prepare_plan(args):
         raise ValueError("--horizon must be positive")
     if args.video_frame_stride <= 0:
         raise ValueError("--video-frame-stride must be positive")
+    if args.max_errors is not None and args.max_errors <= 0:
+        raise ValueError("--max-errors must be positive")
     if args.seed_protocol == "official_openpi" and args.seed_end is not None:
         raise ValueError(
             "--seed-end is incompatible with --seed-protocol official_openpi"
@@ -374,6 +376,7 @@ def prepare_plan(args):
         "success_quota": args.success_quota,
         "failure_quota": args.failure_quota,
         "retain_only_quota": args.retain_only_quota,
+        "max_errors": args.max_errors,
         "safe_repository_commit": args.safe_repository_commit,
         "official_safe_openpi_commit": args.official_safe_openpi_commit,
         "openpi_repository_commit": args.openpi_repository_commit,
@@ -403,6 +406,7 @@ def _assert_resume_compatible(previous, current):
         "success_quota",
         "failure_quota",
         "retain_only_quota",
+        "max_errors",
         "openpi_repository_commit",
     )
     mismatches = [key for key in keys if previous.get(key) != current.get(key)]
@@ -726,6 +730,14 @@ def run_collection(args, runtime=None):
                 }
                 append_jsonl(output_dir / ERRORS_NAME, event)
                 errors.append(event)
+                if args.max_errors is not None and len(errors) >= args.max_errors:
+                    if shared_env is not None:
+                        shared_env.close()
+                        shared_env = None
+                        env = None
+                    raise RuntimeError(
+                        f"Collection stopped after reaching --max-errors={args.max_errors}"
+                    )
                 if not args.continue_on_error:
                     if shared_env is not None:
                         shared_env.close()
@@ -807,6 +819,11 @@ def build_parser():
             "After one class reaches its quota, keep attempting rollouts but discard "
             "additional examples of that class instead of storing an imbalanced dataset"
         ),
+    )
+    parser.add_argument(
+        "--max-errors",
+        type=int,
+        help="Stop collection after this many recorded errors",
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--video-camera-name", default="robot0_agentview_center")
