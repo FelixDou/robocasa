@@ -121,6 +121,14 @@ def quota_reached(successes, failures, success_quota, failure_quota):
     )
 
 
+def class_quota_reached(
+    *, failed, successes, failures, success_quota, failure_quota
+):
+    quota = failure_quota if failed else success_quota
+    count = failures if failed else successes
+    return quota is not None and count >= quota
+
+
 def artifact_paths(output_dir, task_name, rollout_id, record_actions, record_videos):
     output_dir = Path(output_dir)
     feature_path = output_dir / "rollouts" / f"{rollout_id}.npz"
@@ -173,6 +181,21 @@ def make_summary(config, records, errors, skipped, *, partial):
     for record in records:
         key = "failures" if record.failed else "successes"
         per_task[record.task_name][key] += 1
+    per_task_summary = {}
+    for task in config.get("tasks", sorted(per_task)):
+        counts = per_task[task]
+        task_summary = dict(counts)
+        if (
+            config.get("success_quota") is not None
+            or config.get("failure_quota") is not None
+        ):
+            task_summary["quota_reached"] = quota_reached(
+                counts["successes"],
+                counts["failures"],
+                config.get("success_quota"),
+                config.get("failure_quota"),
+            )
+        per_task_summary[task] = task_summary
     return {
         "schema_version": SAFE_SCHEMA_VERSION,
         "dataset_type": "robocasa_atomic_safe_rollouts",
@@ -186,7 +209,7 @@ def make_summary(config, records, errors, skipped, *, partial):
             "errors": len(errors),
             "skipped": len(skipped),
         },
-        "per_task": {task: dict(counts) for task, counts in sorted(per_task.items())},
+        "per_task": per_task_summary,
         "attempted": [
             {
                 key: event.get(key)
@@ -258,6 +281,14 @@ def prepare_plan(args):
         value = getattr(args, name)
         if value is not None and value < 0:
             raise ValueError(f"--{name.replace('_', '-')} must be non-negative")
+    if (
+        args.retain_only_quota
+        and args.success_quota is None
+        and args.failure_quota is None
+    ):
+        raise ValueError(
+            "--retain-only-quota requires --success-quota and/or --failure-quota"
+        )
     tasks = validate_atomic_tasks(
         args.tasks,
         allow_unregistered=args.allow_unregistered_atomic_tasks,
@@ -342,6 +373,7 @@ def prepare_plan(args):
         "record_safe_features": args.record_safe_features,
         "success_quota": args.success_quota,
         "failure_quota": args.failure_quota,
+        "retain_only_quota": args.retain_only_quota,
         "safe_repository_commit": args.safe_repository_commit,
         "official_safe_openpi_commit": args.official_safe_openpi_commit,
         "openpi_repository_commit": args.openpi_repository_commit,
@@ -368,6 +400,9 @@ def _assert_resume_compatible(previous, current):
         "record_videos",
         "video_frame_stride",
         "record_safe_features",
+        "success_quota",
+        "failure_quota",
+        "retain_only_quota",
         "openpi_repository_commit",
     )
     mismatches = [key for key in keys if previous.get(key) != current.get(key)]
@@ -576,6 +611,26 @@ def run_collection(args, runtime=None):
                     writer = None
                 if args.record_videos and not paths["video"].is_file():
                     raise RuntimeError("Video recording was requested but no video file was finalized")
+                failed = not rollout["success"]
+                if args.retain_only_quota and class_quota_reached(
+                    failed=failed,
+                    successes=counts[task_name]["successes"],
+                    failures=counts[task_name]["failures"],
+                    success_quota=args.success_quota,
+                    failure_quota=args.failure_quota,
+                ):
+                    if paths["video"] is not None and paths["video"].exists():
+                        paths["video"].unlink()
+                    event = {
+                        **attempt,
+                        "status": "skipped_class_quota_reached",
+                        "success": not failed,
+                        "failed": failed,
+                        "created_at": utc_now(),
+                    }
+                    append_jsonl(output_dir / SKIPPED_NAME, event)
+                    skipped.append(event)
+                    continue
                 if args.record_actions:
                     save_actions_atomic(rollout["actions"], paths["action"])
                 feature_meta = rollout["feature_metadata"]
@@ -600,7 +655,7 @@ def run_collection(args, runtime=None):
                     video_frame_stride=args.video_frame_stride,
                     policy_id=args.policy_name,
                     checkpoint=args.checkpoint,
-                    failed=not rollout["success"],
+                    failed=failed,
                     num_env_steps=rollout["num_env_steps"],
                     inference_env_steps=rollout["inference_env_steps"],
                     valid_sequence_length=len(rollout["inference_env_steps"]),
@@ -688,7 +743,19 @@ def run_collection(args, runtime=None):
                 )
         if shared_env is not None:
             shared_env.close()
-    summary = make_summary(plan["config"], records, errors, skipped, partial=False)
+    quotas_requested = args.success_quota is not None or args.failure_quota is not None
+    target_reached = not quotas_requested or all(
+        quota_reached(
+            counts[task_name]["successes"],
+            counts[task_name]["failures"],
+            args.success_quota,
+            args.failure_quota,
+        )
+        for task_name in plan["config"]["tasks"]
+    )
+    summary = make_summary(
+        plan["config"], records, errors, skipped, partial=not target_reached
+    )
     atomic_write_json(summary_path, summary)
     return summary
 
@@ -732,6 +799,15 @@ def build_parser():
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--success-quota", type=int)
     parser.add_argument("--failure-quota", type=int)
+    parser.add_argument(
+        "--retain-only-quota",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "After one class reaches its quota, keep attempting rollouts but discard "
+            "additional examples of that class instead of storing an imbalanced dataset"
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--video-camera-name", default="robot0_agentview_center")
     parser.add_argument("--video-height", type=int, default=512)

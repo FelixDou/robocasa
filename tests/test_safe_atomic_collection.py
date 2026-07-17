@@ -18,6 +18,7 @@ from robocasa.recovery.safe.collect_atomic_rollouts import (
 )
 from robocasa.recovery.safe.dataset import load_manifest
 from robocasa.recovery.safe.export_to_official_safe import export_to_official_safe
+from robocasa.recovery.safe.merge_atomic_datasets import merge_atomic_datasets
 from robocasa.recovery.safe.validate_atomic_dataset import validate_atomic_dataset
 
 
@@ -293,6 +294,77 @@ class TestSafeAtomicCollection(unittest.TestCase):
             ]
             self.assertEqual(len(skipped), 4)
             self.assertTrue(all(event["status"] == "skipped_quota_reached" for event in skipped))
+
+    def test_retain_only_quota_discards_majority_class_excess(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(
+                tmp,
+                num_rollouts=6,
+                success_quota=1,
+                failure_quota=2,
+            )
+            args.retain_only_quota = True
+            result = run_collection(args, runtime=fake_runtime())
+
+            self.assertFalse(result["partial"])
+            self.assertEqual(result["counts"]["valid_rollouts"], 3)
+            self.assertEqual(result["counts"]["successes"], 1)
+            self.assertEqual(result["counts"]["failures"], 2)
+            self.assertTrue(result["per_task"][TASK]["quota_reached"])
+            skipped = [
+                json.loads(line)
+                for line in (Path(tmp) / "skipped.jsonl").read_text().splitlines()
+            ]
+            self.assertEqual(
+                [event["status"] for event in skipped],
+                [
+                    "skipped_class_quota_reached",
+                    "skipped_quota_reached",
+                    "skipped_quota_reached",
+                ],
+            )
+            self.assertTrue(validate_atomic_dataset(tmp)["valid"])
+
+    def test_unmet_quota_marks_dataset_partial(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(
+                tmp,
+                num_rollouts=2,
+                success_quota=2,
+                failure_quota=2,
+            )
+            result = run_collection(args, runtime=fake_runtime())
+            self.assertTrue(result["partial"])
+            validation = validate_atomic_dataset(tmp)
+            self.assertFalse(validation["valid"])
+            self.assertTrue(any("partial" in error for error in validation["errors"]))
+
+    def test_merge_atomic_dataset_shards_with_hardlinks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_a = root / "source_a"
+            source_b = root / "source_b"
+            output = root / "merged"
+
+            args_a = collection_args(source_a, success_quota=1, failure_quota=1)
+            args_b = collection_args(source_b, success_quota=1, failure_quota=1)
+            args_b.tasks = ["OpenDrawer"]
+            run_collection(args_a, runtime=fake_runtime())
+            run_collection(args_b, runtime=fake_runtime())
+
+            result = merge_atomic_datasets([source_a, source_b], output)
+            summary = result["summary"]
+            self.assertEqual(summary["counts"]["valid_rollouts"], 4)
+            self.assertEqual(summary["counts"]["successes"], 2)
+            self.assertEqual(summary["counts"]["failures"], 2)
+            self.assertEqual(set(summary["per_task"]), {TASK, "OpenDrawer"})
+            self.assertTrue(result["validation"]["valid"])
+            for record in load_manifest(output):
+                source = source_a if record.task_name == TASK else source_b
+                self.assertEqual(
+                    (source / record.tensor_path).stat().st_ino,
+                    (output / record.tensor_path).stat().st_ino,
+                )
 
     def test_resume_quarantines_orphan_then_recollects(self):
         with tempfile.TemporaryDirectory() as tmp:
