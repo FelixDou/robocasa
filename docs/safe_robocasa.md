@@ -594,6 +594,31 @@ python "$ROBOCASA_REPO/robocasa/recovery/safe/render_score_videos.py" \
 
 Omit `--max-videos` to render all 30 held-out videos.
 
+### Final all-seen result figures
+
+After the leakage-free inner-CV sweep and six final refits complete, create a
+reproducible static figure set directly from the saved metrics and score
+trajectories:
+
+```bash
+export SAFE_FINAL_PLOTS="$SAFE_FINAL_ROOT/result_plots"
+
+python "$ROBOCASA_REPO/robocasa/recovery/safe/plot_seen_results.py" \
+  --final-root "$SAFE_FINAL_ROOT" \
+  --cv-summary "$SAFE_CV_ROOT/cv_selection_summary.json" \
+  --output-dir "$SAFE_FINAL_PLOTS" \
+  --formats png pdf
+```
+
+The command writes five figures in PNG and PDF format: aggregate test ROC/PRC,
+per-seed sensitivity, the inner-CV-to-test gap, SAFE versus the episode-duration
+baseline, and seed-0 held-out score trajectories. It also writes
+`per_seed_metrics.csv`, `summary_metrics.csv`, and `plot_manifest.json` so every
+plotted value remains auditable. Error bars are population standard deviations
+across the three training seeds. No threshold is fitted on test rollouts, and
+per-task AUC is intentionally omitted because each task has only three test
+successes and three test failures.
+
 ## Training-only inner-CV sweep for the all-five-seen protocol
 
 The first all-seen run reused hyperparameters selected by the official
