@@ -36,7 +36,6 @@ COMPATIBLE_CONFIG_KEYS = (
     "safe_repository_commit",
     "official_safe_openpi_commit",
     "openpi_repository_commit",
-    "robocasa_commit",
 )
 
 
@@ -192,6 +191,13 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
         }
         for source, config in zip(sources, configs)
     ]
+    robocasa_commits = sorted(
+        {
+            config.get("robocasa_commit")
+            for config in configs
+            if config.get("robocasa_commit") is not None
+        }
+    )
     config = dict(configs[0])
     config.update(
         {
@@ -204,6 +210,10 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
             "success_quota": None,
             "failure_quota": None,
             "retain_only_quota": False,
+            "robocasa_commit": (
+                robocasa_commits[0] if len(robocasa_commits) == 1 else None
+            ),
+            "robocasa_commits": robocasa_commits,
             "output_dir": str(output_dir),
             "source_datasets": [str(source) for source in sources],
             "source_collection_quotas": source_collection_quotas,

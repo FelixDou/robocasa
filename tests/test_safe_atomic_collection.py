@@ -354,6 +354,7 @@ class TestSafeAtomicCollection(unittest.TestCase):
                 failure_quota=1,
             )
             args_b.seed = 2
+            args_b.robocasa_commit = "different-collector-commit"
             run_collection(args_a, runtime=fake_runtime())
             run_collection(args_b, runtime=fake_runtime())
 
@@ -364,6 +365,8 @@ class TestSafeAtomicCollection(unittest.TestCase):
             self.assertEqual(summary["counts"]["failures"], 2)
             self.assertEqual(set(summary["per_task"]), {TASK})
             self.assertEqual(summary["config"]["base_environment_seeds"], [0, 2])
+            self.assertEqual(len(summary["config"]["robocasa_commits"]), 2)
+            self.assertIsNone(summary["config"]["robocasa_commit"])
             self.assertIsNone(summary["config"]["success_quota"])
             self.assertTrue(result["validation"]["valid"])
             for record in load_manifest(output):
