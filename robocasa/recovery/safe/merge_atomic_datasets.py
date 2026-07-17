@@ -22,7 +22,6 @@ from .validate_atomic_dataset import validate_atomic_dataset
 
 COMPATIBLE_CONFIG_KEYS = (
     "split",
-    "base_environment_seed",
     "seed_protocol",
     "policy_module",
     "policy_name",
@@ -34,9 +33,6 @@ COMPATIBLE_CONFIG_KEYS = (
     "record_videos",
     "video_frame_stride",
     "record_safe_features",
-    "success_quota",
-    "failure_quota",
-    "retain_only_quota",
     "safe_repository_commit",
     "official_safe_openpi_commit",
     "openpi_repository_commit",
@@ -173,16 +169,44 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
     for config in configs:
         for task in config["tasks"]:
             if task in task_horizons:
-                raise ValueError(f"Task appears in more than one shard: {task}")
+                if task_horizons[task] != config["task_horizons"][task]:
+                    raise ValueError(
+                        f"Task {task} has conflicting rollout horizons across shards"
+                    )
+                continue
             tasks.append(task)
             task_horizons[task] = config["task_horizons"][task]
+    base_environment_seeds = sorted(
+        {
+            config.get("base_environment_seed")
+            for config in configs
+            if config.get("base_environment_seed") is not None
+        }
+    )
+    source_collection_quotas = [
+        {
+            "source_dataset": str(source),
+            "success_quota": config.get("success_quota"),
+            "failure_quota": config.get("failure_quota"),
+            "retain_only_quota": config.get("retain_only_quota", False),
+        }
+        for source, config in zip(sources, configs)
+    ]
     config = dict(configs[0])
     config.update(
         {
             "tasks": tasks,
             "task_horizons": task_horizons,
+            "base_environment_seed": None,
+            "base_environment_seeds": base_environment_seeds,
+            "seeds": base_environment_seeds,
+            "environment_reset_indices": None,
+            "success_quota": None,
+            "failure_quota": None,
+            "retain_only_quota": False,
             "output_dir": str(output_dir),
             "source_datasets": [str(source) for source in sources],
+            "source_collection_quotas": source_collection_quotas,
             "source_ports": [source_config.get("port") for source_config in configs],
             "artifact_materialization": materialization_counts,
         }

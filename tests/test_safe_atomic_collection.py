@@ -347,20 +347,27 @@ class TestSafeAtomicCollection(unittest.TestCase):
             output = root / "merged"
 
             args_a = collection_args(source_a, success_quota=1, failure_quota=1)
-            args_b = collection_args(source_b, success_quota=1, failure_quota=1)
-            args_b.tasks = ["OpenDrawer"]
+            args_b = collection_args(
+                source_b,
+                num_rollouts=3,
+                success_quota=2,
+                failure_quota=1,
+            )
+            args_b.seed = 2
             run_collection(args_a, runtime=fake_runtime())
             run_collection(args_b, runtime=fake_runtime())
 
             result = merge_atomic_datasets([source_a, source_b], output)
             summary = result["summary"]
-            self.assertEqual(summary["counts"]["valid_rollouts"], 4)
-            self.assertEqual(summary["counts"]["successes"], 2)
+            self.assertEqual(summary["counts"]["valid_rollouts"], 5)
+            self.assertEqual(summary["counts"]["successes"], 3)
             self.assertEqual(summary["counts"]["failures"], 2)
-            self.assertEqual(set(summary["per_task"]), {TASK, "OpenDrawer"})
+            self.assertEqual(set(summary["per_task"]), {TASK})
+            self.assertEqual(summary["config"]["base_environment_seeds"], [0, 2])
+            self.assertIsNone(summary["config"]["success_quota"])
             self.assertTrue(result["validation"]["valid"])
             for record in load_manifest(output):
-                source = source_a if record.task_name == TASK else source_b
+                source = source_a if record.environment_seed < 2 else source_b
                 self.assertEqual(
                     (source / record.tensor_path).stat().st_ino,
                     (output / record.tensor_path).stat().st_ino,
