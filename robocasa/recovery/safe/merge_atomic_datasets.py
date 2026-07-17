@@ -30,7 +30,6 @@ COMPATIBLE_CONFIG_KEYS = (
     "replan_steps",
     "horizon_source",
     "record_actions",
-    "record_videos",
     "video_frame_stride",
     "record_safe_features",
     "safe_repository_commit",
@@ -191,6 +190,15 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
         }
         for source, config in zip(sources, configs)
     ]
+    source_artifact_recording = [
+        {
+            "source_dataset": str(source),
+            "record_actions": config.get("record_actions"),
+            "record_videos": config.get("record_videos"),
+        }
+        for source, config in zip(sources, configs)
+    ]
+    record_video_values = {config.get("record_videos") for config in configs}
     robocasa_commits = sorted(
         {
             config.get("robocasa_commit")
@@ -210,6 +218,11 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
             "success_quota": None,
             "failure_quota": None,
             "retain_only_quota": False,
+            "record_videos": (
+                next(iter(record_video_values))
+                if len(record_video_values) == 1
+                else None
+            ),
             "robocasa_commit": (
                 robocasa_commits[0] if len(robocasa_commits) == 1 else None
             ),
@@ -217,6 +230,7 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
             "output_dir": str(output_dir),
             "source_datasets": [str(source) for source in sources],
             "source_collection_quotas": source_collection_quotas,
+            "source_artifact_recording": source_artifact_recording,
             "source_ports": [source_config.get("port") for source_config in configs],
             "artifact_materialization": materialization_counts,
         }

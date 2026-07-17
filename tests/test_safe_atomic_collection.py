@@ -357,6 +357,10 @@ class TestSafeAtomicCollection(unittest.TestCase):
             args_b.robocasa_commit = "different-collector-commit"
             run_collection(args_a, runtime=fake_runtime())
             run_collection(args_b, runtime=fake_runtime())
+            source_b_summary_path = source_b / "summary.json"
+            source_b_summary = json.loads(source_b_summary_path.read_text())
+            source_b_summary["config"]["record_videos"] = True
+            source_b_summary_path.write_text(json.dumps(source_b_summary))
 
             result = merge_atomic_datasets([source_a, source_b], output)
             summary = result["summary"]
@@ -367,6 +371,7 @@ class TestSafeAtomicCollection(unittest.TestCase):
             self.assertEqual(summary["config"]["base_environment_seeds"], [0, 2])
             self.assertEqual(len(summary["config"]["robocasa_commits"]), 2)
             self.assertIsNone(summary["config"]["robocasa_commit"])
+            self.assertIsNone(summary["config"]["record_videos"])
             self.assertIsNone(summary["config"]["success_quota"])
             self.assertTrue(result["validation"]["valid"])
             for record in load_manifest(output):
