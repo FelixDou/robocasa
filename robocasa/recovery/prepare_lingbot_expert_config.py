@@ -62,6 +62,12 @@ def configure(base: dict, args: argparse.Namespace) -> dict:
             "max_steps": args.max_steps,
             "save_steps": args.save_steps,
             "lr": args.learning_rate,
+            # The upstream MoE scaling multiplies routed-expert LR above the
+            # requested base LR. RoboCasa's first 30k run progressively
+            # collapsed toward near-zero/open-gripper actions, so expert-only
+            # adaptation uses the explicit conservative LR for every trainable
+            # action-expert parameter.
+            "use_moe_expert_lr": False,
             "enable_resume": True,
         }
     )
@@ -97,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
     parser.add_argument("--max-steps", type=int, default=30000)
     parser.add_argument("--save-steps", type=int, default=5000)
-    parser.add_argument("--learning-rate", type=float, default=1.0e-4)
+    parser.add_argument("--learning-rate", type=float, default=1.0e-5)
     return parser
 
 

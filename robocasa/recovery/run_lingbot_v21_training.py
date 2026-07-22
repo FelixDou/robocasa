@@ -14,6 +14,7 @@ upstream training script.  It does not modify either source checkout.
 from __future__ import annotations
 
 import argparse
+import functools
 from importlib.metadata import version
 import os
 from pathlib import Path
@@ -69,6 +70,68 @@ def enable_lerobot_v21_layout() -> tuple[str, str]:
     return package_version, codebase_version
 
 
+def combine_action_padding_mask(joint_mask, action_is_pad):
+    """Remove temporally padded action targets from LingBot V2's loss mask.
+
+    LingBot V2 already receives LeRobot's ``action_is_pad`` tensor, but the
+    released forward method only applies the per-joint mask. Consequently,
+    repeated episode-tail actions contribute to the flow-matching objective.
+    The effective mask must be true only for both a real action dimension and
+    a real timestep.
+    """
+    if joint_mask is None or action_is_pad is None:
+        return joint_mask
+    if joint_mask.ndim != 3:
+        raise ValueError(
+            "Expected LingBot joint_mask with shape (batch, time, action_dim), "
+            f"got {tuple(joint_mask.shape)}"
+        )
+    if action_is_pad.ndim != 2:
+        raise ValueError(
+            "Expected LingBot action_is_pad with shape (batch, time), "
+            f"got {tuple(action_is_pad.shape)}"
+        )
+    if joint_mask.shape[:2] != action_is_pad.shape:
+        raise ValueError(
+            "LingBot action mask shapes disagree: "
+            f"joint_mask={tuple(joint_mask.shape)}, "
+            f"action_is_pad={tuple(action_is_pad.shape)}"
+        )
+    import torch
+
+    valid_timesteps = ~action_is_pad.to(dtype=torch.bool)
+    return joint_mask.to(dtype=torch.bool) & valid_timesteps.unsqueeze(-1)
+
+
+def install_lingbot_v2_action_padding_mask() -> None:
+    """Patch the pinned LingBot V2 policy to mask padded action timesteps."""
+    from lingbotvla.models.vla.lingbot_vla.modeling_lingbot_vla_v2 import (
+        LingbotVlaV2Policy,
+    )
+
+    original_forward = LingbotVlaV2Policy.forward
+    if getattr(original_forward, "_robocasa_masks_action_padding", False):
+        return
+
+    @functools.wraps(original_forward)
+    def forward_with_action_padding(self, *args, **kwargs):
+        # The training script calls the policy with ``model(**micro_batch)``.
+        # Keep the wrapper narrow and fail clearly if the pinned call contract
+        # changes instead of silently training without the temporal mask.
+        if "joint_mask" not in kwargs or "action_is_pad" not in kwargs:
+            raise RuntimeError(
+                "LingBot V2 training must pass joint_mask and action_is_pad as "
+                "keyword arguments for RoboCasa temporal padding masking."
+            )
+        kwargs["joint_mask"] = combine_action_padding_mask(
+            kwargs["joint_mask"], kwargs["action_is_pad"]
+        )
+        return original_forward(self, *args, **kwargs)
+
+    forward_with_action_padding._robocasa_masks_action_padding = True
+    LingbotVlaV2Policy.forward = forward_with_action_padding
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--train-script", type=Path, required=True)
@@ -82,11 +145,12 @@ def main() -> None:
         raise FileNotFoundError(f"LingBot training script does not exist: {train_script}")
 
     package_version, codebase_version = enable_lerobot_v21_layout()
+    install_lingbot_v2_action_padding_mask()
     if int(os.environ.get("RANK", "0")) == 0:
         print(
             "LingBot RoboCasa compatibility: "
             f"lerobot={package_version}, layout={codebase_version}, "
-            "LINGBOT_DATASET_API=v2",
+            "LINGBOT_DATASET_API=v2, action_padding_mask=enabled",
             flush=True,
         )
 

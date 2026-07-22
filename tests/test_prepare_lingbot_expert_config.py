@@ -24,6 +24,7 @@ class PrepareLingBotExpertConfigTest(unittest.TestCase):
             "data": {},
             "train": {
                 "token_num_experts": 32,
+                "use_moe_expert_lr": True,
                 "align_params": {
                     "depth": {"moge_path": "old", "morgbd_path": "old"},
                     "video": {"ckpt_path": "old", "config_path": "old"},
@@ -57,6 +58,7 @@ class PrepareLingBotExpertConfigTest(unittest.TestCase):
         self.assertEqual(config["train"]["token_num_experts"], 32)
         self.assertEqual(config["train"]["global_batch_size"], 16)
         self.assertEqual(config["train"]["gradient_accumulation_steps"], 4)
+        self.assertFalse(config["train"]["use_moe_expert_lr"])
         self.assertEqual(config["data"]["prompt_type"], "global")
         self.assertEqual(
             config["train"]["align_params"]["depth"]["moge_path"],
