@@ -12,6 +12,21 @@ from pathlib import Path
 import sys
 
 
+def install_lerobot_import_compat():
+    """Expose LeRobot's top-level constants at the path LingBot imports.
+
+    The RoboCasa training overlay provides LeRobot 0.3.3, which stores
+    ``HF_LEROBOT_HOME`` in ``lerobot.constants``. LingBot's deployment import
+    graph still imports its data package and tries only the older
+    ``lerobot.common.constants`` and newer ``lerobot.utils.constants`` paths.
+    Serving does not need the training dataset layout patch, but it does need
+    this module alias before importing LingBot.
+    """
+    import lerobot.constants as constants
+
+    sys.modules.setdefault("lerobot.utils.constants", constants)
+
+
 def str_to_bool(value):
     if isinstance(value, bool):
         return value
@@ -63,6 +78,7 @@ def main(argv=None):
 
     sys.path.insert(0, str(lingbot_repo))
     os.chdir(lingbot_repo)
+    install_lerobot_import_compat()
     from deploy.lingbot_vla_v2_policy import LingbotVLAv2Server
     from deploy.websocket_policy_server import WebsocketPolicyServer
 

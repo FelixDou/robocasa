@@ -1,8 +1,11 @@
 import importlib.util
 import os
 from pathlib import Path
+import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -65,6 +68,19 @@ def observation(instruction="open the drawer"):
 
 
 class LingBotVLAWebsocketPolicyTest(unittest.TestCase):
+    def test_server_installs_lerobot_constants_alias(self):
+        constants = types.ModuleType("lerobot.constants")
+        constants.HF_LEROBOT_HOME = Path("/tmp/lerobot")
+        modules = {
+            "lerobot": types.ModuleType("lerobot"),
+            "lerobot.constants": constants,
+        }
+
+        with mock.patch.dict(sys.modules, modules):
+            sys.modules.pop("lerobot.utils.constants", None)
+            SERVER_MODULE.install_lerobot_import_compat()
+            self.assertIs(sys.modules["lerobot.utils.constants"], constants)
+
     def test_server_model_path_preserves_runtime_symlink(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
