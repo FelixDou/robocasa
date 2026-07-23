@@ -1,5 +1,9 @@
 # Collecting atomic RoboCasa rollouts for official SAFE π0
 
+For the distinct RLDX-1 feature contract and ZeroMQ collection path, see
+[`safe_rldx1.md`](safe_rldx1.md). RLDX-1 and π0 feature datasets must not be
+mixed.
+
 ## Scope
 
 This integration collects natural π0 task successes and natural π0 task failures in registered RoboCasa atomic environments. RoboCasa's task-success predicate is the only label authority: `failure_label` is `0` when the task succeeds and `1` otherwise. Reaching the rollout horizon without success is a failure. No frame-level failure onset, subtask label, recovery behavior, expert conversion, model training, calibration, or detector evaluation is part of this collection path.

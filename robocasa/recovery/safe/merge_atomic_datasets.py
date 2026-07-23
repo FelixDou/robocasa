@@ -32,9 +32,11 @@ COMPATIBLE_CONFIG_KEYS = (
     "record_actions",
     "video_frame_stride",
     "record_safe_features",
+    "model_family",
     "safe_repository_commit",
     "official_safe_openpi_commit",
     "openpi_repository_commit",
+    "rldx_repository_commit",
 )
 
 
@@ -43,7 +45,10 @@ def _assert_configs_compatible(configs):
     for index, config in enumerate(configs[1:], 1):
         mismatches = [
             key for key in COMPATIBLE_CONFIG_KEYS
-            if config.get(key) != reference.get(key)
+            if (
+                config.get(key, "pi0" if key == "model_family" else None)
+                != reference.get(key, "pi0" if key == "model_family" else None)
+            )
         ]
         if mismatches:
             raise ValueError(

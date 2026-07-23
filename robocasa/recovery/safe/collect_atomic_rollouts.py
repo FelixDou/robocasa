@@ -1,4 +1,4 @@
-"""Resumable atomic-task RoboCasa rollout collection with official SAFE π0 features."""
+"""Resumable atomic-task RoboCasa rollout collection with raw SAFE features."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from .schema import SAFE_SCHEMA_VERSION, SafeRolloutMetadata, compatibility_key
 SAFE_COMMIT = "b6036abe07b2b2bb9996afb2c07f13d6a9f507c0"
 OFFICIAL_SAFE_OPENPI_COMMIT = "9c99ed53f6a0c9be93a1c63cee5792620777d96b"
 ROBOCASA_OPENPI_COMMIT = "5a6beda9ff99da30b4e1b59320f6a32971d7c397"
+RLDX1_BENCHMARK_COMMIT = "ef05cd4ae634ff97d672d42275febbc0b92cc192"
 SUMMARY_NAME = "summary.json"
 ERRORS_NAME = "errors.jsonl"
 SKIPPED_NAME = "skipped.jsonl"
@@ -111,6 +112,10 @@ def planned_seeds(args):
     if args.num_rollouts < 1:
         raise ValueError("--num-rollouts must be positive")
     return list(range(args.seed, args.seed + args.num_rollouts))
+
+
+def uses_repeated_reset_protocol(seed_protocol):
+    return seed_protocol in {"official_openpi", "official_rldx"}
 
 
 def quota_reached(successes, failures, success_quota, failure_quota):
@@ -275,9 +280,18 @@ def prepare_plan(args):
         raise ValueError("--video-frame-stride must be positive")
     if args.max_errors is not None and args.max_errors <= 0:
         raise ValueError("--max-errors must be positive")
-    if args.seed_protocol == "official_openpi" and args.seed_end is not None:
+    if uses_repeated_reset_protocol(args.seed_protocol) and args.seed_end is not None:
         raise ValueError(
-            "--seed-end is incompatible with --seed-protocol official_openpi"
+            "--seed-end is incompatible with official repeated-reset seed protocols"
+        )
+    incompatible_protocol = {
+        "pi0": "official_rldx",
+        "rldx1": "official_openpi",
+    }[args.model_family]
+    if args.seed_protocol == incompatible_protocol:
+        raise ValueError(
+            f"--seed-protocol {args.seed_protocol} is incompatible with "
+            f"--model-family {args.model_family}"
         )
     for name in ("success_quota", "failure_quota"):
         value = getattr(args, name)
@@ -312,7 +326,7 @@ def prepare_plan(args):
             )
         task_horizons = {task: registered_horizons[task] for task in tasks}
         horizon_source = "robocasa_dataset_registry"
-    if args.seed_protocol == "official_openpi":
+    if uses_repeated_reset_protocol(args.seed_protocol):
         seeds = [args.seed]
         attempt_coordinates = [
             (args.seed, reset_index) for reset_index in range(args.num_rollouts)
@@ -329,7 +343,13 @@ def prepare_plan(args):
         "policy_checkpoint": args.checkpoint,
         "policy_config": policy_config,
         "replan_steps": args.replan_steps,
-        "openpi_repository_commit": args.openpi_repository_commit,
+        "model_family": args.model_family,
+        "openpi_repository_commit": (
+            args.openpi_repository_commit if args.model_family == "pi0" else None
+        ),
+        "rldx_repository_commit": (
+            args.rldx_repository_commit if args.model_family == "rldx1" else None
+        ),
     }
     attempts = []
     for task in tasks:
@@ -355,7 +375,7 @@ def prepare_plan(args):
         "seed_protocol": args.seed_protocol,
         "environment_reset_indices": (
             list(range(args.num_rollouts))
-            if args.seed_protocol == "official_openpi"
+            if uses_repeated_reset_protocol(args.seed_protocol)
             else None
         ),
         "split": args.split,
@@ -373,13 +393,23 @@ def prepare_plan(args):
         "record_videos": args.record_videos,
         "video_frame_stride": args.video_frame_stride,
         "record_safe_features": args.record_safe_features,
+        "model_family": args.model_family,
         "success_quota": args.success_quota,
         "failure_quota": args.failure_quota,
         "retain_only_quota": args.retain_only_quota,
         "max_errors": args.max_errors,
         "safe_repository_commit": args.safe_repository_commit,
-        "official_safe_openpi_commit": args.official_safe_openpi_commit,
-        "openpi_repository_commit": args.openpi_repository_commit,
+        "official_safe_openpi_commit": (
+            args.official_safe_openpi_commit
+            if args.model_family == "pi0"
+            else None
+        ),
+        "openpi_repository_commit": (
+            args.openpi_repository_commit if args.model_family == "pi0" else None
+        ),
+        "rldx_repository_commit": (
+            args.rldx_repository_commit if args.model_family == "rldx1" else None
+        ),
         "robocasa_commit": robocasa_commit,
     }
     return {"config": config, "identity": identity, "attempts": attempts}
@@ -403,13 +433,21 @@ def _assert_resume_compatible(previous, current):
         "record_videos",
         "video_frame_stride",
         "record_safe_features",
+        "model_family",
         "success_quota",
         "failure_quota",
         "retain_only_quota",
         "max_errors",
         "openpi_repository_commit",
+        "rldx_repository_commit",
     )
-    mismatches = [key for key in keys if previous.get(key) != current.get(key)]
+    mismatches = []
+    for key in keys:
+        previous_value = previous.get(key)
+        if key == "model_family" and previous_value is None:
+            previous_value = "pi0"
+        if previous_value != current.get(key):
+            mismatches.append(key)
     if mismatches:
         raise ValueError("Resume configuration is incompatible for: " + ", ".join(mismatches))
 
@@ -504,7 +542,7 @@ def run_collection(args, runtime=None):
                         for later in task_attempts[attempt_index + 1 :]
                     )
                     if (
-                        args.seed_protocol == "official_openpi"
+                        uses_repeated_reset_protocol(args.seed_protocol)
                         and later_collection_pending
                     ):
                         if shared_env is None:
@@ -572,7 +610,7 @@ def run_collection(args, runtime=None):
                         seed,
                         args.record_videos,
                     )
-                if args.seed_protocol == "official_openpi":
+                if uses_repeated_reset_protocol(args.seed_protocol):
                     if shared_policy is None:
                         try:
                             shared_policy = runtime["call_factory"](
@@ -648,6 +686,12 @@ def run_collection(args, runtime=None):
                         "SAFE checkpoint identity disagrees with --checkpoint: "
                         f"{feature_meta.get('policy_checkpoint')!r} != {args.checkpoint!r}"
                     )
+                feature_model_family = feature_meta.get("model_family", "pi0")
+                if feature_model_family != args.model_family:
+                    raise RuntimeError(
+                        "SAFE model family disagrees with --model-family: "
+                        f"{feature_model_family!r} != {args.model_family!r}"
+                    )
                 metadata = SafeRolloutMetadata(
                     rollout_id=rollout_id,
                     task_name=task_name,
@@ -666,6 +710,7 @@ def run_collection(args, runtime=None):
                     action_horizon=int(feature_meta["action_horizon"]),
                     replan_steps=args.replan_steps,
                     feature_layer=feature_meta["feature_layer"],
+                    model_family=feature_model_family,
                     feature_aggregation=feature_meta.get(
                         "feature_aggregation", feature_meta.get("aggregation", "raw")
                     ),
@@ -681,7 +726,15 @@ def run_collection(args, runtime=None):
                     ),
                     policy_config={
                         **plan["config"]["policy_config"],
-                        "official_safe_openpi_commit": args.official_safe_openpi_commit,
+                        **(
+                            {
+                                "official_safe_openpi_commit": (
+                                    args.official_safe_openpi_commit
+                                )
+                            }
+                            if args.model_family == "pi0"
+                            else {}
+                        ),
                     },
                     rollout_horizon=rollout_horizon,
                     action_path=(
@@ -690,7 +743,12 @@ def run_collection(args, runtime=None):
                         else None
                     ),
                     safe_repository_commit=args.safe_repository_commit,
-                    openpi_repository_commit=args.openpi_repository_commit,
+                    openpi_repository_commit=plan["config"][
+                        "openpi_repository_commit"
+                    ],
+                    rldx_repository_commit=plan["config"][
+                        "rldx_repository_commit"
+                    ],
                     robocasa_commit=plan["config"]["robocasa_commit"],
                     action_recording_requested=args.record_actions,
                     video_recording_requested=args.record_videos,
@@ -782,10 +840,10 @@ def build_parser():
     parser.add_argument("--seed-end", type=int)
     parser.add_argument(
         "--seed-protocol",
-        choices=("rollout_index", "official_openpi"),
+        choices=("rollout_index", "official_openpi", "official_rldx"),
         default="rollout_index",
         help=(
-            "Use a distinct seed per rollout, or match the official OpenPI evaluator "
+            "Use a distinct seed per rollout, or match an official policy evaluator "
             "by creating one environment per task and repeatedly resetting it"
         ),
     )
@@ -794,6 +852,7 @@ def build_parser():
     parser.add_argument("--policy-name", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--policy-config", default="{}", help="JSON object")
+    parser.add_argument("--model-family", choices=("pi0", "rldx1"), default="pi0")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8120)
     parser.add_argument("--replan-steps", type=int, default=5)
@@ -839,6 +898,7 @@ def build_parser():
     parser.add_argument("--safe-repository-commit", default=SAFE_COMMIT)
     parser.add_argument("--official-safe-openpi-commit", default=OFFICIAL_SAFE_OPENPI_COMMIT)
     parser.add_argument("--openpi-repository-commit", default=ROBOCASA_OPENPI_COMMIT)
+    parser.add_argument("--rldx-repository-commit", default=RLDX1_BENCHMARK_COMMIT)
     parser.add_argument("--robocasa-commit")
     return parser
 

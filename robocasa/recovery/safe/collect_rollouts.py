@@ -77,7 +77,7 @@ def collect_single_rollout(
             termination_reason = "environment_done"
             break
     if require_safe_features and not records:
-        raise RuntimeError("Rollout produced no π0 SAFE inference records")
+        raise RuntimeError("Rollout produced no SAFE policy-inference records")
     expected = list(range(len(records)))
     if [record["inference_index"] for record in records] != expected:
         raise RuntimeError("Inference indices are not contiguous within the rollout")
@@ -92,6 +92,7 @@ def collect_single_rollout(
         candidate = record["metadata"]
         for key in (
             "schema_version",
+            "model_family",
             "feature_layer",
             "feature_dtype",
             "feature_aggregation",

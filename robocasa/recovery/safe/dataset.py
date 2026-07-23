@@ -48,6 +48,7 @@ def save_rollout(
             raise ValueError("policy action chunks disagree with SAFE inference/horizon axes")
     feature_metadata = {
         "schema_version": metadata.feature_schema_version,
+        "model_family": metadata.model_family,
         "feature_layer": metadata.feature_layer,
         "feature_shape": metadata.feature_shape,
         "feature_dtype": metadata.feature_dtype,
@@ -182,7 +183,7 @@ def generate_splits(
     for record in records:
         episode_identity = (
             record.environment_reset_index
-            if record.seed_protocol == "official_openpi"
+            if record.seed_protocol in {"official_openpi", "official_rldx"}
             else None
         )
         grouped[

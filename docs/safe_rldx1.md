@@ -1,0 +1,288 @@
+# SAFE-style failure detection for RLDX-1 on RoboCasa
+
+## Scope and scientific status
+
+This integration applies the existing RoboCasa raw-SAFE collection, storage,
+training, calibration, evaluation, and visualization pipeline to RLDX-1. The
+rollout label remains binary task outcome only: success is `0` and natural
+failure is `1`. It does not use subtask labels, simulator state, expert
+demonstrations, recovery trajectories, or manufactured frame-level failure
+onsets.
+
+The result is **SAFE-style RLDX-1**, not the exact official π0 feature. SAFE's
+official π0 baseline uses π0 `pre_velocity`. RLDX-1 has a different action
+architecture, so this integration chooses the closest structural analogue and
+records that different identity in every manifest. π0 and RLDX-1 rollouts are
+therefore incompatible by construction and cannot be silently mixed.
+
+Source revisions inspected:
+
+- SAFE: `b6036abe07b2b2bb9996afb2c07f13d6a9f507c0`
+- RLDX-1: `ef05cd4ae634ff97d672d42275febbc0b92cc192`
+- RLDX-1 checkpoint: `RLWRLD/RLDX-1-FT-RC365`
+
+## RLDX-1 feature contract
+
+RLDX-1 predicts an action chunk with flow matching. At every Euler denoising
+step, MSAT produces state/action token outputs `ao`, and the
+embodiment-specific `action_decoder` maps the action-token suffix to action
+velocity. The captured latent is:
+
+```python
+ao[:, -action_horizon:]
+```
+
+immediately before:
+
+```python
+pred_velocity = action_decoder(ao, embodiment_id)[:, -action_horizon:]
+```
+
+The feature layer identifier is:
+
+```text
+action_model_msat_action_suffix_pre_action_decoder
+```
+
+One real RLDX inference returns float32:
+
+```text
+(denoising_steps, action_horizon, MSAT_output_dim)
+```
+
+The dimensions are read from the running checkpoint and validated at runtime;
+they are not hard-coded in RoboCasa. A rollout stores:
+
+```text
+(num_policy_inferences, denoising_steps, action_horizon, MSAT_output_dim)
+```
+
+No denoising or horizon aggregation occurs during collection. The existing
+SAFE aggregation selectors (`mean`, `first`, `last`, mixed selectors, and
+`concat-N`) remain downstream training choices.
+
+Capturing the tensor only detaches and copies `ao`; it does not cast or replace
+the tensor used by `action_decoder`, so requesting features does not change the
+action computation.
+
+## Server and client protocol
+
+`patches/rldx1_safe_features_ef05cd4.patch` applies to the pinned RLDX commit.
+A request opts in through the existing ZeroMQ `options` dictionary:
+
+```python
+{"request_safe_features": True}
+```
+
+The normal `(action, info)` response remains backward compatible. When
+requested, `info` additionally contains:
+
+```python
+{
+    "safe_features": np.ndarray,
+    "safe_feature_metadata": {
+        "schema_version": 1,
+        "model_family": "rldx1",
+        "model_id": "RLDX",
+        "checkpoint": "RLWRLD/RLDX-1-FT-RC365",
+        "feature_layer": "action_model_msat_action_suffix_pre_action_decoder",
+        "feature_shape": [denoising_steps, action_horizon, hidden_dim],
+        "feature_dtype": "float32",
+        "action_horizon": action_horizon,
+        "flow_steps": denoising_steps,
+        "aggregation": "raw",
+    },
+}
+```
+
+`RLDXZeroMQPolicy` validates this payload, strips the single-environment batch
+axis, and creates one inference record only when it contacts the RLDX server.
+Actions served from its local `execution_horizon` cache produce no duplicate
+feature records. `reset()` clears the action cache, feature queue, environment
+step, inference index, and RLDX memory session.
+
+## Apply the RLDX patch
+
+Use source storage under `/gs/fs` and generated data under `/gs/bs`:
+
+```bash
+export PROJECT_FS=/gs/fs/tga-shinoda/felid
+export STORAGE_BS=/gs/bs/tga-shinoda/felid
+export ROBOCASA_REPO="$PROJECT_FS/robocasa"
+export RLDX_REPO="$PROJECT_FS/RLDX-1"
+export RLDX_COMMIT=ef05cd4ae634ff97d672d42275febbc0b92cc192
+export RLDX_SAFE_PATCH="$ROBOCASA_REPO/patches/rldx1_safe_features_ef05cd4.patch"
+
+test "$(git -C "$RLDX_REPO" rev-parse HEAD)" = "$RLDX_COMMIT" || {
+  echo "RLDX checkout is not at the pinned benchmark commit"
+  exit 1
+}
+test -f "$RLDX_SAFE_PATCH" || exit 1
+
+if git -C "$RLDX_REPO" apply --reverse --check "$RLDX_SAFE_PATCH" 2>/dev/null; then
+  echo "RLDX SAFE patch is already applied"
+else
+  git -C "$RLDX_REPO" apply --check "$RLDX_SAFE_PATCH" &&
+  git -C "$RLDX_REPO" apply "$RLDX_SAFE_PATCH"
+fi
+
+cd "$RLDX_REPO"
+python -m py_compile \
+  rldx/model/core/rldx.py \
+  rldx/policy/policy_runtime.py \
+  rldx/policy/rldx_policy.py \
+  rldx/policy/step_request.py
+
+grep -n "request_safe_features" \
+  rldx/policy/step_request.py \
+  rldx/policy/policy_runtime.py
+grep -n "safe_feature_steps" rldx/model/core/rldx.py
+```
+
+## Start the patched server
+
+Follow `docs/cluster_experiment_runbook.md` for the full environment block.
+The patched server uses the normal RLDX port family:
+
+```bash
+export RLDX_SERVER_TAG=rldx1_safe_$(date +%Y%m%d_%H%M%S)
+export RLDX_SERVER_LOG="$STORAGE_BS/robocasa_logs/eval/${RLDX_SERVER_TAG}_20100.log"
+
+cd "$RLDX_REPO"
+CUDA_VISIBLE_DEVICES=0 \
+nohup uv run python -u rldx/eval/run_rldx_server.py \
+  --model-path RLWRLD/RLDX-1-FT-RC365 \
+  --embodiment-tag GENERAL_EMBODIMENT \
+  --host 127.0.0.1 \
+  --port 20100 \
+  --use-sim-policy-wrapper \
+  > "$RLDX_SERVER_LOG" 2>&1 &
+
+echo "server_pid=$!"
+until ss -ltn | grep -q ':20100'; do
+  tail -30 "$RLDX_SERVER_LOG" 2>/dev/null || true
+  sleep 10
+done
+```
+
+Do not enable RLDX's optional compiled inference paths for the first SAFE
+collection. The patch instruments the eager `RLDXActionModel` path, while an
+optimized replacement may bypass or specialize that method. Establish the
+eager action-equivalence smoke first; compiled SAFE capture would require a
+separate equivalence test.
+
+## One-rollout protocol smoke test
+
+Run this bounded test before collecting a balanced dataset:
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+conda activate "$STORAGE_BS/envs/robocasa_openpi"
+
+export RLDX_SAFE_SMOKE="$STORAGE_BS/robocasa_rollouts/safe/rldx1_safe_smoke_$(date +%Y%m%d_%H%M%S)"
+
+cd "$ROBOCASA_REPO"
+CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
+python -u -m robocasa.recovery.safe.collect_atomic_rollouts \
+  --output-dir "$RLDX_SAFE_SMOKE" \
+  --tasks TurnOnSinkFaucet \
+  --num-rollouts 1 \
+  --seed 7 \
+  --seed-protocol official_rldx \
+  --policy-module robocasa.recovery.rldx_zmq_policy:make_policy \
+  --model-family rldx1 \
+  --policy-name RLDX-1-FT-RC365 \
+  --checkpoint RLWRLD/RLDX-1-FT-RC365 \
+  --policy-config '{"embodiment_tag":"GENERAL_EMBODIMENT"}' \
+  --host 127.0.0.1 \
+  --port 20100 \
+  --split target \
+  --replan-steps 8 \
+  --record-safe-features \
+  --record-actions \
+  --no-record-videos \
+  --max-errors 1
+
+python -m robocasa.recovery.safe.validate_atomic_dataset \
+  --dataset-dir "$RLDX_SAFE_SMOKE"
+```
+
+Inspect the actual feature contract:
+
+```bash
+python - "$RLDX_SAFE_SMOKE" <<'PY'
+import json
+from pathlib import Path
+import sys
+import numpy as np
+
+root = Path(sys.argv[1])
+record = json.loads(next(line for line in (root / "manifest.jsonl").read_text().splitlines() if line))
+with np.load(root / record["tensor_path"], allow_pickle=False) as payload:
+    features = payload["features"]
+    print("model_family:", record["model_family"])
+    print("feature_layer:", record["feature_layer"])
+    print("shape:", features.shape)
+    print("dtype:", features.dtype)
+    print("finite:", np.isfinite(features).all())
+    print("nonzero:", np.any(features))
+    print("inference steps:", payload["inference_environment_steps"].tolist())
+PY
+```
+
+The smoke is successful only if the dataset validator reports `VALID`, the
+features are finite and nonzero, and inference steps are spaced by at least the
+configured eight cached actions.
+
+## Balanced collection and SAFE training
+
+After the smoke, use the same collector quotas and immutable shard/merge
+workflow as π0, changing only the policy, model family, RLDX port, checkpoint,
+and `official_rldx` seed protocol. For example:
+
+```bash
+python -u -m robocasa.recovery.safe.collect_atomic_rollouts \
+  --output-dir "$RLDX_SAFE_DATASET" \
+  --tasks CloseFridge OpenDrawer PickPlaceCounterToCabinet \
+          PickPlaceCounterToStove TurnOnSinkFaucet \
+  --num-rollouts 200 \
+  --seed 7 \
+  --seed-protocol official_rldx \
+  --success-quota 20 \
+  --failure-quota 20 \
+  --retain-only-quota \
+  --policy-module robocasa.recovery.rldx_zmq_policy:make_policy \
+  --model-family rldx1 \
+  --policy-name RLDX-1-FT-RC365 \
+  --checkpoint RLWRLD/RLDX-1-FT-RC365 \
+  --policy-config '{"embodiment_tag":"GENERAL_EMBODIMENT"}' \
+  --host 127.0.0.1 \
+  --port 20100 \
+  --split target \
+  --replan-steps 8 \
+  --record-safe-features \
+  --record-actions \
+  --record-videos \
+  --video-frame-stride 2 \
+  --max-errors 3
+```
+
+The resulting dataset can be exported with
+`robocasa.recovery.safe.export_to_official_safe` and passed to the existing
+official SAFE MLP/LSTM grid, conformal calibration, reporting, and score-video
+tools. The pinned official loader does not hard-code π0's 1024-wide latent: it
+selects the requested horizon and diffusion indices, stacks the resulting
+vectors, and sets `dim_features` from the loaded tensor's final dimension.
+Select and calibrate RLDX hyperparameters independently of π0; do not reuse a
+π0 predictor or mix the two feature families.
+
+## Validation status and remaining live check
+
+The RLDX patch applies cleanly to the pinned commit and its modified files pass
+`py_compile`. RoboCasa unit tests cover action-only backward compatibility,
+missing and invalid feature payloads, cached-action versus real-inference
+records, reset behavior, RLDX model-family provenance, dataset validation, and
+official-loader export. A live GPU feature capture still requires the cluster
+checkpoint, RLDX server, RoboCasa simulator, and assets, so the one-rollout
+command above is the required final runtime check before a large collection.

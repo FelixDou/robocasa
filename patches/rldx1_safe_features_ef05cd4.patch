@@ -1,0 +1,245 @@
+diff --git a/rldx/model/core/rldx.py b/rldx/model/core/rldx.py
+index 04ee101..d73e7f5 100755
+--- a/rldx/model/core/rldx.py
++++ b/rldx/model/core/rldx.py
+@@ -494,6 +494,7 @@ class RLDXActionModel(nn.Module):
+         embodiment_id: torch.Tensor,
+         backbone_output: BatchFeature,
+         action_input: BatchFeature = None,
++        return_safe_features: bool = False,
+     ) -> BatchFeature:
+         """
+         Generate actions using the flow matching diffusion process.
+@@ -638,6 +639,11 @@ class RLDXActionModel(nn.Module):
+             )
+             return mo
+ 
++        # SAFE-style RLDX features are the action-token MSAT outputs immediately
++        # before the embodiment-specific action decoder. Preserve one raw
++        # (action_horizon, hidden_dim) tensor per denoising step.
++        safe_feature_steps = [] if return_safe_features else None
++
+         # Run denoising steps.
+         for i in range(len(timesteps_list) - 1):
+             t_cont = float(timesteps_list[i])
+@@ -718,6 +724,9 @@ class RLDXActionModel(nn.Module):
+                     pred_velocity = self.action_decoder(ao, embodiment_id)[:, -horizon:]
+                     model_output = mo
+ 
++            if safe_feature_steps is not None:
++                safe_feature_steps.append(ao[:, -horizon:].detach())
++
+             # Euler step.
+             with torch.no_grad():
+                 actions = actions + dt * pred_velocity
+@@ -726,16 +735,23 @@ class RLDXActionModel(nn.Module):
+                     actions[:, :prefix_len] = prefix_actions
+                 phys_state = self.physics.update_state(phys_state, model_output, dt)
+ 
+-        return BatchFeature(
+-            data={
+-                "action_pred": actions,
+-                "backbone_features": vl_embeds,
+-                "state_features": state_features,
+-            }
+-        )
++        output = {
++            "action_pred": actions,
++            "backbone_features": vl_embeds,
++            "state_features": state_features,
++        }
++        if safe_feature_steps is not None:
++            output["safe_features"] = torch.stack(safe_feature_steps, dim=1).float()
++        return BatchFeature(data=output)
+ 
+     @torch.no_grad()
+-    def get_action(self, backbone_output: BatchFeature, action_input: BatchFeature) -> BatchFeature:
++    def get_action(
++        self,
++        backbone_output: BatchFeature,
++        action_input: BatchFeature,
++        *,
++        return_safe_features: bool = False,
++    ) -> BatchFeature:
+         """
+         Generate actions using the flow matching diffusion process.
+ 
+@@ -758,6 +774,7 @@ class RLDXActionModel(nn.Module):
+             embodiment_id=action_input.embodiment_id,
+             backbone_output=backbone_output,
+             action_input=action_input,
++            return_safe_features=return_safe_features,
+         )
+ 
+     @property
+@@ -1141,6 +1158,7 @@ class RLDX(PreTrainedModel):
+                 )
+             inputs = {**inputs, **kwargs}
+ 
++        return_safe_features = bool(inputs.pop("return_safe_features", False))
+         reset_memory = inputs.pop("reset_memory", None) if self.use_memory else None
+ 
+         backbone_inputs, action_inputs = self.prepare_input(inputs)
+@@ -1149,7 +1167,11 @@ class RLDX(PreTrainedModel):
+         if self.use_memory:
+             backbone_outputs = self._apply_memory_inference(backbone_outputs, reset_memory)
+ 
+-        action_outputs = self.action_model.get_action(backbone_outputs, action_inputs)
++        action_outputs = self.action_model.get_action(
++            backbone_outputs,
++            action_inputs,
++            return_safe_features=return_safe_features,
++        )
+         return action_outputs
+ 
+     # ── Memory processing ──
+diff --git a/rldx/policy/policy_runtime.py b/rldx/policy/policy_runtime.py
+index d0f3e62..1d5e3e5 100644
+--- a/rldx/policy/policy_runtime.py
++++ b/rldx/policy/policy_runtime.py
+@@ -83,6 +83,8 @@ class PolicyRuntime:
+         rtc_inference_delay: int,
+         rtc_exec_horizon: int,
+         rtc_enabled: bool,
++        model_id: str = "RLDX-1",
++        checkpoint: str = "unknown",
+         verbose: bool = False,
+     ):
+         self.model = model
+@@ -98,6 +100,8 @@ class PolicyRuntime:
+         self.rtc_inference_delay = rtc_inference_delay
+         self.rtc_exec_horizon = rtc_exec_horizon
+         self._rtc_enabled = rtc_enabled
++        self.model_id = model_id
++        self.checkpoint = checkpoint
+         self.verbose = verbose
+ 
+     # ------------------------------------------------------------------
+@@ -149,13 +153,54 @@ class PolicyRuntime:
+         )
+ 
+         normalized_action = model_pred["action_pred"].float()
++        info = {}
++        if request.request_safe_features:
++            if "safe_features" not in model_pred:
++                raise RuntimeError(
++                    "SAFE features were requested, but the RLDX model did not "
++                    "return 'safe_features'. Apply the companion RLDX patch."
++                )
++            features = model_pred["safe_features"].float()
++            if features.ndim != 4 or features.shape[0] != B:
++                raise RuntimeError(
++                    "RLDX SAFE features must have shape "
++                    f"(batch, denoising_steps, action_horizon, hidden_dim); got "
++                    f"{tuple(features.shape)}"
++                )
++            if features.shape[2] != normalized_action.shape[1]:
++                raise RuntimeError(
++                    "RLDX SAFE action horizon disagrees with predicted actions: "
++                    f"{features.shape[2]} != {normalized_action.shape[1]}"
++                )
++            if not torch.isfinite(features).all():
++                raise RuntimeError("RLDX SAFE features contain NaN or Inf")
++            if not torch.any(features):
++                raise RuntimeError("RLDX SAFE features are entirely zero")
++            feature_array = features.cpu().numpy()
++            info = {
++                "safe_features": feature_array,
++                "safe_feature_metadata": {
++                    "schema_version": 1,
++                    "model_family": "rldx1",
++                    "model_id": self.model_id,
++                    "checkpoint": self.checkpoint,
++                    "feature_layer": (
++                        "action_model_msat_action_suffix_pre_action_decoder"
++                    ),
++                    "feature_shape": list(feature_array.shape[1:]),
++                    "feature_dtype": "float32",
++                    "action_horizon": int(feature_array.shape[2]),
++                    "flow_steps": int(feature_array.shape[1]),
++                    "aggregation": "raw",
++                },
++            }
+ 
+         # RTC chunk cache update with freshly predicted chunk
+         if self._rtc_enabled and active_sids:
+             self.registry.save_rtc_batch(active_sids, normalized_action)
+ 
+         action = self._decode(normalized_action, states)
+-        return action, {}
++        return action, info
+ 
+     # ------------------------------------------------------------------
+     # Stage 1: prepare inputs
+@@ -377,6 +422,9 @@ class PolicyRuntime:
+         Returns (model_pred, updated_reset_memory). reset_memory may be
+         updated to reflect cold-start slots (multi-session memory path).
+         """
++        if request.request_safe_features:
++            collated["return_safe_features"] = True
++
+         if self.use_memory and hasattr(self.model, "_cached_mq"):
+             # Registry owns model._cached_mq lifecycle via context manager.
+             # Runtime never touches _cached_mq directly.
+diff --git a/rldx/policy/rldx_policy.py b/rldx/policy/rldx_policy.py
+index 8e05910..c37bec2 100644
+--- a/rldx/policy/rldx_policy.py
++++ b/rldx/policy/rldx_policy.py
+@@ -175,6 +175,8 @@ class RLDXPolicy(BasePolicy):
+             rtc_inference_delay=self.rtc_inference_delay,
+             rtc_exec_horizon=self.rtc_exec_horizon,
+             rtc_enabled=self._rtc_enabled,
++            model_id=type(self.model).__name__,
++            checkpoint=model_path,
+             verbose=self.verbose,
+         )
+ 
+diff --git a/rldx/policy/step_request.py b/rldx/policy/step_request.py
+index b88e872..28a1cc2 100644
+--- a/rldx/policy/step_request.py
++++ b/rldx/policy/step_request.py
+@@ -12,6 +12,7 @@ Options keys consumed (closed set, verified from grep of `rldx_policy.py`):
+   - "session_ids"     — list[str], per-sample session identifiers
+   - "action_prefix"   — ndarray or Tensor, (B,d,D) or (d,D) for broadcast
+   - "rtc_prefix_len"  — int, effective prefix length override
++  - "request_safe_features" — bool, return raw SAFE-style RLDX action latents
+ 
+ Any other field in options is ignored (e.g. third-party extensions).
+ """
+@@ -77,6 +78,7 @@ class StepRequest:
+     reset_mask: list[bool] | None = None
+     action_prefix: "np.ndarray | torch.Tensor | None" = None
+     rtc_prefix_len: int | None = None
++    request_safe_features: bool = False
+ 
+     # Extras that were in options but not consumed — kept for caller
+     # debugging, never acted on.
+@@ -130,6 +132,12 @@ class StepRequest:
+                     f"rtc_prefix_len must be non-negative int, got {self.rtc_prefix_len!r}"
+                 )
+ 
++        if not isinstance(self.request_safe_features, bool):
++            raise ValueError(
++                "request_safe_features must be bool, got "
++                f"{type(self.request_safe_features).__name__}"
++            )
++
+ 
+ # ----------------------------------------------------------------------------
+ # Decoder
+@@ -141,6 +149,7 @@ _KNOWN_OPTION_KEYS = frozenset(
+         "session_ids",
+         "action_prefix",
+         "rtc_prefix_len",
++        "request_safe_features",
+     }
+ )
+ 
+@@ -190,6 +199,7 @@ def decode_options_to_step_request(
+         reset_mask=reset_mask,
+         action_prefix=options.get("action_prefix"),
+         rtc_prefix_len=options.get("rtc_prefix_len"),
++        request_safe_features=options.get("request_safe_features", False),
+         extras=extras,
+     )
+ 

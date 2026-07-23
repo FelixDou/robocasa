@@ -131,6 +131,7 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
             if not np.isfinite(chunks).all():
                 errors.append(f"{prefix}: predicted action chunks contain non-finite values")
             expected_metadata = {
+                "model_family": record.model_family,
                 "feature_layer": record.feature_layer,
                 "feature_dtype": record.feature_dtype,
                 "feature_aggregation": record.feature_aggregation,
@@ -141,7 +142,11 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
                 "flow_steps": record.flow_steps,
             }
             for key, value in expected_metadata.items():
-                if metadata.get(key) != value:
+                actual = metadata.get(
+                    key,
+                    "pi0" if key == "model_family" else None,
+                )
+                if actual != value:
                     errors.append(f"{prefix}: feature metadata mismatch for {key}")
         except Exception as error:
             errors.append(f"{prefix}: feature validation failed: {error}")

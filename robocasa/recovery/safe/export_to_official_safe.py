@@ -1,4 +1,4 @@
-"""Deterministically materialize RoboCasa atomic SAFE data for the official SAFE π0 loader."""
+"""Materialize RoboCasa atomic data in the official SAFE loader layout."""
 
 from __future__ import annotations
 
@@ -173,6 +173,7 @@ def export_to_official_safe(
         "num_rollouts": len(records),
         "num_policy_records": sum(r.valid_sequence_length for r in records),
         "task_ids": task_ids,
+        "model_families": sorted({record.model_family for record in records}),
     }
     if dry_run:
         return {"dry_run": True, **plan}
@@ -221,6 +222,7 @@ def export_to_official_safe(
             "replan_steps": record.replan_steps,
             "policy_name": record.policy_id,
             "policy_checkpoint": record.checkpoint,
+            "model_family": record.model_family,
             "robocasa_manifest_record": record.to_dict(),
         }
         if not _check_existing_pickle(env_path, record.rollout_id, resume):
@@ -250,6 +252,7 @@ def export_to_official_safe(
                 "pre_velocity": np.asarray(features[inference_index], dtype=np.float32),
                 "actions": np.asarray(chunks[inference_index], dtype=np.float32),
                 "feature_layer": record.feature_layer,
+                "model_family": record.model_family,
                 "policy_name": record.policy_id,
                 "policy_checkpoint": record.checkpoint,
             }
@@ -274,7 +277,11 @@ def export_to_official_safe(
         )
     report = {
         "schema_version": 1,
-        "format": "official_safe_pizero_env_records_policy_records",
+        "format": (
+            "official_safe_pizero_env_records_policy_records"
+            if plan["model_families"] == ["pi0"]
+            else "official_safe_rldx1_env_records_policy_records"
+        ),
         "complete": True,
         "created_at": utc_now(),
         **plan,

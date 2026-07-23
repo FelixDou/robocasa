@@ -14,6 +14,7 @@ import numpy as np
 SAFE_SCHEMA_VERSION = 1
 SAFE_FEATURE_SCHEMA_VERSION = 1
 OFFICIAL_PI0_FEATURE_LAYER = "action_expert_suffix_pre_action_out_proj"
+RLDX1_FEATURE_LAYER = "action_model_msat_action_suffix_pre_action_decoder"
 
 
 @dataclass
@@ -31,6 +32,7 @@ class SafeRolloutMetadata:
     action_horizon: int
     replan_steps: int
     feature_layer: str = OFFICIAL_PI0_FEATURE_LAYER
+    model_family: str = "pi0"
     feature_aggregation: str = "raw"
     feature_shape: list[int] = field(default_factory=list)
     feature_dtype: str = "float32"
@@ -51,6 +53,7 @@ class SafeRolloutMetadata:
     action_path: str | None = None
     safe_repository_commit: str | None = None
     openpi_repository_commit: str | None = None
+    rldx_repository_commit: str | None = None
     robocasa_commit: str | None = None
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -85,16 +88,32 @@ class SafeRolloutMetadata:
             raise ValueError("feature_shape horizon axis disagrees with action_horizon")
         if self.feature_dtype != "float32":
             raise ValueError("raw SAFE storage dtype must be float32")
-        if self.seed_protocol not in {"rollout_index", "official_openpi"}:
+        if self.model_family not in {"pi0", "rldx1"}:
+            raise ValueError(f"Unsupported SAFE model_family {self.model_family!r}")
+        expected_layer = {
+            "pi0": OFFICIAL_PI0_FEATURE_LAYER,
+            "rldx1": RLDX1_FEATURE_LAYER,
+        }[self.model_family]
+        if self.feature_layer != expected_layer:
+            raise ValueError(
+                f"Feature layer {self.feature_layer!r} is incompatible with "
+                f"model_family {self.model_family!r}"
+            )
+        if self.seed_protocol not in {
+            "rollout_index",
+            "official_openpi",
+            "official_rldx",
+        }:
             raise ValueError(f"Unsupported seed_protocol {self.seed_protocol!r}")
-        if self.seed_protocol == "official_openpi":
+        if self.seed_protocol in {"official_openpi", "official_rldx"}:
             if self.environment_reset_index is None or self.environment_reset_index < 0:
                 raise ValueError(
-                    "official_openpi records require a non-negative environment_reset_index"
+                    "official policy seed protocols require a non-negative "
+                    "environment_reset_index"
                 )
         elif self.environment_reset_index is not None:
             raise ValueError(
-                "environment_reset_index is only valid for official_openpi records"
+                "environment_reset_index is only valid for official policy records"
             )
         if self.video_frame_stride < 1:
             raise ValueError("video_frame_stride must be positive")
@@ -177,6 +196,7 @@ def compatibility_key(metadata: SafeRolloutMetadata) -> str:
     identity = {
         "policy_id": metadata.policy_id,
         "checkpoint": metadata.checkpoint,
+        "model_family": metadata.model_family,
         "feature_schema_version": metadata.feature_schema_version,
         "feature_layer": metadata.feature_layer,
         "feature_aggregation": metadata.feature_aggregation,

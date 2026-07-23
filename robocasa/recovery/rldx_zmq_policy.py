@@ -10,12 +10,16 @@ action dictionaries to the flat simulator format expected by RLDX.
 from __future__ import annotations
 
 import collections
+import copy
 import io
 import uuid
 
 import numpy as np
 
 from robocasa.utils.env_utils import convert_action
+
+
+RLDX_SAFE_FEATURE_LAYER = "action_model_msat_action_suffix_pre_action_decoder"
 
 
 class MsgSerializer:
@@ -118,27 +122,50 @@ class RLDXZeroMQPolicy:
         api_token: str | None = None,
         session_id: str | None = None,
         reset_memory_on_instruction_change: bool = True,
+        collect_safe_features: bool = False,
+        safe_feature_shape: tuple[int, ...] | None = None,
+        policy_name: str | None = None,
+        policy_checkpoint: str | None = None,
+        client=None,
     ):
-        self.client = RLDXPolicyClient(
+        self.client = client or RLDXPolicyClient(
             host=host,
             port=port,
             timeout_ms=timeout_ms,
             api_token=api_token,
         )
         self.execution_horizon = int(execution_horizon)
+        if self.execution_horizon <= 0:
+            raise ValueError("execution_horizon must be positive")
+        self.replan_steps = self.execution_horizon
         self.video_history = int(video_history)
         self.session_id = session_id or f"robocasa-recovery-{uuid.uuid4().hex[:8]}"
         self.reset_memory_on_instruction_change = bool(
             reset_memory_on_instruction_change
         )
+        self.collect_safe_features = bool(collect_safe_features)
+        self.safe_feature_shape = (
+            tuple(int(value) for value in safe_feature_shape)
+            if safe_feature_shape is not None
+            else None
+        )
+        self.policy_name = policy_name
+        self.policy_checkpoint = policy_checkpoint
         self.action_plan = collections.deque()
         self.last_instruction = None
         self.needs_memory_reset = True
+        self._env_step = 0
+        self._inference_index = 0
+        self._pending_inference_record = None
+        self._latest_inference_record = None
 
     def __call__(self, obs, instruction=None):
         instruction = instruction or obs["annotation.human.task_description"]
         if instruction != self.last_instruction:
             self.action_plan.clear()
+            self._pending_inference_record = None
+            self._latest_inference_record = None
+            self._inference_index = 0
             self.last_instruction = instruction
             if self.reset_memory_on_instruction_change:
                 self.needs_memory_reset = True
@@ -149,17 +176,195 @@ class RLDXZeroMQPolicy:
                 "session_ids": [self.session_id],
                 "reset_memory": [self.needs_memory_reset],
             }
-            action_chunk, _ = self.client.get_action(element, options=options)
+            if self.collect_safe_features:
+                options["request_safe_features"] = True
+            action_chunk, info = self.client.get_action(element, options=options)
             self.needs_memory_reset = False
+            if self.collect_safe_features:
+                self._record_safe_features(info, action_chunk)
             self.action_plan.extend(self._split_action_chunk(action_chunk))
             if not self.action_plan:
                 raise RuntimeError("RLDX policy returned an empty action chunk")
 
-        return self._to_robocasa_action(self.action_plan.popleft())
+        action = self._to_robocasa_action(self.action_plan.popleft())
+        self._env_step += 1
+        return action
+
+    @staticmethod
+    def _action_chunk_matrix(action_chunk):
+        """Return the server action chunk as one `(horizon, action_dim)` array."""
+        if not isinstance(action_chunk, dict):
+            array = np.asarray(action_chunk, dtype=np.float32)
+            if array.ndim == 3:
+                if array.shape[0] != 1:
+                    raise RuntimeError(
+                        "SAFE collection requires one RLDX environment per client"
+                    )
+                array = array[0]
+            if array.ndim == 1:
+                array = array[None, :]
+            if array.ndim != 2:
+                raise RuntimeError(
+                    "RLDX action chunk must be (horizon, action_dim), got "
+                    f"{array.shape}"
+                )
+            return array
+
+        parts = []
+        horizon = None
+        for key in sorted(action_chunk):
+            array = np.asarray(action_chunk[key], dtype=np.float32)
+            if array.ndim == 3:
+                if array.shape[0] != 1:
+                    raise RuntimeError(
+                        "SAFE collection requires one RLDX environment per client"
+                    )
+                array = array[0]
+            if array.ndim == 1:
+                array = array[:, None]
+            if array.ndim != 2:
+                raise RuntimeError(
+                    f"RLDX action field {key!r} must be (horizon, dim), got "
+                    f"{array.shape}"
+                )
+            if horizon is None:
+                horizon = array.shape[0]
+            elif array.shape[0] != horizon:
+                raise RuntimeError("RLDX action fields disagree on action horizon")
+            parts.append(array)
+        if not parts:
+            raise RuntimeError("RLDX returned an empty action dictionary")
+        return np.concatenate(parts, axis=-1)
+
+    def _record_safe_features(self, info, action_chunk):
+        if not isinstance(info, dict) or "safe_features" not in info:
+            raise RuntimeError(
+                "SAFE feature collection was requested, but the RLDX server "
+                "did not return info['safe_features']. Apply the companion "
+                "RLDX patch and request SAFE features."
+            )
+        features = np.asarray(info["safe_features"])
+        if features.ndim == 4:
+            if features.shape[0] != 1:
+                raise RuntimeError(
+                    "SAFE collection requires one RLDX environment per client"
+                )
+            features = features[0]
+        metadata = info.get("safe_feature_metadata")
+        if not isinstance(metadata, dict):
+            raise RuntimeError(
+                "RLDX SAFE response is missing dict 'safe_feature_metadata'"
+            )
+        metadata = copy.deepcopy(metadata)
+        if features.ndim != 3:
+            raise RuntimeError(
+                "Expected raw RLDX SAFE features with shape "
+                "(denoising_steps, action_horizon, feature_dim), got "
+                f"{features.shape}"
+            )
+        if self.safe_feature_shape is not None and features.shape != self.safe_feature_shape:
+            raise RuntimeError(
+                f"SAFE feature shape {features.shape} does not match configured "
+                f"shape {self.safe_feature_shape}"
+            )
+        declared_shape = metadata.get("feature_shape")
+        if declared_shape is not None and tuple(declared_shape) != features.shape:
+            raise RuntimeError(
+                f"SAFE metadata declares shape {declared_shape}, but payload has "
+                f"shape {features.shape}"
+            )
+        if features.dtype != np.float32:
+            raise RuntimeError(f"RLDX SAFE features must be float32, got {features.dtype}")
+        if not np.all(np.isfinite(features)):
+            raise RuntimeError("RLDX SAFE features contain NaN or infinite values")
+        if not np.any(features):
+            raise RuntimeError("RLDX SAFE features are entirely zero")
+
+        action_matrix = self._action_chunk_matrix(action_chunk)
+        if not np.all(np.isfinite(action_matrix)):
+            raise RuntimeError("RLDX action chunk contains NaN or infinite values")
+        if action_matrix.shape[0] != features.shape[1]:
+            raise RuntimeError(
+                "RLDX SAFE action-horizon mismatch: actions have "
+                f"{action_matrix.shape[0]} positions but features have "
+                f"{features.shape[1]}"
+            )
+
+        metadata.setdefault("schema_version", 1)
+        metadata.setdefault("model_family", "rldx1")
+        metadata.setdefault("feature_aggregation", metadata.get("aggregation", "raw"))
+        metadata.setdefault("aggregation", metadata["feature_aggregation"])
+        metadata.setdefault("policy_name", self.policy_name or metadata.get("model_id"))
+        metadata.setdefault(
+            "policy_checkpoint", self.policy_checkpoint or metadata.get("checkpoint")
+        )
+        metadata.setdefault("feature_dtype", str(features.dtype))
+        metadata.setdefault("feature_shape", list(features.shape))
+        metadata.setdefault("action_horizon", int(features.shape[1]))
+        metadata.setdefault("flow_steps", int(features.shape[0]))
+        required = (
+            "schema_version",
+            "model_family",
+            "feature_layer",
+            "feature_shape",
+            "feature_dtype",
+            "feature_aggregation",
+            "policy_name",
+            "policy_checkpoint",
+            "action_horizon",
+            "flow_steps",
+        )
+        missing = [key for key in required if metadata.get(key) is None]
+        if missing:
+            raise RuntimeError(f"RLDX SAFE metadata is missing required fields: {missing}")
+        if int(metadata["schema_version"]) != 1:
+            raise RuntimeError("RLDX SAFE metadata schema_version is unsupported")
+        if metadata["model_family"] != "rldx1":
+            raise RuntimeError("RLDX SAFE metadata model_family must be 'rldx1'")
+        if metadata["feature_layer"] != RLDX_SAFE_FEATURE_LAYER:
+            raise RuntimeError(
+                "RLDX SAFE feature_layer is not the action-token pre-decoder "
+                f"layer: {metadata['feature_layer']!r}"
+            )
+        if metadata["feature_aggregation"] != "raw":
+            raise RuntimeError("RLDX SAFE inference capture must preserve raw features")
+        if metadata["feature_dtype"] != str(features.dtype):
+            raise RuntimeError("RLDX SAFE metadata feature_dtype disagrees with payload")
+        if int(metadata["action_horizon"]) != features.shape[1]:
+            raise RuntimeError("RLDX SAFE metadata action_horizon disagrees with payload")
+        if int(metadata["flow_steps"]) != features.shape[0]:
+            raise RuntimeError("RLDX SAFE metadata flow_steps disagrees with payload")
+
+        record = {
+            "env_step": self._env_step,
+            "environment_step": self._env_step,
+            "inference_index": self._inference_index,
+            "features": np.asarray(features, dtype=np.float32),
+            "actions": np.asarray(action_matrix, dtype=np.float32),
+            "metadata": metadata,
+        }
+        self._inference_index += 1
+        self._pending_inference_record = record
+        self._latest_inference_record = record
+
+    def pop_inference_record(self):
+        """Return one record for the latest real inference, never cached actions."""
+        record = self._pending_inference_record
+        self._pending_inference_record = None
+        return record
+
+    @property
+    def latest_inference_record(self):
+        return self._latest_inference_record
 
     def reset(self):
         self.action_plan.clear()
+        self.last_instruction = None
         self.needs_memory_reset = True
+        self._env_step = 0
+        self._inference_index = 0
+        self._pending_inference_record = None
+        self._latest_inference_record = None
         try:
             self.client.reset(options={"session_ids": [self.session_id]})
         except Exception:
@@ -359,7 +564,14 @@ def make_policy(
     api_token=None,
     session_id=None,
     reset_memory_on_instruction_change=True,
+    collect_safe_features=False,
+    safe_feature_shape=None,
+    policy_name=None,
+    policy_checkpoint=None,
+    replan_steps=None,
 ):
+    if replan_steps is not None:
+        execution_horizon = int(replan_steps)
     return RLDXZeroMQPolicy(
         host=host,
         port=port,
@@ -369,4 +581,8 @@ def make_policy(
         api_token=api_token,
         session_id=session_id,
         reset_memory_on_instruction_change=reset_memory_on_instruction_change,
+        collect_safe_features=collect_safe_features,
+        safe_feature_shape=safe_feature_shape,
+        policy_name=policy_name,
+        policy_checkpoint=policy_checkpoint,
     )

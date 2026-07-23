@@ -86,7 +86,24 @@ class FakePolicy:
         return record
 
 
-def fake_runtime(tracker=None):
+class FakeRLDXPolicy(FakePolicy):
+    def __call__(self, obs, instruction=None):
+        action = super().__call__(obs, instruction=instruction)
+        if self.pending is not None:
+            self.pending["metadata"].update(
+                {
+                    "model_family": "rldx1",
+                    "feature_layer": (
+                        "action_model_msat_action_suffix_pre_action_decoder"
+                    ),
+                    "policy_name": "mock-rldx1",
+                    "policy_checkpoint": "mock-rldx-checkpoint",
+                }
+            )
+        return action
+
+
+def fake_runtime(tracker=None, policy_cls=FakePolicy):
     def make_env(task, interface, split, seed, render):
         env = FakeEnv(seed)
         if tracker is not None:
@@ -94,7 +111,7 @@ def fake_runtime(tracker=None):
         return env
 
     return {
-        "load_factory": lambda spec: FakePolicy,
+        "load_factory": lambda spec: policy_cls,
         "parse_policy_args": lambda values: {},
         "make_env": make_env,
         "open_video_writer": lambda path, fps: None,
@@ -209,6 +226,68 @@ class TestSafeAtomicCollection(unittest.TestCase):
             self.assertTrue(all(record.video_frame_stride == 2 for record in records))
             validation = validate_atomic_dataset(tmp)
             self.assertTrue(validation["valid"], validation["errors"])
+
+    def test_rldx_collection_records_model_family_and_repeated_reset_protocol(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as exported,
+        ):
+            args = collection_args(tmp, num_rollouts=2)
+            args.seed = 7
+            args.seed_protocol = "official_rldx"
+            args.model_family = "rldx1"
+            args.policy_module = "robocasa.recovery.rldx_zmq_policy:make_policy"
+            args.policy_name = "mock-rldx1"
+            args.checkpoint = "mock-rldx-checkpoint"
+            tracker = {}
+
+            result = run_collection(
+                args,
+                runtime=fake_runtime(tracker, policy_cls=FakeRLDXPolicy),
+            )
+            records = load_manifest(tmp)
+
+            self.assertEqual(result["counts"]["valid_rollouts"], 2)
+            self.assertEqual(len(tracker["envs"]), 1)
+            self.assertTrue(all(record.model_family == "rldx1" for record in records))
+            self.assertTrue(
+                all(record.seed_protocol == "official_rldx" for record in records)
+            )
+            self.assertTrue(
+                all(record.openpi_repository_commit is None for record in records)
+            )
+            self.assertTrue(
+                all(record.rldx_repository_commit for record in records)
+            )
+            validation = validate_atomic_dataset(tmp)
+            self.assertTrue(validation["valid"], validation["errors"])
+            report = export_to_official_safe(tmp, exported)
+            self.assertEqual(
+                report["format"],
+                "official_safe_rldx1_env_records_policy_records",
+            )
+            self.assertEqual(report["model_families"], ["rldx1"])
+            policy_path = next(
+                (Path(exported) / "policy_records").glob("*meta.pkl")
+            )
+            with policy_path.open("rb") as stream:
+                policy_record = pickle.load(stream)
+            self.assertEqual(policy_record["model_family"], "rldx1")
+            self.assertEqual(policy_record["pre_velocity"].shape, (2, 4, 8))
+
+    def test_model_family_rejects_other_policy_seed_protocol(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(tmp)
+            args.model_family = "rldx1"
+            args.seed_protocol = "official_openpi"
+            with self.assertRaisesRegex(ValueError, "incompatible"):
+                prepare_plan(args)
+
+            args = collection_args(tmp)
+            args.model_family = "pi0"
+            args.seed_protocol = "official_rldx"
+            with self.assertRaisesRegex(ValueError, "incompatible"):
+                prepare_plan(args)
 
     def test_official_protocol_rejects_seed_end(self):
         with tempfile.TemporaryDirectory() as tmp:

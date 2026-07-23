@@ -141,6 +141,7 @@ class OpenPIWebsocketPolicy:
                 f"{action_chunk.shape[0]} positions but features have {features.shape[1]}"
             )
         metadata.setdefault("schema_version", 1)
+        metadata.setdefault("model_family", "pi0")
         metadata.setdefault("feature_aggregation", metadata.get("aggregation", "raw"))
         metadata.setdefault("aggregation", metadata["feature_aggregation"])
         metadata.setdefault("policy_name", self.policy_name or metadata.get("model_id"))
