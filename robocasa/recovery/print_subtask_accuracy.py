@@ -62,7 +62,6 @@ def _task_group(task_name: str) -> str:
         "GetToastedBread",
         "KettleBoiling",
         "LoadDishwasher",
-        "MakeIceLemonade",
         "PackIdenticalLunches",
         "PreSoakPan",
         "PrepareCoffee",
