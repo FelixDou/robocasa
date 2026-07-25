@@ -220,6 +220,10 @@ if [[ "${SKIP_DOWNLOAD}" == "0" ]]; then
             "${ABOT_HF_REPOSITORY}" \
             --repo-type model \
             --include "base_checkpoint/**" \
+            --local-dir "${ABOT_CHECKPOINT_ROOT}"
+        print_command env HF_HOME="${HF_HOME}" "${ABOT_ENV}/bin/hf" download \
+            "${ABOT_HF_REPOSITORY}" \
+            --repo-type model \
             --include "checkpoint_step/**" \
             --local-dir "${ABOT_CHECKPOINT_ROOT}"
     else
@@ -238,6 +242,10 @@ EOF
             "${ABOT_HF_REPOSITORY}" \
             --repo-type model \
             --include "base_checkpoint/**" \
+            --local-dir "${ABOT_CHECKPOINT_ROOT}"
+        env HF_HOME="${HF_HOME}" "${ABOT_ENV}/bin/hf" download \
+            "${ABOT_HF_REPOSITORY}" \
+            --repo-type model \
             --include "checkpoint_step/**" \
             --local-dir "${ABOT_CHECKPOINT_ROOT}"
     fi
