@@ -273,7 +273,7 @@ preflight() {
             "from wam.modules.attention_ops import flash_attn_func; assert flash_attn_func is not None, 'flash-attn is not installed'; print('flash-attn: OK')"
     fi
     PYTHONPATH="${CLIENT_PYTHONPATH}" "${CLIENT_PYTHON}" -c \
-        "import gymnasium, msgpack, scipy, websockets, robocasa; assert robocasa.__version__ == '1.0.1', robocasa.__version__; print('RoboCasa client imports: OK'); print('robocasa', robocasa.__version__)"
+        "import click, sys; choice_generic = hasattr(click.Choice, '__class_getitem__'); choice_generic or sys.exit(f'Incompatible client Click: {click.__version__}. Run: ${CLIENT_PYTHON} -m pip install click==8.2.1'); import typer, gymnasium, msgpack, scipy, websockets, robocasa; assert robocasa.__version__ == '1.0.1', robocasa.__version__; print('RoboCasa client imports: OK'); print('robocasa', robocasa.__version__); print('click', click.__version__, 'typer', typer.__version__)"
     echo "ABot-M0.5 preflight: OK"
     echo "Durable checkpoint: ${ABOT_CHECKPOINT_ROOT}"
     echo "Requested GPUs: ${GPU_IDS}"

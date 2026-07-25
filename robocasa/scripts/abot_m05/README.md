@@ -69,7 +69,24 @@ bash robocasa/scripts/abot_m05/evaluate_cluster.sh \
 ```
 
 Preflight checks the exact ABot commit, clean upstream checkout, server and
-client imports, RoboCasa 1.0.1, and all required checkpoint artifacts.
+client imports, compatible Click/Typer CLI packages, RoboCasa 1.0.1, and all
+required checkpoint artifacts.
+
+If preflight reports that the client Click is incompatible, repair only the
+RoboCasa client environment and verify its dependency set:
+
+```bash
+CLIENT_PYTHON=/gs/bs/tga-shinoda/felid/envs/robocasa_openpi/bin/python
+
+"$CLIENT_PYTHON" -m pip install click==8.2.1
+"$CLIENT_PYTHON" -m pip check
+"$CLIENT_PYTHON" -c \
+  "import click, typer; print('click', click.__version__, 'typer', typer.__version__)"
+```
+
+Typer's installed implementation subclasses the generic `click.Choice`, which
+requires Click 8.2 or newer. The conservative 8.2.1 pin avoids pulling a newer
+Click release into the shared RoboCasa/OpenPI environment.
 
 ## 4. One-episode smoke
 

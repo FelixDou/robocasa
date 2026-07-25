@@ -95,6 +95,15 @@ class TestABotM05ClusterScripts(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_preflight_checks_client_click_before_importing_typer(self):
+        script = EVAL_SCRIPT.read_text(encoding="utf-8")
+        click_check = script.index(
+            "hasattr(click.Choice, '__class_getitem__')"
+        )
+        typer_import = script.index("import typer, gymnasium")
+        self.assertLess(click_check, typer_import)
+        self.assertIn("pip install click==8.2.1", script)
+
     def test_setup_dry_run_uses_pinned_public_artifacts(self):
         result = run_script(SETUP_SCRIPT, "--dry-run")
         self.assertEqual(result.returncode, 0, result.stdout)
