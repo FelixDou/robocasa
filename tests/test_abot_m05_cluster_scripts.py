@@ -121,6 +121,11 @@ class TestABotM05ClusterScripts(unittest.TestCase):
         self.assertIn("SPLIT=pretrain", result.stdout)
         self.assertIn("ENV_NAME=CloseFridge", result.stdout)
         self.assertIn("/tmp/ut06746/abot_m05", result.stdout)
+        self.assertIn(
+            "WAN22_PRETRAINED_PATH=/tmp/ut06746/abot_m05/"
+            "ABot-M0.5-RoboCasa365/base_checkpoint",
+            result.stdout,
+        )
         self.assertIn("launch_server_env_sweep.sh", result.stdout)
 
     def test_full_dry_run_explicitly_uses_fifty_episodes_for_all_splits(self):
