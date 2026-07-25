@@ -264,6 +264,10 @@ preflight() {
     CUDA_VISIBLE_DEVICES="${GPU_IDS}" PYTHONPATH="${ABOT_REPO}" \
         "${ABOT_PYTHON}" -c \
         "import torch, diffusers, transformers, wam; assert torch.cuda.is_available(), 'CUDA is unavailable'; assert torch.cuda.device_count() == ${WORKER_COUNT}, (torch.cuda.device_count(), ${WORKER_COUNT}); print('ABot server imports and GPUs: OK'); print('torch', torch.__version__, 'visible_gpus', torch.cuda.device_count())"
+    WAN22_PRETRAINED_PATH="${ABOT_CHECKPOINT_ROOT}/base_checkpoint" \
+        ROBOCASA_POSTTRAIN_MODEL_PATH_TEST="${ABOT_CHECKPOINT_ROOT}/checkpoint_step" \
+        PYTHONPATH="${ABOT_REPO}" "${ABOT_PYTHON}" -c \
+        "from wam.configs import WAM_CONFIGS; cfg = WAM_CONFIGS['robocasa_train_test_atomic_target']; assert cfg.wan22_pretrained_model_name_or_path == '${ABOT_CHECKPOINT_ROOT}/base_checkpoint', cfg.wan22_pretrained_model_name_or_path; assert cfg.posttrain_model_name_or_path == '${ABOT_CHECKPOINT_ROOT}/checkpoint_step', cfg.posttrain_model_name_or_path; print('ABot leaderboard config paths: OK')"
     if [[ "${ATTN_MODE}" == "flashattn" ]]; then
         PYTHONPATH="${ABOT_REPO}" "${ABOT_PYTHON}" -c \
             "from wam.modules.attention_ops import flash_attn_func; assert flash_attn_func is not None, 'flash-attn is not installed'; print('flash-attn: OK')"
@@ -317,6 +321,8 @@ common_env=(
     CKPT_PATH="${POSTTRAIN_CHECKPOINT}"
     WAN22_PRETRAINED_PATH="${BASE_CHECKPOINT}"
     WAN22_PRETRAINED_MODEL_NAME_OR_PATH="${BASE_CHECKPOINT}"
+    ROBOCASA_POSTTRAIN_MODEL_PATH="${POSTTRAIN_CHECKPOINT}"
+    ROBOCASA_POSTTRAIN_MODEL_PATH_TEST="${POSTTRAIN_CHECKPOINT}"
     WRAPPER_PYTHON="${ABOT_PYTHON}"
     SERVER_PYTHON="${ABOT_PYTHON}"
     CLIENT_PYTHON="${CLIENT_PYTHON}"
@@ -345,6 +351,7 @@ run_smoke() {
             "${common_env[@]}" \
             GPU_ID="${GPU_IDS%%,*}" \
             ENV_NAME="${SMOKE_TASK}" \
+            CONFIG_NAME=robocasa_train_test_atomic_target \
             RUN_ROOT="${run_root}" \
             SAVE_ROOT="${run_root}/server_predictions" \
             RESULT_DIR="${run_root}/results" \
@@ -360,6 +367,7 @@ run_smoke() {
             "${common_env[@]}" \
                 GPU_ID="${GPU_IDS%%,*}" \
                 ENV_NAME="${SMOKE_TASK}" \
+                CONFIG_NAME=robocasa_train_test_atomic_target \
                 RUN_ROOT="${run_root}" \
                 SAVE_ROOT="${run_root}/server_predictions" \
                 RESULT_DIR="${run_root}/results" \

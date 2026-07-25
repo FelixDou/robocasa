@@ -120,10 +120,19 @@ class TestABotM05ClusterScripts(unittest.TestCase):
         self.assertIn("episodes per task     : 1", result.stdout)
         self.assertIn("SPLIT=pretrain", result.stdout)
         self.assertIn("ENV_NAME=CloseFridge", result.stdout)
+        self.assertIn(
+            "CONFIG_NAME=robocasa_train_test_atomic_target",
+            result.stdout,
+        )
         self.assertIn("/tmp/ut06746/abot_m05", result.stdout)
         self.assertIn(
             "WAN22_PRETRAINED_PATH=/tmp/ut06746/abot_m05/"
             "ABot-M0.5-RoboCasa365/base_checkpoint",
+            result.stdout,
+        )
+        self.assertIn(
+            "ROBOCASA_POSTTRAIN_MODEL_PATH_TEST=/tmp/ut06746/abot_m05/"
+            "ABot-M0.5-RoboCasa365/checkpoint_step",
             result.stdout,
         )
         self.assertIn("launch_server_env_sweep.sh", result.stdout)
