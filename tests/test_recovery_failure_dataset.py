@@ -884,6 +884,8 @@ class TestRecoveryFailureDataset(unittest.TestCase):
                 pass
 
         class FakePolicy:
+            close_calls = 0
+
             def __init__(self, env):
                 self.env = env
 
@@ -891,6 +893,9 @@ class TestRecoveryFailureDataset(unittest.TestCase):
                 return {
                     "action.eef_pos_delta": np.array([self.env.steps], dtype=np.float32)
                 }
+
+            def close(self):
+                type(self).close_calls += 1
 
         summary = {
             "task_success": False,
@@ -985,6 +990,7 @@ class TestRecoveryFailureDataset(unittest.TestCase):
             self.assertFalse(manifest["partial"])
             self.assertEqual(manifest["dataset_type"], "recovery_failure_dataset")
             self.assertEqual(manifest["summary"]["num_failures"], 1)
+            self.assertEqual(FakePolicy.close_calls, 1)
             sample = manifest["samples"][0]
             self.assertEqual(sample["task_name"], "OpenDrawer")
             self.assertEqual(sample["failure_diagnostic"]["failed_atomic"], "OpenDrawer")

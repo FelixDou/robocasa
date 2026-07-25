@@ -1,0 +1,59 @@
+# Zero-shot PandaOmron interface for LingBot-VLA-v2.
+#
+# Raw state follows RoboCasa's released LeRobot datasets:
+#   base xyz [0:3], base quaternion [3:7], relative EEF xyz+quaternion [7:14],
+#   gripper qpos [14:16].
+# Raw action follows RoboCasa controller order without the final mode bit:
+#   delta EEF xyz+axis-angle [0:6], gripper [6], base xyz [7:10], torso [10].
+states:
+  - observation.state.end.position:
+      origin_keys:
+        - observation.state:
+            start: 7
+            end: 14
+  - observation.state.effector.position:
+      origin_keys:
+        - observation.state:
+            start: 14
+            end: 16
+  - observation.state.base.position:
+      origin_keys:
+        - observation.state:
+            start: 0
+            end: 3
+
+actions:
+  - action.end.position:
+      origin_keys:
+        - action:
+            start: 0
+            end: 6
+      subtract_state: false
+  - action.effector.position:
+      origin_keys:
+        - action:
+            start: 6
+            end: 7
+      subtract_state: false
+  - action.base.position:
+      origin_keys:
+        - action:
+            start: 7
+            end: 10
+      subtract_state: false
+  - action.waist.position:
+      origin_keys:
+        - action:
+            start: 10
+            end: 11
+      subtract_state: false
+
+images:
+  - observation.images.camera_top:
+      origin_keys: observation.images.robot0_agentview_left
+  - observation.images.camera_wrist_left:
+      origin_keys: observation.images.robot0_eye_in_hand
+  - observation.images.camera_wrist_right:
+      origin_keys: observation.images.robot0_agentview_right
+
+norm_stats: assets/norm_stats/robocasa_zero_shot_identity.json

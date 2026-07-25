@@ -8,6 +8,7 @@ with links to videos, action trajectories, and task/subtask/predicate progress.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import json
 from pathlib import Path
@@ -1085,7 +1086,7 @@ def run_dataset_creation(args):
     successes_by_task = {task_name: 0 for task_name in tasks}
 
     manifest = {
-        "dataset_type": "recovery_failure_dataset",
+        "dataset_type": getattr(args, "dataset_type", "recovery_failure_dataset"),
         "schema_version": 1,
         "config": vars(args),
         "tasks": tasks,
@@ -1132,6 +1133,7 @@ def run_dataset_creation(args):
 
             seed = args.seed + rollout_i
             env = None
+            policy = None
             video_writer = None
             video_path = None
             action_path = None
@@ -1195,6 +1197,11 @@ def run_dataset_creation(args):
                 write_manifest(partial=True)
                 continue
             finally:
+                if policy is not None:
+                    close_policy = getattr(policy, "close", None)
+                    if close_policy is not None:
+                        with contextlib.suppress(Exception):
+                            close_policy()
                 if video_writer is not None:
                     video_writer.close()
                 if env is not None:
@@ -1238,13 +1245,23 @@ def run_dataset_creation(args):
             write_manifest(partial=True)
 
     write_manifest(partial=False)
-    print(colored(f"Wrote recovery failure dataset manifest to {manifest_path}", "yellow"))
+    dataset_type = getattr(args, "dataset_type", "recovery_failure_dataset")
+    print(colored(f"Wrote {dataset_type} manifest to {manifest_path}", "yellow"))
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--dataset-type",
+        choices=["recovery_failure_dataset", "policy_evaluation"],
+        default="recovery_failure_dataset",
+        help=(
+            "Manifest label. Use policy_evaluation together with "
+            "--include-successes when collecting an ordinary closed-loop benchmark."
+        ),
+    )
     parser.add_argument("--policy-module", type=str, default=None)
     parser.add_argument("--policy-name", type=str, default=None)
     parser.add_argument("--policy-arg", action="append", default=[])
