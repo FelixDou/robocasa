@@ -198,7 +198,10 @@ if [[ "${SKIP_ENV}" == "0" ]]; then
     run "${ABOT_ENV}/bin/python" -m pip install \
         torch==2.9.0 torchvision==0.24.0 torchaudio==2.9.0
     run "${ABOT_ENV}/bin/python" -m pip install --editable "${ABOT_REPO}"
-    run "${ABOT_ENV}/bin/python" -m pip install --upgrade huggingface_hub
+    # Transformers 4.55.2 and Tokenizers 0.21.4 both require Hub < 1.0.
+    # Pin the known-compatible release instead of allowing pip to install a
+    # newer 1.x version that makes Transformers fail during import.
+    run "${ABOT_ENV}/bin/python" -m pip install huggingface_hub==0.36.2
     if [[ "${WITH_FLASH_ATTN}" == "1" ]]; then
         run env MAX_JOBS="${MAX_JOBS:-8}" "${ABOT_ENV}/bin/python" -m pip install \
             flash-attn==2.8.3 --no-build-isolation

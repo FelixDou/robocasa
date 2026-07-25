@@ -99,6 +99,7 @@ class TestABotM05ClusterScripts(unittest.TestCase):
         self.assertIn("base_checkpoint/", result.stdout)
         self.assertIn("checkpoint_step/", result.stdout)
         self.assertIn("/gs/bs/tga-shinoda/felid/envs/abot_m05", result.stdout)
+        self.assertIn("huggingface_hub==0.36.2", result.stdout)
 
     def test_smoke_dry_run_is_one_pretrain_episode(self):
         result = run_script(
