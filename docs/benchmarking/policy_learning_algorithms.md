@@ -178,3 +178,33 @@ python robocasa/recovery/evaluate_recovery_benchmark.py \
 ```
 
 The RLDX adapter maps RoboCasa Gym observations to the RLDX simulator-wrapper keys (`video.res256_image_side_0`, `video.res256_image_side_1`, `video.res256_image_wrist_0`, and `annotation.human.action.task_description`) and converts returned action chunks back to RoboCasa Gym action dictionaries.
+
+-------
+## ABot-M0.5
+
+ABot-M0.5 is evaluated through the public
+[ABot-Manipulation](https://github.com/amap-cvlab/ABot-Manipulation)
+inference stack. It is not vendored into RoboCasa. The model server uses a
+dedicated ABot environment while the simulator client uses the existing
+RoboCasa environment.
+
+Cluster setup, gated checkpoint download, preflight checks, node-local
+checkpoint staging, smoke evaluation, and the 50-task protocol are provided in
+`robocasa/scripts/abot_m05/README.md`.
+
+Key commands:
+
+```bash
+# Install the pinned ABot source/environment and download the checkpoint.
+bash robocasa/scripts/abot_m05/setup_cluster.sh
+
+# Verify the two environments and checkpoint without starting an experiment.
+bash robocasa/scripts/abot_m05/evaluate_cluster.sh preflight --gpus 0
+
+# One-task server/client smoke test.
+bash robocasa/scripts/abot_m05/evaluate_cluster.sh smoke --gpus 0
+
+# Official pretrain-scene protocol: 50 tasks x 50 episodes.
+bash robocasa/scripts/abot_m05/evaluate_cluster.sh \
+  all --gpus 0,1,2,3 --episodes 50
+```

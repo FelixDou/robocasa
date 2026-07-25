@@ -1,1 +1,2 @@
 recursive-include robocasa *.yaml *.xml *.json *.png *.obj *.csv *.urdf *.stl *.mtl
+recursive-include robocasa/scripts/abot_m05 *.sh *.md *.py
