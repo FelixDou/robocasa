@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,6 +21,9 @@ from robocasa.scripts.abot_m05.summarize_subtask_progress import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SETUP_SCRIPT = REPO_ROOT / "robocasa/scripts/abot_m05/setup_cluster.sh"
 EVAL_SCRIPT = REPO_ROOT / "robocasa/scripts/abot_m05/evaluate_cluster.sh"
+SITE_CUSTOMIZE_DIR = (
+    REPO_ROOT / "robocasa/scripts/abot_m05/python_startup"
+)
 ABOT_COMMIT = "7642747ed2817b241dde5df06e17ee80192718ad"
 
 
@@ -156,6 +160,56 @@ class TestABotM05ClusterScripts(unittest.TestCase):
         self.assertIn("ROBOCASA_TRACK_SUBTASK_PROGRESS=1", result.stdout)
         self.assertIn("python_startup", result.stdout)
         self.assertIn("summarize_subtask_progress.py", result.stdout)
+
+    def test_sitecustomize_skips_tracking_in_python_probe_children(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_root = Path(temp_dir) / "fake_package"
+            package_dir = fake_root / "robocasa/scripts/abot_m05"
+            package_dir.mkdir(parents=True)
+            for init_path in [
+                fake_root / "robocasa/__init__.py",
+                fake_root / "robocasa/scripts/__init__.py",
+                package_dir / "__init__.py",
+            ]:
+                init_path.write_text("", encoding="utf-8")
+
+            marker_path = Path(temp_dir) / "imports.txt"
+            (package_dir / "subtask_progress_recorder.py").write_text(
+                "\n".join(
+                    [
+                        "import os",
+                        "import subprocess",
+                        "import sys",
+                        "with open(os.environ['HOOK_MARKER'], 'a') as f:",
+                        "    f.write('imported\\n')",
+                        "def install_gym_make_hook():",
+                        "    subprocess.run([sys.executable, '-c', 'pass'], check=True)",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PYTHONPATH": f"{SITE_CUSTOMIZE_DIR}:{fake_root}",
+                    "ROBOCASA_TRACK_SUBTASK_PROGRESS": "1",
+                    "HOOK_MARKER": str(marker_path),
+                }
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", "pass"],
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(
+                marker_path.read_text(encoding="utf-8").splitlines(),
+                ["imported"],
+            )
 
     def test_all_rejects_detached_parallel_split_launch(self):
         result = run_script(EVAL_SCRIPT, "all", "--dry-run", "--background")
