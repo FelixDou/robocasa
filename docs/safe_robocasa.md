@@ -4,6 +4,10 @@ For the distinct RLDX-1 feature contract and ZeroMQ collection path, see
 [`safe_rldx1.md`](safe_rldx1.md). RLDX-1 and π0 feature datasets must not be
 mixed.
 
+For ABot-M0.5's action-stream feature and released websocket/KV-cache chunk
+protocol, see [`safe_abot_m05.md`](safe_abot_m05.md). ABot, RLDX-1, and π0
+feature datasets are mutually incompatible.
+
 ## Scope
 
 This integration collects natural π0 task successes and natural π0 task failures in registered RoboCasa atomic environments. RoboCasa's task-success predicate is the only label authority: `failure_label` is `0` when the task succeeds and `1` otherwise. Reaching the rollout horizon without success is a failure. No frame-level failure onset, subtask label, recovery behavior, expert conversion, model training, calibration, or detector evaluation is part of this collection path.

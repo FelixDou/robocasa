@@ -30,10 +30,14 @@ class FakeEnv:
         self.seed = seed
         self.steps = 0
         self.reset_calls = 0
+        self.reset_seeds = []
         self.closed = False
 
-    def reset(self):
+    def reset(self, seed=None):
         self.reset_calls += 1
+        self.reset_seeds.append(seed)
+        if seed is not None:
+            self.seed = int(seed)
         self.steps = 0
         return {"annotation.human.task_description": "turn on the sink faucet"}, {}
 
@@ -101,6 +105,52 @@ class FakeRLDXPolicy(FakePolicy):
                 }
             )
         return action
+
+
+class FakeABotPolicy(FakePolicy):
+    def __call__(self, obs, instruction=None):
+        action = super().__call__(obs, instruction=instruction)
+        if self.pending is not None:
+            self.pending["metadata"].update(
+                {
+                    "model_family": "abot_m05",
+                    "feature_layer": (
+                        "action_stream_post_norm_pre_action_proj_out"
+                    ),
+                    "policy_name": "mock-abot",
+                    "policy_checkpoint": "mock-abot-checkpoint",
+                }
+            )
+        return action
+
+
+class FakeABotChunkProtocolPolicy(FakePolicy):
+    def __call__(self, obs, instruction=None):
+        if self.env_step in {0, 16, 48}:
+            value = self.env.seed + self.inference_index + 1
+            self.pending = {
+                "env_step": self.env_step,
+                "environment_step": self.env_step,
+                "inference_index": self.inference_index,
+                "features": np.full((2, 32, 8), value, dtype=np.float32),
+                "actions": np.full((32, 12), value, dtype=np.float32),
+                "metadata": {
+                    "schema_version": 1,
+                    "model_family": "abot_m05",
+                    "feature_layer": (
+                        "action_stream_post_norm_pre_action_proj_out"
+                    ),
+                    "feature_dtype": "float32",
+                    "feature_aggregation": "raw",
+                    "policy_name": "mock-abot",
+                    "policy_checkpoint": "mock-abot-checkpoint",
+                    "action_horizon": 32,
+                    "flow_steps": 2,
+                },
+            }
+            self.inference_index += 1
+        self.env_step += 1
+        return np.full(12, self.env.seed, dtype=np.float32)
 
 
 def fake_runtime(tracker=None, policy_cls=FakePolicy):
@@ -288,6 +338,85 @@ class TestSafeAtomicCollection(unittest.TestCase):
             args.seed_protocol = "official_rldx"
             with self.assertRaisesRegex(ValueError, "incompatible"):
                 prepare_plan(args)
+
+            args = collection_args(tmp)
+            args.model_family = "abot_m05"
+            args.seed_protocol = "official_openpi"
+            with self.assertRaisesRegex(ValueError, "incompatible"):
+                prepare_plan(args)
+
+    def test_abot_collection_uses_official_incrementing_reset_seeds(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as exported,
+        ):
+            args = collection_args(tmp, num_rollouts=3)
+            args.seed = 7
+            args.seed_protocol = "official_abot"
+            args.model_family = "abot_m05"
+            args.policy_module = "robocasa.recovery.abot_websocket_policy:make_policy"
+            args.policy_name = "mock-abot"
+            args.checkpoint = "mock-abot-checkpoint"
+            tracker = {}
+
+            plan = prepare_plan(args)
+            self.assertEqual(plan["config"]["seeds"], [7, 8, 9])
+            self.assertEqual(
+                [attempt["environment_seed"] for attempt in plan["attempts"]],
+                [7, 8, 9],
+            )
+            result = run_collection(
+                args,
+                runtime=fake_runtime(tracker, policy_cls=FakeABotPolicy),
+            )
+            records = load_manifest(tmp)
+
+            self.assertEqual(result["counts"]["valid_rollouts"], 3)
+            self.assertEqual(len(tracker["envs"]), 1)
+            self.assertEqual(tracker["envs"][0].reset_seeds, [7, 8, 9])
+            self.assertEqual(
+                [record.environment_reset_index for record in records],
+                [0, 1, 2],
+            )
+            self.assertTrue(
+                all(record.seed_protocol == "official_abot" for record in records)
+            )
+            self.assertTrue(
+                all(record.model_family == "abot_m05" for record in records)
+            )
+            self.assertTrue(
+                all(record.abot_repository_commit for record in records)
+            )
+            self.assertTrue(
+                all(record.openpi_repository_commit is None for record in records)
+            )
+            self.assertTrue(validate_atomic_dataset(tmp)["valid"])
+            report = export_to_official_safe(tmp, exported)
+            self.assertEqual(
+                report["format"],
+                "official_safe_abot_m05_env_records_policy_records",
+            )
+
+    def test_abot_validator_accepts_official_first_half_chunk_spacing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(tmp, num_rollouts=1)
+            args.seed = 7
+            args.seed_protocol = "official_abot"
+            args.model_family = "abot_m05"
+            args.policy_module = "robocasa.recovery.abot_websocket_policy:make_policy"
+            args.policy_name = "mock-abot"
+            args.checkpoint = "mock-abot-checkpoint"
+            args.replan_steps = 32
+            args.horizon = 50
+
+            run_collection(
+                args,
+                runtime=fake_runtime(policy_cls=FakeABotChunkProtocolPolicy),
+            )
+            record = load_manifest(tmp)[0]
+            self.assertEqual(record.inference_env_steps, [0, 16, 48])
+            validation = validate_atomic_dataset(tmp)
+            self.assertTrue(validation["valid"], validation["errors"])
 
     def test_official_protocol_rejects_seed_end(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,0 +1,199 @@
+diff --git a/wam/modules/model.py b/wam/modules/model.py
+index ec9766f..11c5322 100755
+--- a/wam/modules/model.py
++++ b/wam/modules/model.py
+@@ -1122,6 +1122,7 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin):
+         action_mode=False,
+         train_mode=False,
+         video_only=False,
++        return_safe_features=False,
+     ):
+         r"""Inference forward.
+
+@@ -1205,6 +1206,16 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin):
+         latent_hidden_states = (out_norm(latent_hidden_states.float()) *
+                                 (1. + scale) + shift).type_as(latent_hidden_states)
+
++        safe_features = None
++        if return_safe_features:
++            if not action_mode:
++                raise ValueError(
++                    "SAFE feature capture is only defined for the action stream."
++                )
++            # SAFE-style ABot features are the normalized action-stream tokens
++            # immediately before the learned action output projection.
++            safe_features = latent_hidden_states.detach()
++
+         if action_mode:
+             latent_hidden_states = self.action_proj_out(latent_hidden_states)
+         else:
+@@ -1212,6 +1223,8 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin):
+             latent_hidden_states = rearrange(latent_hidden_states,
+                                              'b l (n c) -> b (l n) c',
+                                              n=math.prod(self.patch_size))
++        if return_safe_features:
++            return latent_hidden_states, safe_features
+         return latent_hidden_states
+
+
+diff --git a/wam/pipelines/core/pipeline_output.py b/wam/pipelines/core/pipeline_output.py
+index e0c49da..fc61947 100755
+--- a/wam/pipelines/core/pipeline_output.py
++++ b/wam/pipelines/core/pipeline_output.py
+@@ -17,3 +17,4 @@ class WAMPipelineOutput:
+     actions: object
+     latents: object | None = None
+     frames: object | None = None
++    safe_features: object | None = None
+diff --git a/wam/pipelines/core/pipeline_wam.py b/wam/pipelines/core/pipeline_wam.py
+index 35d984e..82c17a6 100755
+--- a/wam/pipelines/core/pipeline_wam.py
++++ b/wam/pipelines/core/pipeline_wam.py
+@@ -667,6 +667,7 @@ class WAMPipeline:
+         cond: torch.Tensor | None,
+         frame_chunk_size: int,
+         video_exec_step: int = -1,
++        safe_feature_steps: list[torch.Tensor] | None = None,
+     ) -> torch.Tensor:
+         """Run a single denoising phase (video or action) to completion."""
+         for i, t in enumerate(tqdm(timesteps, desc="video" if is_video else "action")):
+@@ -681,11 +682,12 @@ class WAMPipeline:
+                 cond=cond,
+             )
+
+-            noise_pred = self.transformer(
++            transformer_output = self.transformer(
+                 self._apply_cfg_to_stream(stream),
+                 update_cache=1 if is_final else 0,
+                 cache_name=self.cache.name,
+                 action_mode=not is_video,
++                return_safe_features=safe_feature_steps is not None,
+             )
+
+             if is_video:
+@@ -693,6 +695,13 @@ class WAMPipeline:
+             else:
+                 should_step = not is_final
+
++            if safe_feature_steps is not None:
++                noise_pred, safe_features = transformer_output
++                if should_step:
++                    safe_feature_steps.append(safe_features.detach())
++            else:
++                noise_pred = transformer_output
++
+             if should_step:
+                 if is_video:
+                     noise_pred = data_seq_to_patch(
+@@ -911,6 +920,7 @@ class WAMPipeline:
+         latents=None,
+         actions=None,
+         return_dict=True,
++        return_safe_features=False,
+     ):
+         """Run one video+action denoising chunk for the current observation.
+
+@@ -996,6 +1006,7 @@ class WAMPipeline:
+             if frame_st_id == 0 else None
+         )
+
++        safe_feature_steps = [] if return_safe_features else None
+         with torch.no_grad():
+             latents = self._run_denoising_phase(
+                 latents=latents,
+@@ -1017,6 +1028,7 @@ class WAMPipeline:
+                 frame_st_id=frame_st_id,
+                 cond=action_cond,
+                 frame_chunk_size=frame_chunk_size,
++                safe_feature_steps=safe_feature_steps,
+             )
+
+         self._current_timestep = None
+@@ -1030,7 +1042,16 @@ class WAMPipeline:
+         torch.cuda.empty_cache()
+         if not return_dict:
+             return actions, latents
+-        return WAMPipelineOutput(actions=actions, latents=latents)
++        safe_features = (
++            torch.stack(safe_feature_steps, dim=1).float()
++            if safe_feature_steps is not None
++            else None
++        )
++        return WAMPipelineOutput(
++            actions=actions,
++            latents=latents,
++            safe_features=safe_features,
++        )
+
+     @torch.no_grad()
+     def infer_chunk(self, obs, frame_st_id=0):
+diff --git a/wam/pipelines/core/server_policy.py b/wam/pipelines/core/server_policy.py
+index 1e15679..4692fa9 100755
+--- a/wam/pipelines/core/server_policy.py
++++ b/wam/pipelines/core/server_policy.py
+@@ -60,10 +60,63 @@ class WAMServerPolicy(WAMPipeline):
+
+     def _handle_infer_chunk(self, obs):
+         logger.info("Infer one chunk")
++        obs = dict(obs)
++        request_safe_features = obs.pop("request_safe_features", False)
++        if not isinstance(request_safe_features, bool):
++            raise ValueError("request_safe_features must be a bool")
+         t_start = time.time()
+-        action = self(obs, frame_st_id=self.frame_st_id).actions
++        output = self(
++            obs,
++            frame_st_id=self.frame_st_id,
++            return_safe_features=request_safe_features,
++        )
++        action = output.actions
+         self._log_chunk_perf(time.time() - t_start, action)
+-        return {"action": action}
++        response = {"action": action}
++        if request_safe_features:
++            features = output.safe_features
++            if features is None:
++                raise RuntimeError(
++                    "SAFE features were requested, but the ABot pipeline "
++                    "returned no feature tensor."
++                )
++            if features.ndim != 4 or features.shape[0] != 1:
++                raise RuntimeError(
++                    "ABot SAFE features must have shape "
++                    "(batch, flow_steps, action_horizon, feature_dim); got "
++                    f"{tuple(features.shape)}"
++                )
++            if not torch.isfinite(features).all():
++                raise RuntimeError("ABot SAFE features contain NaN or Inf")
++            if not torch.any(features):
++                raise RuntimeError("ABot SAFE features are entirely zero")
++            action_horizon = int(action.shape[1] * action.shape[2])
++            if features.shape[2] != action_horizon:
++                raise RuntimeError(
++                    "ABot SAFE action horizon disagrees with predicted actions: "
++                    f"{features.shape[2]} != {action_horizon}"
++                )
++            feature_array = features.float().cpu().numpy()
++            response.update(
++                {
++                    "safe_features": feature_array,
++                    "safe_feature_metadata": {
++                        "schema_version": 1,
++                        "model_family": "abot_m05",
++                        "model_id": "ABot-M0.5",
++                        "checkpoint": self.job_config.posttrain_model_name_or_path,
++                        "feature_layer": (
++                            "action_stream_post_norm_pre_action_proj_out"
++                        ),
++                        "feature_shape": list(feature_array.shape[1:]),
++                        "feature_dtype": "float32",
++                        "action_horizon": int(feature_array.shape[2]),
++                        "flow_steps": int(feature_array.shape[1]),
++                        "aggregation": "raw",
++                    },
++                }
++            )
++        return response
+
+     def _log_chunk_perf(self, elapsed, action):
+         logger.info(f"[Shape] action numpy shape: {getattr(action, 'shape', None)}")

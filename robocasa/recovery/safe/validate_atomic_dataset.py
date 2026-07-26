@@ -116,7 +116,14 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
                 errors.append(f"{prefix}: inference environment steps mismatch")
             if len(steps) and (np.diff(steps) <= 0).any():
                 errors.append(f"{prefix}: inference steps are not strictly increasing")
-            if len(steps) > 1 and (np.diff(steps) < record.replan_steps).any():
+            spacings = np.diff(steps)
+            if (
+                len(steps) > 1
+                and record.model_family == "abot_m05"
+                and spacings[0] == record.action_horizon // 2
+            ):
+                spacings = spacings[1:]
+            if len(spacings) and (spacings < record.replan_steps).any():
                 errors.append(
                     f"{prefix}: inference spacing is below replan_steps; cached actions may have duplicated features"
                 )

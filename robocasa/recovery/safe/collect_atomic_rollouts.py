@@ -25,6 +25,7 @@ SAFE_COMMIT = "b6036abe07b2b2bb9996afb2c07f13d6a9f507c0"
 OFFICIAL_SAFE_OPENPI_COMMIT = "9c99ed53f6a0c9be93a1c63cee5792620777d96b"
 ROBOCASA_OPENPI_COMMIT = "5a6beda9ff99da30b4e1b59320f6a32971d7c397"
 RLDX1_BENCHMARK_COMMIT = "ef05cd4ae634ff97d672d42275febbc0b92cc192"
+ABOT_M05_BENCHMARK_COMMIT = "7642747ed2817b241dde5df06e17ee80192718ad"
 SUMMARY_NAME = "summary.json"
 ERRORS_NAME = "errors.jsonl"
 SKIPPED_NAME = "skipped.jsonl"
@@ -115,7 +116,14 @@ def planned_seeds(args):
 
 
 def uses_repeated_reset_protocol(seed_protocol):
-    return seed_protocol in {"official_openpi", "official_rldx"}
+    return seed_protocol in {"official_openpi", "official_rldx", "official_abot"}
+
+
+def reset_kwargs(seed_protocol, environment_seed):
+    """Match the seed/reset call used by each released policy evaluator."""
+    if seed_protocol == "official_abot":
+        return {"seed": int(environment_seed)}
+    return {}
 
 
 def quota_reached(successes, failures, success_quota, failure_quota):
@@ -284,11 +292,15 @@ def prepare_plan(args):
         raise ValueError(
             "--seed-end is incompatible with official repeated-reset seed protocols"
         )
-    incompatible_protocol = {
-        "pi0": "official_rldx",
-        "rldx1": "official_openpi",
+    official_protocol = {
+        "pi0": "official_openpi",
+        "rldx1": "official_rldx",
+        "abot_m05": "official_abot",
     }[args.model_family]
-    if args.seed_protocol == incompatible_protocol:
+    if (
+        args.seed_protocol.startswith("official_")
+        and args.seed_protocol != official_protocol
+    ):
         raise ValueError(
             f"--seed-protocol {args.seed_protocol} is incompatible with "
             f"--model-family {args.model_family}"
@@ -326,7 +338,13 @@ def prepare_plan(args):
             )
         task_horizons = {task: registered_horizons[task] for task in tasks}
         horizon_source = "robocasa_dataset_registry"
-    if uses_repeated_reset_protocol(args.seed_protocol):
+    if args.seed_protocol == "official_abot":
+        seeds = list(range(args.seed, args.seed + args.num_rollouts))
+        attempt_coordinates = [
+            (environment_seed, reset_index)
+            for reset_index, environment_seed in enumerate(seeds)
+        ]
+    elif uses_repeated_reset_protocol(args.seed_protocol):
         seeds = [args.seed]
         attempt_coordinates = [
             (args.seed, reset_index) for reset_index in range(args.num_rollouts)
@@ -349,6 +367,9 @@ def prepare_plan(args):
         ),
         "rldx_repository_commit": (
             args.rldx_repository_commit if args.model_family == "rldx1" else None
+        ),
+        "abot_repository_commit": (
+            args.abot_repository_commit if args.model_family == "abot_m05" else None
         ),
     }
     attempts = []
@@ -410,6 +431,9 @@ def prepare_plan(args):
         "rldx_repository_commit": (
             args.rldx_repository_commit if args.model_family == "rldx1" else None
         ),
+        "abot_repository_commit": (
+            args.abot_repository_commit if args.model_family == "abot_m05" else None
+        ),
         "robocasa_commit": robocasa_commit,
     }
     return {"config": config, "identity": identity, "attempts": attempts}
@@ -440,6 +464,7 @@ def _assert_resume_compatible(previous, current):
         "max_errors",
         "openpi_repository_commit",
         "rldx_repository_commit",
+        "abot_repository_commit",
     )
     mismatches = []
     for key in keys:
@@ -561,7 +586,9 @@ def run_collection(args, runtime=None):
                                 shared_env.close()
                                 shared_env = None
                                 raise
-                        shared_env.reset()
+                        shared_env.reset(
+                            **reset_kwargs(args.seed_protocol, seed)
+                        )
                         reset_policy = getattr(shared_policy, "reset", None)
                         if reset_policy is not None:
                             reset_policy()
@@ -647,6 +674,7 @@ def run_collection(args, runtime=None):
                     frame_fn=frame_fn,
                     video_frame_stride=args.video_frame_stride,
                     require_safe_features=True,
+                    reset_kwargs=reset_kwargs(args.seed_protocol, seed),
                 )
                 if writer is not None:
                     writer.close()
@@ -749,6 +777,9 @@ def run_collection(args, runtime=None):
                     rldx_repository_commit=plan["config"][
                         "rldx_repository_commit"
                     ],
+                    abot_repository_commit=plan["config"][
+                        "abot_repository_commit"
+                    ],
                     robocasa_commit=plan["config"]["robocasa_commit"],
                     action_recording_requested=args.record_actions,
                     video_recording_requested=args.record_videos,
@@ -840,7 +871,12 @@ def build_parser():
     parser.add_argument("--seed-end", type=int)
     parser.add_argument(
         "--seed-protocol",
-        choices=("rollout_index", "official_openpi", "official_rldx"),
+        choices=(
+            "rollout_index",
+            "official_openpi",
+            "official_rldx",
+            "official_abot",
+        ),
         default="rollout_index",
         help=(
             "Use a distinct seed per rollout, or match an official policy evaluator "
@@ -852,7 +888,11 @@ def build_parser():
     parser.add_argument("--policy-name", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--policy-config", default="{}", help="JSON object")
-    parser.add_argument("--model-family", choices=("pi0", "rldx1"), default="pi0")
+    parser.add_argument(
+        "--model-family",
+        choices=("pi0", "rldx1", "abot_m05"),
+        default="pi0",
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8120)
     parser.add_argument("--replan-steps", type=int, default=5)
@@ -899,6 +939,7 @@ def build_parser():
     parser.add_argument("--official-safe-openpi-commit", default=OFFICIAL_SAFE_OPENPI_COMMIT)
     parser.add_argument("--openpi-repository-commit", default=ROBOCASA_OPENPI_COMMIT)
     parser.add_argument("--rldx-repository-commit", default=RLDX1_BENCHMARK_COMMIT)
+    parser.add_argument("--abot-repository-commit", default=ABOT_M05_BENCHMARK_COMMIT)
     parser.add_argument("--robocasa-commit")
     return parser
 

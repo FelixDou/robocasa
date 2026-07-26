@@ -24,9 +24,10 @@ def collect_single_rollout(
     frame_fn=None,
     video_frame_stride=1,
     require_safe_features=True,
+    reset_kwargs=None,
 ):
     """Simulator-light collection core used by the live CLI and mocked tests."""
-    reset_result = env.reset()
+    reset_result = env.reset(**(reset_kwargs or {}))
     obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
     if hasattr(policy, "reset"):
         policy.reset()

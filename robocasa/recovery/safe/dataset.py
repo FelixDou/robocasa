@@ -166,7 +166,7 @@ def generate_splits(
     train_fraction: float = 0.6,
     calibration_fraction: float = 0.2,
 ) -> dict:
-    """Split by episode identity, including reset index for official OpenPI runs."""
+    """Split by episode identity, including official-evaluator reset indices."""
     if not records:
         raise ValueError("Cannot split an empty dataset")
     if train_fraction <= 0 or calibration_fraction <= 0:
@@ -183,7 +183,8 @@ def generate_splits(
     for record in records:
         episode_identity = (
             record.environment_reset_index
-            if record.seed_protocol in {"official_openpi", "official_rldx"}
+            if record.seed_protocol
+            in {"official_openpi", "official_rldx", "official_abot"}
             else None
         )
         grouped[

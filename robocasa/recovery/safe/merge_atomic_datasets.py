@@ -37,6 +37,7 @@ COMPATIBLE_CONFIG_KEYS = (
     "official_safe_openpi_commit",
     "openpi_repository_commit",
     "rldx_repository_commit",
+    "abot_repository_commit",
 )
 
 

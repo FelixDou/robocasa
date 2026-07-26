@@ -153,7 +153,7 @@ def export_to_official_safe(
     if not validation["valid"]:
         raise ValueError("Source dataset is invalid: " + "; ".join(validation["errors"]))
     if not validation["official_safe_loader_compatible"]:
-        raise ValueError("Source dataset lacks fields required by the official SAFE π0 loader")
+        raise ValueError("Source dataset lacks fields required by the official SAFE loader")
     source_records = load_manifest(dataset_dir)
     records, selection = select_balanced_records(
         source_records,
@@ -277,11 +277,11 @@ def export_to_official_safe(
         )
     report = {
         "schema_version": 1,
-        "format": (
-            "official_safe_pizero_env_records_policy_records"
-            if plan["model_families"] == ["pi0"]
-            else "official_safe_rldx1_env_records_policy_records"
-        ),
+        "format": {
+            ("pi0",): "official_safe_pizero_env_records_policy_records",
+            ("rldx1",): "official_safe_rldx1_env_records_policy_records",
+            ("abot_m05",): "official_safe_abot_m05_env_records_policy_records",
+        }[tuple(plan["model_families"])],
         "complete": True,
         "created_at": utc_now(),
         **plan,

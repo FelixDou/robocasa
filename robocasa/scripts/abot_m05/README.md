@@ -210,3 +210,10 @@ Expected leaderboard reference for the artifact named ABot-M0.5:
 The ABot paper/repository also associates 46.6% with “ABot-M0.5,” while the
 RoboCasa leaderboard attributes that score to ABot-M0.6. Preserve per-task and
 split summaries so the released checkpoint can be compared against both claims.
+
+## SAFE-style failure detection
+
+The raw SAFE adapter, companion ABot patch, official seed/chunk protocol, and
+bounded cluster smoke are documented in
+[`docs/safe_abot_m05.md`](../../../docs/safe_abot_m05.md). Use a separate
+patched worktree so this official evaluation checkout remains clean.
