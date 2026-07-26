@@ -107,6 +107,17 @@ class TestSafeRLDXPolicy(unittest.TestCase):
         self.assertTrue(
             policy.client.requests[0][1]["request_safe_features"]
         )
+        request_observation = policy.client.requests[0][0]
+        self.assertEqual(
+            request_observation["annotation.human.task_description"],
+            ["turn on the sink"],
+        )
+        self.assertEqual(
+            request_observation["language"][
+                "annotation.human.task_description"
+            ],
+            [["turn on the sink"]],
+        )
 
         policy(observation())
         self.assertIsNone(policy.pop_inference_record())

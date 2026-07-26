@@ -432,11 +432,15 @@ class RLDXZeroMQPolicy:
                     "task_description": [[instruction]],
                 }
             },
-            "annotation.human.action.task_description": [[instruction]],
-            "annotation.human.task_description": [[instruction]],
-            "language.instruction": [[instruction]],
-            "language.task_description": [[instruction]],
-            "task": [[instruction]],
+            # The RLDX simulation policy wrapper consumes flat language fields
+            # as one string per batch item, then adds the temporal dimension
+            # before forwarding to the underlying policy. Keep the nested
+            # ``language`` representation above for direct-policy compatibility.
+            "annotation.human.action.task_description": [instruction],
+            "annotation.human.task_description": [instruction],
+            "language.instruction": [instruction],
+            "language.task_description": [instruction],
+            "task": [instruction],
         }
         for key, value in video.items():
             element[f"video.{key}"] = value
