@@ -273,7 +273,7 @@ preflight() {
             "from wam.modules.attention_ops import flash_attn_func; assert flash_attn_func is not None, 'flash-attn is not installed'; print('flash-attn: OK')"
     fi
     PYTHONPATH="${CLIENT_PYTHONPATH}" "${CLIENT_PYTHON}" -c \
-        "import click, sys; choice_generic = hasattr(click.Choice, '__class_getitem__'); choice_generic or sys.exit(f'Incompatible client Click: {click.__version__}. Run: ${CLIENT_PYTHON} -m pip install click==8.2.1'); import typer, gymnasium, msgpack, scipy, websockets, robocasa; assert robocasa.__version__ == '1.0.1', robocasa.__version__; print('RoboCasa client imports: OK'); print('robocasa', robocasa.__version__); print('click', click.__version__, 'typer', typer.__version__)"
+        "import click, sys; from importlib.metadata import version; choice_generic = hasattr(click.Choice, '__class_getitem__'); choice_generic or sys.exit(f'Incompatible client Click: {version(\"click\")}. Run: ${CLIENT_PYTHON} -m pip install click==8.2.1'); import typer, gymnasium, msgpack, scipy, websockets, robocasa; assert robocasa.__version__ == '1.0.1', robocasa.__version__; print('RoboCasa client imports: OK'); print('robocasa', robocasa.__version__); print('click', version('click'), 'typer', version('typer'))"
     echo "ABot-M0.5 preflight: OK"
     echo "Durable checkpoint: ${ABOT_CHECKPOINT_ROOT}"
     echo "Requested GPUs: ${GPU_IDS}"
@@ -420,26 +420,49 @@ run_split() {
     local script_path
     local start_port
     local run_root
+    local all_run_root
     local launcher_log
+    local launcher_status
     local worker_log_dir
     script_path=$(split_script "${split_name}")
     start_port=$(split_port_base "${split_name}")
-    run_root=${ROBOCASA_ROLLOUT_ROOT}/abot_m05/${RUN_TAG}/${split_name}
+    all_run_root=${ROBOCASA_ROLLOUT_ROOT}/abot_m05/${RUN_TAG}
+    run_root=${all_run_root}/${split_name}
     launcher_log=${ROBOCASA_LOG_ROOT}/eval/${RUN_TAG}_${split_name}_launcher.log
     worker_log_dir=${ROBOCASA_LOG_ROOT}/eval/${RUN_TAG}_${split_name}_workers
     run mkdir -p "${run_root}" "${ROBOCASA_LOG_ROOT}/eval" "${worker_log_dir}"
     echo "${split_name} result root: ${run_root}"
-    run_in_abot_repo \
+    if run_in_abot_repo \
         "${common_env[@]}" \
-        BACKGROUND="${BACKGROUND}" \
-        RUN_TAG="${RUN_TAG}_${split_name}" \
-        RUN_ROOT="${run_root}" \
-        LOCAL_LAUNCH_LOG_DIR="${worker_log_dir}" \
-        BACKGROUND_LOG="${launcher_log}" \
-        START_PORT="${start_port}" \
-        MASTER_PORT_BASE="$((start_port + 100))" \
-        NUMBA_CACHE_DIR="/tmp/${USER_ID}/numba_abot_m05_${split_name}" \
-        bash "${script_path}"
+            BACKGROUND="${BACKGROUND}" \
+            RUN_TAG="${RUN_TAG}_${split_name}" \
+            RUN_ROOT="${run_root}" \
+            LOCAL_LAUNCH_LOG_DIR="${worker_log_dir}" \
+            BACKGROUND_LOG="${launcher_log}" \
+            START_PORT="${start_port}" \
+            MASTER_PORT_BASE="$((start_port + 100))" \
+            NUMBA_CACHE_DIR="/tmp/${USER_ID}/numba_abot_m05_${split_name}" \
+            bash "${script_path}"; then
+        return 0
+    else
+        launcher_status=$?
+    fi
+
+    if [[ "${launcher_status}" != "1" || "${BACKGROUND}" == "1" ]]; then
+        return "${launcher_status}"
+    fi
+
+    echo "${split_name} launcher returned 1; validating aggregated results."
+    if run "${CLIENT_PYTHON}" \
+        "${ROBOCASA_REPO}/robocasa/scripts/abot_m05/summarize_results.py" \
+        "${all_run_root}" \
+        --expected-episodes "${NUM_EPISODES}" \
+        --single-split "${split_name}"; then
+        echo "${split_name} is complete after retries; continuing."
+        return 0
+    fi
+    echo "${split_name} remains incomplete; preserving partial results." >&2
+    return "${launcher_status}"
 }
 
 echo "ABot-M0.5 evaluation"

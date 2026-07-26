@@ -12,6 +12,7 @@ from robocasa.scripts.abot_m05.subtask_progress_recorder import (
 from robocasa.scripts.abot_m05.summarize_results import (
     EXPECTED_TASK_COUNTS,
     summarize_run,
+    validate_split_summary,
 )
 from robocasa.scripts.abot_m05.summarize_subtask_progress import (
     summarize_subtask_progress,
@@ -288,6 +289,62 @@ class TestABotM05ClusterScripts(unittest.TestCase):
             self.assertFalse(result["complete"])
             self.assertTrue(
                 any("missing split summary" in issue for issue in result["issues"])
+            )
+
+    def test_single_split_validation_accepts_retry_recovered_summary(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_root = Path(temp_dir)
+            split_name = "composite_seen"
+            expected_episodes = 10
+            split_dir = run_root / split_name
+            split_dir.mkdir()
+            per_env = [
+                {
+                    "env_name": f"task_{task_index}",
+                    "num_episodes": expected_episodes,
+                    "success_count": task_index % (expected_episodes + 1),
+                    "success_rate": (
+                        task_index % (expected_episodes + 1)
+                    )
+                    / expected_episodes,
+                }
+                for task_index in range(EXPECTED_TASK_COUNTS[split_name])
+            ]
+            (split_dir / "summary.json").write_text(
+                json.dumps({"per_env": per_env}),
+                encoding="utf-8",
+            )
+
+            result = validate_split_summary(
+                run_root,
+                split_name,
+                expected_episodes,
+            )
+            self.assertTrue(result["complete"], result["issues"])
+            self.assertEqual(result["task_count"], 16)
+            self.assertEqual(result["episode_count"], 160)
+
+    def test_single_split_validation_rejects_duplicate_retry_results(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_root = Path(temp_dir)
+            split_name = "atomic_seen"
+            split_dir = run_root / split_name
+            split_dir.mkdir()
+            duplicate = {
+                "env_name": "CloseFridge",
+                "num_episodes": 10,
+                "success_count": 5,
+                "success_rate": 0.5,
+            }
+            (split_dir / "summary.json").write_text(
+                json.dumps({"per_env": [duplicate, duplicate]}),
+                encoding="utf-8",
+            )
+
+            result = validate_split_summary(run_root, split_name, 10)
+            self.assertFalse(result["complete"])
+            self.assertTrue(
+                any("duplicate task CloseFridge" in issue for issue in result["issues"])
             )
 
     def test_subtask_recorder_writes_compact_episode_sidecar(self):

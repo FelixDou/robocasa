@@ -174,17 +174,29 @@ Monitor with:
 tail -f "$LOG"
 nvidia-smi
 
-find "/gs/bs/tga-shinoda/felid/robocasa_rollouts/abot_m05/$RUN_TAG" \
-  -name summary.json -o -name robocasa_eval.json -o -name overall_summary.json
+RUN_ROOT="/gs/bs/tga-shinoda/felid/robocasa_rollouts/abot_m05/$RUN_TAG"
 
-find "/gs/bs/tga-shinoda/felid/robocasa_rollouts/abot_m05/$RUN_TAG" \
-  -name subtask_progress.json -o -name subtask_progress_summary.json
+# Per-task aggregates only. A raw robocasa_eval.json count also includes
+# batch-level files and therefore double-counts completed tasks.
+find "$RUN_ROOT" -type f -name robocasa_eval.json \
+  ! -path '*/batches/*'
+
+find "$RUN_ROOT" -type f \
+  \( -name summary.json -o -name overall_summary.json \
+     -o -name subtask_progress_summary.json \)
 ```
 
 After all three splits finish, the wrapper validates exactly 18 Atomic-Seen,
 16 Composite-Seen, and 16 Composite-Unseen task results with the requested
 episode count. It writes `overall_summary.json` and exits nonzero instead of
 silently reporting a partial run.
+
+The pinned upstream scheduler can return status 1 after a transient failed
+attempt even when its retries completed every episode. The harness validates
+the aggregated split in that case and continues only when task uniqueness,
+task count, episode count, success count, and success rate are all complete.
+Reusing the same run tag remains safe: completed episodes are discovered from
+their preserved batch JSONs and skipped.
 
 Expected leaderboard reference for the artifact named ABot-M0.5:
 

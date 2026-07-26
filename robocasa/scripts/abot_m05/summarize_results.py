@@ -24,6 +24,79 @@ def load_split_summary(path: Path) -> dict:
     return data
 
 
+def validate_split_summary(
+    run_root: Path,
+    split_name: str,
+    expected_episodes: int,
+) -> dict:
+    """Validate one aggregated split before accepting a launcher retry exit."""
+    expected_tasks = EXPECTED_TASK_COUNTS[split_name]
+    summary_path = run_root / split_name / "summary.json"
+    issues: list[str] = []
+    try:
+        source = load_split_summary(summary_path)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "split": split_name,
+            "summary_path": str(summary_path),
+            "complete": False,
+            "task_count": 0,
+            "expected_task_count": expected_tasks,
+            "issues": [str(exc)],
+        }
+
+    task_names: set[str] = set()
+    episode_count = 0
+    for entry in source["per_env"]:
+        task_name = str(entry.get("env_name", "")).strip()
+        if not task_name:
+            issues.append(f"{split_name}: result with empty env_name")
+            continue
+        if task_name in task_names:
+            issues.append(f"{split_name}: duplicate task {task_name}")
+            continue
+        task_names.add(task_name)
+
+        num_episodes = int(entry.get("num_episodes", 0))
+        success_count = int(entry.get("success_count", 0))
+        episode_count += num_episodes
+        if num_episodes != expected_episodes:
+            issues.append(
+                f"{split_name}/{task_name}: expected {expected_episodes} "
+                f"episodes, found {num_episodes}"
+            )
+        if success_count < 0 or success_count > num_episodes:
+            issues.append(
+                f"{split_name}/{task_name}: invalid success count "
+                f"{success_count}/{num_episodes}"
+            )
+            continue
+        expected_rate = success_count / max(1, num_episodes)
+        recorded_rate = float(entry.get("success_rate", expected_rate))
+        if abs(recorded_rate - expected_rate) > 1e-9:
+            issues.append(
+                f"{split_name}/{task_name}: recorded success_rate "
+                f"{recorded_rate} does not match {expected_rate}"
+            )
+
+    if len(task_names) != expected_tasks:
+        issues.append(
+            f"{split_name}: expected {expected_tasks} tasks, "
+            f"found {len(task_names)}"
+        )
+
+    return {
+        "split": split_name,
+        "summary_path": str(summary_path),
+        "complete": not issues,
+        "task_count": len(task_names),
+        "expected_task_count": expected_tasks,
+        "episode_count": episode_count,
+        "expected_episode_count": expected_tasks * expected_episodes,
+        "issues": issues,
+    }
+
+
 def summarize_run(run_root: Path, expected_episodes: int) -> dict:
     issues: list[str] = []
     split_summaries: dict[str, dict] = {}
@@ -167,10 +240,38 @@ def main() -> int:
         default=None,
         help="Defaults to <run_root>/overall_summary.json.",
     )
+    parser.add_argument(
+        "--single-split",
+        choices=sorted(EXPECTED_TASK_COUNTS),
+        default=None,
+        help=(
+            "Validate only this split's aggregated summary. Used to distinguish "
+            "a complete retry-recovered split from a genuinely failed launcher."
+        ),
+    )
     args = parser.parse_args()
 
     if args.expected_episodes < 1:
         parser.error("--expected-episodes must be positive")
+
+    if args.single_split:
+        result = validate_split_summary(
+            args.run_root,
+            args.single_split,
+            args.expected_episodes,
+        )
+        print(
+            f"{args.single_split}: tasks={result['task_count']}/"
+            f"{result['expected_task_count']} "
+            f"episodes={result.get('episode_count', 0)}/"
+            f"{result.get('expected_episode_count', 0)}"
+        )
+        if result["issues"]:
+            for issue in result["issues"]:
+                print(f"ERROR: {issue}", file=sys.stderr)
+            return 1
+        print(f"validated split summary: {result['summary_path']}")
+        return 0
 
     result = summarize_run(args.run_root, args.expected_episodes)
     output_path = args.output or args.run_root / "overall_summary.json"
