@@ -467,7 +467,6 @@ def _assert_resume_compatible(previous, current):
         "split",
         "base_environment_seed",
         "seed_protocol",
-        "environment_reset_indices",
         "policy_module",
         "policy_name",
         "policy_checkpoint",
@@ -488,6 +487,20 @@ def _assert_resume_compatible(previous, current):
         "rldx_repository_commit",
     )
     mismatches = []
+    previous_reset_indices = previous.get("environment_reset_indices")
+    current_reset_indices = current.get("environment_reset_indices")
+    reset_indices_are_compatible = (
+        previous_reset_indices == current_reset_indices
+        or (
+            isinstance(previous_reset_indices, list)
+            and isinstance(current_reset_indices, list)
+            and len(current_reset_indices) >= len(previous_reset_indices)
+            and current_reset_indices[: len(previous_reset_indices)]
+            == previous_reset_indices
+        )
+    )
+    if not reset_indices_are_compatible:
+        mismatches.append("environment_reset_indices")
     for key in keys:
         previous_value = previous.get(key)
         if key == "model_family" and previous_value is None:

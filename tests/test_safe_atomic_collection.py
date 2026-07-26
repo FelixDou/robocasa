@@ -201,6 +201,22 @@ class TestSafeAtomicCollection(unittest.TestCase):
 
             _assert_resume_compatible(previous, current)
 
+    def test_resume_can_extend_but_not_shrink_official_reset_attempts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            initial_args = collection_args(tmp, num_rollouts=2)
+            initial_args.seed_protocol = "official_rldx"
+            initial_args.model_family = "rldx1"
+            initial = prepare_plan(initial_args)["config"]
+
+            extended_args = collection_args(tmp, num_rollouts=4)
+            extended_args.seed_protocol = "official_rldx"
+            extended_args.model_family = "rldx1"
+            extended = prepare_plan(extended_args)["config"]
+
+            _assert_resume_compatible(initial, extended)
+            with self.assertRaisesRegex(ValueError, "environment_reset_indices"):
+                _assert_resume_compatible(extended, initial)
+
     def test_official_openpi_seed_protocol_reuses_one_environment(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = collection_args(tmp, num_rollouts=3)
