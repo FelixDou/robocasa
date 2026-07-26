@@ -235,22 +235,53 @@ The smoke is successful only if the dataset validator reports `VALID`, the
 features are finite and nonzero, and inference steps are spaced by at least the
 configured eight cached actions.
 
-## Balanced collection and SAFE training
+## Mixed atomic/composite pilot collection
 
-After the smoke, use the same collector quotas and immutable shard/merge
-workflow as π0, changing only the policy, model family, RLDX port, checkpoint,
-and `official_rldx` seed protocol. For example:
+The collector module keeps its historical
+`collect_atomic_rollouts` name, but accepts registered atomic and composite
+RoboCasa tasks. Without `--horizon`, it reads each task's official horizon from
+the current dataset registry. Do not force one common horizon across composite
+tasks.
+
+The first RLDX pilot uses five atomic tasks and five composite-seen tasks. They
+span moderate success rates, longer-horizon failures, and a composite task
+(`LoadDishwasher`) whose ordered progress is substantially higher than its
+binary success rate:
+
+| Type | Task | Pilot target | Official horizon |
+|---|---|---:|---:|
+| Atomic | `CoffeeSetupMug` | 10 success + 10 failure | 600 |
+| Atomic | `CloseToasterOvenDoor` | 10 success + 10 failure | 450 |
+| Atomic | `PickPlaceDrawerToCounter` | 10 success + 10 failure | 750 |
+| Atomic | `PickPlaceCounterToStove` | 10 success + 10 failure | 600 |
+| Atomic | `TurnOnSinkFaucet` | 10 success + 10 failure | 600 |
+| Composite | `PreSoakPan` | 10 success + 10 failure | 2400 |
+| Composite | `ScrubCuttingBoard` | 10 success + 10 failure | 1200 |
+| Composite | `WashLettuce` | 10 success + 10 failure | 1650 |
+| Composite | `StackBowlsCabinet` | 10 success + 10 failure | 2100 |
+| Composite | `LoadDishwasher` | 10 success + 10 failure | 1800 |
+
+Run one immutable shard per server/GPU. The assignment below mixes atomic and
+composite tasks so the sum of expected simulator steps is approximately
+balanced between the two GPUs. Forty-five attempts per task is the pilot cap;
+`--retain-only-quota` stores exactly 10 examples of each class when the target
+is reached:
 
 ```bash
+export RLDX_SAFE_TAG=rldx1_safe_mixed10_10x10_$(date +%Y%m%d_%H%M%S)
+export RLDX_SAFE_ROOT="$STORAGE_BS/robocasa_rollouts/safe/$RLDX_SAFE_TAG"
+mkdir -p "$RLDX_SAFE_ROOT"
+
+CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
 python -u -m robocasa.recovery.safe.collect_atomic_rollouts \
-  --output-dir "$RLDX_SAFE_DATASET" \
-  --tasks CloseFridge OpenDrawer PickPlaceCounterToCabinet \
-          PickPlaceCounterToStove TurnOnSinkFaucet \
-  --num-rollouts 200 \
+  --output-dir "$RLDX_SAFE_ROOT/shard0" \
+  --tasks LoadDishwasher PreSoakPan CoffeeSetupMug \
+          CloseToasterOvenDoor PickPlaceDrawerToCounter \
+  --num-rollouts 45 \
   --seed 7 \
   --seed-protocol official_rldx \
-  --success-quota 20 \
-  --failure-quota 20 \
+  --success-quota 10 \
+  --failure-quota 10 \
   --retain-only-quota \
   --policy-module robocasa.recovery.rldx_zmq_policy:make_policy \
   --model-family rldx1 \
@@ -265,10 +296,61 @@ python -u -m robocasa.recovery.safe.collect_atomic_rollouts \
   --record-actions \
   --record-videos \
   --video-frame-stride 2 \
-  --max-errors 3
+  --max-errors 3 \
+  --resume
+
+CUDA_VISIBLE_DEVICES=1 MUJOCO_EGL_DEVICE_ID=1 \
+python -u -m robocasa.recovery.safe.collect_atomic_rollouts \
+  --output-dir "$RLDX_SAFE_ROOT/shard1" \
+  --tasks StackBowlsCabinet WashLettuce ScrubCuttingBoard \
+          PickPlaceCounterToStove TurnOnSinkFaucet \
+  --num-rollouts 45 \
+  --seed 7 \
+  --seed-protocol official_rldx \
+  --success-quota 10 \
+  --failure-quota 10 \
+  --retain-only-quota \
+  --policy-module robocasa.recovery.rldx_zmq_policy:make_policy \
+  --model-family rldx1 \
+  --policy-name RLDX-1-FT-RC365 \
+  --checkpoint RLWRLD/RLDX-1-FT-RC365 \
+  --policy-config '{"embodiment_tag":"GENERAL_EMBODIMENT"}' \
+  --host 127.0.0.1 \
+  --port 20101 \
+  --split target \
+  --replan-steps 8 \
+  --record-safe-features \
+  --record-actions \
+  --record-videos \
+  --video-frame-stride 2 \
+  --max-errors 3 \
+  --resume
 ```
 
-The resulting dataset can be exported with
+Validate both completed shards, then merge them into a new directory:
+
+```bash
+python -m robocasa.recovery.safe.validate_atomic_dataset \
+  --dataset-dir "$RLDX_SAFE_ROOT/shard0"
+python -m robocasa.recovery.safe.validate_atomic_dataset \
+  --dataset-dir "$RLDX_SAFE_ROOT/shard1"
+
+python -m robocasa.recovery.safe.merge_atomic_datasets \
+  --source-dirs "$RLDX_SAFE_ROOT/shard0" "$RLDX_SAFE_ROOT/shard1" \
+  --output-dir "$RLDX_SAFE_ROOT/merged"
+
+python -m robocasa.recovery.safe.validate_atomic_dataset \
+  --dataset-dir "$RLDX_SAFE_ROOT/merged"
+```
+
+The merged pilot is healthy only when it contains 200 valid rollouts, 100
+successes, 100 failures, all ten tasks at exactly 10/10, zero collection
+errors, no duplicate rollout or task/reset identities, and no missing requested
+artifacts. If a task does not reach both quotas within 45 attempts, preserve
+the partial shard and resume it with a larger `--num-rollouts`; do not lower the
+class quota or delete the evidence.
+
+The resulting dataset can then be exported with
 `robocasa.recovery.safe.export_to_official_safe` and passed to the existing
 official SAFE MLP/LSTM grid, conformal calibration, reporting, and score-video
 tools. The pinned official loader does not hard-code π0's 1024-wide latent: it

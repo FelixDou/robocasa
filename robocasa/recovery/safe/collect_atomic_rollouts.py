@@ -15,7 +15,11 @@ import traceback
 
 import numpy as np
 
-from .atomic_tasks import registered_atomic_task_horizons, validate_atomic_tasks
+from .atomic_tasks import (
+    registered_atomic_tasks,
+    registered_safe_task_horizons,
+    validate_safe_tasks,
+)
 from .collect_rollouts import collect_single_rollout
 from .dataset import MANIFEST_NAME, load_manifest, save_rollout
 from .schema import SAFE_SCHEMA_VERSION, SafeRolloutMetadata, compatibility_key
@@ -203,7 +207,9 @@ def make_summary(config, records, errors, skipped, *, partial):
         per_task_summary[task] = task_summary
     return {
         "schema_version": SAFE_SCHEMA_VERSION,
-        "dataset_type": "robocasa_atomic_safe_rollouts",
+        "dataset_type": config.get(
+            "dataset_type", "robocasa_atomic_safe_rollouts"
+        ),
         "partial": bool(partial),
         "updated_at": utc_now(),
         "config": config,
@@ -305,23 +311,27 @@ def prepare_plan(args):
         raise ValueError(
             "--retain-only-quota requires --success-quota and/or --failure-quota"
         )
-    tasks = validate_atomic_tasks(
+    allow_unregistered = (
+        args.allow_unregistered_tasks
+        or args.allow_unregistered_atomic_tasks
+    )
+    tasks = validate_safe_tasks(
         args.tasks,
-        allow_unregistered=args.allow_unregistered_atomic_tasks,
+        allow_unregistered=allow_unregistered,
     )
     if args.horizon is not None:
         task_horizons = {task: args.horizon for task in tasks}
         horizon_source = "command_line_override"
     else:
-        if args.allow_unregistered_atomic_tasks:
+        if allow_unregistered:
             raise ValueError(
-                "--horizon is required with --allow-unregistered-atomic-tasks"
+                "--horizon is required with --allow-unregistered-tasks"
             )
-        registered_horizons = registered_atomic_task_horizons()
+        registered_horizons = registered_safe_task_horizons()
         missing_horizons = [task for task in tasks if task not in registered_horizons]
         if missing_horizons:
             raise ValueError(
-                "Official horizons are missing for atomic tasks: "
+                "Official horizons are missing for registered tasks: "
                 + ", ".join(missing_horizons)
             )
         task_horizons = {task: registered_horizons[task] for task in tasks}
@@ -336,6 +346,17 @@ def prepare_plan(args):
         attempt_coordinates = [(seed, None) for seed in seeds]
     policy_config = parse_policy_config(args.policy_config)
     robocasa_commit = args.robocasa_commit or current_robocasa_commit()
+    atomic_tasks = registered_atomic_tasks()
+    task_types = {
+        task: "atomic" if task in atomic_tasks else "composite"
+        for task in tasks
+    }
+    unique_task_types = set(task_types.values())
+    task_scope = (
+        next(iter(unique_task_types))
+        if len(unique_task_types) == 1
+        else "mixed"
+    )
     identity = {
         "split": args.split,
         "seed_protocol": args.seed_protocol,
@@ -370,6 +391,9 @@ def prepare_plan(args):
             )
     config = {
         "tasks": tasks,
+        "task_types": task_types,
+        "task_scope": task_scope,
+        "dataset_type": f"robocasa_{task_scope}_safe_rollouts",
         "seeds": seeds,
         "base_environment_seed": args.seed,
         "seed_protocol": args.seed_protocol,
@@ -416,8 +440,30 @@ def prepare_plan(args):
 
 
 def _assert_resume_compatible(previous, current):
+    previous = dict(previous)
+    previous_tasks = previous.get("tasks", [])
+    if "task_types" not in previous:
+        atomic_tasks = registered_atomic_tasks()
+        previous["task_types"] = {
+            task: "atomic" if task in atomic_tasks else "composite"
+            for task in previous_tasks
+        }
+    if "task_scope" not in previous:
+        previous_task_types = set(previous["task_types"].values())
+        previous["task_scope"] = (
+            next(iter(previous_task_types))
+            if len(previous_task_types) == 1
+            else "mixed"
+        )
+    if "dataset_type" not in previous:
+        previous["dataset_type"] = (
+            f"robocasa_{previous['task_scope']}_safe_rollouts"
+        )
     keys = (
         "tasks",
+        "task_types",
+        "task_scope",
+        "dataset_type",
         "split",
         "base_environment_seed",
         "seed_protocol",
@@ -834,6 +880,7 @@ def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--tasks", nargs="+", required=True)
+    parser.add_argument("--allow-unregistered-tasks", action="store_true")
     parser.add_argument("--allow-unregistered-atomic-tasks", action="store_true")
     parser.add_argument("--num-rollouts", type=int, default=1, help="Maximum attempts per task")
     parser.add_argument("--seed", type=int, default=0)

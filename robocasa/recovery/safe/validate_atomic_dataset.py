@@ -1,4 +1,4 @@
-"""Validate a RoboCasa atomic SAFE rollout dataset and official-loader readiness."""
+"""Validate a registered RoboCasa SAFE rollout dataset and loader readiness."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .atomic_tasks import registered_atomic_tasks
+from .atomic_tasks import registered_safe_tasks
 from .collect_atomic_rollouts import SUMMARY_NAME, atomic_write_json
 from .dataset import MANIFEST_NAME, load_manifest
 from .schema import SAFE_SCHEMA_VERSION, validate_feature_tensor
@@ -43,7 +43,7 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
     if not records:
         errors.append("Dataset contains no valid rollouts")
 
-    registered = registered_atomic_tasks() if not allow_unregistered else set()
+    registered = registered_safe_tasks() if not allow_unregistered else set()
     seen_episode_identity = set()
     identities = set()
     feature_files = set()
@@ -63,7 +63,10 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
             )
         seen_episode_identity.add(episode_identity)
         if not allow_unregistered and record.task_name not in registered:
-            errors.append(f"{prefix}: task is not a registered atomic task: {record.task_name}")
+            errors.append(
+                f"{prefix}: task is not a registered atomic or composite task: "
+                f"{record.task_name}"
+            )
         if not record.collection_complete:
             errors.append(f"{prefix}: rollout is marked incomplete")
         if record.tensor_path is None:
@@ -208,7 +211,7 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
 def format_report(result):
     status = "VALID" if result["valid"] else "INVALID"
     lines = [
-        f"Atomic SAFE dataset: {status}",
+        f"RoboCasa SAFE dataset: {status}",
         f"Rollouts: {result['num_rollouts']} "
         f"({result['num_successes']} successes, {result['num_failures']} failures)",
         f"Official SAFE loader compatible: {result['official_safe_loader_compatible']}",
@@ -221,6 +224,7 @@ def format_report(result):
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-dir", required=True)
+    parser.add_argument("--allow-unregistered-tasks", action="store_true")
     parser.add_argument("--allow-unregistered-atomic-tasks", action="store_true")
     parser.add_argument("--json-output")
     return parser
@@ -230,7 +234,10 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     result = validate_atomic_dataset(
         args.dataset_dir,
-        allow_unregistered=args.allow_unregistered_atomic_tasks,
+        allow_unregistered=(
+            args.allow_unregistered_tasks
+            or args.allow_unregistered_atomic_tasks
+        ),
     )
     print(format_report(result))
     if args.json_output:

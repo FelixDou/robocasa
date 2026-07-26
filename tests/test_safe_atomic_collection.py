@@ -190,6 +190,17 @@ class TestSafeAtomicCollection(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "split"):
                 _assert_resume_compatible(test_plan["config"], pretrain_plan["config"])
 
+    def test_resume_accepts_atomic_config_from_before_task_scope_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(tmp)
+            current = prepare_plan(args)["config"]
+            previous = dict(current)
+            previous.pop("task_types")
+            previous.pop("task_scope")
+            previous.pop("dataset_type")
+
+            _assert_resume_compatible(previous, current)
+
     def test_official_openpi_seed_protocol_reuses_one_environment(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = collection_args(tmp, num_rollouts=3)
@@ -320,6 +331,65 @@ class TestSafeAtomicCollection(unittest.TestCase):
                 [attempt["rollout_horizon"] for attempt in plan["attempts"]],
                 [1050, 1050, 450, 450, 600, 600],
             )
+
+    def test_registered_composite_horizons_and_mixed_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(tmp, num_rollouts=1)
+            args.tasks = [
+                TASK,
+                "LoadDishwasher",
+                "PreSoakPan",
+                "ScrubCuttingBoard",
+                "StackBowlsCabinet",
+                "WashLettuce",
+            ]
+            args.horizon = None
+            plan = prepare_plan(args)
+
+            self.assertEqual(
+                plan["config"]["task_horizons"],
+                {
+                    TASK: 600,
+                    "LoadDishwasher": 1800,
+                    "PreSoakPan": 2400,
+                    "ScrubCuttingBoard": 1200,
+                    "StackBowlsCabinet": 2100,
+                    "WashLettuce": 1650,
+                },
+            )
+            self.assertEqual(plan["config"]["task_scope"], "mixed")
+            self.assertEqual(
+                plan["config"]["dataset_type"],
+                "robocasa_mixed_safe_rollouts",
+            )
+            self.assertEqual(plan["config"]["task_types"][TASK], "atomic")
+            self.assertEqual(
+                plan["config"]["task_types"]["LoadDishwasher"],
+                "composite",
+            )
+
+    def test_registered_composite_collection_validates_without_escape_hatch(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as exported,
+        ):
+            args = collection_args(tmp)
+            args.tasks = ["PreSoakPan"]
+            result = run_collection(args, runtime=fake_runtime())
+
+            self.assertEqual(
+                result["dataset_type"], "robocasa_composite_safe_rollouts"
+            )
+            self.assertEqual(result["config"]["task_scope"], "composite")
+            validation = validate_atomic_dataset(tmp)
+            self.assertTrue(validation["valid"], validation["errors"])
+            report = export_to_official_safe(tmp, exported)
+            self.assertEqual(report["task_types"], {"PreSoakPan": "composite"})
+            env_path = next((Path(exported) / "env_records").glob("*.pkl"))
+            with env_path.open("rb") as stream:
+                env_record = pickle.load(stream)
+            self.assertEqual(env_record["task_suite_name"], "robocasa_composite")
+            self.assertEqual(env_record["task_type"], "composite")
 
     def test_unregistered_task_requires_explicit_horizon(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -482,6 +552,31 @@ class TestSafeAtomicCollection(unittest.TestCase):
                     (source / record.tensor_path).stat().st_ino,
                     (output / record.tensor_path).stat().st_ino,
                 )
+
+    def test_merge_atomic_and_composite_shards_records_mixed_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            atomic = root / "atomic"
+            composite = root / "composite"
+            output = root / "mixed"
+
+            atomic_args = collection_args(atomic, num_rollouts=1)
+            composite_args = collection_args(composite, num_rollouts=1)
+            composite_args.tasks = ["PreSoakPan"]
+            run_collection(atomic_args, runtime=fake_runtime())
+            run_collection(composite_args, runtime=fake_runtime())
+
+            result = merge_atomic_datasets([atomic, composite], output)
+            config = result["summary"]["config"]
+            self.assertEqual(config["task_scope"], "mixed")
+            self.assertEqual(
+                config["dataset_type"], "robocasa_mixed_safe_rollouts"
+            )
+            self.assertEqual(
+                config["task_types"],
+                {TASK: "atomic", "PreSoakPan": "composite"},
+            )
+            self.assertTrue(result["validation"]["valid"])
 
     def test_resume_quarantines_orphan_then_recollects(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,4 +1,4 @@
-"""Materialize RoboCasa atomic data in the official SAFE loader layout."""
+"""Materialize RoboCasa SAFE data in the official SAFE loader layout."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import random
 
 import numpy as np
 
-from .collect_atomic_rollouts import atomic_write_json, utc_now
+from .collect_atomic_rollouts import SUMMARY_NAME, atomic_write_json, utc_now
 from .dataset import MANIFEST_NAME, assert_compatible, load_manifest
 from .validate_atomic_dataset import validate_atomic_dataset
 
@@ -155,6 +155,11 @@ def export_to_official_safe(
     if not validation["official_safe_loader_compatible"]:
         raise ValueError("Source dataset lacks fields required by the official SAFE π0 loader")
     source_records = load_manifest(dataset_dir)
+    source_summary = json.loads((dataset_dir / SUMMARY_NAME).read_text())
+    task_types = {
+        task: source_summary["config"].get("task_types", {}).get(task, "atomic")
+        for task in sorted({record.task_name for record in source_records})
+    }
     records, selection = select_balanced_records(
         source_records,
         successes_per_task=successes_per_task,
@@ -173,6 +178,7 @@ def export_to_official_safe(
         "num_rollouts": len(records),
         "num_policy_records": sum(r.valid_sequence_length for r in records),
         "task_ids": task_ids,
+        "task_types": task_types,
         "model_families": sorted({record.model_family for record in records}),
     }
     if dry_run:
@@ -208,7 +214,8 @@ def export_to_official_safe(
         env_path = env_dir / f"rollout_{rollout_index:08d}--{record.rollout_id}.pkl"
         env_record = {
             "rollout_id": record.rollout_id,
-            "task_suite_name": "robocasa_atomic",
+            "task_suite_name": f"robocasa_{task_types[record.task_name]}",
+            "task_type": task_types[record.task_name],
             "task_id": task_ids[record.task_name],
             "task_name": record.task_name,
             "task_description": record.task_instruction,
@@ -302,6 +309,7 @@ def build_parser():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--allow-unregistered-tasks", action="store_true")
     parser.add_argument("--allow-unregistered-atomic-tasks", action="store_true")
     parser.add_argument("--successes-per-task", type=int)
     parser.add_argument("--failures-per-task", type=int)
@@ -317,7 +325,10 @@ def main(argv=None):
             args.output_dir,
             resume=args.resume,
             dry_run=args.dry_run,
-            allow_unregistered=args.allow_unregistered_atomic_tasks,
+            allow_unregistered=(
+                args.allow_unregistered_tasks
+                or args.allow_unregistered_atomic_tasks
+            ),
             successes_per_task=args.successes_per_task,
             failures_per_task=args.failures_per_task,
             selection_seed=args.selection_seed,

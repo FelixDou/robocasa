@@ -1,4 +1,4 @@
-"""Merge validated atomic SAFE rollout shards without duplicating large artifacts."""
+"""Merge validated RoboCasa SAFE rollout shards without duplicating artifacts."""
 
 from __future__ import annotations
 
@@ -169,6 +169,7 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
 
     tasks = []
     task_horizons = {}
+    task_types = {}
     for config in configs:
         for task in config["tasks"]:
             if task in task_horizons:
@@ -179,6 +180,13 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
                 continue
             tasks.append(task)
             task_horizons[task] = config["task_horizons"][task]
+            task_types[task] = config.get("task_types", {}).get(task, "atomic")
+    unique_task_types = set(task_types.values())
+    task_scope = (
+        next(iter(unique_task_types))
+        if len(unique_task_types) == 1
+        else "mixed"
+    )
     base_environment_seeds = sorted(
         {
             config.get("base_environment_seed")
@@ -215,6 +223,9 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
     config.update(
         {
             "tasks": tasks,
+            "task_types": task_types,
+            "task_scope": task_scope,
+            "dataset_type": f"robocasa_{task_scope}_safe_rollouts",
             "task_horizons": task_horizons,
             "base_environment_seed": None,
             "base_environment_seeds": base_environment_seeds,
