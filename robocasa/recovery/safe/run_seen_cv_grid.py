@@ -1,4 +1,4 @@
-"""Run the official SAFE grid with three-fold CV inside the 70-rollout train pool."""
+"""Run the official SAFE grid with training-only, outcome-stratified inner CV."""
 
 from __future__ import annotations
 
@@ -172,11 +172,34 @@ def run_cv_grid(args):
         args.learning_rates,
         args.regularization,
     )
+    env_records = load_env_records(args.export_dir)
+    source_groups = defaultdict(int)
+    for _, env in env_records:
+        source_groups[(int(env["task_id"]), int(env["episode_success"]))] += 1
+    task_ids = sorted({task_id for task_id, _ in source_groups})
+    missing_groups = [
+        (task_id, success)
+        for task_id in task_ids
+        for success in (0, 1)
+        if source_groups[(task_id, success)] <= args.train_per_class
+    ]
+    if missing_groups:
+        raise ValueError(
+            "Each task/outcome group must contain more than train_per_class; "
+            f"invalid groups: {missing_groups}"
+        )
+    outer_train_count = len(task_ids) * 2 * args.train_per_class
+    outer_test_count = len(env_records) - outer_train_count
     plan = {
         "schema_version": 1,
         "official_safe_commit": OFFICIAL_SAFE_COMMIT,
-        "protocol": "three-fold outcome-stratified CV within fixed 70-rollout training pool",
+        "protocol": "training-only outcome-stratified inner CV within fixed outer training pool",
         "outer_test_used": False,
+        "num_tasks": len(task_ids),
+        "num_source_rollouts": len(env_records),
+        "outer_train_rollouts": outer_train_count,
+        "outer_test_rollouts": outer_test_count,
+        "train_per_task_class": args.train_per_class,
         "model": args.model,
         "num_runs": len(all_runs),
         "num_configurations": len(all_runs) // args.num_folds,
@@ -187,7 +210,6 @@ def run_cv_grid(args):
         "selection_metric": "mean falert_early_roc_auc/model_inner_val across folds",
     }
     write_json(output_root / f"cv_plan_{args.model}.json", plan)
-    env_records = load_env_records(args.export_dir)
     events_path = output_root / f"cv_events_{args.model}.jsonl"
     completed = 0
     for horizon in args.horizon_selectors:

@@ -1,4 +1,4 @@
-"""Aggregate the three seeds of the all-five-seen SAFE experiment."""
+"""Aggregate final SAFE refits on one fixed same-task held-out split."""
 
 from __future__ import annotations
 
@@ -17,9 +17,19 @@ def summarize(root, expected_seeds=(0, 1, 2)):
         metrics = json.loads(path.read_text())
         runs.append({"run_dir": str(path.parent), **metrics})
     expected_seeds = set(expected_seeds)
+    count_records = [run.get("counts") for run in runs if run.get("counts") is not None]
+    if count_records and any(counts != count_records[0] for counts in count_records[1:]):
+        raise ValueError("Final runs do not use identical train/test counts")
+    split_counts = count_records[0] if count_records else None
+    task_counts = {run.get("num_tasks") for run in runs if run.get("num_tasks") is not None}
+    if len(task_counts) > 1:
+        raise ValueError(f"Final runs disagree on task count: {sorted(task_counts)}")
+    num_tasks = next(iter(task_counts)) if task_counts else None
     output = {
         "schema_version": 1,
-        "protocol": "all five tasks seen; 7 success + 7 failure train and 3 + 3 test per task",
+        "protocol": "same tasks in train and test; fixed outcome-stratified outer split",
+        "num_tasks": num_tasks,
+        "split_counts": split_counts,
         "models": {},
     }
     for model in sorted({run["model"] for run in runs}):

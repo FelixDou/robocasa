@@ -1,4 +1,4 @@
-"""Plot the final all-five-seen SAFE evaluation without touching test selection."""
+"""Plot final same-task SAFE evaluation results without touching test selection."""
 
 from __future__ import annotations
 
@@ -133,7 +133,25 @@ def write_csvs(records, grouped, cv_summary, output_dir):
     return run_rows, summary_rows
 
 
-def plot_test_summary(plt, grouped, output_dir, formats):
+def held_out_counts(grouped):
+    counts = []
+    for model in MODEL_ORDER:
+        for record in grouped[model]:
+            values = record["counts"]
+            counts.append(
+                (
+                    int(values["test"]),
+                    int(values["test_successes"]),
+                    int(values["test_failures"]),
+                )
+            )
+    if any(values != counts[0] for values in counts[1:]):
+        raise ValueError("Final runs do not use identical held-out class counts")
+    return counts[0]
+
+
+def plot_test_summary(plt, grouped, output_dir, formats, test_counts):
+    test_rollouts, test_successes, test_failures = test_counts
     fig, axes = plt.subplots(1, 2, figsize=(9.2, 4.5), sharey=True)
     for ax, kind, title in zip(
         axes,
@@ -160,11 +178,16 @@ def plot_test_summary(plt, grouped, output_dir, formats):
         ax.grid(axis="y", alpha=0.75)
     axes[0].set_ylabel("Area under curve")
     axes[1].legend(frameon=False, loc="upper right")
-    fig.suptitle("SAFE performance on the fixed 30-rollout test set", fontsize=14, y=1.02)
+    fig.suptitle(
+        f"SAFE performance on the fixed {test_rollouts}-rollout test set",
+        fontsize=14,
+        y=1.02,
+    )
     fig.text(
         0.5,
         -0.01,
-        "Mean +/- population SD across three model seeds; 15 failures and 15 successes per seed",
+        "Mean +/- population SD across three model seeds; "
+        f"{test_failures} failures and {test_successes} successes per seed",
         ha="center",
         color="#4B5563",
         fontsize=9,
@@ -377,9 +400,10 @@ def create_seen_result_plots(final_root, cv_summary, output_dir, formats=("png",
     if unsupported:
         raise ValueError(f"Unsupported formats: {sorted(unsupported)}")
     run_rows, summary_rows = write_csvs(records, grouped, cv_summary, output_dir)
+    test_counts = held_out_counts(grouped)
     plt = configure_matplotlib()
     outputs = []
-    outputs += plot_test_summary(plt, grouped, output_dir, formats)
+    outputs += plot_test_summary(plt, grouped, output_dir, formats, test_counts)
     outputs += plot_per_seed(plt, grouped, output_dir, formats)
     outputs += plot_cv_gap(plt, grouped, cv_summary, output_dir, formats)
     outputs += plot_duration_baseline(plt, grouped, output_dir, formats)
@@ -389,7 +413,9 @@ def create_seen_result_plots(final_root, cv_summary, output_dir, formats=("png",
         "final_root": str(final_root),
         "cv_summary": str(cv_summary_path),
         "num_final_runs": len(records),
-        "num_test_rollouts_per_run": int(records[0]["counts"]["test"]),
+        "num_test_rollouts_per_run": test_counts[0],
+        "num_test_successes_per_run": test_counts[1],
+        "num_test_failures_per_run": test_counts[2],
         "plots": [str(path) for path in outputs],
         "data_files": [
             str(output_dir / "per_seed_metrics.csv"),
@@ -399,7 +425,8 @@ def create_seen_result_plots(final_root, cv_summary, output_dir, formats=("png",
         "per_seed_rows": run_rows,
         "notes": [
             "Error bars are population standard deviations across three model seeds.",
-            "The fixed 30-rollout test set contains 15 successes and 15 failures.",
+            f"The fixed {test_counts[0]}-rollout test set contains "
+            f"{test_counts[1]} successes and {test_counts[2]} failures.",
             "No threshold is fitted on held-out test scores.",
         ],
     }

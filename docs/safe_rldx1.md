@@ -359,6 +359,187 @@ vectors, and sets `dim_features` from the loaded tensor's final dimension.
 Select and calibrate RLDX hyperparameters independently of π0; do not reuse a
 π0 predictor or mix the two feature families.
 
+## Ten-task RLDX training protocol
+
+For the balanced 10-task pilot, use the same tasks in training and test while
+holding out examples before any hyperparameter selection:
+
+- outer training pool: 7 successes + 7 failures per task, 140 rollouts total;
+- untouched outer test: 3 successes + 3 failures per task, 60 rollouts total;
+- hyperparameter selection: three outcome-stratified folds inside only the
+  140-rollout outer training pool;
+- final estimation: refit three model seeds on all 140 training rollouts and
+  evaluate the fixed 60-rollout test once;
+- threshold calibration: not performed on the 60 test rollouts. Collect or
+  reserve a separate successful-rollout calibration set before reporting a
+  conformal operating point.
+
+The 10-task RLDX export is:
+
+```text
+/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/rldx1_safe_mixed10_10x10_20260726_190751/official_safe_10x10
+```
+
+Activate the SAFE environment and keep all generated files under `/gs/bs`:
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+
+export PROJECT_FS=/gs/fs/tga-shinoda/felid
+export STORAGE_BS=/gs/bs/tga-shinoda/felid
+export ROBOCASA_REPO="$PROJECT_FS/robocasa_safe_integration"
+export SAFE_REPO="$PROJECT_FS/SAFE"
+export SAFE_ENV="$STORAGE_BS/envs/vla_safe"
+export SAFE_OFFICIAL="$STORAGE_BS/robocasa_rollouts/safe/rldx1_safe_mixed10_10x10_20260726_190751/official_safe_10x10"
+export SAFE_LOG_ROOT="$STORAGE_BS/robocasa_logs/eval"
+
+conda activate "$SAFE_ENV"
+
+export XDG_CACHE_HOME="$STORAGE_BS/xdg_cache"
+export MPLCONFIGDIR="$STORAGE_BS/matplotlib_config"
+export WANDB_CACHE_DIR="$STORAGE_BS/wandb_cache"
+export TMPDIR=/tmp/ut06746/safe_rldx_training
+export WANDB_MODE=disabled
+export WANDB_DISABLED=true
+export WANDB_ENABLED=0
+export PYTHONNOUSERSITE=1
+
+mkdir -p \
+  "$SAFE_LOG_ROOT" \
+  "$XDG_CACHE_HOME" \
+  "$MPLCONFIGDIR" \
+  "$WANDB_CACHE_DIR" \
+  "$TMPDIR"
+
+test "$(git -C "$SAFE_REPO" rev-parse HEAD)" = \
+  "b6036abe07b2b2bb9996afb2c07f13d6a9f507c0"
+test -f "$SAFE_OFFICIAL/conversion_report.json"
+```
+
+First run one bounded selector pair per architecture for two epochs. These two
+processes use separate GPUs and should produce three fold metrics each:
+
+```bash
+export SAFE_RLDX_SMOKE_TAG=safe_rldx1_seen10_cv_smoke_$(date +%Y%m%d_%H%M%S)
+export SAFE_RLDX_SMOKE_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/$SAFE_RLDX_SMOKE_TAG"
+mkdir -p "$SAFE_RLDX_SMOKE_ROOT"
+
+CUDA_VISIBLE_DEVICES=0 nohup python -u \
+  "$ROBOCASA_REPO/robocasa/recovery/safe/run_seen_cv_grid.py" \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --output-root "$SAFE_RLDX_SMOKE_ROOT" \
+  --model indep \
+  --train-per-class 7 \
+  --split-seed 0 \
+  --inner-seed 0 \
+  --num-folds 3 \
+  --horizon-selectors 1.0 \
+  --diffusion-selectors 0.0 \
+  --learning-rates 3e-4 \
+  --regularization 1e-3 \
+  --epochs 2 \
+  --device cuda \
+  --resume \
+  > "$SAFE_LOG_ROOT/${SAFE_RLDX_SMOKE_TAG}_indep.log" 2>&1 &
+echo "indep_pid=$!"
+
+CUDA_VISIBLE_DEVICES=1 nohup python -u \
+  "$ROBOCASA_REPO/robocasa/recovery/safe/run_seen_cv_grid.py" \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --output-root "$SAFE_RLDX_SMOKE_ROOT" \
+  --model lstm \
+  --train-per-class 7 \
+  --split-seed 0 \
+  --inner-seed 0 \
+  --num-folds 3 \
+  --horizon-selectors 1.0 \
+  --diffusion-selectors concat-2 \
+  --learning-rates 1e-3 \
+  --regularization 1e-2 \
+  --epochs 2 \
+  --device cuda \
+  --resume \
+  > "$SAFE_LOG_ROOT/${SAFE_RLDX_SMOKE_TAG}_lstm.log" 2>&1 &
+echo "lstm_pid=$!"
+```
+
+The smoke passes only with six completed fits, no `failure.json`, finite loss,
+and a plan that records 140 outer-training and 60 untouched outer-test
+rollouts:
+
+```bash
+echo "Completed: $(find "$SAFE_RLDX_SMOKE_ROOT" -mindepth 2 -name metrics.json | wc -l) / 6"
+echo "Failures:  $(find "$SAFE_RLDX_SMOKE_ROOT" -name failure.json | wc -l)"
+tail -30 "$SAFE_LOG_ROOT/${SAFE_RLDX_SMOKE_TAG}_indep.log"
+tail -30 "$SAFE_LOG_ROOT/${SAFE_RLDX_SMOKE_TAG}_lstm.log"
+
+python "$ROBOCASA_REPO/robocasa/recovery/safe/summarize_seen_cv.py" \
+  --root "$SAFE_RLDX_SMOKE_ROOT" \
+  --expected-folds 0 1 2 \
+  --quiet
+
+python - "$SAFE_RLDX_SMOKE_ROOT" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+for model in ("indep", "lstm"):
+    plan = json.loads((root / f"cv_plan_{model}.json").read_text())
+    print(
+        model,
+        "tasks=", plan["num_tasks"],
+        "outer_train=", plan["outer_train_rollouts"],
+        "outer_test=", plan["outer_test_rollouts"],
+        "test_used=", plan["outer_test_used"],
+    )
+PY
+```
+
+After this smoke passes, launch the full official 405-fit grid per architecture
+with the same split seeds and 1,000 epochs. Do not reuse the π0 hyperparameters:
+
+```bash
+export SAFE_RLDX_CV_TAG=safe_rldx1_seen10_official_cv_2gpu_$(date +%Y%m%d_%H%M%S)
+export SAFE_RLDX_CV_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/$SAFE_RLDX_CV_TAG"
+mkdir -p "$SAFE_RLDX_CV_ROOT"
+
+CUDA_VISIBLE_DEVICES=0 nohup python -u \
+  "$ROBOCASA_REPO/robocasa/recovery/safe/run_seen_cv_grid.py" \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --output-root "$SAFE_RLDX_CV_ROOT" \
+  --model indep \
+  --train-per-class 7 \
+  --split-seed 0 \
+  --inner-seed 0 \
+  --num-folds 3 \
+  --epochs 1000 \
+  --device cuda \
+  --resume \
+  > "$SAFE_LOG_ROOT/${SAFE_RLDX_CV_TAG}_indep.log" 2>&1 &
+echo "indep_pid=$!"
+
+CUDA_VISIBLE_DEVICES=1 nohup python -u \
+  "$ROBOCASA_REPO/robocasa/recovery/safe/run_seen_cv_grid.py" \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --output-root "$SAFE_RLDX_CV_ROOT" \
+  --model lstm \
+  --train-per-class 7 \
+  --split-seed 0 \
+  --inner-seed 0 \
+  --num-folds 3 \
+  --epochs 1000 \
+  --device cuda \
+  --resume \
+  > "$SAFE_LOG_ROOT/${SAFE_RLDX_CV_TAG}_lstm.log" 2>&1 &
+echo "lstm_pid=$!"
+```
+
 ## Validation status and remaining live check
 
 The RLDX patch applies cleanly to the pinned commit and its modified files pass

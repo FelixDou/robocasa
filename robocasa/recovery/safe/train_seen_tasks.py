@@ -1,4 +1,4 @@
-"""Train official SAFE on 7+7 per task and evaluate on the remaining 3+3."""
+"""Train official SAFE on a fixed per-task split and evaluate the remainder."""
 
 from __future__ import annotations
 
@@ -253,6 +253,15 @@ def task_names(export_dir):
     return {int(value): key for key, value in report["task_ids"].items()}
 
 
+def export_provenance(export_dir):
+    report = json.loads((Path(export_dir) / "conversion_report.json").read_text())
+    return {
+        "source_fingerprint": report.get("source_fingerprint"),
+        "model_families": report.get("model_families", []),
+        "task_types": report.get("task_types", {}),
+    }
+
+
 def save_scores(path, rollouts_by_split, scores_by_split, identity, names, model, seed):
     with Path(path).open("w") as stream:
         for split, rollouts in rollouts_by_split.items():
@@ -356,12 +365,37 @@ def train_seen_model(args):
     (output / "config.yaml").write_text(OmegaConf.to_yaml(cfg))
     write_json(output / "train_history.json", {"loss": history})
     names = task_names(args.export_dir)
+    provenance = export_provenance(args.export_dir)
+    train_successes = sum(int(rollout.episode_success) for rollout in train_rollouts)
+    train_failures = len(train_rollouts) - train_successes
+    test_successes = sum(int(rollout.episode_success) for rollout in test_rollouts)
+    test_failures = len(test_rollouts) - test_successes
+    test_per_class_values = {
+        counts[outcome]["test"]
+        for counts in per_task.values()
+        for outcome in ("success", "failure")
+    }
+    test_per_task_class = (
+        next(iter(test_per_class_values))
+        if len(test_per_class_values) == 1
+        else None
+    )
     split_manifest = {
         "schema_version": 1,
-        "protocol": "all_five_seen_outcome_stratified",
+        "protocol": "same_task_outcome_stratified",
         "split_seed": args.split_seed,
+        "num_tasks": len(names),
+        "task_names": [names[key] for key in sorted(names)],
         "train_per_task_class": args.train_per_class,
-        "test_per_task_class": len(test_rollouts) // (2 * len(names)),
+        "test_per_task_class": test_per_task_class,
+        "counts": {
+            "train": len(train_rollouts),
+            "test": len(test_rollouts),
+            "train_successes": train_successes,
+            "train_failures": train_failures,
+            "test_successes": test_successes,
+            "test_failures": test_failures,
+        },
         "per_task": {names[key]: value for key, value in per_task.items()},
         "train": [identity[id(rollout)][1]["rollout_id"] for rollout in train_rollouts],
         "test": [identity[id(rollout)][1]["rollout_id"] for rollout in test_rollouts],
@@ -385,28 +419,36 @@ def train_seen_model(args):
         "seed": args.seed,
         "official_safe_commit": OFFICIAL_SAFE_COMMIT,
         "export_dir": str(Path(args.export_dir).resolve()),
+        "source_fingerprint": provenance["source_fingerprint"],
+        "model_families": provenance["model_families"],
+        "task_types": provenance["task_types"],
+        "num_tasks": len(names),
         "selected_hyperparameters": hyperparameters,
         "selection_summary": (
             str(Path(args.selection_summary).resolve())
             if args.selection_summary is not None
             else None
         ),
-        "task_min_step_source": "minimum inference length per task in the 70-rollout training split only",
+        "task_min_step_source": (
+            f"minimum inference length per task in the {len(train_rollouts)}-rollout "
+            "training split only"
+        ),
         "task_min_steps": {names[key]: value for key, value in task_cutoffs.items()},
         "counts": {
             "train": len(train_rollouts),
             "test": len(test_rollouts),
-            "train_successes": sum(int(rollout.episode_success) for rollout in train_rollouts),
-            "train_failures": sum(not int(rollout.episode_success) for rollout in train_rollouts),
-            "test_successes": sum(int(rollout.episode_success) for rollout in test_rollouts),
-            "test_failures": sum(not int(rollout.episode_success) for rollout in test_rollouts),
+            "train_successes": train_successes,
+            "train_failures": train_failures,
+            "test_successes": test_successes,
+            "test_failures": test_failures,
         },
         "scalar_metrics": metrics,
         "primary_metric": "falert_early_roc_auc/model_test",
         "primary_value": metrics["falert_early_roc_auc/model_test"],
         "duration_only_test_roc_auc": float(roc_auc_score(duration_labels, duration)),
         "thresholding": (
-            "No conformal threshold is fitted: all 30 held-out rollouts remain evaluation-only."
+            f"No conformal threshold is fitted: all {len(test_rollouts)} held-out "
+            "rollouts remain evaluation-only."
         ),
     }
     write_json(output / "metrics.json", result)

@@ -30,7 +30,11 @@ class TestSeenResultPlots(unittest.TestCase):
                             "learning_rate": 1e-4,
                             "lambda_reg": 1e-2,
                         },
-                        "counts": {"test": 30},
+                        "counts": {
+                            "test": 60,
+                            "test_successes": 30,
+                            "test_failures": 30,
+                        },
                         "duration_only_test_roc_auc": 0.55,
                         "scalar_metrics": {
                             "falert_early_roc_auc/model_test": base + 0.01 * seed,
@@ -74,7 +78,13 @@ class TestSeenResultPlots(unittest.TestCase):
             self.assertTrue((output_dir / "summary_metrics.csv").is_file())
             manifest = json.loads((output_dir / "plot_manifest.json").read_text())
             self.assertEqual(manifest["num_final_runs"], 6)
-            self.assertEqual(manifest["num_test_rollouts_per_run"], 30)
+            self.assertEqual(manifest["num_test_rollouts_per_run"], 60)
+            self.assertEqual(manifest["num_test_successes_per_run"], 30)
+            self.assertEqual(manifest["num_test_failures_per_run"], 30)
+            self.assertIn(
+                "fixed 60-rollout test set",
+                " ".join(manifest["notes"]),
+            )
 
 
 if __name__ == "__main__":

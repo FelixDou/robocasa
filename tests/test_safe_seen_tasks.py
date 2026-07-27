@@ -24,10 +24,10 @@ from robocasa.recovery.safe.train_seen_tasks import (
 
 
 class TestSeenTaskProtocol(unittest.TestCase):
-    def test_fixed_split_is_seven_plus_seven_train_and_three_plus_three_test(self):
+    def test_fixed_split_scales_to_ten_tasks_without_changing_per_task_balance(self):
         rollouts = []
         identity = {}
-        for task_id in range(5):
+        for task_id in range(10):
             for success in (0, 1):
                 for index in range(10):
                     rollout = SimpleNamespace(
@@ -44,13 +44,13 @@ class TestSeenTaskProtocol(unittest.TestCase):
             split_seed=13,
         )
         again = make_seen_split(rollouts, identity, train_per_class=7, split_seed=13)
-        self.assertEqual(len(train), 70)
-        self.assertEqual(len(test), 30)
+        self.assertEqual(len(train), 140)
+        self.assertEqual(len(test), 60)
         self.assertEqual(
             [identity[id(rollout)][1]["rollout_id"] for rollout in train],
             [identity[id(rollout)][1]["rollout_id"] for rollout in again[0]],
         )
-        for task_id in range(5):
+        for task_id in range(10):
             self.assertEqual(counts[task_id]["success"], {"train": 7, "test": 3})
             self.assertEqual(counts[task_id]["failure"], {"train": 7, "test": 3})
 
@@ -114,6 +114,15 @@ class TestSeenTaskProtocol(unittest.TestCase):
                     metrics = {
                         "model": model,
                         "seed": seed,
+                        "num_tasks": 10,
+                        "counts": {
+                            "train": 140,
+                            "test": 60,
+                            "train_successes": 70,
+                            "train_failures": 70,
+                            "test_successes": 30,
+                            "test_failures": 30,
+                        },
                         "scalar_metrics": {
                             "falert_early_roc_auc/model_test": value,
                             "falert_early_prc_auc/model_test": value - 0.1,
@@ -122,6 +131,8 @@ class TestSeenTaskProtocol(unittest.TestCase):
                     (run / "metrics.json").write_text(json.dumps(metrics))
             result = summarize(root)
             self.assertEqual(result["num_completed_runs"], 6)
+            self.assertEqual(result["num_tasks"], 10)
+            self.assertEqual(result["split_counts"]["test"], 60)
             self.assertAlmostEqual(result["models"]["indep"]["test_roc_auc_mean"], 0.8)
             self.assertTrue((root / "summary.json").is_file())
 
@@ -142,10 +153,24 @@ class TestSeenTaskProtocol(unittest.TestCase):
                             "lambda_reg": 1e-2,
                             "fold": fold,
                             "selection_value": score + 0.01 * fold,
+                            "counts": {
+                                "outer_train": {
+                                    "rollouts": 140,
+                                    "successes": 70,
+                                    "failures": 70,
+                                },
+                                "outer_test_untouched": {
+                                    "rollouts": 60,
+                                    "successes": 30,
+                                    "failures": 30,
+                                },
+                            },
                         }
                         (run / "metrics.json").write_text(json.dumps(record))
             summary = summarize_seen_cv(root)
             self.assertEqual(summary["num_completed_fits"], 12)
+            self.assertEqual(summary["outer_train_counts"]["rollouts"], 140)
+            self.assertEqual(summary["outer_test_counts"]["rollouts"], 60)
             self.assertEqual(summary["best_by_model"]["lstm"]["diffusion_selector"], "concat-2")
             resolved = resolve_hyperparameters("lstm", root / "cv_selection_summary.json")
             self.assertEqual(resolved["horizon_selector"], 1.0)

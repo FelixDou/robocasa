@@ -29,6 +29,20 @@ def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
         )
         groups[key].append(record)
     expected_folds = set(expected_folds)
+    outer_counts = [
+        record.get("counts", {}).get("outer_train")
+        for record in records
+        if record.get("counts", {}).get("outer_train") is not None
+    ]
+    if outer_counts and any(counts != outer_counts[0] for counts in outer_counts[1:]):
+        raise ValueError("CV runs disagree on the outer training split counts")
+    test_counts = [
+        record.get("counts", {}).get("outer_test_untouched")
+        for record in records
+        if record.get("counts", {}).get("outer_test_untouched") is not None
+    ]
+    if test_counts and any(counts != test_counts[0] for counts in test_counts[1:]):
+        raise ValueError("CV runs disagree on the untouched outer test counts")
     rows = []
     for key, values in groups.items():
         folds = {int(value["fold"]) for value in values}
@@ -59,9 +73,11 @@ def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
             best[model] = max(candidates, key=lambda row: row["inner_val_mean"])
     result = {
         "schema_version": 1,
-        "protocol": "three-fold training-only CV inside fixed 70-rollout all-five-seen train pool",
+        "protocol": "training-only outcome-stratified CV inside a fixed outer training pool",
         "selection_rule": "maximum mean matched-earliest inner-validation ROC-AUC",
         "outer_test_used_for_selection": False,
+        "outer_train_counts": outer_counts[0] if outer_counts else None,
+        "outer_test_counts": test_counts[0] if test_counts else None,
         "num_completed_fits": len(records),
         "num_configurations": len(rows),
         "best_by_model": best,
