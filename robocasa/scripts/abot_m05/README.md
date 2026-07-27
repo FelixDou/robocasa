@@ -191,6 +191,34 @@ After all three splits finish, the wrapper validates exactly 18 Atomic-Seen,
 episode count. It writes `overall_summary.json` and exits nonzero instead of
 silently reporting a partial run.
 
+## 6. Analyze ordered subtask progress
+
+After a complete `--subtask-progress` run, generate validated rollout-, task-,
+and split-level statistics plus PNG and SVG figures on a login or CPU node:
+
+```bash
+RUN_ROOT=/gs/bs/tga-shinoda/felid/robocasa_rollouts/abot_m05/abot_m05_subtask10_20260725_200251
+CLIENT_PYTHON=/gs/bs/tga-shinoda/felid/envs/robocasa_openpi/bin/python
+
+"$CLIENT_PYTHON" \
+  robocasa/scripts/abot_m05/analyze_subtask_progress.py \
+  "$RUN_ROOT" \
+  --expected-episodes 10
+```
+
+The command refuses partial or unbalanced input before writing results. Outputs
+are placed in `$RUN_ROOT/subtask_analysis`:
+
+- `subtask_progress_statistics.json` with fixed-task bootstrap intervals
+- rollout-, task-, split-, stuck-subtask-, and failure-mode CSV tables
+- split success versus progress, task-level gap, progress-survival, and
+  stuck-subtask figures as both PNG and SVG
+- `README.md` with a compact split summary and interpretation guardrail
+
+The confidence intervals resample rollouts within each fixed benchmark task.
+Official binary task success remains the leaderboard metric; ordered progress
+is a diagnostic that reveals partial completion hidden by binary success.
+
 The pinned upstream scheduler can return status 1 after a transient failed
 attempt even when its retries completed every episode. The harness validates
 the aggregated split in that case and continues only when task uniqueness,
