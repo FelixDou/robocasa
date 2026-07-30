@@ -13,11 +13,11 @@ from robocasa.recovery.create_recovery_failure_dataset import (
 from robocasa.recovery.subtask_eval import summarize_subtask_rollout
 
 
-SUBTASK_SAFE_SCHEMA_VERSION = 2
+SUBTASK_SAFE_SCHEMA_VERSION = 3
 SUBTASK_FAILURE_LABEL_SEMANTICS = "active_subtask_eventually_fails_before_completion"
 SUBTASK_DEFINITION_SOURCE = (
-    "robocasa.recovery.eval_composite_predicates:"
-    "_TASK_SUBTASK_GROUP_OVERRIDES via mapped_subtask_sequence"
+    "robocasa.recovery.create_recovery_failure_dataset:"
+    "mapped_subtask_sequence observation-safe semantic normalization"
 )
 
 
@@ -97,6 +97,9 @@ def _semantic_subtasks(
                 "subtask_id": subtask_id,
                 "instruction": instruction,
                 "predicate_names": predicate_names,
+                "source_subtask_ids": list(
+                    entry.get("source_subtask_ids") or [subtask_id]
+                ),
             }
         )
     if not definitions:
@@ -298,6 +301,11 @@ def build_subtask_safe_record(
                     if definition is not None
                     else []
                 ),
+                "source_subtask_ids": (
+                    list(definition["source_subtask_ids"])
+                    if definition is not None
+                    else []
+                ),
                 "within_subtask_inference_index": within_index,
                 "subtask_progress": float(entry["subtask_progress"]),
             }
@@ -349,6 +357,9 @@ def build_subtask_safe_record(
                 "subtask_name": subtask_id,
                 "subtask_instruction": definition["instruction"],
                 "predicate_names": list(definition["predicate_names"]),
+                "source_subtask_ids": list(
+                    definition["source_subtask_ids"]
+                ),
                 "entry_environment_step": int(entry_step),
                 "end_environment_step": int(end_step),
                 "completion_environment_step": (
@@ -447,6 +458,7 @@ def validate_subtask_safe_record(
             not subtask_id
             or not definition.get("instruction")
             or not definition.get("predicate_names")
+            or not definition.get("source_subtask_ids")
             or definition.get("subtask_index") != expected_index
         ):
             raise ValueError("Invalid natural-language subtask definition")
@@ -472,6 +484,8 @@ def validate_subtask_safe_record(
         if (
             item.get("subtask_instruction") != definition["instruction"]
             or item.get("predicate_names") != definition["predicate_names"]
+            or item.get("source_subtask_ids")
+            != definition["source_subtask_ids"]
         ):
             raise ValueError(
                 "Inference natural-language subtask metadata is inconsistent"
@@ -492,6 +506,8 @@ def validate_subtask_safe_record(
         if (
             segment.get("subtask_instruction") != definition["instruction"]
             or segment.get("predicate_names") != definition["predicate_names"]
+            or segment.get("source_subtask_ids")
+            != definition["source_subtask_ids"]
             or segment.get("segment_index") != definition["subtask_index"]
         ):
             raise ValueError(
@@ -524,6 +540,8 @@ def validate_subtask_safe_record(
         if (
             entry.get("instruction") != definition["instruction"]
             or entry.get("predicate_names") != definition["predicate_names"]
+            or entry.get("source_subtask_ids")
+            != definition["source_subtask_ids"]
         ):
             raise ValueError(
                 "Excluded natural-language subtask metadata is inconsistent"

@@ -599,6 +599,265 @@ class TestRecoveryFailureDataset(unittest.TestCase):
                 if entry["predicate_success"]:
                     self.assertTrue(entry["blocked_by_previous"], task_name)
 
+    def test_all_composite_tasks_have_observable_normalized_subtasks(self):
+        expected_sequences = {
+            "ArrangeBreadBasket": [
+                "OpenCabinet_1",
+                "PickPlaceCabinetToCounter_2_place",
+                "PickPlaceCounterToCounter_3_place",
+                "PickPlaceCounterToCounter_3_release",
+            ],
+            "ArrangeTea": [
+                "PickPlaceCounterToCounter_1_place",
+                "PickPlaceCabinetToCounter_2_place",
+                "PickPlaceCabinetToCounter_2_release",
+                "CloseCabinet_3",
+            ],
+            "BreadSelection": [
+                "PickPlaceCounterToCounter_1_place",
+                "PickPlaceCabinetToCounter_2_place",
+                "PickPlaceCabinetToCounter_2_release",
+            ],
+            "CategorizeCondiments": [
+                "PickPlaceCounterToCabinet_1_place",
+                "PickPlaceCounterToCabinet_2_place",
+                "PickPlaceCounterToCabinet_2_release",
+            ],
+            "CuttingToolSelection": [
+                "OpenDrawer_1",
+                "PickPlaceDrawerToCounter_2_pick",
+                "PickPlaceDrawerToCounter_2_place",
+                "PickPlaceDrawerToCounter_2_release",
+            ],
+            "DeliverStraw": [
+                "OpenDrawer_1",
+                "PickPlaceDrawerToGlass_2_pick",
+                "PickPlaceDrawerToGlass_2_place",
+                "PickPlaceDrawerToGlass_2_release",
+            ],
+            "GarnishPancake": [
+                "fridge_open",
+                "strawberry_grasped",
+                "strawberry_on_pancake",
+                "strawberry_released_on_pancake",
+                "pancake_on_plate",
+                "plate_on_table",
+            ],
+            "GatherTableware": [
+                "third_glass_placed_with_others",
+                "bowl_placed_away_from_glasses",
+                "bowl_released_away_from_glasses",
+            ],
+            "GetToastedBread": [
+                "TurnOnToaster_1",
+                "PickPlaceToasterToCounter_2_pick",
+                "PickPlaceToasterToCounter_2_place",
+                "PickPlaceToasterToCounter_2_release",
+            ],
+            "HeatKebabSandwich": [
+                "PickPlaceCounterToToasterOven_1_place",
+                "PickPlaceCounterToToasterOven_2_place",
+                "CloseToasterOvenDoor_3",
+                "TurnOnToasterOven_4",
+            ],
+            "KettleBoiling": [
+                "PickPlaceCounterToStove_1_pick",
+                "PickPlaceCounterToStove_1_place",
+                "PickPlaceCounterToStove_1_release",
+                "TurnOnStove_2",
+            ],
+            "LoadDishwasher": [
+                "cup_grasped",
+                "cup_on_rack",
+                "bowl_grasped",
+                "bowl_on_rack",
+                "dishwasher_closed",
+            ],
+            "MakeIceLemonade": [
+                "fridge_open",
+                "lemon_grasped",
+                "lemon_in_glass",
+                "ice_cube1_grasped",
+                "ice_cube1_in_glass",
+                "ice_cube2_grasped",
+                "ingredients_released_in_glass",
+            ],
+            "PackIdenticalLunches": [
+                "fridge_open",
+                "first_vegetable_packed",
+                "first_meat_packed",
+                "second_vegetable_packed",
+                "second_meat_packed",
+                "packed_lunches_released",
+            ],
+            "PanTransfer": [
+                "pan_grasped",
+                "pan_tilted_to_transfer_vegetable",
+                "pan_replaced_on_stove",
+            ],
+            "PortionHotDogs": [
+                "first_bun_on_plate",
+                "first_sausage_on_plate",
+                "second_bun_on_plate",
+                "second_sausage_on_plate",
+                "hot_dogs_released",
+            ],
+            "PreSoakPan": [
+                "PickPlaceCounterToSink_1_pick",
+                "PickPlaceCounterToSink_1_place",
+                "PickPlaceCounterToSink_2_pick",
+                "PickPlaceCounterToSink_2_place",
+                "PickPlaceCounterToSink_2_release",
+                "TurnOnSinkFaucet_3",
+            ],
+            "PrepareCoffee": [
+                "mug_grasped",
+                "mug_under_dispenser",
+                "mug_released_under_dispenser",
+                "coffee_started",
+            ],
+            "RecycleBottlesByType": [
+                "middle_plastic_bottle_clustered",
+                "middle_glass_bottle_clustered",
+                "mystery_bottle_clustered",
+                "bottles_released_on_table",
+            ],
+            "RinseSinkBasin": ["TurnOnSinkFaucet_1", "TurnSinkSpout_2"],
+            "ScrubCuttingBoard": ["sponge_grasped", "cutting_board_scrubbed"],
+            "SearingMeat": [
+                "PickPlaceCabinetToStove_2_pick",
+                "PickPlaceCabinetToStove_2_place",
+                "PickPlaceCounterToStove_3_pick",
+                "PickPlaceCounterToStove_3_place",
+                "PickPlaceCounterToStove_3_release",
+                "TurnOnStove_4",
+            ],
+            "SeparateFreezerRack": [
+                "meat_container_placed_on_second_rack",
+                "vegetable_container_placed_on_top_rack",
+                "freezer_containers_released",
+            ],
+            "SetUpCuttingStation": [
+                "PickPlaceDrawerToCounter_2_pick",
+                "PickPlaceDrawerToCounter_2_place",
+                "PickPlaceCounterToCounter_3_pick",
+                "PickPlaceCounterToCounter_3_place",
+                "PickPlaceCounterToCounter_3_release",
+            ],
+            "StackBowlsCabinet": [
+                "larger_bowl_placed_in_cabinet",
+                "smaller_bowl_stacked_on_larger_bowl",
+                "smaller_bowl_released_on_stack",
+            ],
+            "SteamInMicrowave": [
+                "vegetable_placed_in_bowl",
+                "bowl_placed_in_microwave",
+                "microwave_closed",
+                "microwave_started",
+            ],
+            "StirVegetables": [
+                "first_vegetable_placed_in_pot",
+                "second_vegetable_placed_in_pot",
+                "spatula_grasped",
+                "vegetables_stirred",
+            ],
+            "StoreLeftoversInBowl": [
+                "chicken_placed_in_bowl",
+                "vegetable_placed_in_bowl",
+                "bowl_with_leftovers_placed_in_fridge",
+                "bowl_with_leftovers_released_in_fridge",
+            ],
+            "WaffleReheat": [
+                "OpenMicrowave_1",
+                "PickPlaceCounterToBowl_2_place",
+                "PickPlaceCounterToMicrowave_3_place",
+                "CloseMicrowave_4",
+                "TurnOnMicrowave_5",
+            ],
+            "WashFruitColander": [
+                "PickPlaceCounterToSink_1_place",
+                "PickPlaceCounterToSink_2_place",
+                "TurnOnSinkFaucet_3",
+            ],
+            "WashLettuce": ["water_on", "lettuce_rinsed"],
+            "WeighIngredients": [
+                "PickPlaceCabinetToCounter_1_pick",
+                "PickPlaceCabinetToCounter_1_place",
+                "PickPlaceCabinetToCounter_1_release",
+                "CloseCabinet_2",
+            ],
+        }
+        group_overrides = self.module.load_task_subtask_group_overrides()
+        composite_overrides = self.module.load_composite_atomic_task_overrides()
+        initial_context = self.module.load_task_initial_context_subtasks()
+
+        self.assertEqual(set(composite_overrides), set(expected_sequences))
+        for task_name, expected_sequence in expected_sequences.items():
+            predicate_names = []
+            for _, _, names in group_overrides.get(task_name, []):
+                predicate_names.extend(names)
+            for step in composite_overrides[task_name]:
+                predicate_names.extend(step.get("predicate_names") or [])
+            required_predicates = list(dict.fromkeys(predicate_names))
+            summary = {
+                "task_success": False,
+                "final_subtask_eval": {
+                    "required_predicates": required_predicates,
+                    "predicates": {
+                        name: {"value": False, "required": True}
+                        for name in required_predicates
+                    },
+                },
+                "ordered_completed_required_subtasks": [],
+                "failed_required_predicates_final": [],
+            }
+
+            sequence = self.module.mapped_subtask_sequence(summary, task_name)
+
+            self.assertEqual(
+                [entry["subtask_id"] for entry in sequence],
+                expected_sequence,
+                task_name,
+            )
+            self.assertEqual(
+                len(set(expected_sequence)),
+                len(expected_sequence),
+                task_name,
+            )
+            previous_signature = None
+            for entry in sequence:
+                self.assertTrue(entry["instruction"].strip(), task_name)
+                self.assertTrue(entry["predicate_names"], task_name)
+                self.assertTrue(entry["source_subtask_ids"], task_name)
+                self.assertFalse(
+                    set(entry["source_subtask_ids"])
+                    & initial_context.get(task_name, set()),
+                    task_name,
+                )
+                signature = tuple(entry["predicate_names"])
+                self.assertNotEqual(signature, previous_signature, task_name)
+                previous_signature = signature
+
+                subtask_id = entry["subtask_id"].lower()
+                if subtask_id.endswith(("_pick", "_grasped")):
+                    self.assertTrue(
+                        any(
+                            name.endswith("_grasped")
+                            for name in entry["predicate_names"]
+                        ),
+                        task_name,
+                    )
+                if (
+                    "release" in subtask_id
+                    or entry["instruction"].lower().startswith("release ")
+                ):
+                    self.assertTrue(
+                        self.module._has_release_signal(
+                            entry["predicate_names"]
+                        ),
+                        task_name,
+                    )
+
     def test_composite_atomic_task_sequence_uses_task_level_steps(self):
         summary = {
             "final_subtask_eval": {
@@ -748,11 +1007,11 @@ class TestRecoveryFailureDataset(unittest.TestCase):
 
         self.assertEqual(sequence[0]["subtask_id"], "OpenCabinet_1")
         self.assertEqual(
-            [entry["subtask_id"] for entry in sequence[1:4]],
+            [entry["subtask_id"] for entry in sequence[1:]],
             [
-                "PickPlaceCabinetToCounter_2_pick",
                 "PickPlaceCabinetToCounter_2_place",
-                "PickPlaceCabinetToCounter_2_release",
+                "PickPlaceCounterToCounter_3_place",
+                "PickPlaceCounterToCounter_3_release",
             ],
         )
         self.assertEqual(
@@ -760,8 +1019,12 @@ class TestRecoveryFailureDataset(unittest.TestCase):
             ["bread_in_basket"],
         )
         self.assertEqual(
+            sequence[1]["instruction"],
+            "Pick the bread from the cabinet and place it in the basket.",
+        )
+        self.assertEqual(
             sequence[3]["predicate_names"],
-            ["bread_in_basket"],
+            ["basket_on_dining_counter", "gripper_released"],
         )
 
     def test_load_dishwasher_splits_cup_and_bowl_subtasks(self):
@@ -812,7 +1075,6 @@ class TestRecoveryFailureDataset(unittest.TestCase):
         self.assertEqual(
             [entry["language_instruction"] for entry in atomic_sequence],
             [
-                "Pull out the dishwasher rack.",
                 "Pick the cup from the counter and place it on the dishwasher rack.",
                 "Pick the bowl from the counter and place it on the dishwasher rack.",
                 "Close the dishwasher.",
@@ -821,32 +1083,34 @@ class TestRecoveryFailureDataset(unittest.TestCase):
         self.assertEqual(
             [entry["subtask_id"] for entry in subtask_sequence],
             [
-                "dishwasher_rack_accessible",
                 "cup_grasped",
                 "cup_on_rack",
-                "cup_released_on_rack",
                 "bowl_grasped",
                 "bowl_on_rack",
-                "bowl_released_on_rack",
                 "dishwasher_closed",
             ],
         )
         self.assertEqual(
             [entry["instruction"] for entry in subtask_sequence],
             [
-                "Pull out the dishwasher rack.",
                 "Pick the cup from the counter.",
                 "Place the cup on the dishwasher rack.",
-                "Release the cup on the dishwasher rack.",
                 "Pick the bowl from the counter.",
                 "Place the bowl on the dishwasher rack.",
-                "Release the bowl on the dishwasher rack.",
                 "Close the dishwasher.",
             ],
         )
+        self.assertTrue(subtask_sequence[0]["success"])
         self.assertTrue(subtask_sequence[1]["success"])
-        self.assertTrue(subtask_sequence[2]["success"])
-        self.assertFalse(subtask_sequence[4]["success"])
+        self.assertFalse(subtask_sequence[2]["success"])
+        self.assertEqual(
+            subtask_sequence[1]["source_subtask_ids"],
+            ["cup_on_rack", "cup_released_on_rack"],
+        )
+        self.assertEqual(
+            subtask_sequence[3]["source_subtask_ids"],
+            ["bowl_on_rack", "bowl_released_on_rack"],
+        )
 
     def test_validate_atomic_tasks_rejects_unknown_by_default(self):
         self.module.load_registered_atomic_task_names = lambda: {"OpenDrawer"}

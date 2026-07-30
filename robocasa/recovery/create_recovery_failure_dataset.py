@@ -197,6 +197,23 @@ def load_task_subtask_group_overrides():
     return dict(getattr(module, "_TASK_SUBTASK_GROUP_OVERRIDES", {}))
 
 
+def load_task_initial_context_subtasks():
+    path = Path(__file__).with_name("eval_composite_predicates.py")
+    spec = importlib.util.spec_from_file_location("eval_composite_predicates", path)
+    if spec is None or spec.loader is None:
+        return {}
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return {
+        task_name: set(subtask_ids)
+        for task_name, subtask_ids in getattr(
+            module,
+            "_TASK_INITIAL_CONTEXT_SUBTASK_OVERRIDES",
+            {},
+        ).items()
+    }
+
+
 def load_composite_atomic_task_overrides():
     path = Path(__file__).with_name("eval_composite_predicates.py")
     spec = importlib.util.spec_from_file_location("eval_composite_predicates", path)
@@ -318,10 +335,9 @@ def _split_pick_place_instruction(instruction):
 def _expand_composite_atomic_step_subtasks(step, step_index, required_predicates):
     """Expand one composite atomic task into semantic subtasks.
 
-    The monitor may only expose a placement predicate for a composite step even
-    when the atomic task semantics are pick, move, release. In that case we
-    intentionally reuse the same predicate across multiple semantic subtasks so
-    the stored hierarchy stays comparable to the standalone atomic task.
+    Only create pick or release units when a distinct runtime signal exists.
+    Otherwise keep one natural-language pick-place unit tied to the observable
+    placement predicate instead of manufacturing duplicate semantic labels.
     """
     atomic_task = step.get("atomic_task") or f"atomic_step_{step_index}"
     instruction = step.get("language_instruction") or atomic_task
@@ -354,25 +370,219 @@ def _expand_composite_atomic_step_subtasks(step, step_index, required_predicates
     if not placement:
         placement = [predicate_names[-1]]
     pick_text, place_text = _split_pick_place_instruction(instruction)
-    pick_predicates = grasp or [placement[0]]
-    release_predicates = placement + release if release else [placement[-1]]
-    return [
-        {
-            "subtask_id": f"{atomic_task}_{step_index}_pick",
-            "instruction": pick_text.rstrip(".") + ".",
-            "predicate_names": pick_predicates,
-        },
+    groups = []
+    if grasp:
+        groups.append(
+            {
+                "subtask_id": f"{atomic_task}_{step_index}_pick",
+                "instruction": pick_text.rstrip(".") + ".",
+                "predicate_names": grasp,
+            }
+        )
+    groups.append(
         {
             "subtask_id": f"{atomic_task}_{step_index}_place",
-            "instruction": place_text.rstrip(".") + ".",
+            "instruction": (
+                place_text.rstrip(".") + "."
+                if grasp
+                else str(instruction).rstrip(".") + "."
+            ),
             "predicate_names": placement,
-        },
-        {
-            "subtask_id": f"{atomic_task}_{step_index}_release",
-            "instruction": "Release the object at the target location.",
-            "predicate_names": release_predicates,
-        },
-    ]
+        }
+    )
+    if release:
+        groups.append(
+            {
+                "subtask_id": f"{atomic_task}_{step_index}_release",
+                "instruction": "Release the object at the target location.",
+                "predicate_names": placement + release,
+            }
+        )
+    return groups
+
+
+def _is_pick_group(group):
+    subtask_id = str(group.get("subtask_id") or "").lower()
+    return subtask_id.endswith("_pick") or subtask_id.endswith("_grasped")
+
+
+def _is_release_group(group):
+    subtask_id = str(group.get("subtask_id") or "").lower()
+    instruction = str(group.get("instruction") or "").strip().lower()
+    return "release" in subtask_id or instruction.startswith("release ")
+
+
+def _has_grasp_signal(predicate_names):
+    return any(str(name).endswith("_grasped") for name in predicate_names)
+
+
+def _has_release_signal(predicate_names):
+    return any(
+        str(name) == "gripper_released"
+        or str(name).endswith("_released")
+        or "_released_" in str(name)
+        for name in predicate_names
+    )
+
+
+def _combine_pick_place_instruction(pick_instruction, target_instruction):
+    pick = str(pick_instruction).strip().rstrip(".")
+    target = str(target_instruction).strip().rstrip(".")
+    if not pick:
+        return target + "."
+    if not target or target.lower() == pick.lower():
+        return pick + "."
+    target = target[0].lower() + target[1:]
+    return f"{pick}, then {target}."
+
+
+def _merge_group_metadata(
+    primary,
+    merged,
+    *,
+    combine_pick=False,
+    merged_before_primary=True,
+):
+    result = dict(primary)
+    ordered_groups = (
+        (merged, primary) if merged_before_primary else (primary, merged)
+    )
+    result["source_subtask_ids"] = list(
+        dict.fromkeys(
+            subtask_id
+            for group in ordered_groups
+            for subtask_id in group.get(
+                "source_subtask_ids",
+                [group["subtask_id"]],
+            )
+        )
+    )
+    result["predicate_names"] = list(
+        dict.fromkeys(
+            predicate_name
+            for group in ordered_groups
+            for predicate_name in group.get("predicate_names", [])
+        )
+    )
+    if combine_pick:
+        result["instruction"] = _combine_pick_place_instruction(
+            merged.get("instruction"),
+            primary.get("instruction"),
+        )
+    return result
+
+
+def normalize_semantic_subtask_groups(task_name, groups):
+    """Return observable ordered natural-language units for one task.
+
+    Deterministic setup conditions are removed. Adjacent groups sharing the
+    same predicate signature are collapsed, pick units without a grasp signal
+    are merged into their following target unit, and release units without a
+    release signal are folded into the preceding placement unit.
+    """
+    initial_context = load_task_initial_context_subtasks().get(task_name, set())
+    prepared = []
+    for raw_group in groups:
+        group = dict(raw_group)
+        if group.get("subtask_id") in initial_context:
+            continue
+        group["predicate_names"] = list(
+            dict.fromkeys(group.get("predicate_names", []))
+        )
+        if not group["predicate_names"]:
+            continue
+        group["source_subtask_ids"] = list(
+            dict.fromkeys(
+                group.get(
+                    "source_subtask_ids",
+                    [group["subtask_id"]],
+                )
+            )
+        )
+        prepared.append(group)
+
+    deduplicated = []
+    index = 0
+    while index < len(prepared):
+        run = [prepared[index]]
+        signature = tuple(prepared[index]["predicate_names"])
+        index += 1
+        while (
+            index < len(prepared)
+            and tuple(prepared[index]["predicate_names"]) == signature
+        ):
+            run.append(prepared[index])
+            index += 1
+        if len(run) == 1:
+            deduplicated.append(run[0])
+            continue
+        preferred = next(
+            (
+                group
+                for group in run
+                if not _is_pick_group(group) and not _is_release_group(group)
+            ),
+            run[0],
+        )
+        merged = dict(preferred)
+        merged["source_subtask_ids"] = list(
+            dict.fromkeys(
+                subtask_id
+                for group in run
+                for subtask_id in group["source_subtask_ids"]
+            )
+        )
+        pick = next((group for group in run if _is_pick_group(group)), None)
+        if pick is not None and not _has_grasp_signal(signature):
+            merged["instruction"] = _combine_pick_place_instruction(
+                pick["instruction"],
+                preferred["instruction"],
+            )
+        deduplicated.append(merged)
+
+    merged_picks = []
+    index = 0
+    while index < len(deduplicated):
+        group = deduplicated[index]
+        if (
+            _is_pick_group(group)
+            and not _has_grasp_signal(group["predicate_names"])
+            and index + 1 < len(deduplicated)
+        ):
+            target = _merge_group_metadata(
+                deduplicated[index + 1],
+                group,
+                combine_pick=True,
+            )
+            merged_picks.append(target)
+            index += 2
+            continue
+        merged_picks.append(group)
+        index += 1
+
+    normalized = []
+    for group in merged_picks:
+        if (
+            _is_release_group(group)
+            and not _has_release_signal(group["predicate_names"])
+            and normalized
+        ):
+            normalized[-1] = _merge_group_metadata(
+                normalized[-1],
+                group,
+                merged_before_primary=False,
+            )
+            continue
+        normalized.append(group)
+
+    for group in normalized:
+        group["predicate_names"] = list(
+            dict.fromkeys(group["predicate_names"])
+        )
+        group["source_subtask_ids"] = list(
+            dict.fromkeys(group["source_subtask_ids"])
+        )
+    return normalized
 
 
 def mapped_subtask_sequence(summary, task_name):
@@ -400,6 +610,7 @@ def mapped_subtask_sequence(summary, task_name):
                 "predicate_names": [
                     name for name in predicate_names if name in available_predicates
                 ],
+                "source_subtask_ids": [subtask_id],
             }
             for subtask_id, instruction, predicate_names in group_overrides
         ]
@@ -417,6 +628,7 @@ def mapped_subtask_sequence(summary, task_name):
                     or name.replace("_", " ").capitalize() + "."
                 ),
                 "predicate_names": [name],
+                "source_subtask_ids": [name],
             }
             for name in required_predicates
             if name not in grouped
@@ -443,6 +655,7 @@ def mapped_subtask_sequence(summary, task_name):
                     or name.replace("_", " ").capitalize() + "."
                 ),
                 "predicate_names": [name],
+                "source_subtask_ids": [name],
             }
             for name in required_predicates
             if name not in grouped
@@ -463,10 +676,12 @@ def mapped_subtask_sequence(summary, task_name):
                     or name.replace("_", " ").capitalize() + "."
                 ),
                 "predicate_names": [name],
+                "source_subtask_ids": [name],
             }
             for name in ordered_predicates
         ]
 
+    groups = normalize_semantic_subtask_groups(task_name, groups)
     blocked_by_previous = False
     for index, group in enumerate(groups, start=1):
         predicate_names = group["predicate_names"]
@@ -487,6 +702,7 @@ def mapped_subtask_sequence(summary, task_name):
                 "subtask_id": group["subtask_id"],
                 "kind": "semantic_subtask",
                 "instruction": group["instruction"],
+                "source_subtask_ids": group["source_subtask_ids"],
                 "success": success,
                 "predicate_success": predicates_success,
                 "blocked_by_previous": blocked_by_previous and predicates_success,
@@ -515,6 +731,7 @@ def mapped_composite_atomic_task_sequence(summary, task_name):
     steps = load_composite_atomic_task_overrides().get(task_name, [])
     if not steps:
         return []
+    semantic_sequence = mapped_subtask_sequence(summary, task_name)
     completed = set(summary.get("ordered_completed_required_subtasks", []))
     failed = set(summary.get("failed_required_predicates_final", []))
     final_eval = summary.get("final_subtask_eval") or {}
@@ -523,6 +740,16 @@ def mapped_composite_atomic_task_sequence(summary, task_name):
     blocked_by_previous = False
     for index, step in enumerate(steps, start=1):
         predicate_names = list(step.get("predicate_names") or [])
+        subtask_ids = [
+            entry["subtask_id"]
+            for entry in semantic_sequence
+            if any(
+                predicate_name in entry.get("predicate_names", [])
+                for predicate_name in predicate_names
+            )
+        ]
+        if not subtask_ids:
+            continue
         predicates_success = all(
             bool(predicates.get(name, {}).get("value", False)) or name in completed
             for name in predicate_names
@@ -546,14 +773,7 @@ def mapped_composite_atomic_task_sequence(summary, task_name):
                 "blocked_by_previous": blocked_by_previous and predicates_success,
                 "value_final": success,
                 "predicate_names": predicate_names,
-                "subtask_ids": [
-                    entry["subtask_id"]
-                    for entry in mapped_subtask_sequence(summary, task_name)
-                    if any(
-                        predicate_name in entry.get("predicate_names", [])
-                        for predicate_name in predicate_names
-                    )
-                ],
+                "subtask_ids": subtask_ids,
                 "completed_predicates": [
                     name
                     for name in predicate_names

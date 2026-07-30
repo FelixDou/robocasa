@@ -730,13 +730,14 @@ unit with a stable ID and one or more associated runtime predicates:
 (subtask_id, natural-language instruction, predicate_names)
 ```
 
-The canonical definitions are `_TASK_SUBTASK_GROUP_OVERRIDES` in
-`robocasa/recovery/eval_composite_predicates.py`, exposed through
+The source definitions are `_TASK_SUBTASK_GROUP_OVERRIDES` and
+`_COMPOSITE_ATOMIC_TASK_OVERRIDES` in
+`robocasa/recovery/eval_composite_predicates.py`. They are converted by
 `mapped_subtask_sequence()` in
-`robocasa/recovery/create_recovery_failure_dataset.py`. Raw predicates are
-timestamping evidence, not Subtask-SAFE training units. This stage does not yet
-predict subtask identity or continuous progress. Add this flag to a normal SAFE
-collection:
+`robocasa/recovery/create_recovery_failure_dataset.py` into a canonical
+observation-safe sequence. Raw predicates are timestamping evidence, not
+Subtask-SAFE training units. This stage does not yet predict subtask identity
+or continuous progress. Add this flag to a normal SAFE collection:
 
 ```bash
 --record-subtask-trace
@@ -745,7 +746,7 @@ collection:
 For each retained rollout, the collector evaluates the existing predicate
 tracker at reset and after every environment action, then maps its observations
 onto the ordered natural-language subtask sequence. It writes a separate
-schema-v2 artifact under:
+schema-v3 artifact under:
 
 ```text
 subtasks/<task_name>/<rollout_id>.json
@@ -754,8 +755,8 @@ subtasks/<task_name>/<rollout_id>.json
 The original SAFE feature tensor and official-loader compatibility are
 unchanged. The Subtask-SAFE artifact contains:
 
-- every ordered semantic subtask's ID, natural-language instruction, and
-  predicate set;
+- every ordered semantic subtask's ID, natural-language instruction, predicate
+  set, and `source_subtask_ids` provenance;
 - the environment step where every semantic subtask first becomes complete;
 - the oracle current semantic subtask aligned to every genuine policy
   inference;
@@ -772,9 +773,40 @@ subtask without an observed active state, is recorded under
 completion is monotonic; later predicate regression is recorded diagnostically
 but does not reopen a completed segment.
 
+Before recording, the canonicalizer reviews all 32 registered composite tasks
+with these observability rules:
+
+- deterministic setup conditions are context, not attempted subtasks;
+- a separate pick unit exists only when a distinct `*_grasped` predicate can
+  timestamp it;
+- a separate release unit exists only when `gripper_released` or another
+  release predicate can timestamp it;
+- adjacent units with the same predicate signature are merged, while retaining
+  all original IDs in `source_subtask_ids`;
+- a pick/place atomic step without a grasp predicate becomes one natural
+  pick-and-place unit rather than three indistinguishable samples.
+
+The deterministic setup exclusions are `cabinets_open` for
+`GatherTableware`, `dishwasher_rack_accessible` for `LoadDishwasher`, freezer
+and preloaded-container context for `SeparateFreezerRack`, the setup-opened
+cabinet for `SearingMeat`, the setup-opened drawer for
+`SetUpCuttingStation`, and `cabinet_open` for `StackBowlsCabinet`.
+
+For example, the effective `LoadDishwasher` sequence is now:
+
+```text
+Pick the cup from the counter.
+Place the cup on the dishwasher rack.
+Pick the bowl from the counter.
+Place the bowl on the dishwasher rack.
+Close the dishwasher.
+```
+
 Subtask-SAFE schema v1 represented required predicates as if each predicate
-were a subtask. The schema-v2 validator intentionally rejects those artifacts;
-rerun collection in a fresh output directory after pulling this change.
+were a subtask. Schema v2 added natural-language groups but still retained
+unobservable setup and duplicate-predicate units. The schema-v3 validator
+intentionally rejects both older formats; rerun collection in a fresh output
+directory after pulling this change.
 
 The validator reports the number of recorded rollouts and usable successful
 and failed segments:

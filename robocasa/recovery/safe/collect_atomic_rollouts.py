@@ -986,8 +986,9 @@ def build_parser():
         action=argparse.BooleanOptionalAction,
         default=False,
         help=(
-            "Record ordered oracle subtasks aligned to every real SAFE policy "
-            "inference and label entered segments by eventual completion/failure"
+            "Record ordered observable natural-language semantic subtasks "
+            "aligned to every real SAFE policy inference and label entered "
+            "segments by eventual completion/failure"
         ),
     )
     parser.add_argument("--continue-on-error", action=argparse.BooleanOptionalAction, default=True)

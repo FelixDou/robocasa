@@ -111,6 +111,9 @@ def summarize_subtask_records(
                 "subtask_name": subtask_id,
                 "subtask_instruction": definition["instruction"],
                 "predicate_names": list(definition["predicate_names"]),
+                "source_subtask_ids": list(
+                    definition["source_subtask_ids"]
+                ),
                 "segment_indices": {int(definition["subtask_index"])},
             }
             group = groups.get(key)
@@ -124,6 +127,7 @@ def summarize_subtask_records(
                         "subtask_name",
                         "subtask_instruction",
                         "predicate_names",
+                        "source_subtask_ids",
                         "segment_indices",
                     )
                 }
@@ -452,6 +456,10 @@ def format_report(result: dict[str, Any]) -> str:
         )
         lines.append(f"    instruction: {row['subtask_instruction']}")
         lines.append("    predicates: " + ", ".join(row["predicate_names"]))
+        if row["source_subtask_ids"] != [row["subtask_id"]]:
+            lines.append(
+                "    merged from: " + ", ".join(row["source_subtask_ids"])
+            )
         lines.append(
             "    rollout states: "
             f"excluded-completed={row['excluded_completed_without_activation']} "

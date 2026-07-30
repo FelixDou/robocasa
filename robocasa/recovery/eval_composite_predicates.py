@@ -1991,6 +1991,22 @@ _COMPOSITE_ATOMIC_TASK_OVERRIDES.update(
     }
 )
 
+# These semantic units describe deterministic scene setup, not policy actions.
+# Keep their predicates available as diagnostics, but omit them from trainable
+# ordered subtask sequences.
+_TASK_INITIAL_CONTEXT_SUBTASK_OVERRIDES = {
+    "GatherTableware": {"cabinets_open"},
+    "LoadDishwasher": {"dishwasher_rack_accessible"},
+    "SeparateFreezerRack": {
+        "freezer_open",
+        "meat_container_ready",
+        "vegetable_container_ready",
+    },
+    "SearingMeat": {"OpenCabinet_1"},
+    "SetUpCuttingStation": {"OpenDrawer_1"},
+    "StackBowlsCabinet": {"cabinet_open"},
+}
+
 
 def _plain_label(name):
     return _OBJECT_LABELS.get(name, name.replace("_", " "))

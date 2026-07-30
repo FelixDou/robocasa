@@ -188,24 +188,26 @@ class TestSubtaskSafe(unittest.TestCase):
             atomic_write_subtask_safe_record(path, record)
             self.assertEqual(json.loads(path.read_text()), record)
 
-    def test_predicate_level_schema_v1_record_is_rejected(self):
-        record = build_subtask_safe_record(
-            [subtask_eval(), subtask_eval(first=True)],
-            [0],
-            rollout_failed=True,
-            rollout_id="old-schema",
-        )
-        record["schema_version"] = 1
-        with self.assertRaisesRegex(
-            ValueError,
-            "rerun semantic Subtask-SAFE collection",
-        ):
-            validate_subtask_safe_record(
-                record,
-                rollout_id="old-schema",
-                rollout_failed=True,
-                inference_environment_steps=[0],
-            )
+    def test_pre_normalization_schema_records_are_rejected(self):
+        for schema_version in (1, 2):
+            with self.subTest(schema_version=schema_version):
+                record = build_subtask_safe_record(
+                    [subtask_eval(), subtask_eval(first=True)],
+                    [0],
+                    rollout_failed=True,
+                    rollout_id="old-schema",
+                )
+                record["schema_version"] = schema_version
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "rerun semantic Subtask-SAFE collection",
+                ):
+                    validate_subtask_safe_record(
+                        record,
+                        rollout_id="old-schema",
+                        rollout_failed=True,
+                        inference_environment_steps=[0],
+                    )
 
     def test_coverage_audit_counts_zero_inference_and_deficits(self):
         success_without_first_inference = build_subtask_safe_record(
@@ -407,23 +409,24 @@ class TestSubtaskSafe(unittest.TestCase):
                 for definition in record["semantic_subtasks"]
             ],
             [
-                "dishwasher_rack_accessible",
                 "cup_grasped",
                 "cup_on_rack",
-                "cup_released_on_rack",
                 "bowl_grasped",
                 "bowl_on_rack",
-                "bowl_released_on_rack",
                 "dishwasher_closed",
             ],
         )
         self.assertEqual(
-            record["semantic_subtasks"][6],
+            record["semantic_subtasks"][3],
             {
-                "subtask_index": 6,
-                "subtask_id": "bowl_released_on_rack",
-                "instruction": "Release the bowl on the dishwasher rack.",
+                "subtask_index": 3,
+                "subtask_id": "bowl_on_rack",
+                "instruction": "Place the bowl on the dishwasher rack.",
                 "predicate_names": ["bowl_on_rack", "dishes_on_rack"],
+                "source_subtask_ids": [
+                    "bowl_on_rack",
+                    "bowl_released_on_rack",
+                ],
             },
         )
         self.assertEqual(
@@ -449,15 +452,8 @@ class TestSubtaskSafe(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            [
-                entry["subtask_id"]
-                for entry in record["excluded_completed_subtasks"]
-            ],
-            [
-                "dishwasher_rack_accessible",
-                "cup_released_on_rack",
-                "bowl_released_on_rack",
-            ],
+            record["excluded_completed_subtasks"],
+            [],
         )
         counts = validate_subtask_safe_record(
             record,
@@ -467,7 +463,7 @@ class TestSubtaskSafe(unittest.TestCase):
             task_name="LoadDishwasher",
         )
         self.assertEqual(counts["successful_segments"], 5)
-        self.assertEqual(counts["excluded_completed_subtasks"], 3)
+        self.assertEqual(counts["excluded_completed_subtasks"], 0)
         audit = summarize_subtask_records(
             [
                 {
@@ -479,23 +475,27 @@ class TestSubtaskSafe(unittest.TestCase):
                 }
             ]
         )
-        self.assertEqual(audit["counts"]["task_subtask_pairs"], 8)
+        self.assertEqual(audit["counts"]["task_subtask_pairs"], 5)
         self.assertEqual(
             audit["counts"]["excluded_completed_without_activation"],
-            3,
+            0,
         )
-        released_bowl = next(
+        bowl_placement = next(
             row
             for row in audit["task_subtask_rows"]
-            if row["subtask_id"] == "bowl_released_on_rack"
+            if row["subtask_id"] == "bowl_on_rack"
         )
         self.assertEqual(
-            released_bowl["subtask_instruction"],
-            "Release the bowl on the dishwasher rack.",
+            bowl_placement["subtask_instruction"],
+            "Place the bowl on the dishwasher rack.",
         )
         self.assertEqual(
-            released_bowl["predicate_names"],
+            bowl_placement["predicate_names"],
             ["bowl_on_rack", "dishes_on_rack"],
+        )
+        self.assertEqual(
+            bowl_placement["source_subtask_ids"],
+            ["bowl_on_rack", "bowl_released_on_rack"],
         )
 
 
