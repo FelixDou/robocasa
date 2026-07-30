@@ -19,6 +19,7 @@ import numpy as np
 
 
 OFFICIAL_SAFE_COMMIT = "b6036abe07b2b2bb9996afb2c07f13d6a9f507c0"
+TASK_TYPE_FILTERS = ("all", "atomic", "composite")
 MODEL_DEFAULTS = {
     "indep": {
         "horizon_selector": 1.0,
@@ -58,10 +59,21 @@ def set_task_min_step_from_training(train_rollouts, *other_splits):
     return task_cutoffs
 
 
-def resolve_hyperparameters(model_name, selection_summary=None):
+def resolve_hyperparameters(
+    model_name,
+    selection_summary=None,
+    expected_task_type=None,
+):
     if selection_summary is None:
         return dict(MODEL_DEFAULTS[model_name])
     summary = json.loads(Path(selection_summary).read_text())
+    if expected_task_type is not None:
+        selected_task_type = summary.get("task_type_filter", "all")
+        if selected_task_type != expected_task_type:
+            raise ValueError(
+                "Selection summary task type "
+                f"{selected_task_type!r} does not match {expected_task_type!r}"
+            )
     selected = summary["best_by_model"][model_name]
     def selector(value):
         try:
@@ -139,7 +151,106 @@ def validate_alignment(rollouts, env_records):
     return identity
 
 
-def make_seen_split(rollouts, identity, *, train_per_class=7, split_seed=0):
+def task_catalog(export_dir):
+    report = json.loads((Path(export_dir) / "conversion_report.json").read_text())
+    task_ids = {name: int(task_id) for name, task_id in report["task_ids"].items()}
+    task_types = report.get("task_types", {})
+    missing_types = sorted(set(task_ids) - set(task_types))
+    if missing_types:
+        raise ValueError(
+            "Official export is missing task-type provenance for: "
+            + ", ".join(missing_types)
+        )
+    invalid_types = {
+        name: task_types[name]
+        for name in task_ids
+        if task_types[name] not in TASK_TYPE_FILTERS[1:]
+    }
+    if invalid_types:
+        raise ValueError(f"Official export has invalid task types: {invalid_types}")
+    return {
+        "task_ids": task_ids,
+        "task_names": {task_id: name for name, task_id in task_ids.items()},
+        "task_types": {name: task_types[name] for name in task_ids},
+    }
+
+
+def resolve_task_type_selection(export_dir, task_type="all"):
+    if task_type not in TASK_TYPE_FILTERS:
+        raise ValueError(
+            f"Unknown task type {task_type!r}; expected one of {TASK_TYPE_FILTERS}"
+        )
+    catalog = task_catalog(export_dir)
+    selected_names = sorted(
+        name
+        for name, value in catalog["task_types"].items()
+        if task_type == "all" or value == task_type
+    )
+    if not selected_names:
+        raise ValueError(f"No {task_type} tasks are present in the official export")
+    selected_ids = sorted(catalog["task_ids"][name] for name in selected_names)
+    return {
+        "task_type_filter": task_type,
+        "source_num_tasks": len(catalog["task_ids"]),
+        "selected_task_ids": selected_ids,
+        "selected_task_names": selected_names,
+        "selected_task_types": {
+            name: catalog["task_types"][name] for name in selected_names
+        },
+    }
+
+
+def filter_aligned_task_type(
+    rollouts,
+    env_records,
+    selection,
+):
+    validate_alignment(rollouts, env_records)
+    selected_ids = set(selection["selected_task_ids"])
+    pairs = [
+        (rollout, env_record)
+        for rollout, env_record in zip(rollouts, env_records)
+        if int(env_record[1]["task_id"]) in selected_ids
+    ]
+    if not pairs:
+        raise ValueError("Task-type filter selected no aligned rollouts")
+    selected_rollouts = [rollout for rollout, _ in pairs]
+    selected_env_records = [env_record for _, env_record in pairs]
+    identity = validate_alignment(selected_rollouts, selected_env_records)
+    return selected_rollouts, selected_env_records, identity
+
+
+def load_outer_split_ids(path):
+    if path is None:
+        return None
+    path = Path(path).resolve()
+    manifest = json.loads(path.read_text())
+    train = manifest.get("train")
+    test = manifest.get("test")
+    if not isinstance(train, list) or not isinstance(test, list):
+        raise ValueError(
+            "Outer split manifest must contain rollout-ID lists named train and test"
+        )
+    train = {str(rollout_id) for rollout_id in train}
+    test = {str(rollout_id) for rollout_id in test}
+    if not train or not test or train & test:
+        raise ValueError("Outer split manifest train/test IDs are empty or overlap")
+    return {
+        "path": str(path),
+        "train": train,
+        "test": test,
+        "split_seed": manifest.get("split_seed"),
+    }
+
+
+def make_seen_split(
+    rollouts,
+    identity,
+    *,
+    train_per_class=7,
+    split_seed=0,
+    fixed_split_ids=None,
+):
     """Return a fixed outcome-stratified split shared by every model seed."""
     grouped = defaultdict(list)
     for rollout in rollouts:
@@ -155,17 +266,49 @@ def make_seen_split(rollouts, identity, *, train_per_class=7, split_seed=0):
                 grouped[(task_id, success)],
                 key=lambda rollout: str(identity[id(rollout)][1]["rollout_id"]),
             )
-            rng.shuffle(values)
-            if len(values) <= train_per_class:
+            if fixed_split_ids is None:
+                rng.shuffle(values)
+                group_train = values[:train_per_class]
+                group_test = values[train_per_class:]
+            else:
+                group_train = [
+                    rollout
+                    for rollout in values
+                    if identity[id(rollout)][1]["rollout_id"]
+                    in fixed_split_ids["train"]
+                ]
+                group_test = [
+                    rollout
+                    for rollout in values
+                    if identity[id(rollout)][1]["rollout_id"]
+                    in fixed_split_ids["test"]
+                ]
+                assigned_ids = {
+                    identity[id(rollout)][1]["rollout_id"]
+                    for rollout in group_train + group_test
+                }
+                if len(assigned_ids) != len(values):
+                    missing = [
+                        identity[id(rollout)][1]["rollout_id"]
+                        for rollout in values
+                        if identity[id(rollout)][1]["rollout_id"]
+                        not in assigned_ids
+                    ]
+                    raise ValueError(
+                        "Outer split manifest does not assign selected rollout IDs: "
+                        + ", ".join(missing[:5])
+                    )
+            if len(group_train) != train_per_class or not group_test:
                 raise ValueError(
-                    f"Task {task_id}, success={success} has {len(values)} rollouts; "
-                    f"need more than {train_per_class}"
+                    f"Task {task_id}, success={success} split has "
+                    f"{len(group_train)} train and {len(group_test)} test rollouts; "
+                    f"expected {train_per_class} train and at least one test"
                 )
-            train.extend(values[:train_per_class])
-            test.extend(values[train_per_class:])
+            train.extend(group_train)
+            test.extend(group_test)
             per_task[task_id]["success" if success else "failure"] = {
-                "train": len(values[:train_per_class]),
-                "test": len(values[train_per_class:]),
+                "train": len(group_train),
+                "test": len(group_test),
             }
     train_ids = {identity[id(rollout)][1]["rollout_id"] for rollout in train}
     test_ids = {identity[id(rollout)][1]["rollout_id"] for rollout in test}
@@ -262,7 +405,16 @@ def export_provenance(export_dir):
     }
 
 
-def save_scores(path, rollouts_by_split, scores_by_split, identity, names, model, seed):
+def save_scores(
+    path,
+    rollouts_by_split,
+    scores_by_split,
+    identity,
+    names,
+    task_types,
+    model,
+    seed,
+):
     with Path(path).open("w") as stream:
         for split, rollouts in rollouts_by_split.items():
             for rollout, score in zip(rollouts, scores_by_split[split]):
@@ -273,6 +425,7 @@ def save_scores(path, rollouts_by_split, scores_by_split, identity, names, model
                     "split": split,
                     "task_id": int(rollout.task_id),
                     "task_name": names[int(rollout.task_id)],
+                    "task_type": task_types[names[int(rollout.task_id)]],
                     "failed": not bool(rollout.episode_success),
                     "model": model,
                     "seed": seed,
@@ -307,7 +460,11 @@ def train_seen_model(args):
     from failure_prob.utils.metrics import eval_scores_roc_prc
     from failure_prob.utils.random import seed_everything
 
-    hyperparameters = resolve_hyperparameters(args.model, args.selection_summary)
+    hyperparameters = resolve_hyperparameters(
+        args.model,
+        args.selection_summary,
+        expected_task_type=args.task_type,
+    )
     cfg = make_config(
         args.export_dir,
         args.model,
@@ -317,14 +474,32 @@ def train_seen_model(args):
         hyperparameters,
     )
     seed_everything(0)
-    all_rollouts = load_rollouts_from_root(Path(args.export_dir), cfg)
-    env_records = load_env_records(args.export_dir)
-    identity = validate_alignment(all_rollouts, env_records)
+    source_rollouts = load_rollouts_from_root(Path(args.export_dir), cfg)
+    source_env_records = load_env_records(args.export_dir)
+    task_selection = resolve_task_type_selection(
+        args.export_dir,
+        args.task_type,
+    )
+    all_rollouts, env_records, identity = filter_aligned_task_type(
+        source_rollouts,
+        source_env_records,
+        task_selection,
+    )
+    fixed_split_ids = load_outer_split_ids(args.outer_split_manifest)
+    if (
+        fixed_split_ids is not None
+        and fixed_split_ids["split_seed"] is not None
+        and int(fixed_split_ids["split_seed"]) != args.split_seed
+    ):
+        raise ValueError(
+            "Outer split manifest split_seed does not match --split-seed"
+        )
     train_rollouts, test_rollouts, per_task = make_seen_split(
         all_rollouts,
         identity,
         train_per_class=args.train_per_class,
         split_seed=args.split_seed,
+        fixed_split_ids=fixed_split_ids,
     )
     task_cutoffs = set_task_min_step_from_training(train_rollouts, test_rollouts)
     if cfg.dataset.load_to_cuda:
@@ -364,8 +539,13 @@ def train_seen_model(args):
     torch.save(model.state_dict(), output / "model_final.ckpt")
     (output / "config.yaml").write_text(OmegaConf.to_yaml(cfg))
     write_json(output / "train_history.json", {"loss": history})
-    names = task_names(args.export_dir)
+    all_names = task_names(args.export_dir)
+    selected_task_ids = sorted({int(rollout.task_id) for rollout in all_rollouts})
+    names = {task_id: all_names[task_id] for task_id in selected_task_ids}
     provenance = export_provenance(args.export_dir)
+    selected_task_types = {
+        name: provenance["task_types"][name] for name in names.values()
+    }
     train_successes = sum(int(rollout.episode_success) for rollout in train_rollouts)
     train_failures = len(train_rollouts) - train_successes
     test_successes = sum(int(rollout.episode_success) for rollout in test_rollouts)
@@ -384,8 +564,14 @@ def train_seen_model(args):
         "schema_version": 1,
         "protocol": "same_task_outcome_stratified",
         "split_seed": args.split_seed,
+        "task_type_filter": args.task_type,
+        "source_num_tasks": task_selection["source_num_tasks"],
         "num_tasks": len(names),
         "task_names": [names[key] for key in sorted(names)],
+        "task_types": selected_task_types,
+        "outer_split_manifest": (
+            fixed_split_ids["path"] if fixed_split_ids is not None else None
+        ),
         "train_per_task_class": args.train_per_class,
         "test_per_task_class": test_per_task_class,
         "counts": {
@@ -407,6 +593,7 @@ def train_seen_model(args):
         scores_by_split,
         identity,
         names,
+        selected_task_types,
         args.model,
         args.seed,
     )
@@ -421,13 +608,18 @@ def train_seen_model(args):
         "export_dir": str(Path(args.export_dir).resolve()),
         "source_fingerprint": provenance["source_fingerprint"],
         "model_families": provenance["model_families"],
-        "task_types": provenance["task_types"],
+        "task_type_filter": args.task_type,
+        "source_num_tasks": task_selection["source_num_tasks"],
+        "task_types": selected_task_types,
         "num_tasks": len(names),
         "selected_hyperparameters": hyperparameters,
         "selection_summary": (
             str(Path(args.selection_summary).resolve())
             if args.selection_summary is not None
             else None
+        ),
+        "outer_split_manifest": (
+            fixed_split_ids["path"] if fixed_split_ids is not None else None
         ),
         "task_min_step_source": (
             f"minimum inference length per task in the {len(train_rollouts)}-rollout "
@@ -464,6 +656,15 @@ def build_parser():
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--split-seed", type=int, default=0)
     parser.add_argument("--train-per-class", type=int, default=7)
+    parser.add_argument(
+        "--task-type",
+        choices=TASK_TYPE_FILTERS,
+        default="all",
+    )
+    parser.add_argument(
+        "--outer-split-manifest",
+        help="Reuse train/test rollout IDs from a completed final refit",
+    )
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--selection-summary")

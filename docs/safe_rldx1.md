@@ -671,6 +671,220 @@ successes, 9 reference successes, 21 nonconformity successes, and 130
 evaluation rollouts consisting of 50 successes and 80 failures. The
 calibration and evaluation ID sets must be disjoint.
 
+## Atomic-versus-composite SAFE ablation
+
+Use a two-stage ablation to distinguish threshold heterogeneity from negative
+training transfer:
+
+1. calibrate the already-trained mixed MLP separately on atomic and composite
+   tasks, without retraining;
+2. select and train independent atomic-only and composite-only MLPs, then
+   calibrate each predictor on its matching task type.
+
+Both stages reuse the exact outer train/test rollout IDs from the completed
+mixed final refit. The per-task calibration selector is independent of which
+other tasks are present, so mixed and split predictors also use identical
+calibration and evaluation rollout IDs within each task type. Alpha 0.15
+remains fixed before evaluation.
+
+Set the shared paths:
+
+```bash
+export SAFE_OFFICIAL="$STORAGE_BS/robocasa_rollouts/safe/rldx1_safe_mixed10_extra15x15_20260727_163929/official_safe_25x25"
+export SAFE_MIXED_FINAL="$STORAGE_BS/robocasa_checkpoints/safe/safe_rldx1_25x25_final_2gpu_20260730_104400"
+export SAFE_MIXED_SPLIT="$SAFE_MIXED_FINAL/indep_seed0/split_manifest.json"
+
+export SAFE_TYPE_TAG=safe_rldx1_25x25_type_ablation_$(date +%Y%m%d_%H%M%S)
+export SAFE_TYPE_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/$SAFE_TYPE_TAG"
+export SAFE_LOG_ROOT="$STORAGE_BS/robocasa_logs/eval"
+
+mkdir -p \
+  "$SAFE_TYPE_ROOT/mixed_calibration" \
+  "$SAFE_TYPE_ROOT/cv" \
+  "$SAFE_TYPE_ROOT/final" \
+  "$SAFE_TYPE_ROOT/split_calibration" \
+  "$SAFE_LOG_ROOT"
+
+for seed in 0 1 2; do
+  test -f "$SAFE_MIXED_FINAL/indep_seed${seed}/scores.jsonl"
+done
+test -f "$SAFE_MIXED_SPLIT"
+```
+
+First calibrate the mixed MLP separately by task type:
+
+```bash
+for task_type in atomic composite; do
+  python -u "$ROBOCASA_REPO/robocasa/recovery/safe/calibrate_seen_tasks.py" \
+    --final-root "$SAFE_MIXED_FINAL" \
+    --output-dir "$SAFE_TYPE_ROOT/mixed_calibration/$task_type" \
+    --model indep \
+    --task-type "$task_type" \
+    --seeds 0 1 2 \
+    --calibration-successes-per-task 3 \
+    --split-seed 0 \
+    --conformal-seed 0 \
+    --reference-fraction 0.3 \
+    --alphas 0.05 0.10 0.15 0.20 \
+    --selected-alpha 0.15 \
+    --modulation tfunc \
+    > "$SAFE_LOG_ROOT/${SAFE_TYPE_TAG}_mixed_${task_type}_calibration.log" 2>&1
+done
+```
+
+Each type-specific calibration must contain 170 training rollouts, 15
+calibration successes split into 4 reference and 11 nonconformity rollouts,
+and 65 evaluation rollouts consisting of 25 successes and 40 failures.
+
+Before the full sweep, run one two-epoch, three-fold smoke on each GPU:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 nohup python -u \
+  "$ROBOCASA_REPO/robocasa/recovery/safe/run_seen_cv_grid.py" \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --output-root "$SAFE_TYPE_ROOT/cv_smoke/atomic" \
+  --model indep \
+  --task-type atomic \
+  --outer-split-manifest "$SAFE_MIXED_SPLIT" \
+  --train-per-class 17 \
+  --split-seed 0 \
+  --inner-seed 0 \
+  --num-folds 3 \
+  --horizon-selectors concat-2 \
+  --diffusion-selectors concat-2 \
+  --learning-rates 1e-3 \
+  --regularization 1e-3 \
+  --epochs 2 \
+  --device cuda \
+  --resume \
+  > "$SAFE_LOG_ROOT/${SAFE_TYPE_TAG}_atomic_smoke.log" 2>&1 &
+
+CUDA_VISIBLE_DEVICES=1 nohup python -u \
+  "$ROBOCASA_REPO/robocasa/recovery/safe/run_seen_cv_grid.py" \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --output-root "$SAFE_TYPE_ROOT/cv_smoke/composite" \
+  --model indep \
+  --task-type composite \
+  --outer-split-manifest "$SAFE_MIXED_SPLIT" \
+  --train-per-class 17 \
+  --split-seed 0 \
+  --inner-seed 0 \
+  --num-folds 3 \
+  --horizon-selectors concat-2 \
+  --diffusion-selectors concat-2 \
+  --learning-rates 1e-3 \
+  --regularization 1e-3 \
+  --epochs 2 \
+  --device cuda \
+  --resume \
+  > "$SAFE_LOG_ROOT/${SAFE_TYPE_TAG}_composite_smoke.log" 2>&1 &
+```
+
+The smoke passes with three metrics per type, no `failure.json`, five selected
+tasks, 170 outer-training rollouts, and 80 untouched outer-test rollouts.
+
+Launch the full 405-fit MLP sweep per type only after that smoke passes:
+
+```bash
+for spec in "0 atomic" "1 composite"; do
+  set -- $spec
+  gpu="$1"
+  task_type="$2"
+
+  CUDA_VISIBLE_DEVICES="$gpu" nohup python -u \
+    "$ROBOCASA_REPO/robocasa/recovery/safe/run_seen_cv_grid.py" \
+    --export-dir "$SAFE_OFFICIAL" \
+    --safe-repo "$SAFE_REPO" \
+    --output-root "$SAFE_TYPE_ROOT/cv/$task_type" \
+    --model indep \
+    --task-type "$task_type" \
+    --outer-split-manifest "$SAFE_MIXED_SPLIT" \
+    --train-per-class 17 \
+    --split-seed 0 \
+    --inner-seed 0 \
+    --num-folds 3 \
+    --epochs 1000 \
+    --device cuda \
+    --resume \
+    > "$SAFE_LOG_ROOT/${SAFE_TYPE_TAG}_${task_type}_cv.log" 2>&1 &
+
+  echo "$task_type pid=$!"
+done
+```
+
+Summarize each completed sweep:
+
+```bash
+for task_type in atomic composite; do
+  python "$ROBOCASA_REPO/robocasa/recovery/safe/summarize_seen_cv.py" \
+    --root "$SAFE_TYPE_ROOT/cv/$task_type" \
+    --expected-folds 0 1 2 \
+    --quiet
+done
+```
+
+Refit three MLP seeds per type with the selected type-specific
+hyperparameters:
+
+```bash
+for spec in "0 atomic" "1 composite"; do
+  set -- $spec
+  gpu="$1"
+  task_type="$2"
+
+  CUDA_VISIBLE_DEVICES="$gpu" nohup bash -c '
+    set -euo pipefail
+    task_type="$1"
+    for seed in 0 1 2; do
+      python -u "$ROBOCASA_REPO/robocasa/recovery/safe/train_seen_tasks.py" \
+        --export-dir "$SAFE_OFFICIAL" \
+        --safe-repo "$SAFE_REPO" \
+        --output-dir "$SAFE_TYPE_ROOT/final/$task_type/indep_seed${seed}" \
+        --model indep \
+        --task-type "$task_type" \
+        --outer-split-manifest "$SAFE_MIXED_SPLIT" \
+        --seed "$seed" \
+        --split-seed 0 \
+        --train-per-class 17 \
+        --epochs 1000 \
+        --device cuda \
+        --selection-summary "$SAFE_TYPE_ROOT/cv/$task_type/cv_selection_summary.json" \
+        --resume
+    done
+  ' bash "$task_type" \
+    > "$SAFE_LOG_ROOT/${SAFE_TYPE_TAG}_${task_type}_final.log" 2>&1 &
+
+  echo "$task_type final pid=$!"
+done
+```
+
+Finally calibrate the two split predictors:
+
+```bash
+for task_type in atomic composite; do
+  python -u "$ROBOCASA_REPO/robocasa/recovery/safe/calibrate_seen_tasks.py" \
+    --final-root "$SAFE_TYPE_ROOT/final/$task_type" \
+    --output-dir "$SAFE_TYPE_ROOT/split_calibration/$task_type" \
+    --model indep \
+    --task-type "$task_type" \
+    --seeds 0 1 2 \
+    --calibration-successes-per-task 3 \
+    --split-seed 0 \
+    --conformal-seed 0 \
+    --reference-fraction 0.3 \
+    --alphas 0.05 0.10 0.15 0.20 \
+    --selected-alpha 0.15 \
+    --modulation tfunc \
+    > "$SAFE_LOG_ROOT/${SAFE_TYPE_TAG}_split_${task_type}_calibration.log" 2>&1
+done
+```
+
+For each type, the mixed and split calibration manifests must have identical
+`calibration_success_ids` and `evaluation_ids`. A gain from mixed training to
+split training therefore cannot be attributed to a different held-out split.
+
 ## Validation status and remaining live check
 
 The RLDX patch applies cleanly to the pinned commit and its modified files pass

@@ -25,10 +25,28 @@ def summarize(root, expected_seeds=(0, 1, 2)):
     if len(task_counts) > 1:
         raise ValueError(f"Final runs disagree on task count: {sorted(task_counts)}")
     num_tasks = next(iter(task_counts)) if task_counts else None
+    task_type_filters = {
+        run.get("task_type_filter", "all") for run in runs
+    }
+    if len(task_type_filters) > 1:
+        raise ValueError(
+            f"Final runs mix task-type filters: {sorted(task_type_filters)}"
+        )
+    task_type_maps = {
+        json.dumps(run.get("task_types", {}), sort_keys=True) for run in runs
+    }
+    if len(task_type_maps) > 1:
+        raise ValueError("Final runs disagree on selected task identities")
     output = {
         "schema_version": 1,
         "protocol": "same tasks in train and test; fixed outcome-stratified outer split",
         "num_tasks": num_tasks,
+        "task_type_filter": (
+            next(iter(task_type_filters)) if task_type_filters else "all"
+        ),
+        "task_types": (
+            json.loads(next(iter(task_type_maps))) if task_type_maps else {}
+        ),
         "split_counts": split_counts,
         "models": {},
     }

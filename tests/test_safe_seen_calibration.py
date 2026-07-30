@@ -99,6 +99,16 @@ class TestSeenTaskCalibration(unittest.TestCase):
             (run / "scores.jsonl").write_text(
                 "".join(json.dumps(record) + "\n" for record in records)
             )
+            (run / "metrics.json").write_text(
+                json.dumps(
+                    {
+                        "task_types": {
+                            "TaskA": "atomic",
+                            "TaskB": "composite",
+                        }
+                    }
+                )
+            )
         return final_root
 
     def test_calibration_is_disjoint_task_normalized_and_reproducible(self):
@@ -198,6 +208,39 @@ class TestSeenTaskCalibration(unittest.TestCase):
             self.assertEqual(calibration["alignment"], "extend")
             self.assertEqual(calibration["reference_size"], 1)
             self.assertEqual(calibration["calibration_size"], 3)
+
+            atomic_output = root / "atomic_calibration"
+            atomic = run_seen_calibration(
+                final_root,
+                atomic_output,
+                task_type="atomic",
+                calibration_successes_per_task=2,
+                reference_fraction=0.5,
+                alphas=(0.15,),
+                selected_alpha=0.15,
+                make_plots=False,
+            )
+            atomic_manifest = json.loads(
+                (atomic_output / "split_manifest.json").read_text()
+            )
+            self.assertEqual(atomic["task_type_filter"], "atomic")
+            self.assertEqual(atomic["selected_task_names"], ["TaskA"])
+            self.assertEqual(
+                atomic_manifest["counts"],
+                {
+                    "train": 8,
+                    "calibration_successes": 2,
+                    "calibration_reference_successes": 1,
+                    "calibration_nonconformity_successes": 1,
+                    "evaluation": 7,
+                    "evaluation_successes": 3,
+                    "evaluation_failures": 4,
+                },
+            )
+            self.assertEqual(
+                atomic_manifest["calibration_success_ids"],
+                manifest["per_task"]["TaskA"]["calibration_success_ids"],
+            )
 
     def test_seed_alignment_rejects_changed_rollout_identity(self):
         records = [

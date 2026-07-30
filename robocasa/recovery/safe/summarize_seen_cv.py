@@ -43,6 +43,18 @@ def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
     ]
     if test_counts and any(counts != test_counts[0] for counts in test_counts[1:]):
         raise ValueError("CV runs disagree on the untouched outer test counts")
+    task_type_filters = {
+        record.get("task_type_filter", "all") for record in records
+    }
+    if len(task_type_filters) > 1:
+        raise ValueError(
+            f"CV runs mix task-type filters: {sorted(task_type_filters)}"
+        )
+    selected_task_sets = {
+        tuple(record.get("selected_task_names", [])) for record in records
+    }
+    if len(selected_task_sets) > 1:
+        raise ValueError("CV runs disagree on selected task identities")
     rows = []
     for key, values in groups.items():
         folds = {int(value["fold"]) for value in values}
@@ -76,6 +88,12 @@ def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
         "protocol": "training-only outcome-stratified CV inside a fixed outer training pool",
         "selection_rule": "maximum mean matched-earliest inner-validation ROC-AUC",
         "outer_test_used_for_selection": False,
+        "task_type_filter": (
+            next(iter(task_type_filters)) if task_type_filters else "all"
+        ),
+        "selected_task_names": (
+            list(next(iter(selected_task_sets))) if selected_task_sets else []
+        ),
         "outer_train_counts": outer_counts[0] if outer_counts else None,
         "outer_test_counts": test_counts[0] if test_counts else None,
         "num_completed_fits": len(records),

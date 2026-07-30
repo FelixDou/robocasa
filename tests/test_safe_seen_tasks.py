@@ -17,7 +17,10 @@ from robocasa.recovery.safe.summarize_seen_cv import summarize_seen_cv
 from robocasa.recovery.safe.run_seen_cv_grid import generate_cv_runs, make_inner_folds
 from robocasa.recovery.safe.train_seen_tasks import (
     MODEL_DEFAULTS,
+    filter_aligned_task_type,
+    load_outer_split_ids,
     make_seen_split,
+    resolve_task_type_selection,
     resolve_hyperparameters,
     set_task_min_step_from_training,
 )
@@ -99,6 +102,93 @@ class TestSeenTaskProtocol(unittest.TestCase):
             validation_union.update(identity[id(item)][1]["rollout_id"] for item in validation)
         self.assertEqual(len(validation_union), 70)
 
+    def test_task_type_filter_reuses_fixed_outer_split_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            task_ids = {
+                "AtomicA": 0,
+                "CompositeA": 1,
+                "AtomicB": 2,
+                "CompositeB": 3,
+            }
+            task_types = {
+                "AtomicA": "atomic",
+                "CompositeA": "composite",
+                "AtomicB": "atomic",
+                "CompositeB": "composite",
+            }
+            (root / "conversion_report.json").write_text(
+                json.dumps({"task_ids": task_ids, "task_types": task_types})
+            )
+            rollouts = []
+            env_records = []
+            train_ids = []
+            test_ids = []
+            for task_name, task_id in task_ids.items():
+                for success in (0, 1):
+                    for index in range(2):
+                        rollout_id = (
+                            f"{task_name}-success-{success}-index-{index}"
+                        )
+                        rollouts.append(
+                            SimpleNamespace(
+                                task_id=task_id,
+                                episode_success=success,
+                            )
+                        )
+                        env_records.append(
+                            (
+                                root / f"{rollout_id}.pkl",
+                                {
+                                    "rollout_id": rollout_id,
+                                    "task_id": task_id,
+                                    "episode_success": success,
+                                },
+                            )
+                        )
+                        (train_ids if index == 0 else test_ids).append(
+                            rollout_id
+                        )
+            split_path = root / "split_manifest.json"
+            split_path.write_text(
+                json.dumps(
+                    {
+                        "split_seed": 0,
+                        "train": train_ids,
+                        "test": test_ids,
+                    }
+                )
+            )
+            selection = resolve_task_type_selection(root, "atomic")
+            selected, selected_env, identity = filter_aligned_task_type(
+                rollouts,
+                env_records,
+                selection,
+            )
+            train, test, per_task = make_seen_split(
+                selected,
+                identity,
+                train_per_class=1,
+                split_seed=0,
+                fixed_split_ids=load_outer_split_ids(split_path),
+            )
+
+            self.assertEqual(selection["selected_task_names"], ["AtomicA", "AtomicB"])
+            self.assertEqual(len(selected_env), 8)
+            self.assertEqual(
+                {identity[id(item)][1]["rollout_id"] for item in train},
+                set(train_ids) & {
+                    env["rollout_id"] for _, env in selected_env
+                },
+            )
+            self.assertEqual(
+                {identity[id(item)][1]["rollout_id"] for item in test},
+                set(test_ids) & {
+                    env["rollout_id"] for _, env in selected_env
+                },
+            )
+            self.assertEqual(set(per_task), {0, 2})
+
     def test_cv_grid_has_405_fits_per_architecture(self):
         runs = generate_cv_runs("lstm")
         self.assertEqual(len(runs), 405)
@@ -114,6 +204,10 @@ class TestSeenTaskProtocol(unittest.TestCase):
                     metrics = {
                         "model": model,
                         "seed": seed,
+                        "task_type_filter": "atomic",
+                        "task_types": {
+                            f"Task{index}": "atomic" for index in range(10)
+                        },
                         "num_tasks": 10,
                         "counts": {
                             "train": 140,
@@ -132,6 +226,7 @@ class TestSeenTaskProtocol(unittest.TestCase):
             result = summarize(root)
             self.assertEqual(result["num_completed_runs"], 6)
             self.assertEqual(result["num_tasks"], 10)
+            self.assertEqual(result["task_type_filter"], "atomic")
             self.assertEqual(result["split_counts"]["test"], 60)
             self.assertAlmostEqual(result["models"]["indep"]["test_roc_auc_mean"], 0.8)
             self.assertTrue((root / "summary.json").is_file())
@@ -147,6 +242,10 @@ class TestSeenTaskProtocol(unittest.TestCase):
                         record = {
                             "status": "complete",
                             "model": model,
+                            "task_type_filter": "atomic",
+                            "selected_task_names": [
+                                f"Task{index}" for index in range(5)
+                            ],
                             "horizon_selector": "1.0",
                             "diffusion_selector": "concat-2" if config == "high" else "0.0",
                             "learning_rate": 1e-3 if config == "high" else 1e-4,
@@ -169,12 +268,27 @@ class TestSeenTaskProtocol(unittest.TestCase):
                         (run / "metrics.json").write_text(json.dumps(record))
             summary = summarize_seen_cv(root)
             self.assertEqual(summary["num_completed_fits"], 12)
+            self.assertEqual(summary["task_type_filter"], "atomic")
             self.assertEqual(summary["outer_train_counts"]["rollouts"], 140)
             self.assertEqual(summary["outer_test_counts"]["rollouts"], 60)
             self.assertEqual(summary["best_by_model"]["lstm"]["diffusion_selector"], "concat-2")
             resolved = resolve_hyperparameters("lstm", root / "cv_selection_summary.json")
             self.assertEqual(resolved["horizon_selector"], 1.0)
             self.assertEqual(resolved["diffusion_selector"], "concat-2")
+
+            summary = json.loads(
+                (root / "cv_selection_summary.json").read_text()
+            )
+            summary["task_type_filter"] = "atomic"
+            (root / "cv_selection_summary.json").write_text(
+                json.dumps(summary)
+            )
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                resolve_hyperparameters(
+                    "lstm",
+                    root / "cv_selection_summary.json",
+                    expected_task_type="composite",
+                )
 
 
 class TestScoreVideo(unittest.TestCase):

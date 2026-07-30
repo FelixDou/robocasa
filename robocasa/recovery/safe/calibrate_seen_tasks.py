@@ -28,6 +28,7 @@ except ImportError:
 
 NORMALIZATION_EPS = 1e-8
 DEFAULT_ALPHAS = (0.05, 0.10, 0.15, 0.20)
+TASK_TYPE_FILTERS = ("all", "atomic", "composite")
 
 
 def json_value(value):
@@ -117,6 +118,68 @@ def validate_seed_alignment(records_by_seed):
                 f"Model seed {seed} does not use the same rollout identities and split"
             )
     return reference
+
+
+def load_final_task_types(final_root, model, seeds, *, required=False):
+    task_type_maps = []
+    for seed in seeds:
+        path = Path(final_root) / f"{model}_seed{seed}" / "metrics.json"
+        if not path.is_file():
+            if required:
+                raise ValueError(
+                    f"Task-type filtering requires final metrics: {path}"
+                )
+            continue
+        task_types = json.loads(path.read_text()).get("task_types", {})
+        if not task_types:
+            if required:
+                raise ValueError(f"Final metrics contain no task_types: {path}")
+            continue
+        task_type_maps.append(task_types)
+    if not task_type_maps:
+        return {}
+    reference = task_type_maps[0]
+    if any(task_types != reference for task_types in task_type_maps[1:]):
+        raise ValueError("Final model seeds disagree on task-type provenance")
+    invalid = {
+        task: task_type
+        for task, task_type in reference.items()
+        if task_type not in TASK_TYPE_FILTERS[1:]
+    }
+    if invalid:
+        raise ValueError(f"Final metrics have invalid task types: {invalid}")
+    return reference
+
+
+def filter_score_task_type(records_by_seed, task_types, task_type):
+    if task_type not in TASK_TYPE_FILTERS:
+        raise ValueError(
+            f"Unknown task type {task_type!r}; expected one of {TASK_TYPE_FILTERS}"
+        )
+    if task_type == "all":
+        selected_names = sorted(
+            {
+                record["task_name"]
+                for records in records_by_seed.values()
+                for record in records
+            }
+        )
+        return records_by_seed, selected_names
+    selected_names = sorted(
+        task for task, value in task_types.items() if value == task_type
+    )
+    if not selected_names:
+        raise ValueError(f"No {task_type} tasks are present in final metrics")
+    selected = set(selected_names)
+    filtered = {
+        seed: [
+            record for record in records if record["task_name"] in selected
+        ]
+        for seed, records in records_by_seed.items()
+    }
+    if any(not records for records in filtered.values()):
+        raise ValueError(f"Task-type filter {task_type} selected no score records")
+    return filtered, selected_names
 
 
 def deterministic_calibration_split(
@@ -256,7 +319,12 @@ def fit_task_normalization(records):
     return result
 
 
-def normalize_records(records, normalization, split_manifest):
+def normalize_records(
+    records,
+    normalization,
+    split_manifest,
+    task_types=None,
+):
     calibration_ids = set(split_manifest["calibration_success_ids"])
     evaluation_ids = set(split_manifest["evaluation_ids"])
     normalized = []
@@ -280,6 +348,11 @@ def normalize_records(records, normalization, split_manifest):
         normalized.append(
             {
                 **record,
+                "task_type": (
+                    task_types.get(record["task_name"])
+                    if task_types
+                    else record.get("task_type")
+                ),
                 "original_split": record["split"],
                 "split": split,
                 "raw_scores": raw.tolist(),
@@ -418,7 +491,10 @@ def create_plots(summary, output_dir):
         xlabel="Conformal significance level (alpha)",
         ylabel="Rate",
         ylim=(0.0, 1.0),
-        title="Task-normalized SAFE conformal trade-off",
+        title=(
+            "Task-normalized SAFE conformal trade-off "
+            f"({summary['task_type_filter']})"
+        ),
     )
     ax.grid(alpha=0.5)
     ax.legend(frameon=False)
@@ -440,7 +516,7 @@ def create_plots(summary, output_dir):
         ylabel="Balanced accuracy",
         ylim=(0.0, 1.0),
         title=(
-            "Per-task conformal performance at "
+            f"{summary['task_type_filter'].title()} per-task performance at "
             f"alpha={summary['selected_alpha']:.2f}"
         ),
     )
@@ -468,6 +544,7 @@ def run_seen_calibration(
     alphas=DEFAULT_ALPHAS,
     selected_alpha=0.15,
     modulation="tfunc",
+    task_type="all",
     make_plots=True,
 ):
     final_root = Path(final_root).resolve()
@@ -493,6 +570,17 @@ def run_seen_calibration(
         )
         for seed in seeds
     }
+    task_types = load_final_task_types(
+        final_root,
+        model,
+        seeds,
+        required=task_type != "all",
+    )
+    records_by_seed, selected_task_names = filter_score_task_type(
+        records_by_seed,
+        task_types,
+        task_type,
+    )
     validate_seed_alignment(records_by_seed)
     split_manifest = deterministic_calibration_split(
         records_by_seed[seeds[0]],
@@ -505,6 +593,13 @@ def run_seen_calibration(
         {
             "model": model,
             "model_seeds": list(seeds),
+            "task_type_filter": task_type,
+            "selected_task_names": selected_task_names,
+            "selected_task_types": {
+                task: task_types[task]
+                for task in selected_task_names
+                if task in task_types
+            },
             "source_final_root": str(final_root),
             "source_score_files": {
                 str(seed): str(
@@ -525,7 +620,10 @@ def run_seen_calibration(
         normalization = fit_task_normalization(records_by_seed[seed])
         write_json(seed_root / "task_normalization.json", normalization)
         records = normalize_records(
-            records_by_seed[seed], normalization, split_manifest
+            records_by_seed[seed],
+            normalization,
+            split_manifest,
+            task_types,
         )
         write_jsonl(seed_root / "normalized_scores.jsonl", records)
         by_id = {record["rollout_id"]: record for record in records}
@@ -558,6 +656,7 @@ def run_seen_calibration(
                     "protocol": "official_safe_seen_task_normalized",
                     "model": model,
                     "model_seed": seed,
+                    "task_type_filter": task_type,
                     "task_normalization": "training_task_early_max_z",
                     "split_manifest": str(
                         (output_dir / "split_manifest.json").resolve()
@@ -572,6 +671,7 @@ def run_seen_calibration(
                 "schema_version": 1,
                 "model": model,
                 "model_seed": seed,
+                "task_type_filter": task_type,
                 "alpha": alpha,
                 "normalization": "training_task_early_max_z",
                 "split_manifest": str(
@@ -613,6 +713,9 @@ def run_seen_calibration(
         "protocol": "task-normalized held-out seen-task functional conformal calibration",
         "model": model,
         "model_seeds": list(seeds),
+        "task_type_filter": task_type,
+        "selected_task_names": selected_task_names,
+        "selected_task_types": split_manifest["selected_task_types"],
         "normalization": "training_task_early_max_z",
         "score_cutoff": "training-derived task_min_step",
         "modulation": modulation,
@@ -644,6 +747,11 @@ def build_parser():
     parser.add_argument("--final-root", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--model", choices=("indep", "lstm"), default="indep")
+    parser.add_argument(
+        "--task-type",
+        choices=TASK_TYPE_FILTERS,
+        default="all",
+    )
     parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
     parser.add_argument("--calibration-successes-per-task", type=int, default=3)
     parser.add_argument("--split-seed", type=int, default=0)
@@ -674,6 +782,7 @@ def main(argv=None):
         alphas=args.alphas,
         selected_alpha=args.selected_alpha,
         modulation=args.modulation,
+        task_type=args.task_type,
         make_plots=not args.no_plots,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))

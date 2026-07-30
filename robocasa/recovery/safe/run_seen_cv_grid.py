@@ -18,9 +18,13 @@ import numpy as np
 try:
     from .train_seen_tasks import (
         OFFICIAL_SAFE_COMMIT,
+        TASK_TYPE_FILTERS,
+        filter_aligned_task_type,
         load_env_records,
+        load_outer_split_ids,
         make_config,
         make_seen_split,
+        resolve_task_type_selection,
         score_splits,
         set_task_min_step_from_training,
         train_epoch_without_wandb,
@@ -31,9 +35,13 @@ try:
 except ImportError:
     from train_seen_tasks import (
         OFFICIAL_SAFE_COMMIT,
+        TASK_TYPE_FILTERS,
+        filter_aligned_task_type,
         load_env_records,
+        load_outer_split_ids,
         make_config,
         make_seen_split,
+        resolve_task_type_selection,
         score_splits,
         set_task_min_step_from_training,
         train_epoch_without_wandb,
@@ -172,7 +180,26 @@ def run_cv_grid(args):
         args.learning_rates,
         args.regularization,
     )
-    env_records = load_env_records(args.export_dir)
+    source_env_records = load_env_records(args.export_dir)
+    task_selection = resolve_task_type_selection(
+        args.export_dir,
+        args.task_type,
+    )
+    selected_task_ids = set(task_selection["selected_task_ids"])
+    env_records = [
+        env_record
+        for env_record in source_env_records
+        if int(env_record[1]["task_id"]) in selected_task_ids
+    ]
+    fixed_split_ids = load_outer_split_ids(args.outer_split_manifest)
+    if (
+        fixed_split_ids is not None
+        and fixed_split_ids["split_seed"] is not None
+        and int(fixed_split_ids["split_seed"]) != args.split_seed
+    ):
+        raise ValueError(
+            "Outer split manifest split_seed does not match --split-seed"
+        )
     source_groups = defaultdict(int)
     for _, env in env_records:
         source_groups[(int(env["task_id"]), int(env["episode_success"]))] += 1
@@ -195,8 +222,13 @@ def run_cv_grid(args):
         "official_safe_commit": OFFICIAL_SAFE_COMMIT,
         "protocol": "training-only outcome-stratified inner CV within fixed outer training pool",
         "outer_test_used": False,
+        "task_type_filter": args.task_type,
+        "source_num_tasks": task_selection["source_num_tasks"],
+        "selected_task_names": task_selection["selected_task_names"],
+        "selected_task_types": task_selection["selected_task_types"],
         "num_tasks": len(task_ids),
-        "num_source_rollouts": len(env_records),
+        "num_source_rollouts": len(source_env_records),
+        "num_selected_rollouts": len(env_records),
         "outer_train_rollouts": outer_train_count,
         "outer_test_rollouts": outer_test_count,
         "train_per_task_class": args.train_per_class,
@@ -207,6 +239,9 @@ def run_cv_grid(args):
         "epochs": args.epochs,
         "split_seed": args.split_seed,
         "inner_seed": args.inner_seed,
+        "outer_split_manifest": (
+            fixed_split_ids["path"] if fixed_split_ids is not None else None
+        ),
         "selection_metric": "mean falert_early_roc_auc/model_inner_val across folds",
     }
     write_json(output_root / f"cv_plan_{args.model}.json", plan)
@@ -247,13 +282,22 @@ def run_cv_grid(args):
                 base_hyperparameters,
             )
             seed_everything(0)
-            all_rollouts = load_rollouts_from_root(Path(args.export_dir), cfg)
-            identity = validate_alignment(all_rollouts, env_records)
+            source_rollouts = load_rollouts_from_root(Path(args.export_dir), cfg)
+            all_rollouts, selected_env_records, identity = filter_aligned_task_type(
+                source_rollouts,
+                source_env_records,
+                task_selection,
+            )
+            if [path for path, _ in selected_env_records] != [
+                path for path, _ in env_records
+            ]:
+                raise AssertionError("Task-type filtering changed environment order")
             outer_train, outer_test, _ = make_seen_split(
                 all_rollouts,
                 identity,
                 train_per_class=args.train_per_class,
                 split_seed=args.split_seed,
+                fixed_split_ids=fixed_split_ids,
             )
             task_cutoffs = set_task_min_step_from_training(outer_train, outer_test)
             folds = make_inner_folds(
@@ -346,6 +390,8 @@ def run_cv_grid(args):
                     "status": "complete",
                     "slug": run.slug,
                     "model": run.model,
+                    "task_type_filter": args.task_type,
+                    "selected_task_names": task_selection["selected_task_names"],
                     "horizon_selector": run.horizon_selector,
                     "diffusion_selector": run.diffusion_selector,
                     "learning_rate": run.learning_rate,
@@ -399,6 +445,15 @@ def build_parser():
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--model", choices=("indep", "lstm"), required=True)
     parser.add_argument("--train-per-class", type=int, default=7)
+    parser.add_argument(
+        "--task-type",
+        choices=TASK_TYPE_FILTERS,
+        default="all",
+    )
+    parser.add_argument(
+        "--outer-split-manifest",
+        help="Reuse train/test rollout IDs from a completed final refit",
+    )
     parser.add_argument("--split-seed", type=int, default=0)
     parser.add_argument("--inner-seed", type=int, default=0)
     parser.add_argument("--num-folds", type=int, default=3)
