@@ -767,6 +767,51 @@ available at every environment state and at least one real policy inference is
 associated with the segment. Cached action consumption never creates duplicate
 SAFE features.
 
+### Composite-first coverage audit
+
+Subtask outcomes should be collected at the natural full-rollout rate. Do not
+stop collection when a subtask class reaches a quota and do not duplicate rare
+segments. Split by rollout before extracting segments, then compute any
+inverse-frequency loss weights from the training split only.
+
+Before scaling collection, audit the raw oracle predicate granularity:
+
+```bash
+python -m robocasa.recovery.safe.audit_subtask_safe_dataset \
+  --dataset-dir "$SUBTASK_SAFE_DATASET" \
+  --task-type composite \
+  --target-successes 30 \
+  --target-failures 20 \
+  --json-output "$SUBTASK_SAFE_DATASET/subtask_coverage.json" \
+  --csv-output "$SUBTASK_SAFE_DATASET/subtask_coverage.csv"
+```
+
+Pass multiple shard directories after `--dataset-dir` to audit them together.
+Use `--allow-partial` only while a collector is still running; every other
+validator error remains fatal. The audit reports each `(task, subtask)` pair
+separately, including usable successes, usable failures, labeled segments with
+no policy inference, and the remaining target deficits. Its collection
+priority ranks the summed failure deficit first because one failed rollout
+contributes at most one terminal failed subtask. These deficits are segment
+counts, not exact additional-rollout requirements.
+
+The first discovery batch should cover the five composite pilot tasks with 10
+natural rollouts per task:
+
+- `LoadDishwasher`
+- `PreSoakPan`
+- `ScrubCuttingBoard`
+- `StackBowlsCabinet`
+- `WashLettuce`
+
+Inspect the audit before grouping predicates or scaling toward 50 natural
+rollouts per task. A practical initial target is at least 30 usable successful
+and 20 usable failed segments for every retained `(task, subtask)` pair. Keep
+atomic controls in a separate dataset and model; `CoffeeSetupMug`,
+`PickPlaceCounterToStove`, and `PickPlaceDrawerToCounter` are useful controls
+at 20--30 natural rollouts each. Atomic and composite models should not be
+mixed until their separate behavior is understood.
+
 ## Local structural validation
 
 These checks require no GPU, RoboSuite, simulator, checkpoint, or server:

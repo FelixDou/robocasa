@@ -7,6 +7,10 @@ from tests.safe_import_helper import install_lightweight_robocasa_packages
 
 install_lightweight_robocasa_packages()
 
+from robocasa.recovery.safe.audit_subtask_safe_dataset import (
+    format_report as format_audit_report,
+    summarize_subtask_records,
+)
 from robocasa.recovery.safe.subtask_safe import (
     SUBTASK_FAILURE_LABEL_SEMANTICS,
     atomic_write_subtask_safe_record,
@@ -163,6 +167,137 @@ class TestSubtaskSafe(unittest.TestCase):
             path = Path(tmp) / "subtasks" / "record.json"
             atomic_write_subtask_safe_record(path, record)
             self.assertEqual(json.loads(path.read_text()), record)
+
+    def test_coverage_audit_counts_zero_inference_and_deficits(self):
+        success_without_first_inference = build_subtask_safe_record(
+            [
+                subtask_eval(),
+                subtask_eval(first=True),
+                subtask_eval(first=True, second=True, task_success=True),
+            ],
+            [1],
+            rollout_failed=False,
+            rollout_id="success-no-first-inference",
+        )
+        success_with_both_inferences = build_subtask_safe_record(
+            [
+                subtask_eval(),
+                subtask_eval(first=True),
+                subtask_eval(first=True, second=True, task_success=True),
+            ],
+            [0, 1],
+            rollout_failed=False,
+            rollout_id="success-both-inferences",
+        )
+        terminal_second_failure = build_subtask_safe_record(
+            [
+                subtask_eval(),
+                subtask_eval(first=True),
+                subtask_eval(first=True),
+            ],
+            [0, 1],
+            rollout_failed=True,
+            rollout_id="failure-second",
+        )
+        result = summarize_subtask_records(
+            [
+                {
+                    "task_name": "CompositeTask",
+                    "task_type": "composite",
+                    "rollout_id": "success-no-first-inference",
+                    "failed": False,
+                    "subtask_record": success_without_first_inference,
+                },
+                {
+                    "task_name": "CompositeTask",
+                    "task_type": "composite",
+                    "rollout_id": "success-both-inferences",
+                    "failed": False,
+                    "subtask_record": success_with_both_inferences,
+                },
+                {
+                    "task_name": "CompositeTask",
+                    "task_type": "composite",
+                    "rollout_id": "failure-second",
+                    "failed": True,
+                    "subtask_record": terminal_second_failure,
+                },
+            ],
+            target_successes=3,
+            target_failures=2,
+            task_type_filter="composite",
+        )
+
+        first, second = result["task_subtask_rows"]
+        self.assertEqual(first["subtask_name"], "first")
+        self.assertEqual(first["usable_successes"], 2)
+        self.assertEqual(first["usable_failures"], 0)
+        self.assertEqual(first["labeled_without_inference"], 1)
+        self.assertEqual(first["inference_coverage"], 2 / 3)
+        self.assertEqual(
+            (first["success_deficit"], first["failure_deficit"]),
+            (1, 2),
+        )
+        self.assertEqual(second["subtask_name"], "second")
+        self.assertEqual(second["usable_successes"], 2)
+        self.assertEqual(second["usable_failures"], 1)
+        self.assertEqual(
+            (second["success_deficit"], second["failure_deficit"]),
+            (1, 1),
+        )
+        self.assertEqual(
+            result["counts"],
+            {
+                "rollouts": 3,
+                "rollout_successes": 2,
+                "rollout_failures": 1,
+                "tasks": 1,
+                "task_subtask_pairs": 2,
+                "usable_success_segments": 4,
+                "usable_failure_segments": 1,
+                "labeled_without_inference": 1,
+                "pairs_reaching_target": 0,
+            },
+        )
+        self.assertEqual(result["tasks"][0]["total_deficit"], 5)
+        report = format_audit_report(result)
+        self.assertIn("CompositeTask", report)
+        self.assertIn("diagnostic, not rollout counts", report)
+
+    def test_coverage_audit_filters_before_duplicate_check(self):
+        atomic_record = build_subtask_safe_record(
+            [subtask_eval(), subtask_eval(first=True)],
+            [0],
+            rollout_failed=True,
+            rollout_id="shared",
+        )
+        composite_record = build_subtask_safe_record(
+            [subtask_eval(), subtask_eval(first=True)],
+            [0],
+            rollout_failed=True,
+            rollout_id="shared",
+        )
+        result = summarize_subtask_records(
+            [
+                {
+                    "task_name": "AtomicTask",
+                    "task_type": "atomic",
+                    "rollout_id": "shared",
+                    "failed": True,
+                    "subtask_record": atomic_record,
+                },
+                {
+                    "task_name": "CompositeTask",
+                    "task_type": "composite",
+                    "rollout_id": "shared",
+                    "failed": True,
+                    "subtask_record": composite_record,
+                },
+            ],
+            task_type_filter="composite",
+        )
+        self.assertEqual(result["counts"]["rollouts"], 1)
+        self.assertEqual(result["task_priority"], ["CompositeTask"])
 
 
 if __name__ == "__main__":

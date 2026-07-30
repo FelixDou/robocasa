@@ -16,6 +16,9 @@ from robocasa.recovery.safe.collect_atomic_rollouts import (
     prepare_plan,
     run_collection,
 )
+from robocasa.recovery.safe.audit_subtask_safe_dataset import (
+    audit_subtask_datasets,
+)
 from robocasa.recovery.safe.dataset import load_manifest
 from robocasa.recovery.safe.export_to_official_safe import export_to_official_safe
 from robocasa.recovery.safe.merge_atomic_datasets import merge_atomic_datasets
@@ -484,6 +487,35 @@ class TestSafeAtomicCollection(unittest.TestCase):
                     payload["segments"][0]["failure_label"],
                     int(record.failed),
                 )
+
+    def test_subtask_audit_can_explicitly_inspect_partial_collection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(
+                tmp,
+                num_rollouts=2,
+                success_quota=2,
+                failure_quota=2,
+            )
+            args.record_subtask_trace = True
+            result = run_collection(args, runtime=fake_runtime())
+            self.assertTrue(result["partial"])
+
+            with self.assertRaisesRegex(ValueError, "partial/incomplete"):
+                audit_subtask_datasets(
+                    [tmp],
+                    task_type_filter="atomic",
+                )
+            audit = audit_subtask_datasets(
+                [tmp],
+                task_type_filter="atomic",
+                allow_partial=True,
+                target_successes=1,
+                target_failures=1,
+            )
+
+            self.assertEqual(audit["counts"]["rollouts"], 2)
+            self.assertEqual(audit["counts"]["pairs_reaching_target"], 1)
+            self.assertTrue(audit["sources"][0]["partial"])
 
     def test_resume_does_not_duplicate_manifest_records(self):
         with tempfile.TemporaryDirectory() as tmp:
