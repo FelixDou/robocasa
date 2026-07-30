@@ -11,12 +11,25 @@ def get_subtask_eval(env):
     This helper intentionally treats subtask evaluation as an optional layer so
     existing binary task success evaluators can continue to run unchanged.
     """
-    if hasattr(env, "get_subtask_progress"):
-        return env.get_subtask_progress()
+    pending = [env]
+    visited = set()
+    while pending:
+        candidate = pending.pop(0)
+        if candidate is None or id(candidate) in visited:
+            continue
+        visited.add(id(candidate))
 
-    inner_env = getattr(env, "env", None)
-    if inner_env is not None and hasattr(inner_env, "get_subtask_progress"):
-        return inner_env.get_subtask_progress()
+        progress_fn = getattr(candidate, "get_subtask_progress", None)
+        if callable(progress_fn):
+            return progress_fn()
+
+        for attribute in ("env", "unwrapped"):
+            try:
+                nested = getattr(candidate, attribute, None)
+            except (AttributeError, RuntimeError):
+                nested = None
+            if nested is not None and id(nested) not in visited:
+                pending.append(nested)
 
     return None
 

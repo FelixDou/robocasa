@@ -31,6 +31,15 @@ def collect_single_rollout(
     """Simulator-light collection core used by the live CLI and mocked tests."""
     reset_result = env.reset()
     obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
+    reset_info = (
+        reset_result[1]
+        if (
+            isinstance(reset_result, tuple)
+            and len(reset_result) > 1
+            and isinstance(reset_result[1], dict)
+        )
+        else {}
+    )
     if hasattr(policy, "reset"):
         policy.reset()
     if instruction is None and isinstance(obs, dict):
@@ -52,7 +61,11 @@ def collect_single_rollout(
             from robocasa.recovery.subtask_eval import get_subtask_eval
 
             subtask_eval_fn = get_subtask_eval
-        subtask_evals.append(subtask_eval_fn(env))
+        subtask_evals.append(
+            reset_info.get("subtask_eval")
+            if reset_info.get("subtask_eval") is not None
+            else subtask_eval_fn(env)
+        )
     for step_index in range(horizon):
         action = policy(obs, instruction=instruction)
         actions.append(action)
@@ -68,7 +81,12 @@ def collect_single_rollout(
         else:
             obs, reward, done, info = result
         if record_subtask_trace:
-            subtask_evals.append(subtask_eval_fn(env))
+            subtask_evals.append(
+                info.get("subtask_eval")
+                if isinstance(info, dict)
+                and info.get("subtask_eval") is not None
+                else subtask_eval_fn(env)
+            )
         success = bool(success_fn(info, reward, env) if success_fn else (info or {}).get("success", False))
         if (
             video_writer is not None

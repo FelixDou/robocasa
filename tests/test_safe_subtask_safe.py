@@ -13,6 +13,7 @@ from robocasa.recovery.safe.subtask_safe import (
     build_subtask_safe_record,
     validate_subtask_safe_record,
 )
+from robocasa.recovery.subtask_eval import get_subtask_eval
 
 
 def subtask_eval(*, first=False, second=False, task_success=False):
@@ -27,6 +28,32 @@ def subtask_eval(*, first=False, second=False, task_success=False):
 
 
 class TestSubtaskSafe(unittest.TestCase):
+    def test_get_subtask_eval_traverses_nested_wrappers(self):
+        payload = subtask_eval()
+
+        class Inner:
+            def get_subtask_progress(self):
+                return payload
+
+        class Wrapper:
+            def __init__(self, env):
+                self.env = env
+
+        self.assertIs(
+            get_subtask_eval(Wrapper(Wrapper(Inner()))),
+            payload,
+        )
+
+    def test_get_subtask_eval_handles_wrapper_cycle(self):
+        class Wrapper:
+            pass
+
+        first = Wrapper()
+        second = Wrapper()
+        first.env = second
+        second.env = first
+        self.assertIsNone(get_subtask_eval(first))
+
     def test_successful_segments_use_first_ordered_completion(self):
         record = build_subtask_safe_record(
             [

@@ -36,6 +36,29 @@ class FakeSubtaskEnv(FakeEnv):
         }
 
 
+class FakeInfoSubtaskEnv(FakeEnv):
+    def _subtask_eval(self):
+        first = self.steps >= 1
+        second = self.steps >= 3
+        return {
+            "required_predicates": ["first", "second"],
+            "predicates": {
+                "first": {"value": first, "stage": "subtask"},
+                "second": {"value": second, "stage": "subtask"},
+            },
+            "task_success": second,
+        }
+
+    def reset(self):
+        obs, _ = super().reset()
+        return obs, {"subtask_eval": self._subtask_eval()}
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = super().step(action)
+        info["subtask_eval"] = self._subtask_eval()
+        return obs, reward, terminated, truncated, info
+
+
 class FakePolicy:
     def __init__(self):
         self.reset()
@@ -128,6 +151,22 @@ class TestSafeCollection(unittest.TestCase):
                 for segment in record["segments"]
             ],
             [("first", 0), ("second", 0)],
+        )
+
+    def test_subtask_trace_prefers_gym_info_over_wrapper_lookup(self):
+        result = collect_single_rollout(
+            FakePolicy(),
+            FakeInfoSubtaskEnv(),
+            horizon=5,
+            record_subtask_trace=True,
+            subtask_eval_fn=lambda env: None,
+        )
+        self.assertEqual(
+            [
+                item["ordered_current_subtask"]
+                for item in result["subtask_safe_record"]["inference_records"]
+            ],
+            ["first", "second"],
         )
 
 
