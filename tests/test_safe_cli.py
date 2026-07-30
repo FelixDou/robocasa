@@ -7,6 +7,7 @@ from tests.safe_import_helper import install_lightweight_robocasa_packages
 install_lightweight_robocasa_packages()
 
 from robocasa.recovery.safe import (
+    calibrate_seen_tasks,
     collect_atomic_rollouts,
     collect_rollouts,
     conformal,
@@ -33,6 +34,7 @@ from robocasa.recovery.safe import (
 class TestSafeCLIHelp(unittest.TestCase):
     def test_all_cli_help_exits_cleanly(self):
         for module in (
+            calibrate_seen_tasks,
             collect_atomic_rollouts,
             validate_atomic_dataset,
             export_to_official_safe,

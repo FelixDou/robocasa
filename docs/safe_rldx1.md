@@ -540,6 +540,137 @@ CUDA_VISIBLE_DEVICES=1 nohup python -u \
 echo "lstm_pid=$!"
 ```
 
+## Leakage-free seen-task calibration for the 25/25 dataset
+
+After selecting and refitting the final MLP on the 25-success/25-failure
+dataset, calibrate a conformal operating threshold without reusing an
+evaluation rollout. The final training command uses 17 successes and 17
+failures per task, leaving 8 successes and 8 failures per task held out.
+This calibration stage then uses:
+
+- 3 of the 8 held-out successes per task for calibration, 30 rollouts total;
+- the official SAFE 30/70 reference/calibration split inside those 30
+  successful rollouts, yielding 9 reference and 21 nonconformity rollouts;
+- the remaining 5 successes and all 8 failures per task for final threshold
+  evaluation, yielding 130 rollouts total;
+- task affine normalization fitted only from the 340 training rollouts;
+- the official functional threshold with `extend` alignment and `tfunc`
+  modulation.
+
+This is a seen-task, task-conditioned protocol. It must not be used to claim
+generalization to an unseen task, because that task would not have a fitted
+normalization statistic. The stage is CPU-only and needs neither a policy
+server nor a GPU. Alpha 0.15 is fixed before evaluation; the other alpha rows
+are sensitivity analyses and must not be used to choose a better-looking test
+operating point.
+
+In a new cluster session, activate the SAFE environment and point
+`SAFE_RLDX25_FINAL_ROOT` at the directory containing `indep_seed0`,
+`indep_seed1`, and `indep_seed2`:
+
+```bash
+set -euo pipefail
+
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+
+export PROJECT_FS=/gs/fs/tga-shinoda/felid
+export STORAGE_BS=/gs/bs/tga-shinoda/felid
+export ROBOCASA_REPO="$PROJECT_FS/robocasa_safe_integration"
+export SAFE_ENV="$STORAGE_BS/envs/vla_safe"
+
+# Replace the final path component with the completed final-training directory.
+export SAFE_RLDX25_FINAL_ROOT=/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/REPLACE_WITH_FINAL_DIRECTORY
+export SAFE_RLDX25_CALIB_ROOT="${SAFE_RLDX25_FINAL_ROOT}_task_normalized_conformal"
+
+export XDG_CACHE_HOME="$STORAGE_BS/xdg_cache"
+export MPLCONFIGDIR="$STORAGE_BS/matplotlib_config"
+export TMPDIR=/tmp/ut06746/safe_rldx_calibration
+export PYTHONNOUSERSITE=1
+
+conda activate "$SAFE_ENV"
+mkdir -p "$MPLCONFIGDIR" "$TMPDIR" "$SAFE_RLDX25_CALIB_ROOT"
+
+for seed in 0 1 2; do
+  test -f "$SAFE_RLDX25_FINAL_ROOT/indep_seed${seed}/scores.jsonl"
+done
+
+python -u "$ROBOCASA_REPO/robocasa/recovery/safe/calibrate_seen_tasks.py" \
+  --final-root "$SAFE_RLDX25_FINAL_ROOT" \
+  --output-dir "$SAFE_RLDX25_CALIB_ROOT" \
+  --model indep \
+  --seeds 0 1 2 \
+  --calibration-successes-per-task 3 \
+  --split-seed 0 \
+  --conformal-seed 0 \
+  --reference-fraction 0.3 \
+  --alphas 0.05 0.10 0.15 0.20 \
+  --selected-alpha 0.15 \
+  --modulation tfunc
+```
+
+Audit the split and print the operating-point trade-off:
+
+```bash
+python - "$SAFE_RLDX25_CALIB_ROOT" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+manifest = json.loads((root / "split_manifest.json").read_text())
+summary = json.loads((root / "summary.json").read_text())
+
+print("Split counts:", manifest["counts"])
+print("Tasks:", len(manifest["task_names"]))
+print(
+    "Calibration/evaluation disjoint:",
+    not (
+        set(manifest["calibration_success_ids"])
+        & set(manifest["evaluation_ids"])
+    ),
+)
+
+print("\nalpha    TPR    FPR bal_acc det_time")
+for alpha, metrics in summary["aggregate"]["by_alpha"].items():
+    print(
+        f"{float(alpha):4.2f}",
+        f"{metrics['true_positive_rate_mean']:6.3f}",
+        f"{metrics['false_positive_rate_mean']:6.3f}",
+        f"{metrics['balanced_accuracy_mean']:7.3f}",
+        f"{metrics['normalized_detection_time_mean']:8.3f}",
+    )
+
+print("\nSelected alpha:", summary["selected_alpha"])
+print("Report:", root / "summary.json")
+print("Trade-off plot:", root / "conformal_tradeoff.png")
+print("Per-task plot:", root / "per_task_balanced_accuracy.png")
+PY
+```
+
+To inspect causal detections on videos for one fitted seed, render normalized
+evaluation trajectories with the matching calibrated threshold:
+
+```bash
+export SAFE_RLDX25_VIDEO_ROOT="$SAFE_RLDX25_CALIB_ROOT/videos_indep_seed0_alpha0p15"
+
+python -u "$ROBOCASA_REPO/robocasa/recovery/safe/render_score_videos.py" \
+  --scores "$SAFE_RLDX25_CALIB_ROOT/indep_seed0/normalized_scores.jsonl" \
+  --calibration "$SAFE_RLDX25_CALIB_ROOT/indep_seed0/alpha_0p15/calibration.json" \
+  --split evaluation \
+  --max-videos 20 \
+  --output-dir "$SAFE_RLDX25_VIDEO_ROOT"
+```
+
+The yellow curve is the normalized SAFE score and the red curve is the
+functional threshold. The status changes from `MONITORING` to `ALERT` at the
+first causal crossing; the overlay never uses a future score.
+
+The result is healthy only if the split reports 340 training, 30 calibration
+successes, 9 reference successes, 21 nonconformity successes, and 130
+evaluation rollouts consisting of 50 successes and 80 failures. The
+calibration and evaluation ID sets must be disjoint.
+
 ## Validation status and remaining live check
 
 The RLDX patch applies cleanly to the pinned commit and its modified files pass

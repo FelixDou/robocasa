@@ -208,7 +208,22 @@ class TestScoreVideo(unittest.TestCase):
                 "inference_environment_steps": [0, 3, 6],
             }
             score_file.write_text(json.dumps(record) + "\n")
-            outputs = render_score_videos(score_file, root / "rendered")
+            calibration_file = root / "calibration.json"
+            calibration_file.write_text(
+                json.dumps(
+                    {
+                        "alpha": 0.15,
+                        "alignment": "extend",
+                        "threshold": [0.4, 0.4, 0.4],
+                    }
+                )
+                + "\n"
+            )
+            outputs = render_score_videos(
+                score_file,
+                root / "rendered",
+                calibration_path=calibration_file,
+            )
             self.assertEqual(len(outputs), 1)
             self.assertGreater(outputs[0].stat().st_size, 0)
             capture = cv2.VideoCapture(str(outputs[0]))

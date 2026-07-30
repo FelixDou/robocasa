@@ -10,7 +10,18 @@ from pathlib import Path
 import numpy as np
 from sklearn.metrics import average_precision_score, balanced_accuracy_score, roc_auc_score
 
-from .conformal import calibrate_functional_threshold, first_detection, load_calibration
+try:
+    from .conformal import (
+        calibrate_functional_threshold,
+        first_detection,
+        load_calibration,
+    )
+except ImportError:
+    from conformal import (
+        calibrate_functional_threshold,
+        first_detection,
+        load_calibration,
+    )
 
 
 def _safe_auc(function, labels, scores):
