@@ -8,6 +8,7 @@ install_lightweight_robocasa_packages()
 
 from robocasa.recovery.safe import (
     calibrate_seen_tasks,
+    build_natural_rate_experiment,
     collect_atomic_rollouts,
     collect_rollouts,
     conformal,
@@ -20,8 +21,10 @@ from robocasa.recovery.safe import (
     report_official_grid,
     render_score_videos,
     run_official_grid,
+    run_natural_rate_screen,
     run_seen_cv_grid,
     summarize_seen_cv,
+    summarize_natural_rate_screen,
     summarize_seen_tasks,
     summarize_official_grid,
     train,
@@ -35,6 +38,7 @@ class TestSafeCLIHelp(unittest.TestCase):
     def test_all_cli_help_exits_cleanly(self):
         for module in (
             calibrate_seen_tasks,
+            build_natural_rate_experiment,
             collect_atomic_rollouts,
             validate_atomic_dataset,
             export_to_official_safe,
@@ -49,8 +53,10 @@ class TestSafeCLIHelp(unittest.TestCase):
             report_official_grid,
             render_score_videos,
             run_official_grid,
+            run_natural_rate_screen,
             run_seen_cv_grid,
             summarize_seen_cv,
+            summarize_natural_rate_screen,
             summarize_seen_tasks,
             summarize_official_grid,
             train_seen_tasks,

@@ -894,3 +894,217 @@ records, reset behavior, RLDX model-family provenance, dataset validation, and
 official-loader export. A live GPU feature capture still requires the cluster
 checkpoint, RLDX server, RoboCasa simulator, and assets, so the one-rollout
 command above is the required final runtime check before a large collection.
+
+## Natural-outcome-rate and official-loss experiment
+
+The 25-success/25-failure export is intentionally balanced. The paper-like
+experiment reconstructs each task's policy success rate from valid manifest
+records plus `skipped_class_quota_reached` records. Those discarded rollouts
+were executed and labeled by the simulator. Errors, `skipped_quota_reached`,
+and other administrative skips are not outcomes and are excluded.
+
+The builder preserves the existing 160-rollout test set exactly and creates
+five immutable resamples for three controlled regimes:
+
+- `matched_weighted`: matched-size 50/50 training with official SAFE
+  inverse-frequency weights;
+- `natural_weighted`: natural-rate training with official weights;
+- `natural_unweighted`: the same natural-rate IDs with equal, scale-matched
+  class multipliers. This removes inverse-frequency scaling while preserving
+  the unchanged official loss and its mean monitor-loss scale relative to
+  regularization.
+
+Consequently, `natural_weighted - matched_weighted` isolates prevalence at
+fixed sample count and `natural_weighted - natural_unweighted` isolates the
+paper's loss weighting.
+
+### New-session setup and split construction
+
+```bash
+set -euo pipefail
+
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+conda activate /gs/bs/tga-shinoda/felid/envs/vla_safe
+
+export PROJECT_FS=/gs/fs/tga-shinoda/felid
+export STORAGE_BS=/gs/bs/tga-shinoda/felid
+export ROBOCASA_REPO="$PROJECT_FS/robocasa_safe_integration"
+export SAFE_REPO="$PROJECT_FS/SAFE"
+export SAFE_OFFICIAL="$STORAGE_BS/robocasa_rollouts/safe/rldx1_safe_mixed10_extra15x15_20260727_163929/official_safe_25x25"
+export SAFE_RLDX25_FINAL_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/safe_rldx1_25x25_final_2gpu_20260730_104400"
+export SAFE_OUTER_SPLIT="$SAFE_RLDX25_FINAL_ROOT/indep_seed0/split_manifest.json"
+export RLDX_FIRST_ROOT="$STORAGE_BS/robocasa_rollouts/safe/rldx1_safe_mixed10_10x10_20260726_190751"
+export RLDX_EXTRA_ROOT="$STORAGE_BS/robocasa_rollouts/safe/rldx1_safe_mixed10_extra15x15_20260727_163929"
+
+export SAFE_NATURAL_TAG=safe_rldx1_natural_rate_screen_$(date +%Y%m%d_%H%M%S)
+export SAFE_NATURAL_PLAN_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/${SAFE_NATURAL_TAG}_plan"
+export SAFE_NATURAL_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/$SAFE_NATURAL_TAG"
+export SAFE_LOG_ROOT="$STORAGE_BS/robocasa_logs/eval"
+export XDG_CACHE_HOME="$STORAGE_BS/xdg_cache"
+export MPLCONFIGDIR="$STORAGE_BS/matplotlib_config"
+export WANDB_CACHE_DIR="$STORAGE_BS/wandb_cache"
+export TMPDIR=/tmp/ut06746/safe_natural_rate
+export WANDB_MODE=disabled
+export WANDB_DISABLED=true
+export WANDB_ENABLED=0
+export PYTHONNOUSERSITE=1
+
+mkdir -p \
+  "$SAFE_NATURAL_PLAN_ROOT" "$SAFE_NATURAL_ROOT" "$SAFE_LOG_ROOT" \
+  "$XDG_CACHE_HOME" "$MPLCONFIGDIR" "$WANDB_CACHE_DIR" "$TMPDIR"
+
+cd "$ROBOCASA_REPO"
+
+python -u -m robocasa.recovery.safe.build_natural_rate_experiment \
+  --collection-dataset "$RLDX_FIRST_ROOT/shard0" \
+  --collection-dataset "$RLDX_FIRST_ROOT/shard1" \
+  --collection-dataset "$RLDX_EXTRA_ROOT/shard0" \
+  --collection-dataset "$RLDX_EXTRA_ROOT/shard1" \
+  --official-export "$SAFE_OFFICIAL" \
+  --outer-split-manifest "$SAFE_OUTER_SPLIT" \
+  --output-dir "$SAFE_NATURAL_PLAN_ROOT" \
+  --subset-seeds 0 1 2 3 4 \
+  > "$SAFE_NATURAL_PLAN_ROOT/build_stdout.json"
+```
+
+Freeze the hyperparameters already selected by the completed 25x25
+training-only inner CV:
+
+```bash
+python - "$SAFE_NATURAL_PLAN_ROOT/frozen_selection_summary.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+summary = {
+    "schema_version": 1,
+    "task_type_filter": "all",
+    "selection_source": "completed 25x25 training-only inner CV",
+    "best_by_model": {
+        "indep": {
+            "horizon_selector": "concat-2",
+            "diffusion_selector": "concat-2",
+            "learning_rate": 1e-3,
+            "lambda_reg": 1e-3,
+        },
+        "lstm": {
+            "horizon_selector": "concat-2",
+            "diffusion_selector": "concat-2",
+            "learning_rate": 1e-4,
+            "lambda_reg": 1e-2,
+        },
+    },
+}
+Path(sys.argv[1]).write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+PY
+
+export SAFE_FROZEN_SELECTION="$SAFE_NATURAL_PLAN_ROOT/frozen_selection_summary.json"
+```
+
+Audit the rate estimates and test-set invariant before training:
+
+```bash
+python - "$SAFE_NATURAL_PLAN_ROOT" "$SAFE_OUTER_SPLIT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+outer = json.loads(Path(sys.argv[2]).read_text())
+audit = json.loads((root / "natural_rate_audit.json").read_text())
+plan = json.loads((root / "experiment_plan.json").read_text())
+
+print("Observed genuine outcomes:", audit["num_observed_outcomes"])
+print("Common samples/task:", plan["samples_per_task"])
+for task, values in audit["per_task"].items():
+    print(
+        f"{task:32s} S={values['successes']:3d} F={values['failures']:3d} "
+        f"p_success={values['natural_success_rate']:.3f}"
+    )
+fixed_test = sorted(map(str, outer["test"]))
+for record in plan["manifests"]:
+    manifest = json.loads(Path(record["path"]).read_text())
+    assert manifest["test"] == fixed_test
+    assert not set(manifest["train"]) & set(manifest["test"])
+print("VERDICT: IMMUTABLE SPLITS HEALTHY")
+PY
+```
+
+### Two-GPU frozen-hyperparameter screen
+
+Each GPU runs 45 fits: three regimes, five subset seeds, and three model seeds.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 nohup python -u -m \
+  robocasa.recovery.safe.run_natural_rate_screen \
+  --experiment-plan "$SAFE_NATURAL_PLAN_ROOT/experiment_plan.json" \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --selection-summary "$SAFE_FROZEN_SELECTION" \
+  --output-root "$SAFE_NATURAL_ROOT" \
+  --model indep \
+  --subset-seeds 0 1 2 3 4 \
+  --model-seeds 0 1 2 \
+  --epochs 1000 \
+  --device cuda \
+  --resume \
+  > "$SAFE_LOG_ROOT/${SAFE_NATURAL_TAG}_indep.log" 2>&1 &
+echo "MLP PID=$!"
+
+CUDA_VISIBLE_DEVICES=1 nohup python -u -m \
+  robocasa.recovery.safe.run_natural_rate_screen \
+  --experiment-plan "$SAFE_NATURAL_PLAN_ROOT/experiment_plan.json" \
+  --export-dir "$SAFE_OFFICIAL" \
+  --safe-repo "$SAFE_REPO" \
+  --selection-summary "$SAFE_FROZEN_SELECTION" \
+  --output-root "$SAFE_NATURAL_ROOT" \
+  --model lstm \
+  --subset-seeds 0 1 2 3 4 \
+  --model-seeds 0 1 2 \
+  --epochs 1000 \
+  --device cuda \
+  --resume \
+  > "$SAFE_LOG_ROOT/${SAFE_NATURAL_TAG}_lstm.log" 2>&1 &
+echo "LSTM PID=$!"
+```
+
+Monitor and summarize:
+
+```bash
+jobs -l
+echo "Completed: $(find "$SAFE_NATURAL_ROOT" -mindepth 2 -name metrics.json | wc -l) / 90"
+echo "Failures:  $(find "$SAFE_NATURAL_ROOT" -name failure.json | wc -l)"
+tail -20 "$SAFE_LOG_ROOT/${SAFE_NATURAL_TAG}_indep.log"
+tail -20 "$SAFE_LOG_ROOT/${SAFE_NATURAL_TAG}_lstm.log"
+
+test "$(find "$SAFE_NATURAL_ROOT" -mindepth 2 -name metrics.json | wc -l)" -eq 90
+test "$(find "$SAFE_NATURAL_ROOT" -name failure.json | wc -l)" -eq 0
+
+python -m robocasa.recovery.safe.summarize_natural_rate_screen \
+  --root "$SAFE_NATURAL_ROOT" \
+  --expected-subset-seeds 0 1 2 3 4 \
+  --expected-model-seeds 0 1 2 \
+  --quiet
+
+python - "$SAFE_NATURAL_ROOT/natural_rate_summary.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+summary = json.loads(Path(sys.argv[1]).read_text())
+for key, result in summary["groups"].items():
+    roc = result["test_roc_auc"]
+    prc = result["test_prc_auc"]
+    print(
+        f"{key:28s} ROC={roc['mean']:.3f} +/- {roc['std']:.3f} "
+        f"PRC={prc['mean']:.3f} +/- {prc['std']:.3f} "
+        f"n={result['counts']['train']}"
+    )
+print(json.dumps(summary["paired_comparisons"], indent=2))
+PY
+```
+
+Treat subset seeds, rather than the three optimization seeds within one
+subset, as the independent resampling units. Run a new inner-CV sweep only if
+the frozen `natural_weighted` regime is consistently promising.

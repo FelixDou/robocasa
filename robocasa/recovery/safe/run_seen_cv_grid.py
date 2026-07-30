@@ -17,14 +17,17 @@ import numpy as np
 
 try:
     from .train_seen_tasks import (
+        CLASS_WEIGHTING_MODES,
         OFFICIAL_SAFE_COMMIT,
         TASK_TYPE_FILTERS,
         filter_aligned_task_type,
         load_env_records,
         load_outer_split_ids,
         make_config,
+        make_manifest_split,
         make_seen_split,
         resolve_task_type_selection,
+        resolve_class_weights,
         score_splits,
         set_task_min_step_from_training,
         train_epoch_without_wandb,
@@ -34,14 +37,17 @@ try:
     )
 except ImportError:
     from train_seen_tasks import (
+        CLASS_WEIGHTING_MODES,
         OFFICIAL_SAFE_COMMIT,
         TASK_TYPE_FILTERS,
         filter_aligned_task_type,
         load_env_records,
         load_outer_split_ids,
         make_config,
+        make_manifest_split,
         make_seen_split,
         resolve_task_type_selection,
+        resolve_class_weights,
         score_splits,
         set_task_min_step_from_training,
         train_epoch_without_wandb,
@@ -191,7 +197,18 @@ def run_cv_grid(args):
         for env_record in source_env_records
         if int(env_record[1]["task_id"]) in selected_task_ids
     ]
-    fixed_split_ids = load_outer_split_ids(args.outer_split_manifest)
+    if args.outer_split_manifest is not None and args.selection_manifest is not None:
+        raise ValueError(
+            "--outer-split-manifest and --selection-manifest are mutually exclusive"
+        )
+    fixed_split_ids = load_outer_split_ids(
+        args.selection_manifest or args.outer_split_manifest
+    )
+    fixed_outer_split_path = (
+        fixed_split_ids["manifest"].get("fixed_outer_split_manifest")
+        if args.selection_manifest is not None
+        else (fixed_split_ids["path"] if fixed_split_ids is not None else None)
+    )
     if (
         fixed_split_ids is not None
         and fixed_split_ids["split_seed"] is not None
@@ -201,22 +218,35 @@ def run_cv_grid(args):
             "Outer split manifest split_seed does not match --split-seed"
         )
     source_groups = defaultdict(int)
+    selected_env_by_id = {}
     for _, env in env_records:
         source_groups[(int(env["task_id"]), int(env["episode_success"]))] += 1
+        selected_env_by_id[str(env["rollout_id"])] = env
     task_ids = sorted({task_id for task_id, _ in source_groups})
-    missing_groups = [
-        (task_id, success)
-        for task_id in task_ids
-        for success in (0, 1)
-        if source_groups[(task_id, success)] <= args.train_per_class
-    ]
-    if missing_groups:
-        raise ValueError(
-            "Each task/outcome group must contain more than train_per_class; "
-            f"invalid groups: {missing_groups}"
-        )
-    outer_train_count = len(task_ids) * 2 * args.train_per_class
-    outer_test_count = len(env_records) - outer_train_count
+    if args.selection_manifest is None:
+        missing_groups = [
+            (task_id, success)
+            for task_id in task_ids
+            for success in (0, 1)
+            if source_groups[(task_id, success)] <= args.train_per_class
+        ]
+        if missing_groups:
+            raise ValueError(
+                "Each task/outcome group must contain more than train_per_class; "
+                f"invalid groups: {missing_groups}"
+            )
+        outer_train_count = len(task_ids) * 2 * args.train_per_class
+        outer_test_count = len(env_records) - outer_train_count
+    else:
+        requested = fixed_split_ids["train"] | fixed_split_ids["test"]
+        missing = sorted(requested - set(selected_env_by_id))
+        if missing:
+            raise ValueError(
+                "Selection manifest contains rollout IDs absent from the selected export: "
+                + ", ".join(missing[:5])
+            )
+        outer_train_count = len(fixed_split_ids["train"])
+        outer_test_count = len(fixed_split_ids["test"])
     plan = {
         "schema_version": 1,
         "official_safe_commit": OFFICIAL_SAFE_COMMIT,
@@ -231,7 +261,13 @@ def run_cv_grid(args):
         "num_selected_rollouts": len(env_records),
         "outer_train_rollouts": outer_train_count,
         "outer_test_rollouts": outer_test_count,
-        "train_per_task_class": args.train_per_class,
+        "train_per_task_class": (
+            None if args.selection_manifest is not None else args.train_per_class
+        ),
+        "selection_manifest": (
+            fixed_split_ids["path"] if args.selection_manifest is not None else None
+        ),
+        "class_weighting": args.class_weighting,
         "model": args.model,
         "num_runs": len(all_runs),
         "num_configurations": len(all_runs) // args.num_folds,
@@ -240,7 +276,7 @@ def run_cv_grid(args):
         "split_seed": args.split_seed,
         "inner_seed": args.inner_seed,
         "outer_split_manifest": (
-            fixed_split_ids["path"] if fixed_split_ids is not None else None
+            fixed_outer_split_path
         ),
         "selection_metric": "mean falert_early_roc_auc/model_inner_val across folds",
     }
@@ -292,13 +328,20 @@ def run_cv_grid(args):
                 path for path, _ in env_records
             ]:
                 raise AssertionError("Task-type filtering changed environment order")
-            outer_train, outer_test, _ = make_seen_split(
-                all_rollouts,
-                identity,
-                train_per_class=args.train_per_class,
-                split_seed=args.split_seed,
-                fixed_split_ids=fixed_split_ids,
-            )
+            if args.selection_manifest is not None:
+                outer_train, outer_test, _ = make_manifest_split(
+                    all_rollouts,
+                    identity,
+                    fixed_split_ids,
+                )
+            else:
+                outer_train, outer_test, _ = make_seen_split(
+                    all_rollouts,
+                    identity,
+                    train_per_class=args.train_per_class,
+                    split_seed=args.split_seed,
+                    fixed_split_ids=fixed_split_ids,
+                )
             task_cutoffs = set_task_min_step_from_training(outer_train, outer_test)
             folds = make_inner_folds(
                 outer_train,
@@ -341,6 +384,13 @@ def run_cv_grid(args):
                         )
                         for split, dataset in datasets.items()
                     }
+                    training_class_weights = [
+                        float(value)
+                        for value in resolve_class_weights(
+                            datasets["inner_train"],
+                            args.class_weighting,
+                        )
+                    ]
                     model = get_model(cfg, int(inner_train[0].hidden_states.shape[-1]))
                     model.to(args.device)
                     optimizer, scheduler = model.get_optimizer()
@@ -352,6 +402,7 @@ def run_cv_grid(args):
                                 optimizer,
                                 loaders["inner_train"],
                                 args.device,
+                                class_weighting=args.class_weighting,
                             )
                         )
                         if scheduler is not None:
@@ -390,6 +441,13 @@ def run_cv_grid(args):
                     "status": "complete",
                     "slug": run.slug,
                     "model": run.model,
+                    "class_weighting": args.class_weighting,
+                    "training_class_weights": training_class_weights,
+                    "selection_manifest": (
+                        fixed_split_ids["path"]
+                        if args.selection_manifest is not None
+                        else None
+                    ),
                     "task_type_filter": args.task_type,
                     "selected_task_names": task_selection["selected_task_names"],
                     "horizon_selector": run.horizon_selector,
@@ -453,6 +511,18 @@ def build_parser():
     parser.add_argument(
         "--outer-split-manifest",
         help="Reuse train/test rollout IDs from a completed final refit",
+    )
+    parser.add_argument(
+        "--selection-manifest",
+        help=(
+            "Use exact train/test rollout IDs, allowing an imbalanced and "
+            "non-exhaustive outer training subset"
+        ),
+    )
+    parser.add_argument(
+        "--class-weighting",
+        choices=CLASS_WEIGHTING_MODES,
+        default="official_inverse_frequency",
     )
     parser.add_argument("--split-seed", type=int, default=0)
     parser.add_argument("--inner-seed", type=int, default=0)

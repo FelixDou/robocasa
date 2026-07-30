@@ -20,6 +20,7 @@ import numpy as np
 
 OFFICIAL_SAFE_COMMIT = "b6036abe07b2b2bb9996afb2c07f13d6a9f507c0"
 TASK_TYPE_FILTERS = ("all", "atomic", "composite")
+CLASS_WEIGHTING_MODES = ("official_inverse_frequency", "none")
 MODEL_DEFAULTS = {
     "indep": {
         "horizon_selector": 1.0,
@@ -240,7 +241,62 @@ def load_outer_split_ids(path):
         "train": train,
         "test": test,
         "split_seed": manifest.get("split_seed"),
+        "manifest": manifest,
     }
+
+
+def make_manifest_split(rollouts, identity, selection):
+    """Apply an exact, possibly imbalanced and non-exhaustive train/test manifest."""
+    if selection is None:
+        raise ValueError("A selection manifest is required")
+    available = {
+        str(identity[id(rollout)][1]["rollout_id"]): rollout
+        for rollout in rollouts
+    }
+    requested = selection["train"] | selection["test"]
+    missing = sorted(requested - set(available))
+    if missing:
+        raise ValueError(
+            "Selection manifest contains rollout IDs absent from the export: "
+            + ", ".join(missing[:5])
+        )
+    train = [available[rollout_id] for rollout_id in sorted(selection["train"])]
+    test = [available[rollout_id] for rollout_id in sorted(selection["test"])]
+    per_task = {}
+    task_ids = sorted({int(rollout.task_id) for rollout in train + test})
+    for task_id in task_ids:
+        per_task[task_id] = {}
+        for success in (0, 1):
+            group_train = [
+                rollout
+                for rollout in train
+                if int(rollout.task_id) == task_id
+                and int(rollout.episode_success) == success
+            ]
+            group_test = [
+                rollout
+                for rollout in test
+                if int(rollout.task_id) == task_id
+                and int(rollout.episode_success) == success
+            ]
+            if not group_train or not group_test:
+                raise ValueError(
+                    f"Task {task_id}, success={success} selection has "
+                    f"{len(group_train)} train and {len(group_test)} test rollouts; "
+                    "both splits require both outcomes"
+                )
+            per_task[task_id]["success" if success else "failure"] = {
+                "train": len(group_train),
+                "test": len(group_test),
+            }
+    selected_task_ids = {int(rollout.task_id) for rollout in train + test}
+    source_task_ids = {int(rollout.task_id) for rollout in rollouts}
+    if selected_task_ids != source_task_ids:
+        raise ValueError(
+            "Selection manifest task coverage differs from the selected export: "
+            f"{sorted(selected_task_ids)} != {sorted(source_task_ids)}"
+        )
+    return train, test, per_task
 
 
 def make_seen_split(
@@ -344,12 +400,59 @@ def make_config(export_dir, model_name, seed, epochs, device, hyperparameters=No
     return Config(dataset=dataset, model=model, train=train)
 
 
-def train_epoch_without_wandb(model, optimizer, loader, device):
+def resolve_class_weights(dataset, class_weighting):
+    if class_weighting == "official_inverse_frequency":
+        return dataset.get_class_weights()
+    if class_weighting == "none":
+        # Official aggregate_monitor_loss indexes the vector unconditionally.
+        # Equal-frequency base multipliers remove inverse-frequency scaling.
+        # Preserve the empirical mean weight of the official vector so this
+        # ablation does not also change the monitor/regularization loss scale.
+        rollouts = dataset.get_rollouts()
+        if not rollouts:
+            raise ValueError("Cannot derive scale-matched class weights from no rollouts")
+        failures = sum(not int(rollout.episode_success) for rollout in rollouts)
+        successes = len(rollouts) - failures
+        frequencies = [failures / len(rollouts), successes / len(rollouts)]
+        official = dataset.get_class_weights()
+        base = [
+            float(dataset.cfg.model.lambda_fail),
+            float(dataset.cfg.model.lambda_success),
+        ]
+        official_mean = sum(
+            frequency * float(weight)
+            for frequency, weight in zip(frequencies, official)
+        )
+        base_mean = sum(
+            frequency * weight
+            for frequency, weight in zip(frequencies, base)
+        )
+        if base_mean <= 0:
+            raise ValueError("Configured class-loss multipliers have non-positive mean")
+        scale = official_mean / base_mean
+        return [
+            scale * base[0],
+            scale * base[1],
+        ]
+    raise ValueError(
+        f"Unknown class weighting {class_weighting!r}; "
+        f"expected one of {CLASS_WEIGHTING_MODES}"
+    )
+
+
+def train_epoch_without_wandb(
+    model,
+    optimizer,
+    loader,
+    device,
+    *,
+    class_weighting="official_inverse_frequency",
+):
     import torch
     from failure_prob.utils.torch import move_to_device
 
     model.train()
-    weights = loader.dataset.get_class_weights()
+    weights = resolve_class_weights(loader.dataset, class_weighting)
     losses = []
     for batch in loader:
         batch = move_to_device(batch, device)
@@ -485,7 +588,18 @@ def train_seen_model(args):
         source_env_records,
         task_selection,
     )
-    fixed_split_ids = load_outer_split_ids(args.outer_split_manifest)
+    if args.outer_split_manifest is not None and args.selection_manifest is not None:
+        raise ValueError(
+            "--outer-split-manifest and --selection-manifest are mutually exclusive"
+        )
+    fixed_split_ids = load_outer_split_ids(
+        args.selection_manifest or args.outer_split_manifest
+    )
+    fixed_outer_split_path = (
+        fixed_split_ids["manifest"].get("fixed_outer_split_manifest")
+        if args.selection_manifest is not None
+        else (fixed_split_ids["path"] if fixed_split_ids is not None else None)
+    )
     if (
         fixed_split_ids is not None
         and fixed_split_ids["split_seed"] is not None
@@ -494,13 +608,20 @@ def train_seen_model(args):
         raise ValueError(
             "Outer split manifest split_seed does not match --split-seed"
         )
-    train_rollouts, test_rollouts, per_task = make_seen_split(
-        all_rollouts,
-        identity,
-        train_per_class=args.train_per_class,
-        split_seed=args.split_seed,
-        fixed_split_ids=fixed_split_ids,
-    )
+    if args.selection_manifest is not None:
+        train_rollouts, test_rollouts, per_task = make_manifest_split(
+            all_rollouts,
+            identity,
+            fixed_split_ids,
+        )
+    else:
+        train_rollouts, test_rollouts, per_task = make_seen_split(
+            all_rollouts,
+            identity,
+            train_per_class=args.train_per_class,
+            split_seed=args.split_seed,
+            fixed_split_ids=fixed_split_ids,
+        )
     task_cutoffs = set_task_min_step_from_training(train_rollouts, test_rollouts)
     if cfg.dataset.load_to_cuda:
         all_rollouts = [rollout.to(args.device) for rollout in all_rollouts]
@@ -519,12 +640,27 @@ def train_seen_model(args):
         )
         for split, dataset in datasets.items()
     }
+    training_class_weights = [
+        float(value)
+        for value in resolve_class_weights(
+            datasets["train"],
+            args.class_weighting,
+        )
+    ]
     model = get_model(cfg, int(train_rollouts[0].hidden_states.shape[-1]))
     model.to(args.device)
     optimizer, scheduler = model.get_optimizer()
     history = []
     for epoch in range(args.epochs):
-        history.append(train_epoch_without_wandb(model, optimizer, loaders["train"], args.device))
+        history.append(
+            train_epoch_without_wandb(
+                model,
+                optimizer,
+                loaders["train"],
+                args.device,
+                class_weighting=args.class_weighting,
+            )
+        )
         if scheduler is not None:
             scheduler.step()
     scores_by_split = score_splits(model, loaders)
@@ -570,9 +706,16 @@ def train_seen_model(args):
         "task_names": [names[key] for key in sorted(names)],
         "task_types": selected_task_types,
         "outer_split_manifest": (
-            fixed_split_ids["path"] if fixed_split_ids is not None else None
+            fixed_outer_split_path
         ),
-        "train_per_task_class": args.train_per_class,
+        "selection_manifest": (
+            fixed_split_ids["path"] if args.selection_manifest is not None else None
+        ),
+        "train_per_task_class": (
+            None if args.selection_manifest is not None else args.train_per_class
+        ),
+        "class_weighting": args.class_weighting,
+        "training_class_weights": training_class_weights,
         "test_per_task_class": test_per_task_class,
         "counts": {
             "train": len(train_rollouts),
@@ -619,8 +762,13 @@ def train_seen_model(args):
             else None
         ),
         "outer_split_manifest": (
-            fixed_split_ids["path"] if fixed_split_ids is not None else None
+            fixed_outer_split_path
         ),
+        "selection_manifest": (
+            fixed_split_ids["path"] if args.selection_manifest is not None else None
+        ),
+        "class_weighting": args.class_weighting,
+        "training_class_weights": training_class_weights,
         "task_min_step_source": (
             f"minimum inference length per task in the {len(train_rollouts)}-rollout "
             "training split only"
@@ -664,6 +812,19 @@ def build_parser():
     parser.add_argument(
         "--outer-split-manifest",
         help="Reuse train/test rollout IDs from a completed final refit",
+    )
+    parser.add_argument(
+        "--selection-manifest",
+        help=(
+            "Use exact train/test rollout IDs, allowing an imbalanced and "
+            "non-exhaustive training subset"
+        ),
+    )
+    parser.add_argument(
+        "--class-weighting",
+        choices=CLASS_WEIGHTING_MODES,
+        default="official_inverse_frequency",
+        help="Official inverse-frequency SAFE weighting or an unweighted ablation",
     )
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--device", default="cuda")

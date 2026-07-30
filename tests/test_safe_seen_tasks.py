@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import pickle
 from types import SimpleNamespace
 import tempfile
 import unittest
@@ -15,18 +16,292 @@ from robocasa.recovery.safe.render_score_videos import render_score_videos
 from robocasa.recovery.safe.summarize_seen_tasks import summarize
 from robocasa.recovery.safe.summarize_seen_cv import summarize_seen_cv
 from robocasa.recovery.safe.run_seen_cv_grid import generate_cv_runs, make_inner_folds
+from robocasa.recovery.safe.summarize_natural_rate_screen import (
+    summarize as summarize_natural_rate_screen,
+)
+from robocasa.recovery.safe.build_natural_rate_experiment import (
+    audit_natural_outcomes,
+    build_experiment,
+)
 from robocasa.recovery.safe.train_seen_tasks import (
     MODEL_DEFAULTS,
     filter_aligned_task_type,
     load_outer_split_ids,
+    make_manifest_split,
     make_seen_split,
     resolve_task_type_selection,
+    resolve_class_weights,
     resolve_hyperparameters,
     set_task_min_step_from_training,
 )
 
 
 class TestSeenTaskProtocol(unittest.TestCase):
+    def test_manifest_split_allows_unused_outer_training_pool(self):
+        rollouts = []
+        identity = {}
+        train_ids = set()
+        test_ids = set()
+        for task_id in range(2):
+            for success in (0, 1):
+                for index in range(4):
+                    rollout = SimpleNamespace(
+                        task_id=task_id,
+                        episode_success=success,
+                    )
+                    rollout_id = f"task-{task_id}-success-{success}-{index}"
+                    rollouts.append(rollout)
+                    identity[id(rollout)] = (
+                        Path(f"{rollout_id}.pkl"),
+                        {"rollout_id": rollout_id},
+                    )
+                    if index < 2:
+                        train_ids.add(rollout_id)
+                    elif index == 3:
+                        test_ids.add(rollout_id)
+        train, test, counts = make_manifest_split(
+            rollouts,
+            identity,
+            {
+                "train": train_ids,
+                "test": test_ids,
+            },
+        )
+        self.assertEqual(len(train), 8)
+        self.assertEqual(len(test), 4)
+        self.assertEqual(counts[0]["success"], {"train": 2, "test": 1})
+        selected = {
+            identity[id(rollout)][1]["rollout_id"]
+            for rollout in train + test
+        }
+        self.assertEqual(len(set(identity_value[1]["rollout_id"] for identity_value in identity.values()) - selected), 4)
+
+    def test_class_weighting_switch_uses_official_weights_or_none(self):
+        expected = np.array([1.0, 1.5])
+
+        class Dataset:
+            def __init__(self):
+                self.calls = 0
+                self.cfg = SimpleNamespace(
+                    model=SimpleNamespace(
+                        lambda_fail=1.0,
+                        lambda_success=1.0,
+                    )
+                )
+                self.rollouts = [
+                    SimpleNamespace(episode_success=0),
+                    SimpleNamespace(episode_success=0),
+                    SimpleNamespace(episode_success=1),
+                ]
+
+            def get_class_weights(self):
+                self.calls += 1
+                return expected
+
+            def get_rollouts(self):
+                return self.rollouts
+
+        dataset = Dataset()
+        self.assertIs(
+            resolve_class_weights(dataset, "official_inverse_frequency"),
+            expected,
+        )
+        self.assertEqual(dataset.calls, 1)
+        unweighted = resolve_class_weights(dataset, "none")
+        self.assertAlmostEqual(unweighted[0], 7 / 6)
+        self.assertAlmostEqual(unweighted[1], 7 / 6)
+        self.assertEqual(dataset.calls, 2)
+        with self.assertRaisesRegex(ValueError, "Unknown class weighting"):
+            resolve_class_weights(dataset, "other")
+
+    def test_natural_rate_builder_uses_only_observed_quota_discards_and_fixed_test(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shard = root / "shard"
+            shard.mkdir()
+            retained = [
+                {
+                    "rollout_id": "observed-a-s0",
+                    "task_name": "TaskA",
+                    "failed": False,
+                },
+                {
+                    "rollout_id": "observed-a-s1",
+                    "task_name": "TaskA",
+                    "failed": False,
+                },
+                {
+                    "rollout_id": "observed-a-f0",
+                    "task_name": "TaskA",
+                    "failed": True,
+                },
+                {
+                    "rollout_id": "observed-b-s0",
+                    "task_name": "TaskB",
+                    "failed": False,
+                },
+                {
+                    "rollout_id": "observed-b-f0",
+                    "task_name": "TaskB",
+                    "failed": True,
+                },
+                {
+                    "rollout_id": "observed-b-f1",
+                    "task_name": "TaskB",
+                    "failed": True,
+                },
+            ]
+            (shard / "manifest.jsonl").write_text(
+                "".join(json.dumps(record) + "\n" for record in retained)
+            )
+            skipped = [
+                {
+                    "rollout_id": "observed-a-s2",
+                    "task_name": "TaskA",
+                    "status": "skipped_class_quota_reached",
+                    "success": True,
+                },
+                {
+                    "rollout_id": "observed-b-f2",
+                    "task_name": "TaskB",
+                    "status": "skipped_class_quota_reached",
+                    "failed": True,
+                },
+                {
+                    "rollout_id": "not-executed",
+                    "task_name": "TaskA",
+                    "status": "skipped_quota_reached",
+                },
+            ]
+            (shard / "skipped.jsonl").write_text(
+                "".join(json.dumps(record) + "\n" for record in skipped)
+            )
+            audit = audit_natural_outcomes([shard])
+            self.assertEqual(audit["num_observed_outcomes"], 8)
+            self.assertEqual(
+                audit["per_task"]["TaskA"]["natural_success_rate"],
+                0.75,
+            )
+            self.assertEqual(
+                audit["per_task"]["TaskB"]["natural_success_rate"],
+                0.25,
+            )
+            export = root / "official"
+            env_dir = export / "env_records"
+            env_dir.mkdir(parents=True)
+            outer_train = []
+            outer_test = []
+            index = 0
+            for task_id, task_name in enumerate(("TaskA", "TaskB")):
+                for success in (0, 1):
+                    for item in range(5):
+                        rollout_id = f"{task_name}-{success}-{item}"
+                        record = {
+                            "rollout_id": rollout_id,
+                            "task_id": task_id,
+                            "task_name": task_name,
+                            "episode_success": success,
+                        }
+                        with (env_dir / f"{index:03d}.pkl").open("wb") as stream:
+                            pickle.dump(record, stream)
+                        index += 1
+                        (outer_train if item < 4 else outer_test).append(
+                            rollout_id
+                        )
+            outer_path = root / "outer.json"
+            outer_path.write_text(
+                json.dumps(
+                    {
+                        "split_seed": 0,
+                        "train": outer_train,
+                        "test": outer_test,
+                    }
+                )
+            )
+            output = root / "experiment"
+            plan = build_experiment(
+                collection_datasets=[shard],
+                official_export=export,
+                outer_split_manifest=outer_path,
+                output_dir=output,
+                subset_seeds=[7],
+                min_per_class=1,
+            )
+            self.assertEqual(plan["samples_per_task"], 5)
+            self.assertEqual(plan["fixed_outer_test_ids"], sorted(outer_test))
+            natural_path = next(
+                Path(record["path"])
+                for record in plan["manifests"]
+                if record["regime"] == "natural_rate"
+            )
+            natural = json.loads(natural_path.read_text())
+            self.assertEqual(natural["test"], sorted(outer_test))
+            self.assertEqual(
+                natural["per_task"]["TaskA"]["train_successes"],
+                4,
+            )
+            self.assertEqual(
+                natural["per_task"]["TaskB"]["train_successes"],
+                1,
+            )
+            self.assertFalse(set(natural["train"]) & set(natural["test"]))
+
+    def test_natural_rate_summary_pairs_effects_by_subset_seed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            regime_offsets = {
+                "matched_weighted": 0.0,
+                "natural_weighted": 0.1,
+                "natural_unweighted": 0.04,
+            }
+            for regime, offset in regime_offsets.items():
+                for subset_seed in (0, 1):
+                    for model_seed in (0, 1):
+                        run = (
+                            root
+                            / f"indep__{regime}__subset-{subset_seed}__seed-{model_seed}"
+                        )
+                        run.mkdir()
+                        (run / "screen_run.json").write_text(
+                            json.dumps(
+                                {
+                                    "model": "indep",
+                                    "regime": regime,
+                                    "subset_seed": subset_seed,
+                                    "model_seed": model_seed,
+                                    "class_weighting": (
+                                        "none"
+                                        if regime == "natural_unweighted"
+                                        else "official_inverse_frequency"
+                                    ),
+                                }
+                            )
+                        )
+                        value = 0.5 + 0.01 * subset_seed + offset
+                        (run / "metrics.json").write_text(
+                            json.dumps(
+                                {
+                                    "counts": {"train": 220, "test": 160},
+                                    "scalar_metrics": {
+                                        "falert_early_roc_auc/model_test": value,
+                                        "falert_early_prc_auc/model_test": value - 0.02,
+                                    },
+                                }
+                            )
+                        )
+            summary = summarize_natural_rate_screen(
+                root,
+                expected_subset_seeds=(0, 1),
+                expected_model_seeds=(0, 1),
+            )
+            self.assertEqual(summary["num_completed_runs"], 12)
+            effect = summary["paired_comparisons"]["indep"]["test_roc_auc"]
+            self.assertAlmostEqual(effect["natural_minus_matched"]["mean"], 0.1)
+            self.assertAlmostEqual(
+                effect["weighted_minus_unweighted"]["mean"],
+                0.06,
+            )
+
     def test_fixed_split_scales_to_ten_tasks_without_changing_per_task_balance(self):
         rollouts = []
         identity = {}
