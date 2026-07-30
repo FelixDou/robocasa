@@ -1108,3 +1108,33 @@ PY
 Treat subset seeds, rather than the three optimization seeds within one
 subset, as the independent resampling units. Run a new inner-CV sweep only if
 the frozen `natural_weighted` regime is consistently promising.
+
+### Detailed task-normalized and per-task analysis
+
+After all 90 fits complete, compute raw pooled, training-only task-z pooled,
+macro-task, atomic/composite, and per-task results. Model seeds are averaged
+inside each subset before the five subset seeds are summarized.
+
+```bash
+export SAFE_NATURAL_ANALYSIS="$SAFE_NATURAL_ROOT/detailed_analysis"
+
+python -u -m robocasa.recovery.safe.analyze_natural_rate_screen \
+  --root "$SAFE_NATURAL_ROOT" \
+  --output-dir "$SAFE_NATURAL_ANALYSIS" \
+  --expected-subset-seeds 0 1 2 3 4 \
+  --expected-model-seeds 0 1 2 \
+  --formats png pdf \
+  --quiet
+
+find "$SAFE_NATURAL_ANALYSIS" -maxdepth 1 -type f -print | sort
+```
+
+The durable outputs are:
+
+- `detailed_summary.json`;
+- `run_metrics.jsonl`;
+- `group_metrics.csv`;
+- `per_task_metrics.csv`;
+- `roc_aggregation_comparison.{png,pdf}`;
+- `per_task_roc_indep.{png,pdf}`;
+- `per_task_roc_lstm.{png,pdf}`.

@@ -23,6 +23,9 @@ from robocasa.recovery.safe.build_natural_rate_experiment import (
     audit_natural_outcomes,
     build_experiment,
 )
+from robocasa.recovery.safe.analyze_natural_rate_screen import (
+    analyze as analyze_natural_rate_screen,
+)
 from robocasa.recovery.safe.train_seen_tasks import (
     MODEL_DEFAULTS,
     filter_aligned_task_type,
@@ -300,6 +303,129 @@ class TestSeenTaskProtocol(unittest.TestCase):
             self.assertAlmostEqual(
                 effect["weighted_minus_unweighted"]["mean"],
                 0.06,
+            )
+
+    def test_detailed_natural_rate_analysis_uses_training_only_task_z(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "screen"
+            output = Path(tmp) / "analysis"
+            task_specs = (
+                ("AtomicTask", "atomic", 0.1),
+                ("CompositeTask", "composite", 0.7),
+            )
+            for model in ("indep", "lstm"):
+                for regime in (
+                    "matched_weighted",
+                    "natural_weighted",
+                    "natural_unweighted",
+                ):
+                    for subset_seed in (0, 1):
+                        for model_seed in (0, 1):
+                            run = (
+                                root
+                                / f"{model}__{regime}__subset-{subset_seed}"
+                                f"__seed-{model_seed}"
+                            )
+                            run.mkdir(parents=True)
+                            (run / "screen_run.json").write_text(
+                                json.dumps(
+                                    {
+                                        "model": model,
+                                        "regime": regime,
+                                        "subset_seed": subset_seed,
+                                        "model_seed": model_seed,
+                                        "class_weighting": (
+                                            "none"
+                                            if regime == "natural_unweighted"
+                                            else "official_inverse_frequency"
+                                        ),
+                                    }
+                                )
+                            )
+                            score_records = []
+                            test_labels = []
+                            test_scores = []
+                            for task_name, task_type, offset in task_specs:
+                                for failed in (False, True):
+                                    for index in range(2):
+                                        value = offset + (0.2 if failed else 0.0)
+                                        score_records.append(
+                                            {
+                                                "rollout_id": (
+                                                    f"train-{regime}-{subset_seed}-"
+                                                    f"{task_name}-{int(failed)}-{index}"
+                                                ),
+                                                "split": "train",
+                                                "task_name": task_name,
+                                                "task_type": task_type,
+                                                "failed": failed,
+                                                "task_min_step": 2,
+                                                "scores": [value, value],
+                                            }
+                                        )
+                                    value = offset + (0.2 if failed else 0.0)
+                                    score_records.append(
+                                        {
+                                            "rollout_id": (
+                                                f"test-{task_name}-{int(failed)}"
+                                            ),
+                                            "split": "test",
+                                            "task_name": task_name,
+                                            "task_type": task_type,
+                                            "failed": failed,
+                                            "task_min_step": 2,
+                                            "scores": [value, value],
+                                        }
+                                    )
+                                    test_labels.append(int(failed))
+                                    test_scores.append(value)
+                            (run / "scores.jsonl").write_text(
+                                "".join(
+                                    json.dumps(record) + "\n"
+                                    for record in score_records
+                                )
+                            )
+                            from sklearn.metrics import roc_auc_score
+
+                            raw_roc = float(
+                                roc_auc_score(test_labels, test_scores)
+                            )
+                            (run / "metrics.json").write_text(
+                                json.dumps(
+                                    {
+                                        "counts": {
+                                            "train": 8,
+                                            "test": 4,
+                                            "train_successes": 4,
+                                            "train_failures": 4,
+                                            "test_successes": 2,
+                                            "test_failures": 2,
+                                        },
+                                        "scalar_metrics": {
+                                            "falert_early_roc_auc/model_test": raw_roc,
+                                        },
+                                    }
+                                )
+                            )
+            summary = analyze_natural_rate_screen(
+                root,
+                output,
+                expected_subset_seeds=(0, 1),
+                expected_model_seeds=(0, 1),
+                formats=("png",),
+                make_plots=True,
+            )
+            self.assertEqual(summary["num_runs"], 24)
+            self.assertEqual(summary["fixed_test_rollouts"], 4)
+            group = summary["groups"]["indep/matched_weighted"]
+            self.assertAlmostEqual(group["raw_pooled_roc_auc"]["mean"], 0.75)
+            self.assertAlmostEqual(group["task_z_pooled_roc_auc"]["mean"], 1.0)
+            self.assertAlmostEqual(group["macro_task_roc_auc"]["mean"], 1.0)
+            self.assertTrue((output / "group_metrics.csv").is_file())
+            self.assertTrue((output / "per_task_metrics.csv").is_file())
+            self.assertEqual(len(summary["figures"]), 3)
+            self.assertTrue(
+                all(Path(path).is_file() for path in summary["figures"])
             )
 
     def test_fixed_split_scales_to_ten_tasks_without_changing_per_task_balance(self):
