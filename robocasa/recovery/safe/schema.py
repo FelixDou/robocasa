@@ -45,6 +45,10 @@ class SafeRolloutMetadata:
     environment_reset_index: int | None = None
     video_frame_stride: int = 1
     unused_subtask_metadata: dict[str, Any] | None = None
+    subtask_trace_path: str | None = None
+    subtask_recording_requested: bool = False
+    subtask_recording_available: bool = False
+    subtask_label_semantics: str | None = None
     schema_version: int = SAFE_SCHEMA_VERSION
     feature_schema_version: int = SAFE_FEATURE_SCHEMA_VERSION
     tensor_path: str | None = None
@@ -117,6 +121,23 @@ class SafeRolloutMetadata:
             )
         if self.video_frame_stride < 1:
             raise ValueError("video_frame_stride must be positive")
+        if self.subtask_recording_requested:
+            if not self.subtask_recording_available or not self.subtask_trace_path:
+                raise ValueError(
+                    "requested Subtask-SAFE recording is missing its trace artifact"
+                )
+            if not self.subtask_label_semantics:
+                raise ValueError(
+                    "Subtask-SAFE recording requires explicit label semantics"
+                )
+        elif (
+            self.subtask_recording_available
+            or self.subtask_trace_path is not None
+            or self.subtask_label_semantics is not None
+        ):
+            raise ValueError(
+                "Subtask-SAFE fields are present when recording was not requested"
+            )
         if self.rollout_horizon is None:
             self.rollout_horizon = self.timeout_horizon
         if self.rollout_horizon < self.num_env_steps:

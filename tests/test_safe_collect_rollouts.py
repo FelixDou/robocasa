@@ -22,6 +22,20 @@ class FakeEnv:
         return {}, 0.0, self.steps >= 3, False, {"success": self.steps >= 3}
 
 
+class FakeSubtaskEnv(FakeEnv):
+    def get_subtask_progress(self):
+        first = self.steps >= 1
+        second = self.steps >= 3
+        return {
+            "required_predicates": ["first", "second"],
+            "predicates": {
+                "first": {"value": first, "stage": "subtask"},
+                "second": {"value": second, "stage": "subtask"},
+            },
+            "task_success": second,
+        }
+
+
 class FakePolicy:
     def __init__(self):
         self.reset()
@@ -90,6 +104,31 @@ class TestSafeCollection(unittest.TestCase):
         )
         self.assertEqual(frames, [1, 3, 5, 6])
         self.assertEqual(result["num_video_frames"], 4)
+
+    def test_subtask_trace_is_aligned_to_real_policy_inferences(self):
+        result = collect_single_rollout(
+            FakePolicy(),
+            FakeSubtaskEnv(),
+            horizon=5,
+            record_subtask_trace=True,
+        )
+        record = result["subtask_safe_record"]
+
+        self.assertEqual(result["inference_env_steps"], [0, 2])
+        self.assertEqual(
+            [
+                item["ordered_current_subtask"]
+                for item in record["inference_records"]
+            ],
+            ["first", "second"],
+        )
+        self.assertEqual(
+            [
+                (segment["subtask_name"], segment["failure_label"])
+                for segment in record["segments"]
+            ],
+            [("first", 0), ("second", 0)],
+        )
 
 
 if __name__ == "__main__":

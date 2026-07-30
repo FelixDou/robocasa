@@ -10,6 +10,7 @@ import numpy as np
 
 from .dataset import save_rollout
 from .schema import SafeRolloutMetadata
+from .subtask_safe import build_subtask_safe_record
 
 
 def collect_single_rollout(
@@ -24,6 +25,8 @@ def collect_single_rollout(
     frame_fn=None,
     video_frame_stride=1,
     require_safe_features=True,
+    record_subtask_trace=False,
+    subtask_eval_fn=None,
 ):
     """Simulator-light collection core used by the live CLI and mocked tests."""
     reset_result = env.reset()
@@ -43,6 +46,13 @@ def collect_single_rollout(
     if video_frame_stride < 1:
         raise ValueError("video_frame_stride must be positive")
     num_video_frames = 0
+    subtask_evals = []
+    if record_subtask_trace:
+        if subtask_eval_fn is None:
+            from robocasa.recovery.subtask_eval import get_subtask_eval
+
+            subtask_eval_fn = get_subtask_eval
+        subtask_evals.append(subtask_eval_fn(env))
     for step_index in range(horizon):
         action = policy(obs, instruction=instruction)
         actions.append(action)
@@ -57,6 +67,8 @@ def collect_single_rollout(
             done = terminated or truncated
         else:
             obs, reward, done, info = result
+        if record_subtask_trace:
+            subtask_evals.append(subtask_eval_fn(env))
         success = bool(success_fn(info, reward, env) if success_fn else (info or {}).get("success", False))
         if (
             video_writer is not None
@@ -112,6 +124,15 @@ def collect_single_rollout(
         if records and all("actions" in record for record in records)
         else None
     )
+    subtask_safe_record = (
+        build_subtask_safe_record(
+            subtask_evals,
+            inference_steps,
+            rollout_failed=not success,
+        )
+        if record_subtask_trace
+        else None
+    )
     return {
         "success": success,
         "num_env_steps": num_env_steps,
@@ -123,6 +144,7 @@ def collect_single_rollout(
         "policy_action_chunks": policy_action_chunks,
         "actions": actions,
         "num_video_frames": num_video_frames,
+        "subtask_safe_record": subtask_safe_record,
     }
 
 

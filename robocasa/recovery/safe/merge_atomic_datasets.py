@@ -32,6 +32,7 @@ COMPATIBLE_CONFIG_KEYS = (
     "record_actions",
     "video_frame_stride",
     "record_safe_features",
+    "record_subtask_trace",
     "model_family",
     "safe_repository_commit",
     "official_safe_openpi_commit",
@@ -46,8 +47,26 @@ def _assert_configs_compatible(configs):
         mismatches = [
             key for key in COMPATIBLE_CONFIG_KEYS
             if (
-                config.get(key, "pi0" if key == "model_family" else None)
-                != reference.get(key, "pi0" if key == "model_family" else None)
+                config.get(
+                    key,
+                    (
+                        "pi0"
+                        if key == "model_family"
+                        else False
+                        if key == "record_subtask_trace"
+                        else None
+                    ),
+                )
+                != reference.get(
+                    key,
+                    (
+                        "pi0"
+                        if key == "model_family"
+                        else False
+                        if key == "record_subtask_trace"
+                        else None
+                    ),
+                )
             )
         ]
         if mismatches:
@@ -138,6 +157,8 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
                 relative_paths.append(record.action_path)
             if record.video_path:
                 relative_paths.append(record.video_path)
+            if record.subtask_trace_path:
+                relative_paths.append(record.subtask_trace_path)
             for relative_path in relative_paths:
                 source_path = source / relative_path
                 destination = output_dir / relative_path
@@ -208,6 +229,7 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
             "source_dataset": str(source),
             "record_actions": config.get("record_actions"),
             "record_videos": config.get("record_videos"),
+            "record_subtask_trace": config.get("record_subtask_trace", False),
         }
         for source, config in zip(sources, configs)
     ]

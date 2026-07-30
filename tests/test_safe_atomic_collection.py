@@ -45,6 +45,19 @@ class FakeEnv:
     def close(self):
         self.closed = True
 
+    def get_subtask_progress(self):
+        success = self.seed % 2 == 0 and self.steps >= 2
+        return {
+            "required_predicates": ["mock_subtask"],
+            "predicates": {
+                "mock_subtask": {
+                    "value": success,
+                    "stage": "subtask",
+                }
+            },
+            "task_success": success,
+        }
+
 
 class FakePolicy:
     def __init__(self, env, replan_steps=2, **kwargs):
@@ -438,6 +451,39 @@ class TestSafeAtomicCollection(unittest.TestCase):
             validation = validate_atomic_dataset(tmp)
             self.assertTrue(validation["valid"], validation["errors"])
             self.assertTrue(validation["official_safe_loader_compatible"])
+
+    def test_subtask_safe_artifacts_and_labels_validate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(tmp)
+            args.record_subtask_trace = True
+            result = run_collection(args, runtime=fake_runtime())
+            records = load_manifest(tmp)
+            validation = validate_atomic_dataset(tmp)
+
+            self.assertFalse(result["partial"])
+            self.assertTrue(validation["valid"], validation["errors"])
+            self.assertEqual(
+                validation["subtask_safe"],
+                {
+                    "recorded_rollouts": 2,
+                    "segments": 2,
+                    "usable_segments": 2,
+                    "successful_segments": 1,
+                    "failed_segments": 1,
+                    "labeled_without_inference": 0,
+                },
+            )
+            for record in records:
+                self.assertTrue(record.subtask_recording_requested)
+                self.assertTrue(record.subtask_recording_available)
+                path = Path(tmp) / record.subtask_trace_path
+                self.assertTrue(path.is_file())
+                payload = json.loads(path.read_text())
+                self.assertEqual(payload["rollout_id"], record.rollout_id)
+                self.assertEqual(
+                    payload["segments"][0]["failure_label"],
+                    int(record.failed),
+                )
 
     def test_resume_does_not_duplicate_manifest_records(self):
         with tempfile.TemporaryDirectory() as tmp:

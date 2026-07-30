@@ -12,6 +12,7 @@ from .atomic_tasks import registered_safe_tasks
 from .collect_atomic_rollouts import SUMMARY_NAME, atomic_write_json
 from .dataset import MANIFEST_NAME, load_manifest
 from .schema import SAFE_SCHEMA_VERSION, validate_feature_tensor
+from .subtask_safe import validate_subtask_safe_record
 
 
 def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
@@ -48,6 +49,15 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
     identities = set()
     feature_files = set()
     official_compatible = True
+    subtask_counts = {
+        "recorded_rollouts": 0,
+        "segments": 0,
+        "usable_segments": 0,
+        "successful_segments": 0,
+        "failed_segments": 0,
+        "labeled_without_inference": 0,
+    }
+    subtask_files = set()
     for record in records:
         prefix = f"rollout {record.rollout_id}"
         if record.schema_version != SAFE_SCHEMA_VERSION:
@@ -170,6 +180,32 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
         if record.video_recording_requested:
             if not record.video_path or not (dataset_dir / record.video_path).is_file():
                 errors.append(f"{prefix}: requested video artifact is missing")
+        if record.subtask_recording_requested:
+            if not record.subtask_trace_path:
+                errors.append(f"{prefix}: requested subtask trace path is missing")
+            else:
+                subtask_path = dataset_dir / record.subtask_trace_path
+                subtask_files.add(subtask_path.resolve())
+                if not subtask_path.is_file():
+                    errors.append(
+                        f"{prefix}: requested subtask trace artifact is missing"
+                    )
+                else:
+                    try:
+                        subtask_record = json.loads(subtask_path.read_text())
+                        counts = validate_subtask_safe_record(
+                            subtask_record,
+                            rollout_id=record.rollout_id,
+                            rollout_failed=record.failed,
+                            inference_environment_steps=record.inference_env_steps,
+                        )
+                        subtask_counts["recorded_rollouts"] += 1
+                        for key, value in counts.items():
+                            subtask_counts[key] += value
+                    except Exception as error:
+                        errors.append(
+                            f"{prefix}: Subtask-SAFE trace validation failed: {error}"
+                        )
     if len(identities) > 1:
         errors.append("Dataset mixes incompatible checkpoints or SAFE feature schemas")
         official_compatible = False
@@ -179,6 +215,14 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
         for path in rollout_dir.glob("*.npz"):
             if path.resolve() not in feature_files:
                 errors.append(f"Orphan feature file not present in manifest: {path.relative_to(dataset_dir)}")
+    subtask_dir = dataset_dir / "subtasks"
+    if subtask_dir.exists():
+        for path in subtask_dir.rglob("*.json"):
+            if path.resolve() not in subtask_files:
+                errors.append(
+                    "Orphan Subtask-SAFE file not present in manifest: "
+                    f"{path.relative_to(dataset_dir)}"
+                )
     incomplete_dir = dataset_dir / "incomplete"
     if incomplete_dir.exists() and any(path.is_file() for path in incomplete_dir.rglob("*")):
         warnings.append("Quarantined incomplete artifacts are present under incomplete/")
@@ -204,6 +248,7 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
         "official_safe_loader_compatible": bool(official_compatible and not errors),
         "errors": errors,
         "warnings": warnings,
+        "subtask_safe": subtask_counts,
     }
     return result
 
@@ -216,6 +261,16 @@ def format_report(result):
         f"({result['num_successes']} successes, {result['num_failures']} failures)",
         f"Official SAFE loader compatible: {result['official_safe_loader_compatible']}",
     ]
+    if result["subtask_safe"]["recorded_rollouts"]:
+        counts = result["subtask_safe"]
+        lines.append(
+            "Subtask-SAFE: "
+            f"{counts['recorded_rollouts']} rollouts, "
+            f"{counts['usable_segments']} usable segments "
+            f"({counts['successful_segments']} successes, "
+            f"{counts['failed_segments']} failures, "
+            f"{counts['labeled_without_inference']} without inference)"
+        )
     lines.extend(f"ERROR: {error}" for error in result["errors"])
     lines.extend(f"WARNING: {warning}" for warning in result["warnings"])
     return "\n".join(lines)

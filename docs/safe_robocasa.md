@@ -720,6 +720,53 @@ those final refits. The earlier all-seen result is exploratory because its
 matched cutoff was derived before this stricter training-only cutoff rule; the
 inner-CV refit supersedes it.
 
+## Oracle-guided Subtask-SAFE recording
+
+The first Subtask-SAFE stage keeps RoboCasa's ordered predicate monitor as the
+oracle current-subtask source. It does not yet predict subtask identity or
+continuous progress. Add this flag to a normal SAFE collection:
+
+```bash
+--record-subtask-trace
+```
+
+For each retained rollout, the collector evaluates the existing ordered
+subtask tracker at reset and after every environment action. It writes a
+separate artifact under:
+
+```text
+subtasks/<task_name>/<rollout_id>.json
+```
+
+The original SAFE feature tensor and official-loader compatibility are
+unchanged. The Subtask-SAFE artifact contains:
+
+- the environment step where every ordered subtask first becomes complete;
+- the oracle current subtask aligned to every genuine policy inference;
+- one segment for every entered ordered subtask;
+- a binary label with semantics
+  `active_subtask_eventually_fails_before_completion`.
+
+A completed segment has label `0`. Only the active terminal segment of an
+unsuccessful rollout has label `1`. Never-entered future subtasks are not
+samples. A subtask completed before a later failure remains a successful
+segment. Ordered first completion is monotonic; later predicate regression is
+recorded diagnostically but does not reopen a completed segment.
+
+The validator reports the number of recorded rollouts and usable successful
+and failed segments:
+
+```bash
+python -m robocasa.recovery.safe.validate_atomic_dataset \
+  --dataset-dir "$SUBTASK_SAFE_SMOKE"
+```
+
+The first live smoke should use a registered composite task and a new output
+directory. A trace is considered usable only when the current subtask is
+available at every environment state and at least one real policy inference is
+associated with the segment. Cached action consumption never creates duplicate
+SAFE features.
+
 ## Local structural validation
 
 These checks require no GPU, RoboSuite, simulator, checkpoint, or server:
@@ -734,6 +781,7 @@ python -m unittest -v \
   tests.test_safe_openpi_policy \
   tests.test_safe_dataset \
   tests.test_safe_collect_rollouts \
+  tests.test_safe_subtask_safe \
   tests.test_safe_atomic_collection \
   tests.test_safe_official_export \
   tests.test_safe_official_training \
@@ -744,4 +792,10 @@ python -m unittest -v \
 
 A live smoke test still requires a RoboCasa environment with RoboSuite and assets, the π0 RoboCasa checkpoint, a checkout of the pinned OpenPI revision with the companion patch applied, and a reachable WebSocket server. The normal unit tests replace the simulator and policy with deterministic mocks and do not claim real SAFE performance.
 
-The current WebSocket transport sends the raw latent back with each inference. That is reliable and gives RoboCasa a direct outcome association, but it increases inference response size. The integration supports JAX π0 only, matching the inspected official feature. It intentionally does not create frame-level labels, convert expert demonstrations, collect composite tasks, or trigger recovery. Training uses the pinned unmodified official SAFE repository; the in-tree trainer remains an isolated structural baseline rather than the source of the official experiment result.
+The current policy transports send raw latent features with each genuine
+inference. That is reliable and gives RoboCasa a direct outcome association,
+but it increases response size. The Subtask-SAFE extension records registered
+atomic or composite ordered subtask transitions, but it intentionally does not
+invent a frame-level failure onset, predict subtask identity or progress, or
+trigger recovery. Rollout-level official SAFE training remains unchanged until
+a dedicated segment exporter and training protocol are validated.

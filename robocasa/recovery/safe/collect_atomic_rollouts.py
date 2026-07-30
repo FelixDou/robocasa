@@ -23,6 +23,10 @@ from .atomic_tasks import (
 from .collect_rollouts import collect_single_rollout
 from .dataset import MANIFEST_NAME, load_manifest, save_rollout
 from .schema import SAFE_SCHEMA_VERSION, SafeRolloutMetadata, compatibility_key
+from .subtask_safe import (
+    SUBTASK_FAILURE_LABEL_SEMANTICS,
+    atomic_write_subtask_safe_record,
+)
 
 
 SAFE_COMMIT = "b6036abe07b2b2bb9996afb2c07f13d6a9f507c0"
@@ -138,7 +142,14 @@ def class_quota_reached(
     return quota is not None and count >= quota
 
 
-def artifact_paths(output_dir, task_name, rollout_id, record_actions, record_videos):
+def artifact_paths(
+    output_dir,
+    task_name,
+    rollout_id,
+    record_actions,
+    record_videos,
+    record_subtask_trace=False,
+):
     output_dir = Path(output_dir)
     feature_path = output_dir / "rollouts" / f"{rollout_id}.npz"
     action_path = (
@@ -154,6 +165,16 @@ def artifact_paths(output_dir, task_name, rollout_id, record_actions, record_vid
         "video": (
             output_dir / "videos" / task_name / f"{rollout_id}.mp4"
             if record_videos
+            else None
+        ),
+        "subtask_trace": (
+            output_dir / "subtasks" / task_name / f"{rollout_id}.json"
+            if record_subtask_trace
+            else None
+        ),
+        "subtask_trace_temp": (
+            output_dir / "subtasks" / task_name / f"{rollout_id}.json.tmp"
+            if record_subtask_trace
             else None
         ),
     }
@@ -417,6 +438,7 @@ def prepare_plan(args):
         "record_videos": args.record_videos,
         "video_frame_stride": args.video_frame_stride,
         "record_safe_features": args.record_safe_features,
+        "record_subtask_trace": args.record_subtask_trace,
         "model_family": args.model_family,
         "success_quota": args.success_quota,
         "failure_quota": args.failure_quota,
@@ -478,6 +500,7 @@ def _assert_resume_compatible(previous, current):
         "record_videos",
         "video_frame_stride",
         "record_safe_features",
+        "record_subtask_trace",
         "model_family",
         "success_quota",
         "failure_quota",
@@ -505,6 +528,8 @@ def _assert_resume_compatible(previous, current):
         previous_value = previous.get(key)
         if key == "model_family" and previous_value is None:
             previous_value = "pi0"
+        if key == "record_subtask_trace" and previous_value is None:
+            previous_value = False
         if previous_value != current.get(key):
             mismatches.append(key)
     if mismatches:
@@ -576,6 +601,7 @@ def run_collection(args, runtime=None):
                 rollout_id,
                 args.record_actions,
                 args.record_videos,
+                args.record_subtask_trace,
             )
             if rollout_id in record_by_id:
                 if args.resume:
@@ -585,6 +611,10 @@ def run_collection(args, runtime=None):
                         required_completed.append(("actions", completed.action_path))
                     if completed.video_recording_requested:
                         required_completed.append(("video", completed.video_path))
+                    if completed.subtask_recording_requested:
+                        required_completed.append(
+                            ("subtask trace", completed.subtask_trace_path)
+                        )
                     missing_completed = [
                         f"{kind}: {relative_path!r}"
                         for kind, relative_path in required_completed
@@ -706,6 +736,7 @@ def run_collection(args, runtime=None):
                     frame_fn=frame_fn,
                     video_frame_stride=args.video_frame_stride,
                     require_safe_features=True,
+                    record_subtask_trace=args.record_subtask_trace,
                 )
                 if writer is not None:
                     writer.close()
@@ -750,6 +781,21 @@ def run_collection(args, runtime=None):
                     raise RuntimeError(
                         "SAFE model family disagrees with --model-family: "
                         f"{feature_model_family!r} != {args.model_family!r}"
+                    )
+                subtask_trace_path = None
+                if args.record_subtask_trace:
+                    subtask_record = dict(rollout["subtask_safe_record"])
+                    subtask_record["rollout_id"] = rollout_id
+                    for segment in subtask_record["segments"]:
+                        segment["segment_id"] = (
+                            f"{rollout_id}:{segment['segment_index']}:"
+                            f"{segment['subtask_name']}"
+                        )
+                    atomic_write_subtask_safe_record(
+                        paths["subtask_trace"], subtask_record
+                    )
+                    subtask_trace_path = str(
+                        paths["subtask_trace"].relative_to(output_dir)
                     )
                 metadata = SafeRolloutMetadata(
                     rollout_id=rollout_id,
@@ -811,6 +857,14 @@ def run_collection(args, runtime=None):
                     robocasa_commit=plan["config"]["robocasa_commit"],
                     action_recording_requested=args.record_actions,
                     video_recording_requested=args.record_videos,
+                    subtask_trace_path=subtask_trace_path,
+                    subtask_recording_requested=args.record_subtask_trace,
+                    subtask_recording_available=bool(subtask_trace_path),
+                    subtask_label_semantics=(
+                        SUBTASK_FAILURE_LABEL_SEMANTICS
+                        if subtask_trace_path
+                        else None
+                    ),
                 )
                 new_compatibility_key = compatibility_key(metadata)
                 if compatibility_keys and new_compatibility_key not in compatibility_keys:
@@ -926,6 +980,15 @@ def build_parser():
     parser.add_argument("--record-safe-features", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--record-actions", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--record-videos", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument(
+        "--record-subtask-trace",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Record ordered oracle subtasks aligned to every real SAFE policy "
+            "inference and label entered segments by eventual completion/failure"
+        ),
+    )
     parser.add_argument("--continue-on-error", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--success-quota", type=int)
