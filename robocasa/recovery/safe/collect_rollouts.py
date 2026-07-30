@@ -27,6 +27,7 @@ def collect_single_rollout(
     require_safe_features=True,
     record_subtask_trace=False,
     subtask_eval_fn=None,
+    task_name=None,
 ):
     """Simulator-light collection core used by the live CLI and mocked tests."""
     reset_result = env.reset()
@@ -147,6 +148,7 @@ def collect_single_rollout(
             subtask_evals,
             inference_steps,
             rollout_failed=not success,
+            task_name=task_name,
         )
         if record_subtask_trace
         else None

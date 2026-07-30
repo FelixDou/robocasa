@@ -56,6 +56,7 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
         "successful_segments": 0,
         "failed_segments": 0,
         "labeled_without_inference": 0,
+        "excluded_completed_subtasks": 0,
     }
     subtask_files = set()
     for record in records:
@@ -198,6 +199,7 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
                             rollout_id=record.rollout_id,
                             rollout_failed=record.failed,
                             inference_environment_steps=record.inference_env_steps,
+                            task_name=record.task_name,
                         )
                         subtask_counts["recorded_rollouts"] += 1
                         for key, value in counts.items():

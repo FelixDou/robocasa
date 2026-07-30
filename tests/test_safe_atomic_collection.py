@@ -474,6 +474,7 @@ class TestSafeAtomicCollection(unittest.TestCase):
                     "successful_segments": 1,
                     "failed_segments": 1,
                     "labeled_without_inference": 0,
+                    "excluded_completed_subtasks": 0,
                 },
             )
             for record in records:

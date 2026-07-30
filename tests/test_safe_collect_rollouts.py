@@ -27,10 +27,19 @@ class FakeSubtaskEnv(FakeEnv):
         first = self.steps >= 1
         second = self.steps >= 3
         return {
+            "task_name": "TestSemanticTask",
             "required_predicates": ["first", "second"],
             "predicates": {
-                "first": {"value": first, "stage": "subtask"},
-                "second": {"value": second, "stage": "subtask"},
+                "first": {
+                    "value": first,
+                    "stage": "subtask",
+                    "description": "Complete the first semantic subtask.",
+                },
+                "second": {
+                    "value": second,
+                    "stage": "subtask",
+                    "description": "Complete the second semantic subtask.",
+                },
             },
             "task_success": second,
         }
@@ -41,10 +50,19 @@ class FakeInfoSubtaskEnv(FakeEnv):
         first = self.steps >= 1
         second = self.steps >= 3
         return {
+            "task_name": "TestSemanticTask",
             "required_predicates": ["first", "second"],
             "predicates": {
-                "first": {"value": first, "stage": "subtask"},
-                "second": {"value": second, "stage": "subtask"},
+                "first": {
+                    "value": first,
+                    "stage": "subtask",
+                    "description": "Complete the first semantic subtask.",
+                },
+                "second": {
+                    "value": second,
+                    "stage": "subtask",
+                    "description": "Complete the second semantic subtask.",
+                },
             },
             "task_success": second,
         }
@@ -140,7 +158,7 @@ class TestSafeCollection(unittest.TestCase):
         self.assertEqual(result["inference_env_steps"], [0, 2])
         self.assertEqual(
             [
-                item["ordered_current_subtask"]
+                item["subtask_id"]
                 for item in record["inference_records"]
             ],
             ["first", "second"],
@@ -163,7 +181,7 @@ class TestSafeCollection(unittest.TestCase):
         )
         self.assertEqual(
             [
-                item["ordered_current_subtask"]
+                item["subtask_id"]
                 for item in result["subtask_safe_record"]["inference_records"]
             ],
             ["first", "second"],

@@ -737,6 +737,7 @@ def run_collection(args, runtime=None):
                     video_frame_stride=args.video_frame_stride,
                     require_safe_features=True,
                     record_subtask_trace=args.record_subtask_trace,
+                    task_name=task_name,
                 )
                 if writer is not None:
                     writer.close()
@@ -789,7 +790,7 @@ def run_collection(args, runtime=None):
                     for segment in subtask_record["segments"]:
                         segment["segment_id"] = (
                             f"{rollout_id}:{segment['segment_index']}:"
-                            f"{segment['subtask_name']}"
+                            f"{segment['subtask_id']}"
                         )
                     atomic_write_subtask_safe_record(
                         paths["subtask_trace"], subtask_record

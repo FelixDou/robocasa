@@ -45,6 +45,10 @@ def _coverage_warning(row: dict[str, Any]) -> list[str]:
         warnings.append("no_usable_failures")
     if row["labeled_without_inference"]:
         warnings.append("labeled_segments_without_inference")
+    if row["excluded_completed_without_activation"]:
+        warnings.append("completed_without_observed_activation")
+    if row["not_reached_rollouts"]:
+        warnings.append("not_reached_in_some_rollouts")
     if len(row["segment_indices"]) > 1:
         warnings.append("inconsistent_segment_index")
     return warnings
@@ -96,26 +100,72 @@ def summarize_subtask_records(
         task["rollout_ids"].append(item["rollout_id"])
         task["rollout_failures" if item["failed"] else "rollout_successes"] += 1
 
-        for segment in item["subtask_record"].get("segments", []):
-            key = (task_name, segment["subtask_name"])
-            group = groups.setdefault(
-                key,
-                {
-                    "task_name": task_name,
-                    "task_type": item["task_type"],
-                    "subtask_name": segment["subtask_name"],
-                    "segment_indices": set(),
-                    "entered_segments": 0,
-                    "completed_segments": 0,
-                    "terminal_failed_segments": 0,
-                    "unlabeled_segments": 0,
-                    "usable_successes": 0,
-                    "usable_failures": 0,
-                    "labeled_without_inference": 0,
-                    "_inference_counts": [],
-                    "_environment_durations": [],
-                },
-            )
+        definitions = item["subtask_record"].get("semantic_subtasks", [])
+        for definition in definitions:
+            subtask_id = definition["subtask_id"]
+            key = (task_name, subtask_id)
+            expected = {
+                "task_name": task_name,
+                "task_type": item["task_type"],
+                "subtask_id": subtask_id,
+                "subtask_name": subtask_id,
+                "subtask_instruction": definition["instruction"],
+                "predicate_names": list(definition["predicate_names"]),
+                "segment_indices": {int(definition["subtask_index"])},
+            }
+            group = groups.get(key)
+            if group is not None:
+                actual = {
+                    field: group[field]
+                    for field in (
+                        "task_name",
+                        "task_type",
+                        "subtask_id",
+                        "subtask_name",
+                        "subtask_instruction",
+                        "predicate_names",
+                        "segment_indices",
+                    )
+                }
+                if actual != expected:
+                    raise ValueError(
+                        "Semantic subtask definitions changed across rollouts "
+                        f"for {task_name}/{subtask_id}"
+                    )
+                continue
+            groups[key] = {
+                **expected,
+                "entered_segments": 0,
+                "completed_segments": 0,
+                "terminal_failed_segments": 0,
+                "unlabeled_segments": 0,
+                "usable_successes": 0,
+                "usable_failures": 0,
+                "labeled_without_inference": 0,
+                "excluded_completed_without_activation": 0,
+                "not_reached_rollouts": 0,
+                "_inference_counts": [],
+                "_environment_durations": [],
+            }
+
+        segment_by_id = {
+            segment["subtask_id"]: segment
+            for segment in item["subtask_record"].get("segments", [])
+        }
+        excluded_ids = {
+            entry["subtask_id"]
+            for entry in item["subtask_record"].get("excluded_completed_subtasks", [])
+        }
+        for definition in definitions:
+            key = (task_name, definition["subtask_id"])
+            group = groups[key]
+            segment = segment_by_id.get(definition["subtask_id"])
+            if segment is None:
+                if definition["subtask_id"] in excluded_ids:
+                    group["excluded_completed_without_activation"] += 1
+                else:
+                    group["not_reached_rollouts"] += 1
+                continue
             group["segment_indices"].add(int(segment["segment_index"]))
             group["entered_segments"] += 1
             group["completed_segments"] += int(bool(segment["completed"]))
@@ -151,8 +201,16 @@ def summarize_subtask_records(
                 "usable_segments": usable,
                 "inference_coverage": (float(usable / labeled) if labeled else None),
                 "median_policy_inferences": _median(group["_inference_counts"]),
-                "min_policy_inferences": min(group["_inference_counts"]),
-                "max_policy_inferences": max(group["_inference_counts"]),
+                "min_policy_inferences": (
+                    min(group["_inference_counts"])
+                    if group["_inference_counts"]
+                    else None
+                ),
+                "max_policy_inferences": (
+                    max(group["_inference_counts"])
+                    if group["_inference_counts"]
+                    else None
+                ),
                 "median_environment_steps": _median(group["_environment_durations"]),
                 "success_deficit": max(0, target_successes - row["usable_successes"]),
                 "failure_deficit": max(0, target_failures - row["usable_failures"]),
@@ -211,6 +269,7 @@ def summarize_subtask_records(
     return {
         "schema_version": AUDIT_SCHEMA_VERSION,
         "protocol": "oracle_guided_subtask_safe_coverage_audit",
+        "semantic_layer": "ordered_natural_language_subtask",
         "label_semantics": ("active_subtask_eventually_fails_before_completion"),
         "task_type_filter": task_type_filter,
         "targets": {
@@ -236,6 +295,9 @@ def summarize_subtask_records(
             "usable_failure_segments": sum(row["usable_failures"] for row in rows),
             "labeled_without_inference": sum(
                 row["labeled_without_inference"] for row in rows
+            ),
+            "excluded_completed_without_activation": sum(
+                row["excluded_completed_without_activation"] for row in rows
             ),
             "pairs_reaching_target": sum(row["target_reached"] for row in rows),
         },
@@ -303,6 +365,7 @@ def audit_subtask_datasets(
                 rollout_id=record.rollout_id,
                 rollout_failed=record.failed,
                 inference_environment_steps=record.inference_env_steps,
+                task_name=record.task_name,
             )
             rollout_records.append(
                 {
@@ -360,6 +423,10 @@ def format_report(result: dict[str, Any]) -> str:
             f"labeled without inference: "
             f"{counts['labeled_without_inference']}"
         ),
+        (
+            "Completed without observed activation: "
+            f"{counts['excluded_completed_without_activation']}"
+        ),
         "",
         "task                             type idx subtask"
         "                              entered   S   F noinf  cov% need S/F",
@@ -382,6 +449,13 @@ def format_report(result: dict[str, Any]) -> str:
             f"{row['labeled_without_inference']:>5d} "
             f"{coverage} "
             f"{row['success_deficit']:>3d}/{row['failure_deficit']:<3d}"
+        )
+        lines.append(f"    instruction: {row['subtask_instruction']}")
+        lines.append("    predicates: " + ", ".join(row["predicate_names"]))
+        lines.append(
+            "    rollout states: "
+            f"excluded-completed={row['excluded_completed_without_activation']} "
+            f"not-reached={row['not_reached_rollouts']}"
         )
     lines.extend(["", "Collection priority (diagnostic, not rollout counts):"])
     task_by_name = {task["task_name"]: task for task in result["tasks"]}

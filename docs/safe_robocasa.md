@@ -720,19 +720,32 @@ those final refits. The earlier all-seen result is exploratory because its
 matched cutoff was derived before this stricter training-only cutoff rule; the
 inner-CV refit supersedes it.
 
-## Oracle-guided Subtask-SAFE recording
+## Oracle-guided semantic Subtask-SAFE recording
 
-The first Subtask-SAFE stage keeps RoboCasa's ordered predicate monitor as the
-oracle current-subtask source. It does not yet predict subtask identity or
-continuous progress. Add this flag to a normal SAFE collection:
+The first Subtask-SAFE stage uses RoboCasa's curated ordered semantic-subtask
+mapping as the oracle current-subtask source. A subtask is a natural-language
+unit with a stable ID and one or more associated runtime predicates:
+
+```text
+(subtask_id, natural-language instruction, predicate_names)
+```
+
+The canonical definitions are `_TASK_SUBTASK_GROUP_OVERRIDES` in
+`robocasa/recovery/eval_composite_predicates.py`, exposed through
+`mapped_subtask_sequence()` in
+`robocasa/recovery/create_recovery_failure_dataset.py`. Raw predicates are
+timestamping evidence, not Subtask-SAFE training units. This stage does not yet
+predict subtask identity or continuous progress. Add this flag to a normal SAFE
+collection:
 
 ```bash
 --record-subtask-trace
 ```
 
-For each retained rollout, the collector evaluates the existing ordered
-subtask tracker at reset and after every environment action. It writes a
-separate artifact under:
+For each retained rollout, the collector evaluates the existing predicate
+tracker at reset and after every environment action, then maps its observations
+onto the ordered natural-language subtask sequence. It writes a separate
+schema-v2 artifact under:
 
 ```text
 subtasks/<task_name>/<rollout_id>.json
@@ -741,17 +754,27 @@ subtasks/<task_name>/<rollout_id>.json
 The original SAFE feature tensor and official-loader compatibility are
 unchanged. The Subtask-SAFE artifact contains:
 
-- the environment step where every ordered subtask first becomes complete;
-- the oracle current subtask aligned to every genuine policy inference;
-- one segment for every entered ordered subtask;
+- every ordered semantic subtask's ID, natural-language instruction, and
+  predicate set;
+- the environment step where every semantic subtask first becomes complete;
+- the oracle current semantic subtask aligned to every genuine policy
+  inference;
+- one segment for every observed-active semantic subtask;
 - a binary label with semantics
   `active_subtask_eventually_fails_before_completion`.
 
 A completed segment has label `0`. Only the active terminal segment of an
 unsuccessful rollout has label `1`. Never-entered future subtasks are not
 samples. A subtask completed before a later failure remains a successful
-segment. Ordered first completion is monotonic; later predicate regression is
-recorded diagnostically but does not reopen a completed segment.
+segment. A subtask already true at reset, or co-completed with another semantic
+subtask without an observed active state, is recorded under
+`excluded_completed_subtasks` and is not a training sample. Ordered first
+completion is monotonic; later predicate regression is recorded diagnostically
+but does not reopen a completed segment.
+
+Subtask-SAFE schema v1 represented required predicates as if each predicate
+were a subtask. The schema-v2 validator intentionally rejects those artifacts;
+rerun collection in a fresh output directory after pulling this change.
 
 The validator reports the number of recorded rollouts and usable successful
 and failed segments:
@@ -767,14 +790,14 @@ available at every environment state and at least one real policy inference is
 associated with the segment. Cached action consumption never creates duplicate
 SAFE features.
 
-### Composite-first coverage audit
+### Composite-first semantic coverage audit
 
 Subtask outcomes should be collected at the natural full-rollout rate. Do not
 stop collection when a subtask class reaches a quota and do not duplicate rare
 segments. Split by rollout before extracting segments, then compute any
 inverse-frequency loss weights from the training split only.
 
-Before scaling collection, audit the raw oracle predicate granularity:
+Before scaling collection, audit the semantic subtask granularity:
 
 ```bash
 python -m robocasa.recovery.safe.audit_subtask_safe_dataset \
@@ -788,12 +811,14 @@ python -m robocasa.recovery.safe.audit_subtask_safe_dataset \
 
 Pass multiple shard directories after `--dataset-dir` to audit them together.
 Use `--allow-partial` only while a collector is still running; every other
-validator error remains fatal. The audit reports each `(task, subtask)` pair
-separately, including usable successes, usable failures, labeled segments with
-no policy inference, and the remaining target deficits. Its collection
-priority ranks the summed failure deficit first because one failed rollout
-contributes at most one terminal failed subtask. These deficits are segment
-counts, not exact additional-rollout requirements.
+validator error remains fatal. The audit reports each `(task, semantic
+subtask)` pair separately, including its natural-language instruction,
+predicate set, usable successes, usable failures, labeled segments with no
+policy inference, completed subtasks excluded because no active state was
+observed, rollouts where the subtask was not reached, and the remaining target
+deficits. Its collection priority ranks the summed failure deficit first
+because one failed rollout contributes at most one terminal failed subtask.
+These deficits are segment counts, not exact additional-rollout requirements.
 
 The first discovery batch should cover the five composite pilot tasks with 10
 natural rollouts per task:
@@ -804,10 +829,10 @@ natural rollouts per task:
 - `StackBowlsCabinet`
 - `WashLettuce`
 
-Inspect the audit before grouping predicates or scaling toward 50 natural
-rollouts per task. A practical initial target is at least 30 usable successful
-and 20 usable failed segments for every retained `(task, subtask)` pair. Keep
-atomic controls in a separate dataset and model; `CoffeeSetupMug`,
+Inspect the semantic audit before changing mappings or scaling toward 50
+natural rollouts per task. A practical initial target is at least 30 usable
+successful and 20 usable failed segments for every retained `(task, subtask)`
+pair. Keep atomic controls in a separate dataset and model; `CoffeeSetupMug`,
 `PickPlaceCounterToStove`, and `PickPlaceDrawerToCounter` are useful controls
 at 20--30 natural rollouts each. Atomic and composite models should not be
 mixed until their separate behavior is understood.
@@ -840,7 +865,8 @@ A live smoke test still requires a RoboCasa environment with RoboSuite and asset
 The current policy transports send raw latent features with each genuine
 inference. That is reliable and gives RoboCasa a direct outcome association,
 but it increases response size. The Subtask-SAFE extension records registered
-atomic or composite ordered subtask transitions, but it intentionally does not
-invent a frame-level failure onset, predict subtask identity or progress, or
-trigger recovery. Rollout-level official SAFE training remains unchanged until
-a dedicated segment exporter and training protocol are validated.
+atomic or composite ordered natural-language subtask transitions, while raw
+predicates remain diagnostic evidence. It intentionally does not invent a
+frame-level failure onset, predict subtask identity or progress, or trigger
+recovery. Rollout-level official SAFE training remains unchanged until a
+dedicated segment exporter and training protocol are validated.
