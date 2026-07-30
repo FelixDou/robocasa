@@ -171,7 +171,9 @@ def choose_common_total(per_task_rates, pool_counts, *, min_per_class=3):
         values["successes"] + values["failures"]
         for values in pool_counts.values()
     )
-    for total in range(maximum, 2 * min_per_class - 1, -1):
+    if maximum % 2:
+        maximum -= 1
+    for total in range(maximum, 2 * min_per_class - 1, -2):
         balanced_successes = total // 2
         balanced_failures = total - balanced_successes
         valid = True
@@ -264,6 +266,10 @@ def build_experiment(
     if samples_per_task < 2 * min_per_class:
         raise ValueError(
             f"samples_per_task must be at least {2 * min_per_class}"
+        )
+    if samples_per_task % 2:
+        raise ValueError(
+            "samples_per_task must be even so matched_balanced is exactly 50/50"
         )
     audit["official_export"] = str(export_dir)
     audit["fixed_outer_split_manifest"] = str(outer_path)

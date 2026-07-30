@@ -227,7 +227,7 @@ class TestSeenTaskProtocol(unittest.TestCase):
                 subset_seeds=[7],
                 min_per_class=1,
             )
-            self.assertEqual(plan["samples_per_task"], 5)
+            self.assertEqual(plan["samples_per_task"], 4)
             self.assertEqual(plan["fixed_outer_test_ids"], sorted(outer_test))
             natural_path = next(
                 Path(record["path"])
@@ -238,7 +238,7 @@ class TestSeenTaskProtocol(unittest.TestCase):
             self.assertEqual(natural["test"], sorted(outer_test))
             self.assertEqual(
                 natural["per_task"]["TaskA"]["train_successes"],
-                4,
+                3,
             )
             self.assertEqual(
                 natural["per_task"]["TaskB"]["train_successes"],
