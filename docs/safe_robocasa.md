@@ -885,6 +885,109 @@ pair. Keep atomic controls in a separate dataset and model; `CoffeeSetupMug`,
 at 20--30 natural rollouts each. Atomic and composite models should not be
 mixed until their separate behavior is understood.
 
+### Leakage-safe segment export and official SAFE training
+
+`export_subtask_safe` materializes only segments with a binary label and at
+least one genuine policy inference. Every segment becomes one pseudo-rollout
+for the pinned official SAFE loader, with the natural-language subtask as its
+`task_description`. The export excludes never-entered, already-completed,
+bypassed-optional, unlabeled, and labeled-without-inference intervals.
+
+The exporter creates the outer split before materializing segments. Parent
+rollouts are stratified by parent task and official rollout outcome; every
+segment from a parent remains in the same split. The resulting
+`parent_rollout_split.json` contains both segment IDs and parent-rollout IDs,
+and the training code verifies both sets before accepting it.
+
+```bash
+export SUBTASK_SAFE_EXPORT="$STORAGE_BS/robocasa_rollouts/safe/subtask_safe_export_$(date +%Y%m%d_%H%M%S)"
+
+python -u -m robocasa.recovery.safe.export_subtask_safe \
+  --dataset-dir "$SUBTASK_SAFE_DATASET" \
+  --output-dir "$SUBTASK_SAFE_EXPORT" \
+  --train-fraction 0.7 \
+  --split-seed 0
+
+python -u -m robocasa.recovery.safe.validate_official_export \
+  --export-dir "$SUBTASK_SAFE_EXPORT" \
+  --safe-repo "$SAFE_REPO" \
+  --expected-rollouts 426 \
+  --expected-successes 341 \
+  --expected-failures 85
+```
+
+The exact expected counts above describe the 150-rollout composite pilot and
+should be changed for another source dataset. Inspect the immutable split:
+
+```bash
+python - "$SUBTASK_SAFE_EXPORT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+split = json.loads((root / "parent_rollout_split.json").read_text())
+print("protocol:", split["protocol"])
+print("train:", split["counts"]["train"])
+print("test:", split["counts"]["test"])
+print("parent leakage:", bool(set(split["parent_train"]) & set(split["parent_test"])))
+print("segment leakage:", bool(set(split["train"]) & set(split["test"])))
+PY
+```
+
+For hyperparameter selection, pass the generated file as an exact selection
+manifest. `run_seen_cv_grid` detects its `split_unit: parent_rollout`, creates
+inner folds from parent rollouts rather than segments, and computes official
+inverse-frequency class weights from each inner training fold only:
+
+```bash
+python -u -m robocasa.recovery.safe.run_seen_cv_grid \
+  --export-dir "$SUBTASK_SAFE_EXPORT" \
+  --safe-repo "$SAFE_REPO" \
+  --output-root "$SUBTASK_SAFE_CV_ROOT" \
+  --model indep \
+  --task-type composite \
+  --selection-manifest "$SUBTASK_SAFE_EXPORT/parent_rollout_split.json" \
+  --class-weighting official_inverse_frequency \
+  --split-seed 0 \
+  --inner-seed 0 \
+  --num-folds 3 \
+  --epochs 1000 \
+  --device cuda \
+  --resume
+```
+
+Run `--model lstm` on a second GPU while writing to the same grid root. After
+both architectures complete, summarize the grid and refit each selected model
+on the full outer training segment set:
+
+```bash
+python -m robocasa.recovery.safe.summarize_seen_cv \
+  --root "$SUBTASK_SAFE_CV_ROOT" \
+  --expected-folds 0 1 2 \
+  --quiet
+
+python -u -m robocasa.recovery.safe.train_seen_tasks \
+  --export-dir "$SUBTASK_SAFE_EXPORT" \
+  --safe-repo "$SAFE_REPO" \
+  --output-dir "$SUBTASK_SAFE_FINAL_ROOT/indep_seed0" \
+  --model indep \
+  --seed 0 \
+  --split-seed 0 \
+  --task-type composite \
+  --selection-manifest "$SUBTASK_SAFE_EXPORT/parent_rollout_split.json" \
+  --selection-summary "$SUBTASK_SAFE_CV_ROOT/cv_selection_summary.json" \
+  --class-weighting official_inverse_frequency \
+  --epochs 1000 \
+  --device cuda \
+  --resume
+```
+
+Repeat the final refit for seeds 1 and 2 and for `lstm`. Score files retain the
+parent rollout, parent task, subtask ID, instruction, original environment-step
+alignment, and semantic segment boundaries, so later overlay videos can place
+the Subtask-SAFE score on the correct portion of the original rollout.
+
 ## Local structural validation
 
 These checks require no GPU, RoboSuite, simulator, checkpoint, or server:
@@ -915,6 +1018,7 @@ inference. That is reliable and gives RoboCasa a direct outcome association,
 but it increases response size. The Subtask-SAFE extension records registered
 atomic or composite ordered natural-language subtask transitions, while raw
 predicates remain diagnostic evidence. It intentionally does not invent a
-frame-level failure onset, predict subtask identity or progress, or trigger
-recovery. Rollout-level official SAFE training remains unchanged until a
-dedicated segment exporter and training protocol are validated.
+frame-level failure onset, predict subtask identity or continuous progress, or
+trigger recovery. The dedicated segment exporter trains the original official
+SAFE MLP or LSTM on oracle-delimited subtask intervals; online subtask
+recognition and recovery remain future stages.

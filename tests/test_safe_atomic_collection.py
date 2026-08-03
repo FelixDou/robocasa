@@ -21,6 +21,7 @@ from robocasa.recovery.safe.audit_subtask_safe_dataset import (
 )
 from robocasa.recovery.safe.dataset import load_manifest
 from robocasa.recovery.safe.export_to_official_safe import export_to_official_safe
+from robocasa.recovery.safe.export_subtask_safe import export_subtask_safe
 from robocasa.recovery.safe.merge_atomic_datasets import merge_atomic_datasets
 from robocasa.recovery.safe.validate_atomic_dataset import validate_atomic_dataset
 
@@ -489,6 +490,65 @@ class TestSafeAtomicCollection(unittest.TestCase):
                     payload["segments"][0]["failure_label"],
                     int(record.failed),
                 )
+
+    def test_subtask_export_splits_parents_before_segment_materialization(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as exported:
+            args = collection_args(tmp, num_rollouts=6)
+            args.record_subtask_trace = True
+            run_collection(args, runtime=fake_runtime())
+
+            report = export_subtask_safe(
+                tmp,
+                exported,
+                train_fraction=0.5,
+                split_seed=7,
+            )
+            self.assertEqual(report["num_parent_rollouts"], 6)
+            self.assertEqual(report["num_segments"], 6)
+            self.assertEqual(report["num_success_segments"], 3)
+            self.assertEqual(report["num_failure_segments"], 3)
+            split = json.loads(
+                (Path(exported) / "parent_rollout_split.json").read_text()
+            )
+            self.assertEqual(split["split_unit"], "parent_rollout")
+            self.assertFalse(set(split["parent_train"]) & set(split["parent_test"]))
+            self.assertEqual(
+                set(split["parent_train"]) | set(split["parent_test"]),
+                {record.rollout_id for record in load_manifest(tmp)},
+            )
+
+            env_paths = sorted((Path(exported) / "env_records").glob("*.pkl"))
+            policy_paths = sorted(
+                (Path(exported) / "policy_records").glob("*meta.pkl")
+            )
+            self.assertEqual(len(env_paths), 6)
+            self.assertEqual(len(policy_paths), report["num_policy_records"])
+            segment_ids = set()
+            parent_by_segment = {}
+            for path in env_paths:
+                with path.open("rb") as stream:
+                    env = pickle.load(stream)
+                segment_ids.add(env["rollout_id"])
+                parent_by_segment[env["rollout_id"]] = env["parent_rollout_id"]
+                self.assertEqual(env["task_description"], env["subtask_instruction"])
+                self.assertEqual(env["model_infer_times"], 1 if env["episode_success"] else 2)
+            self.assertEqual(segment_ids, set(split["train"]) | set(split["test"]))
+            self.assertEqual(
+                {parent_by_segment[value] for value in split["train"]},
+                set(split["parent_train"]),
+            )
+            self.assertEqual(
+                {parent_by_segment[value] for value in split["test"]},
+                set(split["parent_test"]),
+            )
+            resumed = export_subtask_safe(
+                tmp,
+                exported,
+                train_fraction=0.5,
+                split_seed=7,
+                resume=True,
+            )
+            self.assertTrue(resumed["complete"])
 
     def test_subtask_audit_can_explicitly_inspect_partial_collection(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -116,23 +116,72 @@ def generate_cv_runs(
     ]
 
 
-def make_inner_folds(outer_train, identity, *, num_folds=3, seed=0):
-    """Outcome-stratified folds within every task; outer test is never accepted."""
-    grouped = defaultdict(list)
-    for rollout in outer_train:
-        grouped[(int(rollout.task_id), int(rollout.episode_success))].append(rollout)
-    validation_by_fold = [[] for _ in range(num_folds)]
-    for group_key in sorted(grouped):
-        values = sorted(
-            grouped[group_key],
-            key=lambda rollout: str(identity[id(rollout)][1]["rollout_id"]),
-        )
-        rng = random.Random(f"{seed}:{group_key[0]}:{group_key[1]}")
-        rng.shuffle(values)
-        if len(values) < num_folds:
-            raise ValueError(f"Group {group_key} is too small for {num_folds} folds")
-        for index, rollout in enumerate(values):
-            validation_by_fold[index % num_folds].append(rollout)
+def make_inner_folds(
+    outer_train,
+    identity,
+    *,
+    num_folds=3,
+    seed=0,
+    group_field=None,
+):
+    """Build inner folds, optionally keeping all segments of a parent together."""
+    if group_field is not None:
+        parent_groups = {}
+        for rollout in outer_train:
+            env = identity[id(rollout)][1]
+            group_id = str(env.get(group_field, ""))
+            if not group_id:
+                raise ValueError(f"Environment record is missing {group_field!r}")
+            stratum = (
+                str(env.get("parent_task_name", env.get("task_name", ""))),
+                int(bool(env.get("parent_rollout_failed", False))),
+            )
+            group = parent_groups.setdefault(
+                group_id,
+                {"stratum": stratum, "rollouts": []},
+            )
+            if group["stratum"] != stratum:
+                raise ValueError(f"Grouped split metadata changed for {group_id}")
+            group["rollouts"].append(rollout)
+        grouped_parents = defaultdict(list)
+        for group_id, group in parent_groups.items():
+            grouped_parents[group["stratum"]].append(group_id)
+        validation_group_ids = [set() for _ in range(num_folds)]
+        for stratum, values in sorted(grouped_parents.items()):
+            values = sorted(values)
+            if len(values) < num_folds:
+                raise ValueError(
+                    f"Parent stratum {stratum} has {len(values)} groups, fewer "
+                    f"than {num_folds} folds"
+                )
+            rng = random.Random(f"{seed}:{stratum[0]}:{stratum[1]}")
+            rng.shuffle(values)
+            for index, group_id in enumerate(values):
+                validation_group_ids[index % num_folds].add(group_id)
+        validation_by_fold = [
+            [
+                rollout
+                for group_id in sorted(group_ids)
+                for rollout in parent_groups[group_id]["rollouts"]
+            ]
+            for group_ids in validation_group_ids
+        ]
+    else:
+        grouped = defaultdict(list)
+        for rollout in outer_train:
+            grouped[(int(rollout.task_id), int(rollout.episode_success))].append(rollout)
+        validation_by_fold = [[] for _ in range(num_folds)]
+        for group_key in sorted(grouped):
+            values = sorted(
+                grouped[group_key],
+                key=lambda rollout: str(identity[id(rollout)][1]["rollout_id"]),
+            )
+            rng = random.Random(f"{seed}:{group_key[0]}:{group_key[1]}")
+            rng.shuffle(values)
+            if len(values) < num_folds:
+                raise ValueError(f"Group {group_key} is too small for {num_folds} folds")
+            for index, rollout in enumerate(values):
+                validation_by_fold[index % num_folds].append(rollout)
     outer_ids = {identity[id(rollout)][1]["rollout_id"] for rollout in outer_train}
     folds = []
     for fold, validation in enumerate(validation_by_fold):
@@ -145,15 +194,33 @@ def make_inner_folds(outer_train, identity, *, num_folds=3, seed=0):
         training_ids = {identity[id(rollout)][1]["rollout_id"] for rollout in training}
         if training_ids & validation_ids or training_ids | validation_ids != outer_ids:
             raise AssertionError(f"Fold {fold} is not disjoint and exhaustive")
-        for split in (training, validation):
-            for task_id in sorted({int(rollout.task_id) for rollout in split}):
-                labels = {
-                    int(rollout.episode_success)
-                    for rollout in split
-                    if int(rollout.task_id) == task_id
-                }
+        if group_field is None:
+            for split in (training, validation):
+                for task_id in sorted({int(rollout.task_id) for rollout in split}):
+                    labels = {
+                        int(rollout.episode_success)
+                        for rollout in split
+                        if int(rollout.task_id) == task_id
+                    }
+                    if labels != {0, 1}:
+                        raise ValueError(
+                            f"Fold {fold}, task {task_id} is not outcome-stratified"
+                        )
+        else:
+            training_groups = {
+                str(identity[id(rollout)][1][group_field]) for rollout in training
+            }
+            validation_groups = {
+                str(identity[id(rollout)][1][group_field]) for rollout in validation
+            }
+            if training_groups & validation_groups:
+                raise AssertionError(f"Fold {fold} leaks {group_field} groups")
+            for split_name, split in (("training", training), ("validation", validation)):
+                labels = {int(rollout.episode_success) for rollout in split}
                 if labels != {0, 1}:
-                    raise ValueError(f"Fold {fold}, task {task_id} is not outcome-stratified")
+                    raise ValueError(
+                        f"Fold {fold} grouped {split_name} split lacks both labels"
+                    )
         folds.append((training, validation))
     return folds
 
@@ -208,6 +275,12 @@ def run_cv_grid(args):
         fixed_split_ids["manifest"].get("fixed_outer_split_manifest")
         if args.selection_manifest is not None
         else (fixed_split_ids["path"] if fixed_split_ids is not None else None)
+    )
+    inner_group_field = (
+        "parent_rollout_id"
+        if fixed_split_ids is not None
+        and fixed_split_ids.get("split_unit") == "parent_rollout"
+        else None
     )
     if (
         fixed_split_ids is not None
@@ -275,6 +348,7 @@ def run_cv_grid(args):
         "epochs": args.epochs,
         "split_seed": args.split_seed,
         "inner_seed": args.inner_seed,
+        "inner_group_field": inner_group_field,
         "outer_split_manifest": (
             fixed_outer_split_path
         ),
@@ -348,6 +422,7 @@ def run_cv_grid(args):
                 identity,
                 num_folds=args.num_folds,
                 seed=args.inner_seed,
+                group_field=inner_group_field,
             )
             if cfg.dataset.load_to_cuda:
                 all_rollouts = [rollout.to(args.device) for rollout in all_rollouts]
@@ -465,9 +540,26 @@ def run_cv_grid(args):
                         "inner_val": count_split(inner_val),
                     },
                     "outer_test_scored": False,
+                    "inner_group_field": inner_group_field,
                     "task_min_steps_from_outer_train": task_cutoffs,
                     "inner_train_ids": [identity[id(item)][1]["rollout_id"] for item in inner_train],
                     "inner_val_ids": [identity[id(item)][1]["rollout_id"] for item in inner_val],
+                    "inner_train_parent_ids": (
+                        sorted({
+                            identity[id(item)][1][inner_group_field]
+                            for item in inner_train
+                        })
+                        if inner_group_field is not None
+                        else None
+                    ),
+                    "inner_val_parent_ids": (
+                        sorted({
+                            identity[id(item)][1][inner_group_field]
+                            for item in inner_val
+                        })
+                        if inner_group_field is not None
+                        else None
+                    ),
                     "loss_first": history[0],
                     "loss_last": history[-1],
                     "started_at": started,

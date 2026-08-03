@@ -40,6 +40,98 @@ from robocasa.recovery.safe.train_seen_tasks import (
 
 
 class TestSeenTaskProtocol(unittest.TestCase):
+    def test_parent_rollout_manifest_allows_natural_single_class_subtasks(self):
+        rollouts = []
+        identity = {}
+        train_ids = set()
+        test_ids = set()
+        parent_train = {"train-success", "train-failure"}
+        parent_test = {"test-success", "test-failure"}
+        for task_id in range(2):
+            for split, parents in (("train", parent_train), ("test", parent_test)):
+                for parent in sorted(parents):
+                    success = int("failure" not in parent)
+                    if task_id == 0:
+                        success = 1
+                    rollout = SimpleNamespace(
+                        task_id=task_id,
+                        episode_success=success,
+                    )
+                    rollout_id = f"{parent}-subtask-{task_id}"
+                    rollouts.append(rollout)
+                    identity[id(rollout)] = (
+                        Path(f"{rollout_id}.pkl"),
+                        {
+                            "rollout_id": rollout_id,
+                            "parent_rollout_id": parent,
+                        },
+                    )
+                    (train_ids if split == "train" else test_ids).add(rollout_id)
+
+        train, test, counts = make_manifest_split(
+            rollouts,
+            identity,
+            {
+                "train": train_ids,
+                "test": test_ids,
+                "split_unit": "parent_rollout",
+                "manifest": {
+                    "parent_train": sorted(parent_train),
+                    "parent_test": sorted(parent_test),
+                },
+            },
+        )
+        self.assertEqual((len(train), len(test)), (4, 4))
+        self.assertEqual(counts[0]["failure"], {"train": 0, "test": 0})
+        self.assertEqual(counts[1]["failure"], {"train": 1, "test": 1})
+
+    def test_inner_folds_keep_parent_segments_together(self):
+        rollouts = []
+        identity = {}
+        for task_name in ("TaskA", "TaskB"):
+            for failed in (False, True):
+                for parent_index in range(3):
+                    parent = f"{task_name}-{int(failed)}-{parent_index}"
+                    for subtask_index in range(2):
+                        rollout = SimpleNamespace(
+                            task_id=subtask_index,
+                            episode_success=(
+                                0 if failed and subtask_index == 1 else 1
+                            ),
+                        )
+                        rollout_id = f"{parent}-segment-{subtask_index}"
+                        rollouts.append(rollout)
+                        identity[id(rollout)] = (
+                            Path(f"{rollout_id}.pkl"),
+                            {
+                                "rollout_id": rollout_id,
+                                "parent_rollout_id": parent,
+                                "parent_task_name": task_name,
+                                "parent_rollout_failed": failed,
+                            },
+                        )
+        folds = make_inner_folds(
+            rollouts,
+            identity,
+            num_folds=3,
+            seed=4,
+            group_field="parent_rollout_id",
+        )
+        self.assertEqual(len(folds), 3)
+        for train, validation in folds:
+            train_parents = {
+                identity[id(item)][1]["parent_rollout_id"] for item in train
+            }
+            validation_parents = {
+                identity[id(item)][1]["parent_rollout_id"] for item in validation
+            }
+            self.assertFalse(train_parents & validation_parents)
+            self.assertEqual(len(validation_parents), 4)
+            self.assertEqual(
+                {int(item.episode_success) for item in validation},
+                {0, 1},
+            )
+
     def test_manifest_split_allows_unused_outer_training_pool(self):
         rollouts = []
         identity = {}

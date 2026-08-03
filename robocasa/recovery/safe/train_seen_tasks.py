@@ -241,6 +241,7 @@ def load_outer_split_ids(path):
         "train": train,
         "test": test,
         "split_seed": manifest.get("split_seed"),
+        "split_unit": manifest.get("split_unit", "rollout"),
         "manifest": manifest,
     }
 
@@ -262,6 +263,7 @@ def make_manifest_split(rollouts, identity, selection):
         )
     train = [available[rollout_id] for rollout_id in sorted(selection["train"])]
     test = [available[rollout_id] for rollout_id in sorted(selection["test"])]
+    allow_single_class_tasks = selection.get("split_unit") == "parent_rollout"
     per_task = {}
     task_ids = sorted({int(rollout.task_id) for rollout in train + test})
     for task_id in task_ids:
@@ -279,7 +281,7 @@ def make_manifest_split(rollouts, identity, selection):
                 if int(rollout.task_id) == task_id
                 and int(rollout.episode_success) == success
             ]
-            if not group_train or not group_test:
+            if not allow_single_class_tasks and (not group_train or not group_test):
                 raise ValueError(
                     f"Task {task_id}, success={success} selection has "
                     f"{len(group_train)} train and {len(group_test)} test rollouts; "
@@ -289,6 +291,36 @@ def make_manifest_split(rollouts, identity, selection):
                 "train": len(group_train),
                 "test": len(group_test),
             }
+    if allow_single_class_tasks:
+        train_labels = {int(rollout.episode_success) for rollout in train}
+        test_labels = {int(rollout.episode_success) for rollout in test}
+        if train_labels != {0, 1} or test_labels != {0, 1}:
+            raise ValueError(
+                "Parent-rollout Subtask-SAFE splits require both segment labels "
+                "globally in train and test"
+            )
+        parent_train = set(selection["manifest"].get("parent_train", []))
+        parent_test = set(selection["manifest"].get("parent_test", []))
+        if not parent_train or not parent_test or parent_train & parent_test:
+            raise ValueError(
+                "Parent-rollout split manifest has empty or overlapping parent IDs"
+            )
+        actual_train = {
+            str(identity[id(rollout)][1].get("parent_rollout_id", ""))
+            for rollout in train
+        }
+        actual_test = {
+            str(identity[id(rollout)][1].get("parent_rollout_id", ""))
+            for rollout in test
+        }
+        if (
+            actual_train != parent_train
+            or actual_test != parent_test
+            or actual_train & actual_test
+        ):
+            raise ValueError(
+                "Segment assignments disagree with the parent-rollout split manifest"
+            )
     selected_task_ids = {int(rollout.task_id) for rollout in train + test}
     source_task_ids = {int(rollout.task_id) for rollout in rollouts}
     if selected_task_ids != source_task_ids:
@@ -525,6 +557,13 @@ def save_scores(
                 metadata = env.get("robocasa_manifest_record", {})
                 record = {
                     "rollout_id": env["rollout_id"],
+                    "parent_rollout_id": env.get("parent_rollout_id"),
+                    "parent_task_name": env.get("parent_task_name"),
+                    "parent_rollout_failed": env.get("parent_rollout_failed"),
+                    "subtask_id": env.get("subtask_id"),
+                    "subtask_index": env.get("subtask_index"),
+                    "subtask_instruction": env.get("subtask_instruction"),
+                    "subtask_safe_segment": env.get("subtask_safe_segment"),
                     "split": split,
                     "task_id": int(rollout.task_id),
                     "task_name": names[int(rollout.task_id)],
@@ -537,9 +576,18 @@ def save_scores(
                     "task_min_step": int(rollout.task_min_step),
                     "video_path": str(env_path.with_suffix(".mp4")),
                     "video_frame_stride": int(metadata.get("video_frame_stride", 1)),
-                    "inference_environment_steps": metadata.get(
+                    "inference_environment_steps": env.get(
                         "inference_environment_steps",
-                        list(range(0, len(score) * int(env["replan_steps"]), int(env["replan_steps"]))),
+                        metadata.get(
+                            "inference_environment_steps",
+                            list(
+                                range(
+                                    0,
+                                    len(score) * int(env["replan_steps"]),
+                                    int(env["replan_steps"]),
+                                )
+                            ),
+                        ),
                     ),
                 }
                 stream.write(json.dumps(json_value(record), allow_nan=False) + "\n")
@@ -696,9 +744,20 @@ def train_seen_model(args):
         if len(test_per_class_values) == 1
         else None
     )
+    parent_grouped_split = bool(
+        fixed_split_ids is not None
+        and fixed_split_ids.get("split_unit") == "parent_rollout"
+    )
     split_manifest = {
         "schema_version": 1,
-        "protocol": "same_task_outcome_stratified",
+        "protocol": (
+            "subtask_safe_parent_rollout_stratified"
+            if parent_grouped_split
+            else "same_task_outcome_stratified"
+        ),
+        "split_unit": (
+            "parent_rollout" if parent_grouped_split else "rollout"
+        ),
         "split_seed": args.split_seed,
         "task_type_filter": args.task_type,
         "source_num_tasks": task_selection["source_num_tasks"],
@@ -728,6 +787,22 @@ def train_seen_model(args):
         "per_task": {names[key]: value for key, value in per_task.items()},
         "train": [identity[id(rollout)][1]["rollout_id"] for rollout in train_rollouts],
         "test": [identity[id(rollout)][1]["rollout_id"] for rollout in test_rollouts],
+        "parent_train": (
+            sorted({
+                identity[id(rollout)][1]["parent_rollout_id"]
+                for rollout in train_rollouts
+            })
+            if parent_grouped_split
+            else None
+        ),
+        "parent_test": (
+            sorted({
+                identity[id(rollout)][1]["parent_rollout_id"]
+                for rollout in test_rollouts
+            })
+            if parent_grouped_split
+            else None
+        ),
     }
     write_json(output / "split_manifest.json", split_manifest)
     save_scores(
@@ -768,6 +843,9 @@ def train_seen_model(args):
             fixed_split_ids["path"] if args.selection_manifest is not None else None
         ),
         "class_weighting": args.class_weighting,
+        "split_unit": (
+            "parent_rollout" if parent_grouped_split else "rollout"
+        ),
         "training_class_weights": training_class_weights,
         "task_min_step_source": (
             f"minimum inference length per task in the {len(train_rollouts)}-rollout "
