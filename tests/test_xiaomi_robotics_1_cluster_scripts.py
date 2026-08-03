@@ -97,6 +97,12 @@ class TestXiaomiRobotics1ClusterScripts(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_readiness_uses_tcp_probe_instead_of_ss_output_parsing(self):
+        script = EVAL_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("connection.connect_ex", script)
+        self.assertIn('until port_is_listening "${port}"', script)
+        self.assertNotIn("ss -ltn | awk", script)
+
     def test_setup_dry_run_pins_public_artifacts_and_bs_storage(self):
         result = run_script(SETUP_SCRIPT, "--dry-run")
         self.assertEqual(result.returncode, 0, result.stdout)

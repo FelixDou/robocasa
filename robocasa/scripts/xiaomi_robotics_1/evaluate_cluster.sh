@@ -191,11 +191,23 @@ verify_checkpoint() {
     done
 }
 
+port_is_listening() {
+    "${CLIENT_PYTHON}" - "$1" <<'PY'
+import socket
+import sys
+
+port = int(sys.argv[1])
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+    connection.settimeout(1.0)
+    raise SystemExit(connection.connect_ex(("127.0.0.1", port)))
+PY
+}
+
 verify_ports_free() {
     local index port
     for ((index = 0; index < NUM_WORKERS; index++)); do
         port=$((BASE_PORT + index))
-        if ss -ltn | awk '{print $4}' | grep -Eq "(^|:)${port}$"; then
+        if port_is_listening "${port}"; then
             echo "Port ${port} is already listening; choose another --base-port." >&2
             exit 1
         fi
@@ -297,7 +309,7 @@ start_servers() {
         port=$((BASE_PORT + index))
         server_log=${ROBOCASA_LOG_ROOT}/eval/${RUN_TAG}_server_${port}.log
         pid=${server_pids[$index]}
-        until ss -ltn | awk '{print $4}' | grep -Eq "(^|:)${port}$"; do
+        until port_is_listening "${port}"; do
             if ! kill -0 "${pid}" 2>/dev/null; then
                 echo "Server exited before listening on ${port}." >&2
                 tail -100 "${server_log}" >&2 || true
