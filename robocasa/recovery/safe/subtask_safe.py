@@ -143,6 +143,31 @@ def _failed_preconditions(payload: dict[str, Any]) -> list[str]:
     )
 
 
+def _first_terminally_unsatisfied_subtask(
+    payload: dict[str, Any],
+    definitions: list[dict[str, Any]],
+) -> tuple[str | None, list[str]]:
+    """Find the earliest completed semantic unit whose postcondition regressed.
+
+    Ordered completion is intentionally monotonic so a later manipulation does
+    not erase genuine progress.  An unsuccessful rollout can therefore finish
+    after every semantic unit was observed complete, while one of those units'
+    predicates is false at the terminal state.  In that case, the earliest
+    terminally-unsatisfied unit is the ordered subtask whose success did not
+    persist until overall task completion.
+    """
+    values = _predicate_values(payload)
+    for definition in definitions:
+        unsatisfied = [
+            name
+            for name in definition["predicate_names"]
+            if not values.get(name, False)
+        ]
+        if unsatisfied:
+            return definition["subtask_id"], unsatisfied
+    return None, []
+
+
 def _build_semantic_trace(
     subtask_evals: list[dict[str, Any]],
     definitions: list[dict[str, Any]],
@@ -260,16 +285,38 @@ def build_subtask_safe_record(
     definition_by_id = {
         definition["subtask_id"]: definition for definition in definitions
     }
+    terminal_failure_reason = None
+    terminal_unsatisfied_predicates: list[str] = []
     if not rollout_failed and terminal_active_subtask is not None:
         raise ValueError(
             "Successful rollout ended with an incomplete semantic subtask: "
             f"{terminal_active_subtask}"
         )
-    if rollout_failed and terminal_active_subtask is None:
-        raise ValueError(
-            "Failed rollout has no active semantic subtask; the semantic "
-            "mapping does not explain the official task failure"
-        )
+    if rollout_failed:
+        if terminal_active_subtask is None:
+            (
+                terminal_active_subtask,
+                terminal_unsatisfied_predicates,
+            ) = _first_terminally_unsatisfied_subtask(
+                valid_evals[-1],
+                definitions,
+            )
+            terminal_failure_reason = (
+                "completed_subtask_regressed_before_task_completion"
+            )
+        else:
+            terminal_unsatisfied_predicates = [
+                name
+                for name in definition_by_id[terminal_active_subtask]["predicate_names"]
+                if not _predicate_values(valid_evals[-1]).get(name, False)
+            ]
+            terminal_failure_reason = "active_subtask_never_completed"
+        if terminal_active_subtask is None:
+            raise ValueError(
+                "Failed rollout has no active or terminally regressed semantic "
+                "subtask; the semantic mapping does not explain the official "
+                "task failure"
+            )
 
     within_subtask_counts = {definition["subtask_id"]: 0 for definition in definitions}
     inference_indices_by_subtask = {
@@ -316,10 +363,11 @@ def build_subtask_safe_record(
     for definition in definitions:
         subtask_index = definition["subtask_index"]
         subtask_id = definition["subtask_id"]
-        completed = subtask_id in final_completed
+        observed_completed = subtask_id in final_completed
         is_terminal_failure = bool(
-            rollout_failed and not completed and subtask_id == terminal_active_subtask
+            rollout_failed and subtask_id == terminal_active_subtask
         )
+        completed = observed_completed and not is_terminal_failure
         observed_active = bool(active_steps[subtask_id])
         if completed and not observed_active:
             excluded_completed_subtasks.append(
@@ -333,10 +381,19 @@ def build_subtask_safe_record(
         if not observed_active and not is_terminal_failure:
             break
 
-        entry_step = min(active_steps[subtask_id])
-        completion_step = completion_steps.get(subtask_id)
+        observed_completion_step = completion_steps.get(subtask_id)
+        entry_step = (
+            min(active_steps[subtask_id])
+            if observed_active
+            else int(observed_completion_step or 0)
+        )
+        completion_step = None if is_terminal_failure else observed_completion_step
         end_step = (
-            completion_step if completion_step is not None else len(valid_evals) - 1
+            len(valid_evals) - 1
+            if is_terminal_failure
+            else completion_step
+            if completion_step is not None
+            else len(valid_evals) - 1
         )
         indices = inference_indices_by_subtask[subtask_id]
         if indices and indices != list(range(indices[0], indices[-1] + 1)):
@@ -357,16 +414,25 @@ def build_subtask_safe_record(
                 "subtask_name": subtask_id,
                 "subtask_instruction": definition["instruction"],
                 "predicate_names": list(definition["predicate_names"]),
-                "source_subtask_ids": list(
-                    definition["source_subtask_ids"]
-                ),
+                "source_subtask_ids": list(definition["source_subtask_ids"]),
                 "entry_environment_step": int(entry_step),
                 "end_environment_step": int(end_step),
                 "completion_environment_step": (
                     int(completion_step) if completion_step is not None else None
                 ),
+                "first_observed_completion_environment_step": (
+                    int(observed_completion_step)
+                    if observed_completion_step is not None
+                    else None
+                ),
                 "completed": completed,
                 "eventually_failed": is_terminal_failure,
+                "terminal_failure_reason": (
+                    terminal_failure_reason if is_terminal_failure else None
+                ),
+                "terminal_unsatisfied_predicate_names": (
+                    list(terminal_unsatisfied_predicates) if is_terminal_failure else []
+                ),
                 "failure_label": failure_label,
                 "inference_start_index": (int(indices[0]) if indices else None),
                 "inference_end_index_exclusive": (
@@ -415,6 +481,8 @@ def build_subtask_safe_record(
             if terminal_definition is not None
             else None
         ),
+        "terminal_failure_reason": terminal_failure_reason,
+        "terminal_unsatisfied_predicate_names": terminal_unsatisfied_predicates,
         "labeling_status": "complete",
         "transitions": _transition_trace(trace),
         "inference_records": inference_records,
@@ -484,8 +552,7 @@ def validate_subtask_safe_record(
         if (
             item.get("subtask_instruction") != definition["instruction"]
             or item.get("predicate_names") != definition["predicate_names"]
-            or item.get("source_subtask_ids")
-            != definition["source_subtask_ids"]
+            or item.get("source_subtask_ids") != definition["source_subtask_ids"]
         ):
             raise ValueError(
                 "Inference natural-language subtask metadata is inconsistent"
@@ -506,8 +573,7 @@ def validate_subtask_safe_record(
         if (
             segment.get("subtask_instruction") != definition["instruction"]
             or segment.get("predicate_names") != definition["predicate_names"]
-            or segment.get("source_subtask_ids")
-            != definition["source_subtask_ids"]
+            or segment.get("source_subtask_ids") != definition["source_subtask_ids"]
             or segment.get("segment_index") != definition["subtask_index"]
         ):
             raise ValueError(
@@ -540,8 +606,7 @@ def validate_subtask_safe_record(
         if (
             entry.get("instruction") != definition["instruction"]
             or entry.get("predicate_names") != definition["predicate_names"]
-            or entry.get("source_subtask_ids")
-            != definition["source_subtask_ids"]
+            or entry.get("source_subtask_ids") != definition["source_subtask_ids"]
         ):
             raise ValueError(
                 "Excluded natural-language subtask metadata is inconsistent"

@@ -80,9 +80,7 @@ class TestSubtaskSafe(unittest.TestCase):
             rollout_id="success-rollout",
         )
 
-        self.assertEqual(
-            record["label_semantics"], SUBTASK_FAILURE_LABEL_SEMANTICS
-        )
+        self.assertEqual(record["label_semantics"], SUBTASK_FAILURE_LABEL_SEMANTICS)
         self.assertEqual(
             [
                 (
@@ -95,17 +93,11 @@ class TestSubtaskSafe(unittest.TestCase):
             [("first", 1, 0), ("second", 3, 0)],
         )
         self.assertEqual(
-            [
-                item["subtask_id"]
-                for item in record["inference_records"]
-            ],
+            [item["subtask_id"] for item in record["inference_records"]],
             ["first", "second"],
         )
         self.assertEqual(
-            [
-                item["subtask_instruction"]
-                for item in record["inference_records"]
-            ],
+            [item["subtask_instruction"] for item in record["inference_records"]],
             [
                 "Complete the first semantic subtask.",
                 "Complete the second semantic subtask.",
@@ -166,7 +158,71 @@ class TestSubtaskSafe(unittest.TestCase):
             [("first", False, 0), ("second", True, 1)],
         )
         self.assertEqual(record["terminal_active_subtask"], "second")
+        self.assertEqual(
+            record["terminal_failure_reason"],
+            "active_subtask_never_completed",
+        )
+        self.assertEqual(record["terminal_unsatisfied_predicate_names"], ["second"])
         self.assertEqual(record["labeling_status"], "complete")
+
+    def test_terminal_regression_relabels_first_unsatisfied_subtask(self):
+        record = build_subtask_safe_record(
+            [
+                subtask_eval(),
+                subtask_eval(first=True),
+                subtask_eval(first=False, second=True),
+            ],
+            [0, 1],
+            rollout_failed=True,
+            rollout_id="regressed-rollout",
+        )
+
+        self.assertEqual(record["terminal_active_subtask"], "first")
+        self.assertEqual(
+            record["terminal_failure_reason"],
+            "completed_subtask_regressed_before_task_completion",
+        )
+        self.assertEqual(record["terminal_unsatisfied_predicate_names"], ["first"])
+        self.assertEqual(
+            [
+                (
+                    segment["subtask_id"],
+                    segment["completed"],
+                    segment["eventually_failed"],
+                    segment["failure_label"],
+                    segment["first_observed_completion_environment_step"],
+                    segment["completion_environment_step"],
+                )
+                for segment in record["segments"]
+            ],
+            [
+                ("first", False, True, 1, 1, None),
+                ("second", True, False, 0, 2, 2),
+            ],
+        )
+        counts = validate_subtask_safe_record(
+            record,
+            rollout_id="regressed-rollout",
+            rollout_failed=True,
+            inference_environment_steps=[0, 1],
+        )
+        self.assertEqual(counts["failed_segments"], 1)
+        self.assertEqual(counts["successful_segments"], 1)
+
+    def test_failed_rollout_with_all_terminal_predicates_true_is_rejected(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "mapping does not explain the official task failure",
+        ):
+            build_subtask_safe_record(
+                [
+                    subtask_eval(),
+                    subtask_eval(first=True, second=True),
+                ],
+                [0],
+                rollout_failed=True,
+                rollout_id="unexplained-failure",
+            )
 
     def test_unavailable_trace_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "unavailable"):
@@ -365,8 +421,7 @@ class TestSubtaskSafe(unittest.TestCase):
             for name, value in values.items():
                 predicates[name] = {
                     "value": value,
-                    "required": name
-                    not in {"cup_grasped", "bowl_grasped"},
+                    "required": name not in {"cup_grasped", "bowl_grasped"},
                 }
             return {
                 "task_name": "LoadDishwasher",
@@ -404,10 +459,7 @@ class TestSubtaskSafe(unittest.TestCase):
         )
 
         self.assertEqual(
-            [
-                definition["subtask_id"]
-                for definition in record["semantic_subtasks"]
-            ],
+            [definition["subtask_id"] for definition in record["semantic_subtasks"]],
             [
                 "cup_grasped",
                 "cup_on_rack",

@@ -764,14 +764,21 @@ unchanged. The Subtask-SAFE artifact contains:
 - a binary label with semantics
   `active_subtask_eventually_fails_before_completion`.
 
-A completed segment has label `0`. Only the active terminal segment of an
-unsuccessful rollout has label `1`. Never-entered future subtasks are not
-samples. A subtask completed before a later failure remains a successful
-segment. A subtask already true at reset, or co-completed with another semantic
-subtask without an observed active state, is recorded under
+A completed segment has label `0`. Only one segment of an unsuccessful rollout
+has label `1`: the active terminal subtask, or, when every ordered subtask was
+observed complete but official task success was never reached, the earliest
+completed subtask whose predicates are false at the terminal state. This
+second case records that a transient completion regressed before overall task
+completion; `terminal_failure_reason` and
+`terminal_unsatisfied_predicate_names` preserve that distinction. Later
+subtasks genuinely completed in the meantime remain successful segments.
+Never-entered future subtasks are not samples. A subtask already true at reset,
+or co-completed with another semantic subtask without an observed active state,
+is recorded under
 `excluded_completed_subtasks` and is not a training sample. Ordered first
-completion is monotonic; later predicate regression is recorded diagnostically
-but does not reopen a completed segment.
+completion remains monotonic for trace alignment. Terminal regression does not
+rewrite inference ownership or create a duplicate segment; it changes the
+original segment's outcome to failure because its completion did not persist.
 
 Before recording, the canonicalizer reviews all 32 registered composite tasks
 with these observability rules:
