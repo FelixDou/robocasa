@@ -756,7 +756,8 @@ The original SAFE feature tensor and official-loader compatibility are
 unchanged. The Subtask-SAFE artifact contains:
 
 - every ordered semantic subtask's ID, natural-language instruction, predicate
-  set, and `source_subtask_ids` provenance;
+  set, `source_subtask_ids` provenance, and whether its predicates are required
+  by the official task-success condition;
 - the environment step where every semantic subtask first becomes complete;
 - the oracle current semantic subtask aligned to every genuine policy
   inference;
@@ -779,6 +780,14 @@ is recorded under
 completion remains monotonic for trace alignment. Terminal regression does not
 rewrite inference ownership or create a duplicate segment; it changes the
 original segment's outcome to failure because its completion did not persist.
+
+Transient grasp predicates are useful timestamps but are not official success
+requirements. A policy can occasionally complete the following placement by
+pushing an object, or a brief grasp can fall between observed simulator states.
+When an optional transient predicate was never observed but the immediately
+following semantic subtask completes, the transient unit is recorded under
+`excluded_bypassed_subtasks`. Its ambiguous inference interval is not labeled
+as either success or failure. Required semantic subtasks are never bypassed.
 
 Before recording, the canonicalizer reviews all 32 registered composite tasks
 with these observability rules:

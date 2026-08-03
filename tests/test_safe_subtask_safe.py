@@ -20,13 +20,20 @@ from robocasa.recovery.safe.subtask_safe import (
 from robocasa.recovery.subtask_eval import get_subtask_eval
 
 
-def subtask_eval(*, first=False, second=False, task_success=False):
+def subtask_eval(
+    *,
+    first=False,
+    second=False,
+    task_success=False,
+    first_required=True,
+):
     return {
         "task_name": "TestSemanticTask",
         "required_predicates": ["first", "second"],
         "predicates": {
             "first": {
                 "value": first,
+                "required": first_required,
                 "stage": "subtask",
                 "description": "Complete the first semantic subtask.",
             },
@@ -130,8 +137,51 @@ class TestSubtaskSafe(unittest.TestCase):
                 "failed_segments": 0,
                 "labeled_without_inference": 0,
                 "excluded_completed_subtasks": 0,
+                "excluded_bypassed_subtasks": 0,
             },
         )
+
+    def test_success_bypasses_unobserved_optional_transient(self):
+        record = build_subtask_safe_record(
+            [
+                subtask_eval(first_required=False),
+                subtask_eval(
+                    second=True,
+                    task_success=True,
+                    first_required=False,
+                ),
+            ],
+            [0],
+            rollout_failed=False,
+            rollout_id="optional-transient-bypass",
+        )
+
+        self.assertFalse(
+            record["semantic_subtasks"][0]["required_for_official_success"]
+        )
+        self.assertTrue(record["semantic_subtasks"][1]["required_for_official_success"])
+        self.assertEqual(record["terminal_active_subtask"], None)
+        self.assertEqual(record["segments"], [])
+        self.assertEqual(
+            [entry["subtask_id"] for entry in record["excluded_bypassed_subtasks"]],
+            ["first"],
+        )
+        self.assertEqual(
+            record["excluded_bypassed_subtasks"][0]["num_policy_inferences"],
+            1,
+        )
+        self.assertEqual(
+            [entry["subtask_id"] for entry in record["excluded_completed_subtasks"]],
+            ["second"],
+        )
+        counts = validate_subtask_safe_record(
+            record,
+            rollout_id="optional-transient-bypass",
+            rollout_failed=False,
+            inference_environment_steps=[0],
+        )
+        self.assertEqual(counts["excluded_bypassed_subtasks"], 1)
+        self.assertEqual(counts["excluded_completed_subtasks"], 1)
 
     def test_only_terminal_active_segment_is_failure(self):
         record = build_subtask_safe_record(
@@ -354,6 +404,7 @@ class TestSubtaskSafe(unittest.TestCase):
                 "usable_failure_segments": 1,
                 "labeled_without_inference": 1,
                 "excluded_completed_without_activation": 0,
+                "excluded_bypassed_optional": 0,
                 "pairs_reaching_target": 0,
             },
         )
@@ -479,6 +530,7 @@ class TestSubtaskSafe(unittest.TestCase):
                     "bowl_on_rack",
                     "bowl_released_on_rack",
                 ],
+                "required_for_official_success": True,
             },
         )
         self.assertEqual(

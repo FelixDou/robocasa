@@ -80,6 +80,9 @@ def _semantic_subtasks(
         include_trace=False,
     )
     sequence = mapped_subtask_sequence(summary, task_name)
+    predicate_contract = subtask_evals[-1].get("predicates", {})
+    if not predicate_contract:
+        raise ValueError("Semantic Subtask-SAFE requires runtime predicate metadata")
     definitions = []
     for entry in sequence:
         subtask_id = str(entry.get("subtask_id") or "").strip()
@@ -99,6 +102,10 @@ def _semantic_subtasks(
                 "predicate_names": predicate_names,
                 "source_subtask_ids": list(
                     entry.get("source_subtask_ids") or [subtask_id]
+                ),
+                "required_for_official_success": any(
+                    bool(predicate_contract.get(name, {}).get("required", True))
+                    for name in predicate_names
                 ),
             }
         )
@@ -171,27 +178,51 @@ def _first_terminally_unsatisfied_subtask(
 def _build_semantic_trace(
     subtask_evals: list[dict[str, Any]],
     definitions: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], dict[str, int], dict[str, list[int]],]:
+) -> tuple[list[dict[str, Any]], dict[str, int], dict[str, list[int]], dict[str, int],]:
     trace = []
     completion_steps: dict[str, int] = {}
     active_steps = {definition["subtask_id"]: [] for definition in definitions}
     completed: list[str] = []
+    bypassed: list[str] = []
+    bypass_steps: dict[str, int] = {}
     ordered_index = 0
     previous_predicate_values: dict[str, bool] = {}
     for environment_step, payload in enumerate(subtask_evals):
         values = _predicate_values(payload)
         newly_completed = []
+        newly_bypassed = []
         while ordered_index < len(definitions):
             definition = definitions[ordered_index]
-            if not all(
+            predicates_satisfied = all(
                 values.get(name, False) for name in definition["predicate_names"]
-            ):
-                break
-            subtask_id = definition["subtask_id"]
-            completed.append(subtask_id)
-            newly_completed.append(subtask_id)
-            completion_steps[subtask_id] = environment_step
-            ordered_index += 1
+            )
+            if predicates_satisfied:
+                subtask_id = definition["subtask_id"]
+                completed.append(subtask_id)
+                newly_completed.append(subtask_id)
+                completion_steps[subtask_id] = environment_step
+                ordered_index += 1
+                continue
+            next_definition = (
+                definitions[ordered_index + 1]
+                if ordered_index + 1 < len(definitions)
+                else None
+            )
+            next_satisfied = bool(
+                next_definition is not None
+                and all(
+                    values.get(name, False)
+                    for name in next_definition["predicate_names"]
+                )
+            )
+            if not definition["required_for_official_success"] and next_satisfied:
+                subtask_id = definition["subtask_id"]
+                bypassed.append(subtask_id)
+                newly_bypassed.append(subtask_id)
+                bypass_steps[subtask_id] = environment_step
+                ordered_index += 1
+                continue
+            break
         current = (
             definitions[ordered_index] if ordered_index < len(definitions) else None
         )
@@ -206,6 +237,7 @@ def _build_semantic_trace(
             {
                 "environment_step": environment_step,
                 "completed_subtask_ids": list(completed),
+                "bypassed_optional_subtask_ids": list(bypassed),
                 "current_subtask_id": (
                     current["subtask_id"] if current is not None else None
                 ),
@@ -216,14 +248,17 @@ def _build_semantic_trace(
                     list(current["predicate_names"]) if current is not None else []
                 ),
                 "newly_completed_subtask_ids": newly_completed,
-                "subtask_progress": float(len(completed) / len(definitions)),
+                "newly_bypassed_optional_subtask_ids": newly_bypassed,
+                "subtask_progress": float(
+                    (len(completed) + len(bypassed)) / len(definitions)
+                ),
                 "regressed_predicates": regressed,
                 "failed_preconditions": _failed_preconditions(payload),
                 "task_success": bool(payload.get("task_success", False)),
             }
         )
         previous_predicate_values = values
-    return trace, completion_steps, active_steps
+    return trace, completion_steps, active_steps, bypass_steps
 
 
 def _transition_trace(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -236,7 +271,9 @@ def _transition_trace(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
             tuple(entry["failed_preconditions"]),
         )
         noteworthy = bool(
-            entry["newly_completed_subtask_ids"] or entry["regressed_predicates"]
+            entry["newly_completed_subtask_ids"]
+            or entry["newly_bypassed_optional_subtask_ids"]
+            or entry["regressed_predicates"]
         )
         if (
             previous_signature is None
@@ -275,12 +312,13 @@ def build_subtask_safe_record(
     ):
         raise ValueError("Subtask-SAFE inference step lies outside the trace")
 
-    trace, completion_steps, active_steps = _build_semantic_trace(
+    trace, completion_steps, active_steps, bypass_steps = _build_semantic_trace(
         valid_evals,
         definitions,
     )
     final = trace[-1]
     final_completed = set(final["completed_subtask_ids"])
+    final_bypassed = set(final["bypassed_optional_subtask_ids"])
     terminal_active_subtask = final["current_subtask_id"]
     definition_by_id = {
         definition["subtask_id"]: definition for definition in definitions
@@ -360,6 +398,7 @@ def build_subtask_safe_record(
 
     segments = []
     excluded_completed_subtasks = []
+    excluded_bypassed_subtasks = []
     for definition in definitions:
         subtask_index = definition["subtask_index"]
         subtask_id = definition["subtask_id"]
@@ -369,6 +408,24 @@ def build_subtask_safe_record(
         )
         completed = observed_completed and not is_terminal_failure
         observed_active = bool(active_steps[subtask_id])
+        if subtask_id in final_bypassed:
+            excluded_bypassed_subtasks.append(
+                {
+                    **definition,
+                    "entry_environment_step": (
+                        int(min(active_steps[subtask_id])) if observed_active else None
+                    ),
+                    "bypass_environment_step": int(bypass_steps[subtask_id]),
+                    "num_policy_inferences": len(
+                        inference_indices_by_subtask[subtask_id]
+                    ),
+                    "reason": (
+                        "optional_transient_unobserved_before_following_"
+                        "subtask_completion"
+                    ),
+                }
+            )
+            continue
         if completed and not observed_active:
             excluded_completed_subtasks.append(
                 {
@@ -488,6 +545,7 @@ def build_subtask_safe_record(
         "inference_records": inference_records,
         "segments": segments,
         "excluded_completed_subtasks": excluded_completed_subtasks,
+        "excluded_bypassed_subtasks": excluded_bypassed_subtasks,
     }
 
 
@@ -613,6 +671,27 @@ def validate_subtask_safe_record(
             )
         excluded_ids.add(subtask_id)
 
+    bypassed = record.get("excluded_bypassed_subtasks", [])
+    bypassed_ids = set()
+    for entry in bypassed:
+        subtask_id = entry.get("subtask_id")
+        definition = definition_by_id.get(subtask_id)
+        if definition is None or subtask_id in bypassed_ids:
+            raise ValueError("Invalid bypassed semantic subtask")
+        if subtask_id in seen_segment_ids or subtask_id in excluded_ids:
+            raise ValueError("Semantic subtask cannot be both attempted and excluded")
+        if definition.get("required_for_official_success", True):
+            raise ValueError("Required semantic subtask cannot be bypassed")
+        if (
+            entry.get("instruction") != definition["instruction"]
+            or entry.get("predicate_names") != definition["predicate_names"]
+            or entry.get("source_subtask_ids") != definition["source_subtask_ids"]
+        ):
+            raise ValueError(
+                "Bypassed natural-language subtask metadata is inconsistent"
+            )
+        bypassed_ids.add(subtask_id)
+
     failure_count = sum(label == 1 for label in all_labels)
     if rollout_failed and failure_count != 1:
         raise ValueError(
@@ -627,6 +706,7 @@ def validate_subtask_safe_record(
         "failed_segments": sum(label == 1 for label in usable_labels),
         "labeled_without_inference": len(all_labels) - len(usable_labels),
         "excluded_completed_subtasks": len(excluded),
+        "excluded_bypassed_subtasks": len(bypassed),
     }
 
 

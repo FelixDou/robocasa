@@ -57,6 +57,7 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
         "failed_segments": 0,
         "labeled_without_inference": 0,
         "excluded_completed_subtasks": 0,
+        "excluded_bypassed_subtasks": 0,
     }
     subtask_files = set()
     for record in records:
@@ -87,7 +88,9 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
         feature_path = dataset_dir / record.tensor_path
         feature_files.add(feature_path.resolve())
         if not feature_path.is_file():
-            errors.append(f"{prefix}: feature file does not exist: {record.tensor_path}")
+            errors.append(
+                f"{prefix}: feature file does not exist: {record.tensor_path}"
+            )
             official_compatible = False
             continue
         try:
@@ -118,14 +121,21 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
             validate_feature_tensor(features, record)
             if features.shape[0] == 0:
                 errors.append(f"{prefix}: empty feature sequence")
-            if valid_length != record.valid_sequence_length or valid_length != features.shape[0]:
+            if (
+                valid_length != record.valid_sequence_length
+                or valid_length != features.shape[0]
+            ):
                 errors.append(f"{prefix}: valid length/inference count mismatch")
             if rollout_id != record.rollout_id:
                 errors.append(f"{prefix}: feature rollout_id mismatch")
             if failed != int(record.failed):
-                errors.append(f"{prefix}: feature failure label disagrees with manifest")
+                errors.append(
+                    f"{prefix}: feature failure label disagrees with manifest"
+                )
             if tensor_schema_version != record.schema_version:
-                errors.append(f"{prefix}: feature schema_version disagrees with manifest")
+                errors.append(
+                    f"{prefix}: feature schema_version disagrees with manifest"
+                )
             if steps.tolist() != record.inference_env_steps:
                 errors.append(f"{prefix}: inference environment steps mismatch")
             if len(steps) and (np.diff(steps) <= 0).any():
@@ -140,10 +150,14 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
                 record.valid_sequence_length,
                 record.action_horizon,
             ):
-                errors.append(f"{prefix}: predicted action chunks are incompatible with official SAFE")
+                errors.append(
+                    f"{prefix}: predicted action chunks are incompatible with official SAFE"
+                )
                 official_compatible = False
             if not np.isfinite(chunks).all():
-                errors.append(f"{prefix}: predicted action chunks contain non-finite values")
+                errors.append(
+                    f"{prefix}: predicted action chunks contain non-finite values"
+                )
             expected_metadata = {
                 "model_family": record.model_family,
                 "feature_layer": record.feature_layer,
@@ -176,7 +190,10 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
             )
         )
         if record.action_recording_requested:
-            if not record.action_path or not (dataset_dir / record.action_path).is_file():
+            if (
+                not record.action_path
+                or not (dataset_dir / record.action_path).is_file()
+            ):
                 errors.append(f"{prefix}: requested action artifact is missing")
         if record.video_recording_requested:
             if not record.video_path or not (dataset_dir / record.video_path).is_file():
@@ -216,7 +233,9 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
     if rollout_dir.exists():
         for path in rollout_dir.glob("*.npz"):
             if path.resolve() not in feature_files:
-                errors.append(f"Orphan feature file not present in manifest: {path.relative_to(dataset_dir)}")
+                errors.append(
+                    f"Orphan feature file not present in manifest: {path.relative_to(dataset_dir)}"
+                )
     subtask_dir = dataset_dir / "subtasks"
     if subtask_dir.exists():
         for path in subtask_dir.rglob("*.json"):
@@ -226,11 +245,18 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
                     f"{path.relative_to(dataset_dir)}"
                 )
     incomplete_dir = dataset_dir / "incomplete"
-    if incomplete_dir.exists() and any(path.is_file() for path in incomplete_dir.rglob("*")):
-        warnings.append("Quarantined incomplete artifacts are present under incomplete/")
+    if incomplete_dir.exists() and any(
+        path.is_file() for path in incomplete_dir.rglob("*")
+    ):
+        warnings.append(
+            "Quarantined incomplete artifacts are present under incomplete/"
+        )
     temporary = [path for path in dataset_dir.rglob("*.tmp*") if path.is_file()]
     if temporary:
-        errors.extend(f"Incomplete temporary file: {path.relative_to(dataset_dir)}" for path in temporary)
+        errors.extend(
+            f"Incomplete temporary file: {path.relative_to(dataset_dir)}"
+            for path in temporary
+        )
     if summary is not None and records:
         counts = summary.get("counts", {})
         expected = {
@@ -240,7 +266,9 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
         }
         for key, value in expected.items():
             if counts.get(key) != value:
-                errors.append(f"Summary count {key}={counts.get(key)!r}, expected {value}")
+                errors.append(
+                    f"Summary count {key}={counts.get(key)!r}, expected {value}"
+                )
     result = {
         "valid": not errors,
         "dataset_dir": str(dataset_dir),
@@ -292,8 +320,7 @@ def main(argv=None):
     result = validate_atomic_dataset(
         args.dataset_dir,
         allow_unregistered=(
-            args.allow_unregistered_tasks
-            or args.allow_unregistered_atomic_tasks
+            args.allow_unregistered_tasks or args.allow_unregistered_atomic_tasks
         ),
     )
     print(format_report(result))

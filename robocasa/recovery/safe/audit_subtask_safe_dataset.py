@@ -47,6 +47,8 @@ def _coverage_warning(row: dict[str, Any]) -> list[str]:
         warnings.append("labeled_segments_without_inference")
     if row["excluded_completed_without_activation"]:
         warnings.append("completed_without_observed_activation")
+    if row["excluded_bypassed_optional"]:
+        warnings.append("optional_transient_bypassed")
     if row["not_reached_rollouts"]:
         warnings.append("not_reached_in_some_rollouts")
     if len(row["segment_indices"]) > 1:
@@ -111,9 +113,7 @@ def summarize_subtask_records(
                 "subtask_name": subtask_id,
                 "subtask_instruction": definition["instruction"],
                 "predicate_names": list(definition["predicate_names"]),
-                "source_subtask_ids": list(
-                    definition["source_subtask_ids"]
-                ),
+                "source_subtask_ids": list(definition["source_subtask_ids"]),
                 "segment_indices": {int(definition["subtask_index"])},
             }
             group = groups.get(key)
@@ -147,6 +147,7 @@ def summarize_subtask_records(
                 "usable_failures": 0,
                 "labeled_without_inference": 0,
                 "excluded_completed_without_activation": 0,
+                "excluded_bypassed_optional": 0,
                 "not_reached_rollouts": 0,
                 "_inference_counts": [],
                 "_environment_durations": [],
@@ -160,6 +161,10 @@ def summarize_subtask_records(
             entry["subtask_id"]
             for entry in item["subtask_record"].get("excluded_completed_subtasks", [])
         }
+        bypassed_ids = {
+            entry["subtask_id"]
+            for entry in item["subtask_record"].get("excluded_bypassed_subtasks", [])
+        }
         for definition in definitions:
             key = (task_name, definition["subtask_id"])
             group = groups[key]
@@ -167,6 +172,8 @@ def summarize_subtask_records(
             if segment is None:
                 if definition["subtask_id"] in excluded_ids:
                     group["excluded_completed_without_activation"] += 1
+                elif definition["subtask_id"] in bypassed_ids:
+                    group["excluded_bypassed_optional"] += 1
                 else:
                     group["not_reached_rollouts"] += 1
                 continue
@@ -303,6 +310,9 @@ def summarize_subtask_records(
             "excluded_completed_without_activation": sum(
                 row["excluded_completed_without_activation"] for row in rows
             ),
+            "excluded_bypassed_optional": sum(
+                row["excluded_bypassed_optional"] for row in rows
+            ),
             "pairs_reaching_target": sum(row["target_reached"] for row in rows),
         },
         "tasks": task_summaries,
@@ -431,6 +441,10 @@ def format_report(result: dict[str, Any]) -> str:
             "Completed without observed activation: "
             f"{counts['excluded_completed_without_activation']}"
         ),
+        (
+            "Bypassed optional transient subtasks: "
+            f"{counts['excluded_bypassed_optional']}"
+        ),
         "",
         "task                             type idx subtask"
         "                              entered   S   F noinf  cov% need S/F",
@@ -457,12 +471,11 @@ def format_report(result: dict[str, Any]) -> str:
         lines.append(f"    instruction: {row['subtask_instruction']}")
         lines.append("    predicates: " + ", ".join(row["predicate_names"]))
         if row["source_subtask_ids"] != [row["subtask_id"]]:
-            lines.append(
-                "    merged from: " + ", ".join(row["source_subtask_ids"])
-            )
+            lines.append("    merged from: " + ", ".join(row["source_subtask_ids"]))
         lines.append(
             "    rollout states: "
             f"excluded-completed={row['excluded_completed_without_activation']} "
+            f"bypassed-optional={row['excluded_bypassed_optional']} "
             f"not-reached={row['not_reached_rollouts']}"
         )
     lines.extend(["", "Collection priority (diagnostic, not rollout counts):"])

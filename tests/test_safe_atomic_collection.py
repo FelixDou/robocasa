@@ -138,7 +138,9 @@ def fake_runtime(tracker=None, policy_cls=FakePolicy):
     }
 
 
-def collection_args(output_dir, *, num_rollouts=2, resume=False, success_quota=None, failure_quota=None):
+def collection_args(
+    output_dir, *, num_rollouts=2, resume=False, success_quota=None, failure_quota=None
+):
     values = [
         "--output-dir",
         str(output_dir),
@@ -299,9 +301,7 @@ class TestSafeAtomicCollection(unittest.TestCase):
             self.assertTrue(
                 all(record.openpi_repository_commit is None for record in records)
             )
-            self.assertTrue(
-                all(record.rldx_repository_commit for record in records)
-            )
+            self.assertTrue(all(record.rldx_repository_commit for record in records))
             validation = validate_atomic_dataset(tmp)
             self.assertTrue(validation["valid"], validation["errors"])
             report = export_to_official_safe(tmp, exported)
@@ -310,9 +310,7 @@ class TestSafeAtomicCollection(unittest.TestCase):
                 "official_safe_rldx1_env_records_policy_records",
             )
             self.assertEqual(report["model_families"], ["rldx1"])
-            policy_path = next(
-                (Path(exported) / "policy_records").glob("*meta.pkl")
-            )
+            policy_path = next((Path(exported) / "policy_records").glob("*meta.pkl"))
             with policy_path.open("rb") as stream:
                 policy_record = pickle.load(stream)
             self.assertEqual(policy_record["model_family"], "rldx1")
@@ -409,9 +407,7 @@ class TestSafeAtomicCollection(unittest.TestCase):
             args.tasks = ["PreSoakPan"]
             result = run_collection(args, runtime=fake_runtime())
 
-            self.assertEqual(
-                result["dataset_type"], "robocasa_composite_safe_rollouts"
-            )
+            self.assertEqual(result["dataset_type"], "robocasa_composite_safe_rollouts")
             self.assertEqual(result["config"]["task_scope"], "composite")
             validation = validate_atomic_dataset(tmp)
             self.assertTrue(validation["valid"], validation["errors"])
@@ -443,12 +439,16 @@ class TestSafeAtomicCollection(unittest.TestCase):
             self.assertEqual([record.failed for record in records], [False, True])
             self.assertEqual(records[0].termination_reason, "success")
             self.assertEqual(records[1].termination_reason, "timeout")
-            self.assertTrue(all(record.environment_split == "test" for record in records))
+            self.assertTrue(
+                all(record.environment_split == "test" for record in records)
+            )
             self.assertEqual(records[0].inference_env_steps, [0])
             self.assertEqual(records[1].inference_env_steps, [0, 2])
             for record in records:
                 self.assertTrue((Path(tmp) / record.action_path).is_file())
-                with np.load(Path(tmp) / record.tensor_path, allow_pickle=False) as payload:
+                with np.load(
+                    Path(tmp) / record.tensor_path, allow_pickle=False
+                ) as payload:
                     self.assertIn("policy_action_chunks", payload.files)
                     self.assertEqual(str(payload["rollout_id"]), record.rollout_id)
             validation = validate_atomic_dataset(tmp)
@@ -475,6 +475,7 @@ class TestSafeAtomicCollection(unittest.TestCase):
                     "failed_segments": 1,
                     "labeled_without_inference": 0,
                     "excluded_completed_subtasks": 0,
+                    "excluded_bypassed_subtasks": 0,
                 },
             )
             for record in records:
@@ -541,7 +542,9 @@ class TestSafeAtomicCollection(unittest.TestCase):
                 for line in (Path(tmp) / "skipped.jsonl").read_text().splitlines()
             ]
             self.assertEqual(len(skipped), 4)
-            self.assertTrue(all(event["status"] == "skipped_quota_reached" for event in skipped))
+            self.assertTrue(
+                all(event["status"] == "skipped_quota_reached" for event in skipped)
+            )
 
     def test_retain_only_quota_discards_majority_class_excess(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -664,9 +667,7 @@ class TestSafeAtomicCollection(unittest.TestCase):
             result = merge_atomic_datasets([atomic, composite], output)
             config = result["summary"]["config"]
             self.assertEqual(config["task_scope"], "mixed")
-            self.assertEqual(
-                config["dataset_type"], "robocasa_mixed_safe_rollouts"
-            )
+            self.assertEqual(config["dataset_type"], "robocasa_mixed_safe_rollouts")
             self.assertEqual(
                 config["task_types"],
                 {TASK: "atomic", "PreSoakPan": "composite"},
@@ -684,15 +685,13 @@ class TestSafeAtomicCollection(unittest.TestCase):
             action_temp.parent.mkdir(parents=True)
             action_temp.write_bytes(b"interrupted")
             run_collection(args, runtime=fake_runtime())
-            quarantined = list((Path(tmp) / "incomplete" / rollout_id).glob("feature--*"))
+            quarantined = list(
+                (Path(tmp) / "incomplete" / rollout_id).glob("feature--*")
+            )
             self.assertEqual(len(quarantined), 1)
             self.assertEqual(
                 len(
-                    list(
-                        (Path(tmp) / "incomplete" / rollout_id).glob(
-                            "action_temp--*"
-                        )
-                    )
+                    list((Path(tmp) / "incomplete" / rollout_id).glob("action_temp--*"))
                 ),
                 1,
             )
@@ -705,7 +704,9 @@ class TestSafeAtomicCollection(unittest.TestCase):
             (Path(tmp) / record.action_path).unlink()
             validation = validate_atomic_dataset(tmp)
             self.assertFalse(validation["valid"])
-            self.assertTrue(any("action artifact" in error for error in validation["errors"]))
+            self.assertTrue(
+                any("action artifact" in error for error in validation["errors"])
+            )
 
     def test_validator_detects_success_failure_disagreement(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -716,7 +717,9 @@ class TestSafeAtomicCollection(unittest.TestCase):
             manifest.write_text(json.dumps(payload) + "\n")
             validation = validate_atomic_dataset(tmp)
             self.assertFalse(validation["valid"])
-            self.assertTrue(any("success disagrees" in error for error in validation["errors"]))
+            self.assertTrue(
+                any("success disagrees" in error for error in validation["errors"])
+            )
 
     def test_deterministic_official_export_and_resume(self):
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as exported:
@@ -744,7 +747,9 @@ class TestSafeAtomicCollection(unittest.TestCase):
             self.assertEqual(sorted(labels), [0, 1])
             resumed = export_to_official_safe(tmp, exported, resume=True)
             self.assertTrue(resumed["complete"])
-            self.assertEqual(len(list((Path(exported) / "policy_records").glob("*meta.pkl"))), 3)
+            self.assertEqual(
+                len(list((Path(exported) / "policy_records").glob("*meta.pkl"))), 3
+            )
 
     def test_official_export_can_select_exact_per_task_class_balance(self):
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as exported:
