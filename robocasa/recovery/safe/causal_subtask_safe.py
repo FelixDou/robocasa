@@ -144,6 +144,14 @@ def clone_prefix_rollout(rollout, env_record, length):
         )
     clone = copy.copy(rollout)
     clone.hidden_states = _slice_sequence(rollout.hidden_states, length)
+    action_vectors = getattr(rollout, "action_vectors", None)
+    if action_vectors is not None:
+        if len(action_vectors) != len(rollout.hidden_states):
+            raise ValueError(
+                "SAFE rollout action vectors are not aligned with hidden states: "
+                f"{len(action_vectors)} != {len(rollout.hidden_states)}"
+            )
+        clone.action_vectors = _slice_sequence(action_vectors, length)
     clone.task_min_step = int(length)
     env = copy.deepcopy(env_record)
     source_id = str(env["rollout_id"])

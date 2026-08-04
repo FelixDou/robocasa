@@ -11,6 +11,7 @@ install_lightweight_robocasa_packages()
 
 from robocasa.recovery.safe.causal_subtask_safe import (  # noqa: E402
     CausalPrefixConfig,
+    clone_prefix_rollout,
     prefix_lengths_for_rollout,
     prepare_causal_splits,
     select_supported_stages,
@@ -30,6 +31,9 @@ class FakeRollout:
         self.episode_success = success
         self.hidden_states = np.arange(length * dimensions, dtype=np.float32).reshape(
             length, dimensions
+        )
+        self.action_vectors = np.arange(length * 192, dtype=np.float32).reshape(
+            length, 192
         )
         self.task_min_step = length
 
@@ -55,6 +59,14 @@ def fake_item(index, success, split, stage="Task::stage", parent=None):
 
 
 class TestCausalSubtaskSafe(unittest.TestCase):
+    def test_prefix_clone_truncates_all_official_time_aligned_tensors(self):
+        rollout, env = fake_item(0, 1, "train")
+        rollout.hidden_states = np.zeros((43, 4), dtype=np.float32)
+        rollout.action_vectors = np.zeros((43, 192), dtype=np.float32)
+        clone, _ = clone_prefix_rollout(rollout, env, 16)
+        self.assertEqual(clone.hidden_states.shape, (16, 4))
+        self.assertEqual(clone.action_vectors.shape, (16, 192))
+
     def test_prefix_expansion_and_conditioning_preserve_parent_split(self):
         train_pairs = [fake_item(i, i % 2, "train") for i in range(8)]
         test_pairs = [fake_item(i, i % 2, "test") for i in range(6)]
@@ -93,6 +105,12 @@ class TestCausalSubtaskSafe(unittest.TestCase):
             all(
                 len(item.hidden_states)
                 == payload["identity"][id(item)][1]["causal_prefix_inferences"]
+                for item in payload["train"] + payload["test"]
+            )
+        )
+        self.assertTrue(
+            all(
+                len(item.action_vectors) == len(item.hidden_states)
                 for item in payload["train"] + payload["test"]
             )
         )
