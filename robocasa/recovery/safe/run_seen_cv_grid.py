@@ -16,6 +16,27 @@ import sys
 import numpy as np
 
 try:
+    from .causal_subtask_safe import (
+        CONDITIONING_MODES,
+        DEFAULT_PREFIX_HORIZONS,
+        PREFIX_TRAINING_MODES,
+        CausalPrefixConfig,
+        prepare_causal_splits,
+        select_supported_stages,
+        validate_prefix_horizons,
+    )
+except ImportError:
+    from causal_subtask_safe import (
+        CONDITIONING_MODES,
+        DEFAULT_PREFIX_HORIZONS,
+        PREFIX_TRAINING_MODES,
+        CausalPrefixConfig,
+        prepare_causal_splits,
+        select_supported_stages,
+        validate_prefix_horizons,
+    )
+
+try:
     from .train_seen_tasks import (
         CLASS_WEIGHTING_MODES,
         OFFICIAL_SAFE_COMMIT,
@@ -169,7 +190,9 @@ def make_inner_folds(
     else:
         grouped = defaultdict(list)
         for rollout in outer_train:
-            grouped[(int(rollout.task_id), int(rollout.episode_success))].append(rollout)
+            grouped[(int(rollout.task_id), int(rollout.episode_success))].append(
+                rollout
+            )
         validation_by_fold = [[] for _ in range(num_folds)]
         for group_key in sorted(grouped):
             values = sorted(
@@ -179,13 +202,17 @@ def make_inner_folds(
             rng = random.Random(f"{seed}:{group_key[0]}:{group_key[1]}")
             rng.shuffle(values)
             if len(values) < num_folds:
-                raise ValueError(f"Group {group_key} is too small for {num_folds} folds")
+                raise ValueError(
+                    f"Group {group_key} is too small for {num_folds} folds"
+                )
             for index, rollout in enumerate(values):
                 validation_by_fold[index % num_folds].append(rollout)
     outer_ids = {identity[id(rollout)][1]["rollout_id"] for rollout in outer_train}
     folds = []
     for fold, validation in enumerate(validation_by_fold):
-        validation_ids = {identity[id(rollout)][1]["rollout_id"] for rollout in validation}
+        validation_ids = {
+            identity[id(rollout)][1]["rollout_id"] for rollout in validation
+        }
         training = [
             rollout
             for rollout in outer_train
@@ -215,7 +242,10 @@ def make_inner_folds(
             }
             if training_groups & validation_groups:
                 raise AssertionError(f"Fold {fold} leaks {group_field} groups")
-            for split_name, split in (("training", training), ("validation", validation)):
+            for split_name, split in (
+                ("training", training),
+                ("validation", validation),
+            ):
                 labels = {int(rollout.episode_success) for rollout in split}
                 if labels != {0, 1}:
                     raise ValueError(
@@ -231,6 +261,23 @@ def count_split(rollouts):
         "successes": sum(int(rollout.episode_success) for rollout in rollouts),
         "failures": sum(not int(rollout.episode_success) for rollout in rollouts),
     }
+
+
+def causal_prefix_roc_auc(rollouts, scores, identity, prefix):
+    """Score one preregistered causal horizon on inner validation segments."""
+    from sklearn.metrics import roc_auc_score
+
+    pairs = [
+        (rollout, score)
+        for rollout, score in zip(rollouts, scores)
+        if int(identity[id(rollout)][1].get("causal_prefix_inferences", -1))
+        == int(prefix)
+    ]
+    labels = [not bool(int(rollout.episode_success)) for rollout, _ in pairs]
+    if len(pairs) < 2 or len(set(labels)) < 2:
+        raise ValueError(f"Inner validation prefix {prefix} lacks both failure labels")
+    risks = [float(np.max(np.asarray(score, dtype=np.float64))) for _, score in pairs]
+    return float(roc_auc_score(labels, risks))
 
 
 def run_cv_grid(args):
@@ -282,14 +329,35 @@ def run_cv_grid(args):
         and fixed_split_ids.get("split_unit") == "parent_rollout"
         else None
     )
+    causal_requested = bool(
+        args.causal_prefix_mode != "none"
+        or args.causal_conditioning != "none"
+        or args.min_stage_successes
+        or args.min_stage_failures
+        or args.stages
+    )
+    if causal_requested and inner_group_field != "parent_rollout_id":
+        raise ValueError(
+            "Causal Subtask-SAFE CV requires a parent_rollout selection manifest"
+        )
+    causal_config = CausalPrefixConfig(
+        training_mode=args.causal_prefix_mode,
+        horizons=validate_prefix_horizons(args.causal_prefix_horizons),
+        random_prefixes_per_segment=args.random_prefixes_per_segment,
+        conditioning=args.causal_conditioning,
+        min_stage_successes=args.min_stage_successes,
+        min_stage_failures=args.min_stage_failures,
+    )
+    if causal_requested and args.causal_selection_prefix not in causal_config.horizons:
+        raise ValueError(
+            "--causal-selection-prefix must be included in " "--causal-prefix-horizons"
+        )
     if (
         fixed_split_ids is not None
         and fixed_split_ids["split_seed"] is not None
         and int(fixed_split_ids["split_seed"]) != args.split_seed
     ):
-        raise ValueError(
-            "Outer split manifest split_seed does not match --split-seed"
-        )
+        raise ValueError("Outer split manifest split_seed does not match --split-seed")
     source_groups = defaultdict(int)
     selected_env_by_id = {}
     for _, env in env_records:
@@ -349,12 +417,40 @@ def run_cv_grid(args):
         "split_seed": args.split_seed,
         "inner_seed": args.inner_seed,
         "inner_group_field": inner_group_field,
-        "outer_split_manifest": (
-            fixed_outer_split_path
+        "outer_split_manifest": (fixed_outer_split_path),
+        "selection_metric": (
+            f"mean causal prefix-{args.causal_selection_prefix} ROC-AUC across folds"
+            if causal_requested
+            else "mean falert_early_roc_auc/model_inner_val across folds"
         ),
-        "selection_metric": "mean falert_early_roc_auc/model_inner_val across folds",
+        "causal_subtask_safe": (
+            {
+                "training_mode": causal_config.training_mode,
+                "test_mode": "fixed" if causal_config.enabled else "none",
+                "horizons": list(causal_config.horizons),
+                "random_prefixes_per_segment": (
+                    causal_config.random_prefixes_per_segment
+                ),
+                "conditioning": causal_config.conditioning,
+                "min_stage_successes": causal_config.min_stage_successes,
+                "min_stage_failures": causal_config.min_stage_failures,
+                "requested_stages": args.stages,
+                "selection_prefix": int(args.causal_selection_prefix),
+                "split_before_prefix_expansion": True,
+            }
+            if causal_requested
+            else None
+        ),
     }
-    write_json(output_root / f"cv_plan_{args.model}.json", plan)
+    plan_path = output_root / f"cv_plan_{args.model}.json"
+    if plan_path.is_file():
+        previous_plan = json.loads(plan_path.read_text())
+        if previous_plan != plan:
+            raise ValueError(
+                f"Existing CV plan is incompatible with this command: {plan_path}"
+            )
+    else:
+        write_json(plan_path, plan)
     events_path = output_root / f"cv_events_{args.model}.jsonl"
     completed = 0
     for horizon in args.horizon_selectors:
@@ -366,8 +462,7 @@ def run_cv_grid(args):
                 and run.diffusion_selector == diffusion
             ]
             if args.resume and all(
-                (output_root / run.slug / "metrics.json").is_file()
-                for run in pair_runs
+                (output_root / run.slug / "metrics.json").is_file() for run in pair_runs
             ):
                 completed += len(pair_runs)
                 print(
@@ -416,7 +511,21 @@ def run_cv_grid(args):
                     split_seed=args.split_seed,
                     fixed_split_ids=fixed_split_ids,
                 )
-            task_cutoffs = set_task_min_step_from_training(outer_train, outer_test)
+            stage_selection = None
+            if causal_requested:
+                stage_selection = select_supported_stages(
+                    outer_train,
+                    identity,
+                    min_successes=causal_config.min_stage_successes,
+                    min_failures=causal_config.min_stage_failures,
+                    requested_stages=args.stages,
+                )
+                task_cutoffs = {
+                    "protocol": "per_causal_prefix_length",
+                    "selected_stages": stage_selection["selected_stages"],
+                }
+            else:
+                task_cutoffs = set_task_min_step_from_training(outer_train, outer_test)
             folds = make_inner_folds(
                 outer_train,
                 identity,
@@ -437,7 +546,38 @@ def run_cv_grid(args):
                     print(f"known failed run, skipping: {run.slug}", flush=True)
                     continue
                 run_root.mkdir(parents=True, exist_ok=True)
-                inner_train, inner_val = folds[run.fold]
+                inner_train_source, inner_val_source = folds[run.fold]
+                run_identity = identity
+                causal_fold = None
+                if causal_requested:
+                    fold_config = CausalPrefixConfig(
+                        training_mode=causal_config.training_mode,
+                        horizons=causal_config.horizons,
+                        random_prefixes_per_segment=(
+                            causal_config.random_prefixes_per_segment
+                        ),
+                        conditioning=causal_config.conditioning,
+                        # Stage support is selected once from the outer training
+                        # pool. Inner validation never influences the catalog.
+                        min_stage_successes=0,
+                        min_stage_failures=0,
+                    )
+                    causal_fold = prepare_causal_splits(
+                        inner_train_source,
+                        inner_val_source,
+                        identity,
+                        config=fold_config,
+                        random_seed=args.inner_seed + run.fold,
+                        requested_stages=stage_selection["selected_stages"],
+                    )
+                    inner_train = causal_fold["train"]
+                    inner_val = causal_fold["test"]
+                    run_identity = causal_fold["identity"]
+                    for rollout in inner_train + inner_val:
+                        rollout.task_min_step = len(rollout.hidden_states)
+                else:
+                    inner_train = inner_train_source
+                    inner_val = inner_val_source
                 cfg.model.lr = run.learning_rate
                 cfg.model.lambda_reg = run.lambda_reg
                 cfg.train.seed = run.fold
@@ -491,6 +631,20 @@ def run_cv_grid(args):
                         plot_auc_curves=False,
                         plot_score_curves=False,
                     )
+                    if causal_requested:
+                        value = causal_prefix_roc_auc(
+                            inner_val,
+                            scores["inner_val"],
+                            run_identity,
+                            args.causal_selection_prefix,
+                        )
+                        selection_metric = (
+                            f"causal_prefix_roc_auc/inner_val_prefix_"
+                            f"{args.causal_selection_prefix}"
+                        )
+                    else:
+                        value = metrics["falert_early_roc_auc/model_inner_val"]
+                        selection_metric = "falert_early_roc_auc/model_inner_val"
                 except Exception as error:
                     failure = {
                         "schema_version": 1,
@@ -503,14 +657,15 @@ def run_cv_grid(args):
                     write_json(failure_path, failure)
                     with events_path.open("a") as stream:
                         stream.write(json.dumps(failure) + "\n")
-                    print(f"ERROR {run.slug}: {type(error).__name__}: {error}", flush=True)
+                    print(
+                        f"ERROR {run.slug}: {type(error).__name__}: {error}", flush=True
+                    )
                     if args.fail_fast:
                         raise
                     del model, optimizer, scheduler, datasets, loaders
                     if str(args.device).startswith("cuda"):
                         torch.cuda.empty_cache()
                     continue
-                value = metrics["falert_early_roc_auc/model_inner_val"]
                 record = {
                     "schema_version": 1,
                     "status": "complete",
@@ -530,7 +685,7 @@ def run_cv_grid(args):
                     "learning_rate": run.learning_rate,
                     "lambda_reg": run.lambda_reg,
                     "fold": run.fold,
-                    "selection_metric": "falert_early_roc_auc/model_inner_val",
+                    "selection_metric": selection_metric,
                     "selection_value": value,
                     "scalar_metrics": metrics,
                     "counts": {
@@ -538,25 +693,46 @@ def run_cv_grid(args):
                         "outer_test_untouched": count_split(outer_test),
                         "inner_train": count_split(inner_train),
                         "inner_val": count_split(inner_val),
+                        "inner_train_source_segments": len(inner_train_source),
+                        "inner_val_source_segments": len(inner_val_source),
                     },
                     "outer_test_scored": False,
                     "inner_group_field": inner_group_field,
                     "task_min_steps_from_outer_train": task_cutoffs,
-                    "inner_train_ids": [identity[id(item)][1]["rollout_id"] for item in inner_train],
-                    "inner_val_ids": [identity[id(item)][1]["rollout_id"] for item in inner_val],
+                    "causal_subtask_safe": (
+                        {
+                            "protocol": causal_fold["protocol"],
+                            "conditioning": causal_fold["conditioning"],
+                            "outer_training_stage_support": stage_selection,
+                            "inner_prefix_counts": causal_fold["prefix_counts"],
+                            "selection_prefix": int(args.causal_selection_prefix),
+                        }
+                        if causal_fold is not None
+                        else None
+                    ),
+                    "inner_train_ids": [
+                        run_identity[id(item)][1]["rollout_id"] for item in inner_train
+                    ],
+                    "inner_val_ids": [
+                        run_identity[id(item)][1]["rollout_id"] for item in inner_val
+                    ],
                     "inner_train_parent_ids": (
-                        sorted({
-                            identity[id(item)][1][inner_group_field]
-                            for item in inner_train
-                        })
+                        sorted(
+                            {
+                                run_identity[id(item)][1][inner_group_field]
+                                for item in inner_train
+                            }
+                        )
                         if inner_group_field is not None
                         else None
                     ),
                     "inner_val_parent_ids": (
-                        sorted({
-                            identity[id(item)][1][inner_group_field]
-                            for item in inner_val
-                        })
+                        sorted(
+                            {
+                                run_identity[id(item)][1][inner_group_field]
+                                for item in inner_val
+                            }
+                        )
                         if inner_group_field is not None
                         else None
                     ),
@@ -568,12 +744,17 @@ def run_cv_grid(args):
                 write_json(metrics_path, record)
                 failure_path.unlink(missing_ok=True)
                 with events_path.open("a") as stream:
-                    stream.write(json.dumps({
-                        "status": "complete",
-                        "slug": run.slug,
-                        "selection_value": value,
-                        "at": record["completed_at"],
-                    }) + "\n")
+                    stream.write(
+                        json.dumps(
+                            {
+                                "status": "complete",
+                                "slug": run.slug,
+                                "selection_value": value,
+                                "at": record["completed_at"],
+                            }
+                        )
+                        + "\n"
+                    )
                 completed += 1
                 print(
                     f"[{completed}/{len(all_runs)}] {run.slug} val={value:.4f}",
@@ -622,9 +803,43 @@ def build_parser():
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--horizon-selectors", nargs="+", default=list(SELECTORS))
     parser.add_argument("--diffusion-selectors", nargs="+", default=list(SELECTORS))
-    parser.add_argument("--learning-rates", nargs="+", type=float, default=list(LEARNING_RATES))
-    parser.add_argument("--regularization", nargs="+", type=float, default=list(REGULARIZATION))
+    parser.add_argument(
+        "--learning-rates", nargs="+", type=float, default=list(LEARNING_RATES)
+    )
+    parser.add_argument(
+        "--regularization", nargs="+", type=float, default=list(REGULARIZATION)
+    )
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--causal-prefix-mode",
+        choices=PREFIX_TRAINING_MODES,
+        default="none",
+    )
+    parser.add_argument(
+        "--causal-prefix-horizons",
+        nargs="+",
+        type=int,
+        default=list(DEFAULT_PREFIX_HORIZONS),
+    )
+    parser.add_argument("--random-prefixes-per-segment", type=int, default=3)
+    parser.add_argument(
+        "--causal-selection-prefix",
+        type=int,
+        default=8,
+        help="Preregistered inner-validation prefix used for hyperparameter selection",
+    )
+    parser.add_argument(
+        "--causal-conditioning",
+        choices=CONDITIONING_MODES,
+        default="none",
+    )
+    parser.add_argument("--min-stage-successes", type=int, default=0)
+    parser.add_argument("--min-stage-failures", type=int, default=0)
+    parser.add_argument(
+        "--stages",
+        nargs="+",
+        help="Optional ParentTask::subtask_id allowlist",
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--retry-errors", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")

@@ -1103,3 +1103,12 @@ frame-level failure onset, predict subtask identity or continuous progress, or
 trigger recovery. The dedicated segment exporter trains the original official
 SAFE MLP or LSTM on oracle-delimited subtask intervals; online subtask
 recognition and recovery remain future stages.
+
+## Causal Subtask-SAFE v2
+
+The retrospective segment experiment showed that elapsed subtask duration can
+outperform the detector at early causal prefixes. The next protocol therefore
+trains directly on prefixes, conditions on the active semantic stage, filters
+stages using training-only support, and applies preregistered continuation gates
+against an elapsed-time control. See [safe_subtask_v2.md](safe_subtask_v2.md) for
+the complete collection-planning, CV, final-refit, and evaluation commands.

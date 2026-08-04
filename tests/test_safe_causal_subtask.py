@@ -1,0 +1,241 @@
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+import numpy as np
+
+from tests.safe_import_helper import install_lightweight_robocasa_packages
+
+install_lightweight_robocasa_packages()
+
+from robocasa.recovery.safe.causal_subtask_safe import (  # noqa: E402
+    CausalPrefixConfig,
+    prefix_lengths_for_rollout,
+    prepare_causal_splits,
+    select_supported_stages,
+)
+from robocasa.recovery.safe.evaluate_causal_subtask_gates import (  # noqa: E402
+    evaluate_root,
+)
+from robocasa.recovery.safe.plan_subtask_safe_collection import (  # noqa: E402
+    build_collection_plan,
+)
+from robocasa.recovery.safe.run_seen_cv_grid import causal_prefix_roc_auc  # noqa: E402
+
+
+class FakeRollout:
+    def __init__(self, task_id, success, length=20, dimensions=4):
+        self.task_id = task_id
+        self.episode_success = success
+        self.hidden_states = np.arange(length * dimensions, dtype=np.float32).reshape(
+            length, dimensions
+        )
+        self.task_min_step = length
+
+
+def fake_item(index, success, split, stage="Task::stage", parent=None):
+    rollout = FakeRollout(0, success)
+    parent = parent or f"{split}-parent-{index}"
+    env = {
+        "rollout_id": f"{split}-segment-{index}",
+        "task_id": 0,
+        "task_name": stage,
+        "parent_task_name": "Task",
+        "subtask_id": stage.split("::", 1)[1],
+        "parent_rollout_id": parent,
+        "episode_success": success,
+        "inference_environment_steps": list(range(0, 160, 8)),
+        "subtask_safe_segment": {
+            "entry_environment_step": 0,
+            "end_environment_step": 160,
+        },
+    }
+    return rollout, env
+
+
+class TestCausalSubtaskSafe(unittest.TestCase):
+    def test_prefix_expansion_and_conditioning_preserve_parent_split(self):
+        train_pairs = [fake_item(i, i % 2, "train") for i in range(8)]
+        test_pairs = [fake_item(i, i % 2, "test") for i in range(6)]
+        train = [item[0] for item in train_pairs]
+        test = [item[0] for item in test_pairs]
+        identity = {
+            id(rollout): (Path(f"/{env['rollout_id']}.pkl"), env)
+            for rollout, env in train_pairs + test_pairs
+        }
+        payload = prepare_causal_splits(
+            train,
+            test,
+            identity,
+            config=CausalPrefixConfig(
+                training_mode="fixed",
+                horizons=(1, 2, 4, 8),
+                conditioning="subtask_one_hot_elapsed",
+                min_stage_successes=2,
+                min_stage_failures=2,
+            ),
+        )
+        self.assertEqual(len(payload["train"]), len(train) * 4)
+        self.assertEqual(len(payload["test"]), len(test) * 4)
+        self.assertEqual(payload["conditioning"]["added_dimensions"], 2)
+        self.assertEqual(payload["train"][0].hidden_states.shape[-1], 6)
+        train_parents = {
+            payload["identity"][id(item)][1]["parent_rollout_id"]
+            for item in payload["train"]
+        }
+        test_parents = {
+            payload["identity"][id(item)][1]["parent_rollout_id"]
+            for item in payload["test"]
+        }
+        self.assertFalse(train_parents & test_parents)
+        self.assertTrue(
+            all(
+                len(item.hidden_states)
+                == payload["identity"][id(item)][1]["causal_prefix_inferences"]
+                for item in payload["train"] + payload["test"]
+            )
+        )
+
+    def test_random_prefixes_are_deterministic(self):
+        first = prefix_lengths_for_rollout(
+            20,
+            mode="random",
+            horizons=(1, 2, 4, 8, 16),
+            random_prefixes_per_segment=4,
+            random_seed=7,
+            identity_key="segment",
+        )
+        second = prefix_lengths_for_rollout(
+            20,
+            mode="random",
+            horizons=(1, 2, 4, 8, 16),
+            random_prefixes_per_segment=4,
+            random_seed=7,
+            identity_key="segment",
+        )
+        self.assertEqual(first, second)
+        self.assertEqual(len(first), 4)
+        self.assertTrue(all(1 <= value <= 16 for value in first))
+
+    def test_stage_support_uses_training_only(self):
+        train_pairs = [fake_item(i, int(i == 0), "train") for i in range(3)]
+        identity = {
+            id(rollout): (Path("/tmp/item"), env) for rollout, env in train_pairs
+        }
+        with self.assertRaisesRegex(ValueError, "No semantic stage"):
+            select_supported_stages(
+                [item[0] for item in train_pairs],
+                identity,
+                min_successes=2,
+                min_failures=2,
+            )
+
+    def test_cv_selection_scores_only_preregistered_prefix(self):
+        pairs = [fake_item(i, i % 2, "validation") for i in range(4)]
+        rollouts = []
+        scores = []
+        identity = {}
+        for rollout, env in pairs:
+            for prefix in (4, 8):
+                clone = FakeRollout(0, rollout.episode_success, length=prefix)
+                prefix_env = {
+                    **env,
+                    "rollout_id": f"{env['rollout_id']}::prefix-{prefix}",
+                    "causal_prefix_inferences": prefix,
+                }
+                rollouts.append(clone)
+                identity[id(clone)] = (Path("/tmp/item"), prefix_env)
+                failed = not bool(clone.episode_success)
+                # Prefix 4 is reversed, but the preregistered prefix 8 is perfect.
+                value = (
+                    (0.1 if failed else 0.9)
+                    if prefix == 4
+                    else (0.9 if failed else 0.1)
+                )
+                scores.append(np.repeat(value, prefix))
+        self.assertEqual(causal_prefix_roc_auc(rollouts, scores, identity, 8), 1.0)
+
+    def test_collection_plan_prioritizes_failure_deficits(self):
+        records = []
+        for index, success in enumerate((1, 1, 1, 0)):
+            _, env = fake_item(index, success, "train")
+            records.append((Path(f"/{index}.pkl"), env))
+        plan = build_collection_plan(
+            records,
+            min_train_successes=2,
+            min_train_failures=1,
+            target_train_successes=3,
+            target_train_failures=3,
+            target_test_successes=0,
+            target_test_failures=0,
+        )
+        row = plan["rows"][0]
+        self.assertTrue(row["selected_for_v2"])
+        self.assertEqual(row["train_failure_deficit"], 2)
+        self.assertEqual(row["priority"], "collect_failures")
+
+    def _write_causal_scores(self, final_root):
+        for seed in (0, 1, 2):
+            records = []
+            for split, count in (("train", 16), ("test", 20)):
+                for index in range(count):
+                    failed = index % 2 == 1
+                    parent = f"{split}-parent-{index}"
+                    for prefix in (1, 2, 4, 8, 16):
+                        # Strong representation signal. Elapsed stage risk is
+                        # constant because this fixture contains one stage.
+                        success_value = 0.10 if split == "train" else 0.05
+                        value = (0.90 if failed else success_value) + seed * 0.001
+                        records.append(
+                            {
+                                "rollout_id": f"{split}-seg-{index}::prefix-{prefix:04d}",
+                                "source_segment_id": f"{split}-seg-{index}",
+                                "causal_prefix_inferences": prefix,
+                                "parent_rollout_id": parent,
+                                "parent_task_name": "Task",
+                                "parent_rollout_failed": failed,
+                                "subtask_safe_segment": {
+                                    "entry_environment_step": 0,
+                                    "end_environment_step": 160,
+                                },
+                                "inference_environment_steps": [
+                                    step * 8 for step in range(prefix)
+                                ],
+                                "split": split,
+                                "task_name": "Task::stage",
+                                "task_type": "composite",
+                                "failed": failed,
+                                "model": "indep",
+                                "seed": seed,
+                                "scores": [value] * prefix,
+                                "task_min_step": prefix,
+                                "num_inferences": prefix,
+                            }
+                        )
+            run = final_root / f"indep_seed{seed}"
+            run.mkdir(parents=True)
+            (run / "scores.jsonl").write_text(
+                "".join(json.dumps(record) + "\n" for record in records)
+            )
+
+    def test_causal_gate_evaluator_uses_paired_parent_bootstrap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            final_root = Path(tmp) / "final"
+            self._write_causal_scores(final_root)
+            summary = evaluate_root(
+                final_root,
+                models=("indep",),
+                bootstrap_replicates=50,
+            )
+            result = summary["models"]["indep"]
+            self.assertTrue(result["continue_to_recovery_integration"])
+            self.assertGreater(result["observed"]["causal_prefix_roc_auc"], 0.99)
+            self.assertGreater(
+                result["bootstrap"]["safe_minus_elapsed_roc_auc"]["ci_95_low"],
+                0,
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

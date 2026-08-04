@@ -11,6 +11,31 @@ from pathlib import Path
 import numpy as np
 
 
+def causal_signature(record):
+    payload = record.get("causal_subtask_safe")
+    if payload is None:
+        return None
+    protocol = payload["protocol"]
+    conditioning = payload["conditioning"]
+    support = payload["outer_training_stage_support"]
+    return {
+        "training_mode": protocol["training_mode"],
+        "test_mode": protocol["test_mode"],
+        "horizons": protocol["horizons"],
+        "random_prefixes_per_segment": protocol["random_prefixes_per_segment"],
+        "conditioning": conditioning["mode"],
+        "min_stage_successes": support["min_successes"],
+        "min_stage_failures": support["min_failures"],
+        "requested_stages": support["requested_stages"],
+        "selected_stages": support["selected_stages"],
+        "selection_prefix": payload["selection_prefix"],
+        "split_before_prefix_expansion": protocol["split_before_prefix_expansion"],
+        "support_selected_from_training_only": protocol[
+            "support_selected_from_training_only"
+        ],
+    }
+
+
 def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
     root = Path(root).resolve()
     records = []
@@ -43,18 +68,25 @@ def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
     ]
     if test_counts and any(counts != test_counts[0] for counts in test_counts[1:]):
         raise ValueError("CV runs disagree on the untouched outer test counts")
-    task_type_filters = {
-        record.get("task_type_filter", "all") for record in records
-    }
+    task_type_filters = {record.get("task_type_filter", "all") for record in records}
     if len(task_type_filters) > 1:
-        raise ValueError(
-            f"CV runs mix task-type filters: {sorted(task_type_filters)}"
-        )
+        raise ValueError(f"CV runs mix task-type filters: {sorted(task_type_filters)}")
     selected_task_sets = {
         tuple(record.get("selected_task_names", [])) for record in records
     }
     if len(selected_task_sets) > 1:
         raise ValueError("CV runs disagree on selected task identities")
+    causal_signatures = {
+        json.dumps(causal_signature(record), sort_keys=True) for record in records
+    }
+    if len(causal_signatures) > 1:
+        raise ValueError("CV runs mix incompatible causal Subtask-SAFE protocols")
+    causal_subtask_safe = (
+        json.loads(next(iter(causal_signatures))) if causal_signatures else None
+    )
+    selection_metrics = {record.get("selection_metric") for record in records}
+    if len(selection_metrics) > 1:
+        raise ValueError("CV runs mix different hyperparameter-selection metrics")
     rows = []
     for key, values in groups.items():
         folds = {int(value["fold"]) for value in values}
@@ -73,27 +105,44 @@ def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
                 "inner_val_std": float(np.std(scores)),
             }
         )
-    rows.sort(key=lambda row: (row["model"], not row["complete_fold_set"], -row["inner_val_mean"]))
+    rows.sort(
+        key=lambda row: (
+            row["model"],
+            not row["complete_fold_set"],
+            -row["inner_val_mean"],
+        )
+    )
     best = {}
     for model in sorted({row["model"] for row in rows}):
         candidates = [
-            row
-            for row in rows
-            if row["model"] == model and row["complete_fold_set"]
+            row for row in rows if row["model"] == model and row["complete_fold_set"]
         ]
         if candidates:
             best[model] = max(candidates, key=lambda row: row["inner_val_mean"])
     result = {
         "schema_version": 1,
-        "protocol": "training-only outcome-stratified CV inside a fixed outer training pool",
-        "selection_rule": "maximum mean matched-earliest inner-validation ROC-AUC",
+        "protocol": (
+            "parent-grouped causal-prefix CV inside a fixed outer training pool"
+            if causal_subtask_safe is not None
+            else "training-only outcome-stratified CV inside a fixed outer training pool"
+        ),
+        "selection_rule": (
+            f"maximum mean inner-validation ROC-AUC at causal prefix "
+            f"{causal_subtask_safe['selection_prefix']}"
+            if causal_subtask_safe is not None
+            else "maximum mean matched-earliest inner-validation ROC-AUC"
+        ),
         "outer_test_used_for_selection": False,
+        "selection_metric": (
+            next(iter(selection_metrics)) if selection_metrics else None
+        ),
         "task_type_filter": (
             next(iter(task_type_filters)) if task_type_filters else "all"
         ),
         "selected_task_names": (
             list(next(iter(selected_task_sets))) if selected_task_sets else []
         ),
+        "causal_subtask_safe": causal_subtask_safe,
         "outer_train_counts": outer_counts[0] if outer_counts else None,
         "outer_test_counts": test_counts[0] if test_counts else None,
         "num_completed_fits": len(records),

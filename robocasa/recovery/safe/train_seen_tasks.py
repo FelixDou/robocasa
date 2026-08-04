@@ -17,6 +17,25 @@ import sys
 
 import numpy as np
 
+try:
+    from .causal_subtask_safe import (
+        CONDITIONING_MODES,
+        DEFAULT_PREFIX_HORIZONS,
+        PREFIX_TRAINING_MODES,
+        CausalPrefixConfig,
+        prepare_causal_splits,
+        validate_prefix_horizons,
+    )
+except ImportError:
+    from causal_subtask_safe import (
+        CONDITIONING_MODES,
+        DEFAULT_PREFIX_HORIZONS,
+        PREFIX_TRAINING_MODES,
+        CausalPrefixConfig,
+        prepare_causal_splits,
+        validate_prefix_horizons,
+    )
+
 
 OFFICIAL_SAFE_COMMIT = "b6036abe07b2b2bb9996afb2c07f13d6a9f507c0"
 TASK_TYPE_FILTERS = ("all", "atomic", "composite")
@@ -76,16 +95,88 @@ def resolve_hyperparameters(
                 f"{selected_task_type!r} does not match {expected_task_type!r}"
             )
     selected = summary["best_by_model"][model_name]
+
     def selector(value):
         try:
             return float(value)
         except (TypeError, ValueError):
             return str(value)
+
     return {
         "horizon_selector": selector(selected["horizon_selector"]),
         "diffusion_selector": selector(selected["diffusion_selector"]),
         "learning_rate": float(selected["learning_rate"]),
         "lambda_reg": float(selected["lambda_reg"]),
+    }
+
+
+def validate_causal_selection_summary(selection_summary, config, requested_stages):
+    if selection_summary is None:
+        return
+    summary = json.loads(Path(selection_summary).read_text())
+    selected = summary.get("causal_subtask_safe")
+    requested = None if requested_stages is None else sorted(requested_stages)
+    current = None
+    if config is not None:
+        current = {
+            "training_mode": config.training_mode,
+            "horizons": list(config.horizons),
+            "random_prefixes_per_segment": config.random_prefixes_per_segment,
+            "conditioning": config.conditioning,
+            "min_stage_successes": config.min_stage_successes,
+            "min_stage_failures": config.min_stage_failures,
+            "requested_stages": requested,
+        }
+    if (selected is None) != (current is None):
+        raise ValueError(
+            "Selection summary and final refit disagree on whether causal "
+            "Subtask-SAFE is enabled"
+        )
+    if selected is None:
+        return
+    for key, value in current.items():
+        if selected.get(key) != value:
+            raise ValueError(
+                f"Selection summary causal setting {key}={selected.get(key)!r} "
+                f"does not match final refit value {value!r}"
+            )
+
+
+def causal_args_signature(args):
+    enabled = bool(
+        args.causal_prefix_mode != "none"
+        or args.causal_conditioning != "none"
+        or args.min_stage_successes
+        or args.min_stage_failures
+        or args.stages
+    )
+    if not enabled:
+        return None
+    return {
+        "training_mode": args.causal_prefix_mode,
+        "horizons": list(validate_prefix_horizons(args.causal_prefix_horizons)),
+        "random_prefixes_per_segment": int(args.random_prefixes_per_segment),
+        "conditioning": args.causal_conditioning,
+        "min_stage_successes": int(args.min_stage_successes),
+        "min_stage_failures": int(args.min_stage_failures),
+        "requested_stages": None if args.stages is None else sorted(args.stages),
+    }
+
+
+def causal_metrics_signature(metrics):
+    payload = metrics.get("causal_subtask_safe")
+    if payload is None:
+        return None
+    return {
+        "training_mode": payload["protocol"]["training_mode"],
+        "horizons": payload["protocol"]["horizons"],
+        "random_prefixes_per_segment": payload["protocol"][
+            "random_prefixes_per_segment"
+        ],
+        "conditioning": payload["conditioning"]["mode"],
+        "min_stage_successes": payload["stage_support"]["min_successes"],
+        "min_stage_failures": payload["stage_support"]["min_failures"],
+        "requested_stages": payload["stage_support"]["requested_stages"],
     }
 
 
@@ -109,7 +200,9 @@ def json_value(value):
 def write_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(json_value(value), indent=2, sort_keys=True, allow_nan=False) + "\n")
+    path.write_text(
+        json.dumps(json_value(value), indent=2, sort_keys=True, allow_nan=False) + "\n"
+    )
 
 
 def verify_safe_repo(safe_repo):
@@ -121,7 +214,9 @@ def verify_safe_repo(safe_repo):
         text=True,
     ).stdout.strip()
     if commit != OFFICIAL_SAFE_COMMIT:
-        raise ValueError(f"SAFE checkout is at {commit}, expected {OFFICIAL_SAFE_COMMIT}")
+        raise ValueError(
+            f"SAFE checkout is at {commit}, expected {OFFICIAL_SAFE_COMMIT}"
+        )
     sys.path.insert(0, str(safe_repo))
     return safe_repo
 
@@ -251,8 +346,7 @@ def make_manifest_split(rollouts, identity, selection):
     if selection is None:
         raise ValueError("A selection manifest is required")
     available = {
-        str(identity[id(rollout)][1]["rollout_id"]): rollout
-        for rollout in rollouts
+        str(identity[id(rollout)][1]["rollout_id"]): rollout for rollout in rollouts
     }
     requested = selection["train"] | selection["test"]
     missing = sorted(requested - set(available))
@@ -368,8 +462,7 @@ def make_seen_split(
                 group_test = [
                     rollout
                     for rollout in values
-                    if identity[id(rollout)][1]["rollout_id"]
-                    in fixed_split_ids["test"]
+                    if identity[id(rollout)][1]["rollout_id"] in fixed_split_ids["test"]
                 ]
                 assigned_ids = {
                     identity[id(rollout)][1]["rollout_id"]
@@ -379,8 +472,7 @@ def make_seen_split(
                     missing = [
                         identity[id(rollout)][1]["rollout_id"]
                         for rollout in values
-                        if identity[id(rollout)][1]["rollout_id"]
-                        not in assigned_ids
+                        if identity[id(rollout)][1]["rollout_id"] not in assigned_ids
                     ]
                     raise ValueError(
                         "Outer split manifest does not assign selected rollout IDs: "
@@ -442,7 +534,9 @@ def resolve_class_weights(dataset, class_weighting):
         # ablation does not also change the monitor/regularization loss scale.
         rollouts = dataset.get_rollouts()
         if not rollouts:
-            raise ValueError("Cannot derive scale-matched class weights from no rollouts")
+            raise ValueError(
+                "Cannot derive scale-matched class weights from no rollouts"
+            )
         failures = sum(not int(rollout.episode_success) for rollout in rollouts)
         successes = len(rollouts) - failures
         frequencies = [failures / len(rollouts), successes / len(rollouts)]
@@ -456,8 +550,7 @@ def resolve_class_weights(dataset, class_weighting):
             for frequency, weight in zip(frequencies, official)
         )
         base_mean = sum(
-            frequency * weight
-            for frequency, weight in zip(frequencies, base)
+            frequency * weight for frequency, weight in zip(frequencies, base)
         )
         if base_mean <= 0:
             raise ValueError("Configured class-loss multipliers have non-positive mean")
@@ -489,14 +582,18 @@ def train_epoch_without_wandb(
     for batch in loader:
         batch = move_to_device(batch, device)
         monitor_loss, _ = model.forward_compute_loss(batch, weights)
-        regularization, _ = model.compute_regularization_loss(model.cfg.model.lambda_reg)
+        regularization, _ = model.compute_regularization_loss(
+            model.cfg.model.lambda_reg
+        )
         total = monitor_loss + regularization
         if not torch.isfinite(total):
             raise RuntimeError("Official SAFE training loss became non-finite")
         optimizer.zero_grad()
         total.backward()
         if model.cfg.model.grad_max_norm is not None:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), model.cfg.model.grad_max_norm)
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(), model.cfg.model.grad_max_norm
+            )
         optimizer.step()
         losses.append(float(total.detach().cpu()))
     return float(np.mean(losses))
@@ -564,6 +661,8 @@ def save_scores(
                     "subtask_index": env.get("subtask_index"),
                     "subtask_instruction": env.get("subtask_instruction"),
                     "subtask_safe_segment": env.get("subtask_safe_segment"),
+                    "source_segment_id": env.get("source_segment_id"),
+                    "causal_prefix_inferences": env.get("causal_prefix_inferences"),
                     "split": split,
                     "task_id": int(rollout.task_id),
                     "task_name": names[int(rollout.task_id)],
@@ -597,7 +696,12 @@ def train_seen_model(args):
     output = Path(args.output_dir).resolve()
     metrics_path = output / "metrics.json"
     if args.resume and metrics_path.is_file():
-        return json.loads(metrics_path.read_text())
+        previous_metrics = json.loads(metrics_path.read_text())
+        if causal_metrics_signature(previous_metrics) != causal_args_signature(args):
+            raise ValueError(
+                f"Existing final refit uses an incompatible causal protocol: {output}"
+            )
+        return previous_metrics
     if output.exists() and any(output.iterdir()) and not args.resume:
         raise FileExistsError(f"Output directory is not empty: {output}; pass --resume")
     output.mkdir(parents=True, exist_ok=True)
@@ -648,14 +752,16 @@ def train_seen_model(args):
         if args.selection_manifest is not None
         else (fixed_split_ids["path"] if fixed_split_ids is not None else None)
     )
+    parent_grouped_split = bool(
+        fixed_split_ids is not None
+        and fixed_split_ids.get("split_unit") == "parent_rollout"
+    )
     if (
         fixed_split_ids is not None
         and fixed_split_ids["split_seed"] is not None
         and int(fixed_split_ids["split_seed"]) != args.split_seed
     ):
-        raise ValueError(
-            "Outer split manifest split_seed does not match --split-seed"
-        )
+        raise ValueError("Outer split manifest split_seed does not match --split-seed")
     if args.selection_manifest is not None:
         train_rollouts, test_rollouts, per_task = make_manifest_split(
             all_rollouts,
@@ -670,7 +776,54 @@ def train_seen_model(args):
             split_seed=args.split_seed,
             fixed_split_ids=fixed_split_ids,
         )
-    task_cutoffs = set_task_min_step_from_training(train_rollouts, test_rollouts)
+    causal_requested = bool(
+        args.causal_prefix_mode != "none"
+        or args.causal_conditioning != "none"
+        or args.min_stage_successes
+        or args.min_stage_failures
+        or args.stages
+    )
+    causal_payload = None
+    causal_config = None
+    if causal_requested:
+        if not parent_grouped_split:
+            raise ValueError(
+                "Causal Subtask-SAFE requires a parent_rollout selection manifest"
+            )
+        causal_config = CausalPrefixConfig(
+            training_mode=args.causal_prefix_mode,
+            horizons=validate_prefix_horizons(args.causal_prefix_horizons),
+            random_prefixes_per_segment=args.random_prefixes_per_segment,
+            conditioning=args.causal_conditioning,
+            min_stage_successes=args.min_stage_successes,
+            min_stage_failures=args.min_stage_failures,
+        )
+        validate_causal_selection_summary(
+            args.selection_summary, causal_config, args.stages
+        )
+        causal_payload = prepare_causal_splits(
+            train_rollouts,
+            test_rollouts,
+            identity,
+            config=causal_config,
+            random_seed=args.seed,
+            requested_stages=args.stages,
+        )
+        train_rollouts = causal_payload["train"]
+        test_rollouts = causal_payload["test"]
+        identity = causal_payload["identity"]
+        all_rollouts = train_rollouts + test_rollouts
+        # Each synthetic example is already causally truncated. Do not replace
+        # its own prefix length with a task-wide minimum of one inference.
+        for rollout in all_rollouts:
+            rollout.task_min_step = len(rollout.hidden_states)
+        task_cutoffs = {
+            int(task_id): "per_causal_prefix_length"
+            for task_id in sorted({int(item.task_id) for item in all_rollouts})
+        }
+    else:
+        validate_causal_selection_summary(args.selection_summary, None, None)
+        task_cutoffs = set_task_min_step_from_training(train_rollouts, test_rollouts)
     if cfg.dataset.load_to_cuda:
         all_rollouts = [rollout.to(args.device) for rollout in all_rollouts]
     rollouts_by_split = {"train": train_rollouts, "test": test_rollouts}
@@ -734,19 +887,30 @@ def train_seen_model(args):
     train_failures = len(train_rollouts) - train_successes
     test_successes = sum(int(rollout.episode_success) for rollout in test_rollouts)
     test_failures = len(test_rollouts) - test_successes
+    if causal_payload is not None:
+        per_task = {}
+        for task_id in selected_task_ids:
+            per_task[task_id] = {}
+            for success, outcome in ((1, "success"), (0, "failure")):
+                per_task[task_id][outcome] = {
+                    "train": sum(
+                        int(item.task_id) == task_id
+                        and int(item.episode_success) == success
+                        for item in train_rollouts
+                    ),
+                    "test": sum(
+                        int(item.task_id) == task_id
+                        and int(item.episode_success) == success
+                        for item in test_rollouts
+                    ),
+                }
     test_per_class_values = {
         counts[outcome]["test"]
         for counts in per_task.values()
         for outcome in ("success", "failure")
     }
     test_per_task_class = (
-        next(iter(test_per_class_values))
-        if len(test_per_class_values) == 1
-        else None
-    )
-    parent_grouped_split = bool(
-        fixed_split_ids is not None
-        and fixed_split_ids.get("split_unit") == "parent_rollout"
+        next(iter(test_per_class_values)) if len(test_per_class_values) == 1 else None
     )
     split_manifest = {
         "schema_version": 1,
@@ -755,18 +919,14 @@ def train_seen_model(args):
             if parent_grouped_split
             else "same_task_outcome_stratified"
         ),
-        "split_unit": (
-            "parent_rollout" if parent_grouped_split else "rollout"
-        ),
+        "split_unit": ("parent_rollout" if parent_grouped_split else "rollout"),
         "split_seed": args.split_seed,
         "task_type_filter": args.task_type,
         "source_num_tasks": task_selection["source_num_tasks"],
         "num_tasks": len(names),
         "task_names": [names[key] for key in sorted(names)],
         "task_types": selected_task_types,
-        "outer_split_manifest": (
-            fixed_outer_split_path
-        ),
+        "outer_split_manifest": (fixed_outer_split_path),
         "selection_manifest": (
             fixed_split_ids["path"] if args.selection_manifest is not None else None
         ),
@@ -775,6 +935,20 @@ def train_seen_model(args):
         ),
         "class_weighting": args.class_weighting,
         "training_class_weights": training_class_weights,
+        "causal_subtask_safe": (
+            {
+                "protocol": causal_payload["protocol"],
+                "conditioning": causal_payload["conditioning"],
+                "stage_support": causal_payload["support"],
+                "prefix_counts": causal_payload["prefix_counts"],
+                "source_counts": {
+                    "train_segments": len(causal_payload["source_train"]),
+                    "test_segments": len(causal_payload["source_test"]),
+                },
+            }
+            if causal_payload is not None
+            else None
+        ),
         "test_per_task_class": test_per_task_class,
         "counts": {
             "train": len(train_rollouts),
@@ -788,18 +962,22 @@ def train_seen_model(args):
         "train": [identity[id(rollout)][1]["rollout_id"] for rollout in train_rollouts],
         "test": [identity[id(rollout)][1]["rollout_id"] for rollout in test_rollouts],
         "parent_train": (
-            sorted({
-                identity[id(rollout)][1]["parent_rollout_id"]
-                for rollout in train_rollouts
-            })
+            sorted(
+                {
+                    identity[id(rollout)][1]["parent_rollout_id"]
+                    for rollout in train_rollouts
+                }
+            )
             if parent_grouped_split
             else None
         ),
         "parent_test": (
-            sorted({
-                identity[id(rollout)][1]["parent_rollout_id"]
-                for rollout in test_rollouts
-            })
+            sorted(
+                {
+                    identity[id(rollout)][1]["parent_rollout_id"]
+                    for rollout in test_rollouts
+                }
+            )
             if parent_grouped_split
             else None
         ),
@@ -818,6 +996,7 @@ def train_seen_model(args):
     duration_labels = [1 - int(rollout.episode_success) for rollout in test_rollouts]
     duration = [len(rollout.hidden_states) for rollout in test_rollouts]
     from sklearn.metrics import roc_auc_score
+
     result = {
         "schema_version": 1,
         "model": args.model,
@@ -836,17 +1015,27 @@ def train_seen_model(args):
             if args.selection_summary is not None
             else None
         ),
-        "outer_split_manifest": (
-            fixed_outer_split_path
-        ),
+        "outer_split_manifest": (fixed_outer_split_path),
         "selection_manifest": (
             fixed_split_ids["path"] if args.selection_manifest is not None else None
         ),
         "class_weighting": args.class_weighting,
-        "split_unit": (
-            "parent_rollout" if parent_grouped_split else "rollout"
-        ),
+        "split_unit": ("parent_rollout" if parent_grouped_split else "rollout"),
         "training_class_weights": training_class_weights,
+        "causal_subtask_safe": (
+            {
+                "protocol": causal_payload["protocol"],
+                "conditioning": causal_payload["conditioning"],
+                "stage_support": causal_payload["support"],
+                "prefix_counts": causal_payload["prefix_counts"],
+                "source_counts": {
+                    "train_segments": len(causal_payload["source_train"]),
+                    "test_segments": len(causal_payload["source_test"]),
+                },
+            }
+            if causal_payload is not None
+            else None
+        ),
         "task_min_step_source": (
             f"minimum inference length per task in the {len(train_rollouts)}-rollout "
             "training split only"
@@ -907,6 +1096,35 @@ def build_parser():
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--selection-summary")
+    parser.add_argument(
+        "--causal-prefix-mode",
+        choices=PREFIX_TRAINING_MODES,
+        default="none",
+        help=(
+            "Train on complete segments (none), every declared causal prefix "
+            "(fixed), or deterministic random causal prefixes (random)"
+        ),
+    )
+    parser.add_argument(
+        "--causal-prefix-horizons",
+        nargs="+",
+        type=int,
+        default=list(DEFAULT_PREFIX_HORIZONS),
+    )
+    parser.add_argument("--random-prefixes-per-segment", type=int, default=3)
+    parser.add_argument(
+        "--causal-conditioning",
+        choices=CONDITIONING_MODES,
+        default="none",
+        help="Append training-catalog stage one-hot and optional causal elapsed feature",
+    )
+    parser.add_argument("--min-stage-successes", type=int, default=0)
+    parser.add_argument("--min-stage-failures", type=int, default=0)
+    parser.add_argument(
+        "--stages",
+        nargs="+",
+        help="Optional explicit ParentTask::subtask_id allowlist",
+    )
     parser.add_argument("--resume", action="store_true")
     return parser
 
