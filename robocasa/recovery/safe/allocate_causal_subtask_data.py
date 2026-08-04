@@ -223,7 +223,12 @@ def build_target_aware_allocation(
     # Calibration cannot consume the negative examples reserved for evaluation.
     def preserves_evaluation_successes(parent, remaining):
         after = non_calibration_candidates | (set(remaining) - {parent})
-        for stage in selected_stages:
+        affected_stages = {
+            stage
+            for (stage, failed), count in contributions[parent].items()
+            if not failed and count > 0
+        }
+        for stage in affected_stages:
             available = sum(
                 contributions[key].get((stage, False), 0)
                 for key in after

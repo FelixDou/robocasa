@@ -313,6 +313,34 @@ class TestCausalSubtaskSafe(unittest.TestCase):
         self.assertEqual(row["evaluation_failure_deficit"], 1)
         self.assertEqual(row["collection_priority"], "collect_target_failures")
 
+    def test_infeasible_stage_does_not_block_other_stage_calibration(self):
+        records = []
+        _, sparse = fake_item(0, 0, "test", stage="Task::sparse")
+        sparse["model_infer_times"] = 100
+        sparse["parent_rollout_failed"] = True
+        records.append((Path("/sparse.pkl"), sparse))
+        for index in range(3):
+            _, ready = fake_item(index + 1, 1, "test", stage="Task::ready")
+            ready["model_infer_times"] = 200
+            ready["parent_rollout_failed"] = False
+            records.append((Path(f"/ready-{index}.pkl"), ready))
+
+        allocation = build_target_aware_allocation(
+            records,
+            stages=["Task::sparse", "Task::ready"],
+            prefix=32,
+            failure_horizon=128,
+            calibration_successes_per_stage=1,
+            evaluation_successes_per_stage=1,
+            evaluation_failures_per_stage=0,
+        )
+        rows = {row["stage"]: row for row in allocation["per_stage"]}
+
+        self.assertFalse(allocation["complete"])
+        self.assertEqual(rows["Task::sparse"]["calibration_successes"], 0)
+        self.assertEqual(rows["Task::ready"]["calibration_successes"], 1)
+        self.assertEqual(rows["Task::ready"]["evaluation_successes"], 1)
+
     def _write_causal_scores(self, final_root):
         for seed in (0, 1, 2):
             records = []
