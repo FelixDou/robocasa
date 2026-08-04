@@ -149,3 +149,112 @@ Do not collect additional rollouts or integrate recovery unless the final model
 passes every gate. If all stored-feature treatments fail, the next experiment is
 new feature capture from an earlier RLDX layer, not additional examples of the
 same representation.
+
+## Frozen treatment and independent target-aware evaluation
+
+The completed v3 screen selected the pinned official SAFE objective with
+`raw_delta_mean_slope`, failure horizon `H=128`, and target prefix `32`. Its
+held-out discrimination was promising (ROC-AUC `0.956`), but the first
+operating-point experiment had only five calibration successes per seed. The
+resulting conformal resolution was `1 / (5 + 1) = 0.167`: target FPR values from
+0.10 through 0.30 selected the same conservative threshold and detected no
+failures. A target FPR of 0.40 lowered the threshold and yielded TPR `0.833`,
+realized FPR `0.111`, and normalized lead `0.796`. That is evidence for a useful
+ranking, not a validated operating point.
+
+The next experiment freezes the representation, objective, horizon, prefix,
+checkpoint, and four stages:
+
+```text
+LoadDishwasher::cup_on_rack
+PreSoakPan::TurnOnSinkFaucet_3
+ScrubCuttingBoard::cutting_board_scrubbed
+WashLettuce::water_on
+```
+
+Collect a new independent parent-rollout pool. Do not balance it by final
+rollout success. After exporting its semantic segments, allocate it using the
+actual finite-horizon target:
+
+```bash
+export TARGET_AWARE_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/rldx1_subtask_v3_target_aware_$(date +%Y%m%d_%H%M%S)"
+
+python -u -m robocasa.recovery.safe.allocate_causal_subtask_data \
+  --export-dir "$NEW_SUBTASK_SAFE_EXPORT" \
+  --output-dir "$TARGET_AWARE_ROOT" \
+  --stages \
+    LoadDishwasher::cup_on_rack \
+    PreSoakPan::TurnOnSinkFaucet_3 \
+    ScrubCuttingBoard::cutting_board_scrubbed \
+    WashLettuce::water_on \
+  --prefix 32 \
+  --failure-horizon 128 \
+  --calibration-successes-per-stage 5 \
+  --evaluation-successes-per-stage 10 \
+  --evaluation-failures-per-stage 10 \
+  --seed 0
+```
+
+The allocator assigns complete parent rollouts, keeps calibration and evaluation
+parents disjoint, and reserves evaluation negatives before selecting calibration
+parents. Calibration parents must be overall-successful rollouts and may contain
+no positive selected-stage target. The JSON manifest records exact parent and
+synthetic prefix identities; the CSV reports remaining finite-horizon deficits.
+An incomplete allocation is a collection diagnostic and must not be used for
+the final evaluation.
+
+Minimum complete support is 20 successful calibration segments plus 40
+successful and 40 failed evaluation segments across the four stages. Because
+whole parents are assigned and can contribute more than one segment, these are
+minimum segment counts rather than exact rollout counts. Continue natural full
+rollout collection for stages marked `collect_target_failures` or
+`collect_target_successes`, then rerun the allocator.
+
+### Score without retraining
+
+Apply each of the three frozen MLP checkpoints to the new allocation. The scorer
+loads the saved stage catalog, temporal transformation, model config, and state
+dict. It writes the immutable old training scores plus only the new external
+test scores; it never updates the checkpoint.
+
+```bash
+export FROZEN_SCORE_ROOT="$TARGET_AWARE_ROOT/frozen_scores"
+export TARGET_AWARE_MANIFEST="$TARGET_AWARE_ROOT/target_aware_allocation.json"
+
+for SEED in 0 1 2; do
+  python -u -m robocasa.recovery.safe.score_causal_subtask_checkpoint \
+    --export-dir "$NEW_SUBTASK_SAFE_EXPORT" \
+    --training-run "$TEMPORAL_FINAL_ROOT/indep_seed${SEED}" \
+    --allocation-manifest "$TARGET_AWARE_MANIFEST" \
+    --safe-repo "$SAFE_REPO" \
+    --output-dir "$FROZEN_SCORE_ROOT/indep_seed${SEED}" \
+    --device cuda
+done
+```
+
+The command rejects an incomplete allocation, a horizon mismatch, missing
+stages, absent parents, train/evaluation parent overlap, or a checkpoint input
+dimension inconsistent with the saved representation.
+
+### Evaluate the preregistered allocation
+
+```bash
+python -u -m robocasa.recovery.safe.evaluate_causal_subtask_gates \
+  --final-root "$FROZEN_SCORE_ROOT" \
+  --output-dir "$FROZEN_SCORE_ROOT/causal_gate_analysis" \
+  --models indep \
+  --seeds 0 1 2 \
+  --prefixes 8 16 24 32 48 64 96 128 160 \
+  --target-prefix 32 \
+  --allocation-manifest "$TARGET_AWARE_MANIFEST" \
+  --target-fpr 0.10 \
+  --min-roc 0.65 \
+  --min-delta 0.05 \
+  --min-tpr 0.40 \
+  --min-lead 0.25 \
+  --bootstrap-replicates 2000
+```
+
+With an allocation manifest, fractional calibration sampling is disabled. Only
+the preregistered parents and stages enter threshold calibration, ROC/AP,
+operating points, or parent bootstrap intervals.

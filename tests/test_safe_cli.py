@@ -9,6 +9,7 @@ install_lightweight_robocasa_packages()
 from robocasa.recovery.safe import (
     analyze_subtask_safe_results,
     analyze_natural_rate_screen,
+    allocate_causal_subtask_data,
     audit_subtask_safe_dataset,
     calibrate_seen_tasks,
     build_natural_rate_experiment,
@@ -29,6 +30,7 @@ from robocasa.recovery.safe import (
     run_official_grid,
     run_natural_rate_screen,
     run_seen_cv_grid,
+    score_causal_subtask_checkpoint,
     summarize_seen_cv,
     summarize_natural_rate_screen,
     summarize_seen_tasks,
@@ -45,6 +47,7 @@ class TestSafeCLIHelp(unittest.TestCase):
         for module in (
             analyze_subtask_safe_results,
             analyze_natural_rate_screen,
+            allocate_causal_subtask_data,
             audit_subtask_safe_dataset,
             calibrate_seen_tasks,
             build_natural_rate_experiment,
@@ -67,6 +70,7 @@ class TestSafeCLIHelp(unittest.TestCase):
             run_official_grid,
             run_natural_rate_screen,
             run_seen_cv_grid,
+            score_causal_subtask_checkpoint,
             summarize_seen_cv,
             summarize_natural_rate_screen,
             summarize_seen_tasks,

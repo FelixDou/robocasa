@@ -1112,3 +1112,8 @@ trains directly on prefixes, conditions on the active semantic stage, filters
 stages using training-only support, and applies preregistered continuation gates
 against an elapsed-time control. See [safe_subtask_v2.md](safe_subtask_v2.md) for
 the complete collection-planning, CV, final-refit, and evaluation commands.
+The v3 follow-up freezes the selected finite-horizon temporal detector and uses
+`allocate_causal_subtask_data` plus `score_causal_subtask_checkpoint` for an
+independent, parent-disjoint calibration/evaluation pool balanced on the actual
+finite-horizon stage target rather than final rollout outcome. See
+[safe_subtask_v3.md](safe_subtask_v3.md).

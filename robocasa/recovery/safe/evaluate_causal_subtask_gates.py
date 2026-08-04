@@ -174,6 +174,114 @@ def _calibration_parent_partition(records, *, fraction, seed):
     }
 
 
+def _load_allocation_partition(path, records, target_prefix):
+    """Load a preregistered parent allocation and validate it against scores."""
+    path = Path(path).resolve()
+    manifest = json.loads(path.read_text())
+    if manifest.get("protocol") != "causal_subtask_finite_horizon_parent_allocation":
+        raise ValueError("Unknown causal Subtask-SAFE allocation protocol")
+    if manifest.get("complete") is not True:
+        raise ValueError("Causal Subtask-SAFE allocation is incomplete")
+    target = manifest.get("target_definition", {})
+    if int(target.get("causal_prefix_inferences", -1)) != int(target_prefix):
+        raise ValueError("Allocation manifest uses a different causal prefix")
+    failure_horizon = int(target.get("failure_horizon_inferences", -1))
+    if failure_horizon <= 0:
+        raise ValueError("Allocation manifest has no positive failure horizon")
+    calibration = {str(value) for value in manifest.get("calibration_parent_ids", [])}
+    evaluation = {str(value) for value in manifest.get("evaluation_parent_ids", [])}
+    if not calibration or not evaluation or calibration & evaluation:
+        raise ValueError("Allocation parent sets are empty or overlap")
+    grouped = defaultdict(list)
+    for record in records:
+        if record["split"] == "test":
+            grouped[parent_id(record)].append(record)
+    missing = sorted((calibration | evaluation) - set(grouped))
+    if missing:
+        raise ValueError(
+            "Allocation references parents absent from held-out scores: "
+            + ", ".join(missing[:5])
+        )
+    stages = {str(value) for value in manifest.get("selected_stages", [])}
+    if not stages:
+        raise ValueError("Allocation manifest has no selected stages")
+    allocated_records = [
+        record
+        for parent in calibration | evaluation
+        for record in grouped[parent]
+        if int(record["causal_prefix_inferences"]) == int(target_prefix)
+        and record["task_name"] in stages
+    ]
+    observed_horizons = {
+        record.get("causal_failure_horizon_inferences")
+        for record in allocated_records
+    }
+    if observed_horizons != {failure_horizon}:
+        raise ValueError(
+            "Allocation failure horizon does not match held-out score records"
+        )
+    for parent in calibration:
+        values = [
+            record
+            for record in grouped[parent]
+            if int(record["causal_prefix_inferences"]) == int(target_prefix)
+            and record["task_name"] in stages
+        ]
+        if not values:
+            raise ValueError(f"Calibration parent {parent} has no selected-stage record")
+        if any(
+            bool(value.get("parent_rollout_failed", value["failed"]))
+            for value in values
+        ):
+            raise ValueError("Allocation calibration contains a failed parent rollout")
+        if any(bool(value["failed"]) for value in values):
+            raise ValueError("Allocation calibration contains a positive target label")
+    quotas = manifest.get("quotas_per_stage", {})
+    required_calibration = int(quotas.get("calibration_successes", 0))
+    required_evaluation_successes = int(quotas.get("evaluation_successes", 0))
+    required_evaluation_failures = int(quotas.get("evaluation_failures", 0))
+    for stage in stages:
+        calibration_stage = [
+            record
+            for parent in calibration
+            for record in grouped[parent]
+            if int(record["causal_prefix_inferences"]) == int(target_prefix)
+            and record["task_name"] == stage
+        ]
+        evaluation_stage = [
+            record
+            for parent in evaluation
+            for record in grouped[parent]
+            if int(record["causal_prefix_inferences"]) == int(target_prefix)
+            and record["task_name"] == stage
+        ]
+        actual = (
+            sum(not bool(record["failed"]) for record in calibration_stage),
+            sum(not bool(record["failed"]) for record in evaluation_stage),
+            sum(bool(record["failed"]) for record in evaluation_stage),
+        )
+        required = (
+            required_calibration,
+            required_evaluation_successes,
+            required_evaluation_failures,
+        )
+        if any(value < minimum for value, minimum in zip(actual, required)):
+            raise ValueError(
+                f"Allocation quotas are not met by held-out scores for {stage}: "
+                f"actual={actual}, required={required}"
+            )
+    return {
+        "calibration_parent_ids": sorted(calibration),
+        "evaluation_parent_ids": sorted(evaluation),
+        "selected_stages": sorted(stages),
+        "allocation_manifest": str(path),
+        "source_fingerprint": manifest.get("source_fingerprint"),
+        "target_definition": target,
+        "split_unit": "parent_rollout",
+        "calibration_candidates": "preregistered overall-successful parents",
+    }
+
+
 def _quantile_threshold(success_scores, target_fpr):
     values = np.sort(np.asarray(success_scores, dtype=np.float64))
     if not len(values):
@@ -345,6 +453,7 @@ def evaluate_root(
     min_lead=0.25,
     calibration_parent_fraction=0.30,
     calibration_seed=0,
+    allocation_manifest=None,
     bootstrap_replicates=2000,
     bootstrap_seed=0,
 ):
@@ -361,8 +470,16 @@ def evaluate_root(
             records = load_score_records(root / f"{model}_seed{seed}" / "scores.jsonl")
             validate_causal_records(records, int(target_prefix))
             train = [record for record in records if record["split"] == "train"]
-            partition = _calibration_parent_partition(
-                records, fraction=calibration_parent_fraction, seed=calibration_seed
+            partition = (
+                _load_allocation_partition(
+                    allocation_manifest, records, int(target_prefix)
+                )
+                if allocation_manifest is not None
+                else _calibration_parent_partition(
+                    records,
+                    fraction=calibration_parent_fraction,
+                    seed=calibration_seed,
+                )
             )
             if reference_partition is None:
                 reference_partition = partition
@@ -375,16 +492,19 @@ def evaluate_root(
                 raise ValueError("Model seeds do not use identical calibration parents")
             calibration_parents = set(partition["calibration_parent_ids"])
             evaluation_parents = set(partition["evaluation_parent_ids"])
+            allocated_stages = set(partition.get("selected_stages", ()))
             calibration = [
                 record
                 for record in records
                 if record["split"] == "test"
                 and parent_id(record) in calibration_parents
+                and (not allocated_stages or record["task_name"] in allocated_stages)
             ]
             evaluation = [
                 record
                 for record in records
                 if record["split"] == "test" and parent_id(record) in evaluation_parents
+                and (not allocated_stages or record["task_name"] in allocated_stages)
             ]
             duration_model = _training_duration_progress_model(train)
             for prefix in prefixes:
@@ -647,6 +767,13 @@ def build_parser():
     parser.add_argument("--min-lead", type=float, default=0.25)
     parser.add_argument("--calibration-parent-fraction", type=float, default=0.30)
     parser.add_argument("--calibration-seed", type=int, default=0)
+    parser.add_argument(
+        "--allocation-manifest",
+        help=(
+            "Preregistered target-aware parent allocation. When set, this replaces "
+            "fractional calibration sampling."
+        ),
+    )
     parser.add_argument("--bootstrap-replicates", type=int, default=2000)
     parser.add_argument("--bootstrap-seed", type=int, default=0)
     return parser
@@ -667,6 +794,7 @@ def main(argv=None):
         min_lead=args.min_lead,
         calibration_parent_fraction=args.calibration_parent_fraction,
         calibration_seed=args.calibration_seed,
+        allocation_manifest=args.allocation_manifest,
         bootstrap_replicates=args.bootstrap_replicates,
         bootstrap_seed=args.bootstrap_seed,
     )

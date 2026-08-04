@@ -19,6 +19,9 @@ from robocasa.recovery.safe.causal_subtask_safe import (  # noqa: E402
     transform_temporal_representation,
     validate_causal_config,
 )
+from robocasa.recovery.safe.allocate_causal_subtask_data import (  # noqa: E402
+    build_target_aware_allocation,
+)
 from robocasa.recovery.safe.evaluate_causal_subtask_gates import (  # noqa: E402
     evaluate_root,
 )
@@ -253,6 +256,63 @@ class TestCausalSubtaskSafe(unittest.TestCase):
         self.assertEqual(row["train_failure_deficit"], 2)
         self.assertEqual(row["priority"], "collect_failures")
 
+    def test_target_aware_allocation_is_parent_disjoint_and_uses_horizon_label(self):
+        records = []
+        for index in range(4):
+            _, env = fake_item(index, 1, "test")
+            env["model_infer_times"] = 200
+            env["parent_rollout_failed"] = False
+            records.append((Path(f"/success-{index}.pkl"), env))
+        for index, length in enumerate((100, 200)):
+            _, env = fake_item(index + 10, 0, "test")
+            env["model_infer_times"] = length
+            env["parent_rollout_failed"] = True
+            records.append((Path(f"/failure-{index}.pkl"), env))
+
+        allocation = build_target_aware_allocation(
+            records,
+            stages=["Task::stage"],
+            prefix=32,
+            failure_horizon=128,
+            calibration_successes_per_stage=2,
+            evaluation_successes_per_stage=1,
+            evaluation_failures_per_stage=1,
+            seed=7,
+        )
+        row = allocation["per_stage"][0]
+        self.assertTrue(allocation["complete"])
+        self.assertFalse(
+            set(allocation["calibration_parent_ids"])
+            & set(allocation["evaluation_parent_ids"])
+        )
+        self.assertEqual(row["eligible_failures"], 1)
+        self.assertEqual(row["eligible_successes"], 5)
+        self.assertEqual(row["calibration_successes"], 2)
+        self.assertEqual(row["evaluation_successes"], 1)
+        self.assertEqual(row["evaluation_failures"], 1)
+        self.assertFalse(allocation["audit"]["calibration_contains_failed_parents"])
+
+    def test_target_aware_allocation_reports_finite_horizon_deficits(self):
+        records = []
+        for index, success in enumerate((1, 1, 1, 0)):
+            _, env = fake_item(index, success, "test")
+            env["model_infer_times"] = 100 if not success else 200
+            env["parent_rollout_failed"] = not bool(success)
+            records.append((Path(f"/{index}.pkl"), env))
+        allocation = build_target_aware_allocation(
+            records,
+            stages=["Task::stage"],
+            prefix=32,
+            failure_horizon=128,
+            calibration_successes_per_stage=1,
+            evaluation_successes_per_stage=1,
+            evaluation_failures_per_stage=2,
+        )
+        row = allocation["per_stage"][0]
+        self.assertFalse(allocation["complete"])
+        self.assertEqual(row["evaluation_failure_deficit"], 1)
+        self.assertEqual(row["collection_priority"], "collect_target_failures")
+
     def _write_causal_scores(self, final_root):
         for seed in (0, 1, 2):
             records = []
@@ -270,6 +330,7 @@ class TestCausalSubtaskSafe(unittest.TestCase):
                                 "rollout_id": f"{split}-seg-{index}::prefix-{prefix:04d}",
                                 "source_segment_id": f"{split}-seg-{index}",
                                 "causal_prefix_inferences": prefix,
+                                "causal_failure_horizon_inferences": 128,
                                 "parent_rollout_id": parent,
                                 "parent_task_name": "Task",
                                 "parent_rollout_failed": failed,
@@ -325,6 +386,49 @@ class TestCausalSubtaskSafe(unittest.TestCase):
                     == "successful parent-disjoint held-out calibration prefixes"
                     for row in summary["operating_points"]
                 )
+            )
+
+    def test_causal_gate_evaluator_accepts_preregistered_parent_allocation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            final_root = Path(tmp) / "final"
+            self._write_causal_scores(final_root)
+            manifest = {
+                "schema_version": 1,
+                "protocol": "causal_subtask_finite_horizon_parent_allocation",
+                "complete": True,
+                "target_definition": {
+                    "causal_prefix_inferences": 8,
+                    "failure_horizon_inferences": 128,
+                },
+                "selected_stages": ["Task::stage"],
+                "quotas_per_stage": {
+                    "calibration_successes": 2,
+                    "evaluation_successes": 8,
+                    "evaluation_failures": 10,
+                },
+                "calibration_parent_ids": ["test-parent-0", "test-parent-2"],
+                "evaluation_parent_ids": [
+                    f"test-parent-{index}" for index in range(4, 20)
+                ]
+                + ["test-parent-1", "test-parent-3"],
+            }
+            manifest_path = Path(tmp) / "allocation.json"
+            manifest_path.write_text(json.dumps(manifest))
+            summary = evaluate_root(
+                final_root,
+                models=("indep",),
+                target_prefix=8,
+                prefixes=(1, 2, 4, 8, 16),
+                allocation_manifest=manifest_path,
+                bootstrap_replicates=50,
+            )
+            self.assertEqual(
+                summary["calibration"]["allocation_manifest"],
+                str(manifest_path.resolve()),
+            )
+            self.assertEqual(
+                summary["calibration"]["calibration_parent_ids"],
+                ["test-parent-0", "test-parent-2"],
             )
 
 
