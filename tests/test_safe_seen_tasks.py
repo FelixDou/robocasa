@@ -36,6 +36,7 @@ from robocasa.recovery.safe.train_seen_tasks import (
     causal_binary_monitor_loss,
     configure_training_objective,
     filter_aligned_task_type,
+    load_env_records,
     load_outer_split_ids,
     make_manifest_split,
     make_seen_split,
@@ -48,6 +49,18 @@ from robocasa.recovery.safe.train_seen_tasks import (
 
 
 class TestSeenTaskProtocol(unittest.TestCase):
+    def test_env_records_use_natural_order_without_natsort(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_records = Path(directory) / "env_records"
+            env_records.mkdir()
+            for index in (10, 2, 1):
+                with (env_records / f"episode_{index}.pkl").open("wb") as stream:
+                    pickle.dump({"index": index}, stream)
+
+            records = load_env_records(directory)
+
+        self.assertEqual([record[1]["index"] for record in records], [1, 2, 10])
+
     def test_binary_objective_disables_accumulated_score_output(self):
         official = SimpleNamespace(model=SimpleNamespace(cumsum=True, rmean=False))
         configure_training_objective(official, "official")

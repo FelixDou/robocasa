@@ -12,6 +12,7 @@ import math
 from pathlib import Path
 import pickle
 import random
+import re
 import subprocess
 import sys
 
@@ -276,10 +277,20 @@ def verify_safe_repo(safe_repo):
     return safe_repo
 
 
-def load_env_records(export_dir):
-    from natsort import natsorted
+def _natural_sort_key(value):
+    """Return a deterministic numeric-aware key without requiring natsort."""
 
-    paths = natsorted(glob.glob(str(Path(export_dir) / "env_records" / "*.pkl")))
+    return tuple(
+        int(part) if part.isdigit() else part
+        for part in re.split(r"(\d+)", str(value))
+    )
+
+
+def load_env_records(export_dir):
+    paths = sorted(
+        glob.glob(str(Path(export_dir) / "env_records" / "*.pkl")),
+        key=_natural_sort_key,
+    )
     records = []
     for path in paths:
         with open(path, "rb") as stream:
