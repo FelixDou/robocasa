@@ -1,5 +1,11 @@
 # Causal Subtask-SAFE v2
 
+> Historical protocol note: the v2 gate output called its training-only
+> per-stage target prevalence an "elapsed-time" baseline. That comparator was a
+> valid stage-prior control but was mislabeled. Subtask-SAFE v3 reports the stage
+> prior and duration-normalized progress separately and uses parent-disjoint
+> held-out threshold calibration. See `docs/safe_subtask_v3.md`.
+
 This protocol tests whether RLDX policy features predict failure **causally**, while
 the current semantic subtask is still active. It is deliberately separate from the
 retrospective whole-segment Subtask-SAFE result.

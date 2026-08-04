@@ -17,9 +17,11 @@ import numpy as np
 
 try:
     from .causal_subtask_safe import (
+        CAUSAL_LABEL_MODES,
         CONDITIONING_MODES,
         DEFAULT_PREFIX_HORIZONS,
         PREFIX_TRAINING_MODES,
+        TEMPORAL_REPRESENTATIONS,
         CausalPrefixConfig,
         prepare_causal_splits,
         select_supported_stages,
@@ -27,9 +29,11 @@ try:
     )
 except ImportError:
     from causal_subtask_safe import (
+        CAUSAL_LABEL_MODES,
         CONDITIONING_MODES,
         DEFAULT_PREFIX_HORIZONS,
         PREFIX_TRAINING_MODES,
+        TEMPORAL_REPRESENTATIONS,
         CausalPrefixConfig,
         prepare_causal_splits,
         select_supported_stages,
@@ -39,8 +43,10 @@ except ImportError:
 try:
     from .train_seen_tasks import (
         CLASS_WEIGHTING_MODES,
+        LOSS_MODES,
         OFFICIAL_SAFE_COMMIT,
         TASK_TYPE_FILTERS,
+        configure_training_objective,
         filter_aligned_task_type,
         load_env_records,
         load_outer_split_ids,
@@ -52,6 +58,7 @@ try:
         score_splits,
         set_task_min_step_from_training,
         train_epoch_without_wandb,
+        training_objective_metadata,
         validate_alignment,
         verify_safe_repo,
         write_json,
@@ -59,8 +66,10 @@ try:
 except ImportError:
     from train_seen_tasks import (
         CLASS_WEIGHTING_MODES,
+        LOSS_MODES,
         OFFICIAL_SAFE_COMMIT,
         TASK_TYPE_FILTERS,
+        configure_training_objective,
         filter_aligned_task_type,
         load_env_records,
         load_outer_split_ids,
@@ -72,6 +81,7 @@ except ImportError:
         score_splits,
         set_task_min_step_from_training,
         train_epoch_without_wandb,
+        training_objective_metadata,
         validate_alignment,
         verify_safe_repo,
         write_json,
@@ -332,6 +342,9 @@ def run_cv_grid(args):
     causal_requested = bool(
         args.causal_prefix_mode != "none"
         or args.causal_conditioning != "none"
+        or args.causal_label_mode != "eventual"
+        or args.causal_failure_horizon is not None
+        or args.temporal_representation != "raw"
         or args.min_stage_successes
         or args.min_stage_failures
         or args.stages
@@ -345,6 +358,10 @@ def run_cv_grid(args):
         horizons=validate_prefix_horizons(args.causal_prefix_horizons),
         random_prefixes_per_segment=args.random_prefixes_per_segment,
         conditioning=args.causal_conditioning,
+        label_mode=args.causal_label_mode,
+        failure_horizon=args.causal_failure_horizon,
+        temporal_representation=args.temporal_representation,
+        temporal_window=args.temporal_window,
         min_stage_successes=args.min_stage_successes,
         min_stage_failures=args.min_stage_failures,
     )
@@ -409,6 +426,9 @@ def run_cv_grid(args):
             fixed_split_ids["path"] if args.selection_manifest is not None else None
         ),
         "class_weighting": args.class_weighting,
+        "training_objective": training_objective_metadata(
+            args.loss_mode, args.focal_gamma
+        ),
         "model": args.model,
         "num_runs": len(all_runs),
         "num_configurations": len(all_runs) // args.num_folds,
@@ -432,6 +452,10 @@ def run_cv_grid(args):
                     causal_config.random_prefixes_per_segment
                 ),
                 "conditioning": causal_config.conditioning,
+                "label_mode": causal_config.label_mode,
+                "failure_horizon": causal_config.failure_horizon,
+                "temporal_representation": causal_config.temporal_representation,
+                "temporal_window": causal_config.temporal_window,
                 "min_stage_successes": causal_config.min_stage_successes,
                 "min_stage_failures": causal_config.min_stage_failures,
                 "requested_stages": args.stages,
@@ -486,6 +510,7 @@ def run_cv_grid(args):
                 args.device,
                 base_hyperparameters,
             )
+            configure_training_objective(cfg, args.loss_mode)
             seed_everything(0)
             source_rollouts = load_rollouts_from_root(Path(args.export_dir), cfg)
             all_rollouts, selected_env_records, identity = filter_aligned_task_type(
@@ -557,6 +582,10 @@ def run_cv_grid(args):
                             causal_config.random_prefixes_per_segment
                         ),
                         conditioning=causal_config.conditioning,
+                        label_mode=causal_config.label_mode,
+                        failure_horizon=causal_config.failure_horizon,
+                        temporal_representation=causal_config.temporal_representation,
+                        temporal_window=causal_config.temporal_window,
                         # Stage support is selected once from the outer training
                         # pool. Inner validation never influences the catalog.
                         min_stage_successes=0,
@@ -618,6 +647,8 @@ def run_cv_grid(args):
                                 loaders["inner_train"],
                                 args.device,
                                 class_weighting=args.class_weighting,
+                                loss_mode=args.loss_mode,
+                                focal_gamma=args.focal_gamma,
                             )
                         )
                         if scheduler is not None:
@@ -672,6 +703,9 @@ def run_cv_grid(args):
                     "slug": run.slug,
                     "model": run.model,
                     "class_weighting": args.class_weighting,
+                    "training_objective": training_objective_metadata(
+                        args.loss_mode, args.focal_gamma
+                    ),
                     "training_class_weights": training_class_weights,
                     "selection_manifest": (
                         fixed_split_ids["path"]
@@ -703,8 +737,14 @@ def run_cv_grid(args):
                         {
                             "protocol": causal_fold["protocol"],
                             "conditioning": causal_fold["conditioning"],
+                            "temporal_representation": causal_fold[
+                                "temporal_representation"
+                            ],
                             "outer_training_stage_support": stage_selection,
                             "inner_prefix_counts": causal_fold["prefix_counts"],
+                            "inner_target_counts_by_prefix": causal_fold[
+                                "target_counts_by_prefix"
+                            ],
                             "selection_prefix": int(args.causal_selection_prefix),
                         }
                         if causal_fold is not None
@@ -797,6 +837,8 @@ def build_parser():
         choices=CLASS_WEIGHTING_MODES,
         default="official_inverse_frequency",
     )
+    parser.add_argument("--loss-mode", choices=LOSS_MODES, default="official")
+    parser.add_argument("--focal-gamma", type=float, default=2.0)
     parser.add_argument("--split-seed", type=int, default=0)
     parser.add_argument("--inner-seed", type=int, default=0)
     parser.add_argument("--num-folds", type=int, default=3)
@@ -833,6 +875,18 @@ def build_parser():
         choices=CONDITIONING_MODES,
         default="none",
     )
+    parser.add_argument(
+        "--causal-label-mode",
+        choices=CAUSAL_LABEL_MODES,
+        default="eventual",
+    )
+    parser.add_argument("--causal-failure-horizon", type=int)
+    parser.add_argument(
+        "--temporal-representation",
+        choices=TEMPORAL_REPRESENTATIONS,
+        default="raw",
+    )
+    parser.add_argument("--temporal-window", type=int, default=4)
     parser.add_argument("--min-stage-successes", type=int, default=0)
     parser.add_argument("--min-stage-failures", type=int, default=0)
     parser.add_argument(

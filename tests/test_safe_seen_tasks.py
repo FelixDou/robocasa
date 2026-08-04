@@ -8,6 +8,11 @@ import unittest
 import numpy as np
 
 try:
+    import torch
+except ImportError:
+    torch = None
+
+try:
     import cv2
 except ImportError:
     cv2 = None
@@ -28,6 +33,8 @@ from robocasa.recovery.safe.analyze_natural_rate_screen import (
 )
 from robocasa.recovery.safe.train_seen_tasks import (
     MODEL_DEFAULTS,
+    causal_binary_monitor_loss,
+    configure_training_objective,
     filter_aligned_task_type,
     load_outer_split_ids,
     make_manifest_split,
@@ -36,10 +43,79 @@ from robocasa.recovery.safe.train_seen_tasks import (
     resolve_class_weights,
     resolve_hyperparameters,
     set_task_min_step_from_training,
+    training_objective_metadata,
 )
 
 
 class TestSeenTaskProtocol(unittest.TestCase):
+    def test_binary_objective_disables_accumulated_score_output(self):
+        official = SimpleNamespace(model=SimpleNamespace(cumsum=True, rmean=False))
+        configure_training_objective(official, "official")
+        self.assertTrue(official.model.cumsum)
+
+        binary = SimpleNamespace(model=SimpleNamespace(cumsum=True, rmean=True))
+        configure_training_objective(binary, "focal")
+        self.assertFalse(binary.model.cumsum)
+        self.assertFalse(binary.model.rmean)
+        self.assertEqual(
+            training_objective_metadata("focal", 1.5),
+            {
+                "loss_mode": "focal",
+                "focal_gamma": 1.5,
+                "score_output": "instantaneous_failure_probability",
+            },
+        )
+
+    @unittest.skipIf(torch is None, "PyTorch is unavailable")
+    def test_causal_bce_and_focal_losses_use_failure_as_positive_class(self):
+        model = SimpleNamespace(
+            cfg=SimpleNamespace(model=SimpleNamespace(name="indep")),
+            projector=torch.nn.Sequential(torch.nn.Linear(1, 1), torch.nn.Sigmoid()),
+        )
+        with torch.no_grad():
+            model.projector[0].weight.fill_(1.0)
+            model.projector[0].bias.zero_()
+        batch = {
+            "features": torch.tensor([[[2.0]], [[-2.0]]]),
+            "valid_masks": torch.ones(2, 1),
+            # SAFE convention: one is success, zero is failure.
+            "success_labels": torch.tensor([0, 1]),
+        }
+        bce = causal_binary_monitor_loss(model, batch, [1.0, 1.0], loss_mode="bce")
+        focal = causal_binary_monitor_loss(
+            model, batch, [1.0, 1.0], loss_mode="focal", focal_gamma=2.0
+        )
+        self.assertTrue(torch.isfinite(bce))
+        self.assertTrue(torch.isfinite(focal))
+        self.assertLess(float(focal), float(bce))
+
+    @unittest.skipIf(torch is None, "PyTorch is unavailable")
+    def test_causal_binary_loss_supervises_only_prefix_endpoint(self):
+        model = SimpleNamespace(
+            cfg=SimpleNamespace(model=SimpleNamespace(name="indep")),
+            projector=torch.nn.Sequential(torch.nn.Linear(1, 1), torch.nn.Sigmoid()),
+        )
+        with torch.no_grad():
+            model.projector[0].weight.fill_(1.0)
+            model.projector[0].bias.zero_()
+        common = {
+            "valid_masks": torch.ones(1, 2),
+            "success_labels": torch.tensor([0]),
+        }
+        low_endpoint = causal_binary_monitor_loss(
+            model,
+            {"features": torch.tensor([[[10.0], [-10.0]]]), **common},
+            [1.0, 1.0],
+            loss_mode="bce",
+        )
+        high_endpoint = causal_binary_monitor_loss(
+            model,
+            {"features": torch.tensor([[[-10.0], [10.0]]]), **common},
+            [1.0, 1.0],
+            loss_mode="bce",
+        )
+        self.assertGreater(float(low_endpoint), float(high_endpoint))
+
     def test_parent_rollout_manifest_allows_natural_single_class_subtasks(self):
         rollouts = []
         identity = {}
@@ -95,9 +171,7 @@ class TestSeenTaskProtocol(unittest.TestCase):
                     for subtask_index in range(2):
                         rollout = SimpleNamespace(
                             task_id=subtask_index,
-                            episode_success=(
-                                0 if failed and subtask_index == 1 else 1
-                            ),
+                            episode_success=(0 if failed and subtask_index == 1 else 1),
                         )
                         rollout_id = f"{parent}-segment-{subtask_index}"
                         rollouts.append(rollout)
@@ -165,11 +239,17 @@ class TestSeenTaskProtocol(unittest.TestCase):
         self.assertEqual(len(train), 8)
         self.assertEqual(len(test), 4)
         self.assertEqual(counts[0]["success"], {"train": 2, "test": 1})
-        selected = {
-            identity[id(rollout)][1]["rollout_id"]
-            for rollout in train + test
-        }
-        self.assertEqual(len(set(identity_value[1]["rollout_id"] for identity_value in identity.values()) - selected), 4)
+        selected = {identity[id(rollout)][1]["rollout_id"] for rollout in train + test}
+        self.assertEqual(
+            len(
+                set(
+                    identity_value[1]["rollout_id"]
+                    for identity_value in identity.values()
+                )
+                - selected
+            ),
+            4,
+        )
 
     def test_class_weighting_switch_uses_official_weights_or_none(self):
         expected = np.array([1.0, 1.5])
@@ -209,7 +289,9 @@ class TestSeenTaskProtocol(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown class weighting"):
             resolve_class_weights(dataset, "other")
 
-    def test_natural_rate_builder_uses_only_observed_quota_discards_and_fixed_test(self):
+    def test_natural_rate_builder_uses_only_observed_quota_discards_and_fixed_test(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             shard = root / "shard"
@@ -300,9 +382,7 @@ class TestSeenTaskProtocol(unittest.TestCase):
                         with (env_dir / f"{index:03d}.pkl").open("wb") as stream:
                             pickle.dump(record, stream)
                         index += 1
-                        (outer_train if item < 4 else outer_test).append(
-                            rollout_id
-                        )
+                        (outer_train if item < 4 else outer_test).append(rollout_id)
             outer_path = root / "outer.json"
             outer_path.write_text(
                 json.dumps(
@@ -414,8 +494,7 @@ class TestSeenTaskProtocol(unittest.TestCase):
                     for subset_seed in (0, 1):
                         for model_seed in (0, 1):
                             run = (
-                                root
-                                / f"{model}__{regime}__subset-{subset_seed}"
+                                root / f"{model}__{regime}__subset-{subset_seed}"
                                 f"__seed-{model_seed}"
                             )
                             run.mkdir(parents=True)
@@ -479,9 +558,7 @@ class TestSeenTaskProtocol(unittest.TestCase):
                             )
                             from sklearn.metrics import roc_auc_score
 
-                            raw_roc = float(
-                                roc_auc_score(test_labels, test_scores)
-                            )
+                            raw_roc = float(roc_auc_score(test_labels, test_scores))
                             (run / "metrics.json").write_text(
                                 json.dumps(
                                     {
@@ -516,9 +593,7 @@ class TestSeenTaskProtocol(unittest.TestCase):
             self.assertTrue((output / "group_metrics.csv").is_file())
             self.assertTrue((output / "per_task_metrics.csv").is_file())
             self.assertEqual(len(summary["figures"]), 3)
-            self.assertTrue(
-                all(Path(path).is_file() for path in summary["figures"])
-            )
+            self.assertTrue(all(Path(path).is_file() for path in summary["figures"]))
 
     def test_fixed_split_scales_to_ten_tasks_without_changing_per_task_balance(self):
         rollouts = []
@@ -532,7 +607,10 @@ class TestSeenTaskProtocol(unittest.TestCase):
                     )
                     rollout_id = f"task-{task_id}-success-{success}-{index}"
                     rollouts.append(rollout)
-                    identity[id(rollout)] = (Path(f"{rollout_id}.pkl"), {"rollout_id": rollout_id})
+                    identity[id(rollout)] = (
+                        Path(f"{rollout_id}.pkl"),
+                        {"rollout_id": rollout_id},
+                    )
         train, test, counts = make_seen_split(
             rollouts,
             identity,
@@ -583,16 +661,25 @@ class TestSeenTaskProtocol(unittest.TestCase):
                     rollout = SimpleNamespace(task_id=task_id, episode_success=success)
                     rollout_id = f"task-{task_id}-success-{success}-{index}"
                     rollouts.append(rollout)
-                    identity[id(rollout)] = (Path(f"{rollout_id}.pkl"), {"rollout_id": rollout_id})
-        outer_train, outer_test, _ = make_seen_split(rollouts, identity, train_per_class=7, split_seed=0)
+                    identity[id(rollout)] = (
+                        Path(f"{rollout_id}.pkl"),
+                        {"rollout_id": rollout_id},
+                    )
+        outer_train, outer_test, _ = make_seen_split(
+            rollouts, identity, train_per_class=7, split_seed=0
+        )
         folds = make_inner_folds(outer_train, identity, num_folds=3, seed=0)
         outer_test_ids = {identity[id(item)][1]["rollout_id"] for item in outer_test}
         validation_union = set()
         self.assertEqual([len(validation) for _, validation in folds], [30, 20, 20])
         for training, validation in folds:
-            ids = {identity[id(item)][1]["rollout_id"] for item in training + validation}
+            ids = {
+                identity[id(item)][1]["rollout_id"] for item in training + validation
+            }
             self.assertFalse(ids & outer_test_ids)
-            validation_union.update(identity[id(item)][1]["rollout_id"] for item in validation)
+            validation_union.update(
+                identity[id(item)][1]["rollout_id"] for item in validation
+            )
         self.assertEqual(len(validation_union), 70)
 
     def test_task_type_filter_reuses_fixed_outer_split_ids(self):
@@ -620,9 +707,7 @@ class TestSeenTaskProtocol(unittest.TestCase):
             for task_name, task_id in task_ids.items():
                 for success in (0, 1):
                     for index in range(2):
-                        rollout_id = (
-                            f"{task_name}-success-{success}-index-{index}"
-                        )
+                        rollout_id = f"{task_name}-success-{success}-index-{index}"
                         rollouts.append(
                             SimpleNamespace(
                                 task_id=task_id,
@@ -639,9 +724,7 @@ class TestSeenTaskProtocol(unittest.TestCase):
                                 },
                             )
                         )
-                        (train_ids if index == 0 else test_ids).append(
-                            rollout_id
-                        )
+                        (train_ids if index == 0 else test_ids).append(rollout_id)
             split_path = root / "split_manifest.json"
             split_path.write_text(
                 json.dumps(
@@ -670,15 +753,11 @@ class TestSeenTaskProtocol(unittest.TestCase):
             self.assertEqual(len(selected_env), 8)
             self.assertEqual(
                 {identity[id(item)][1]["rollout_id"] for item in train},
-                set(train_ids) & {
-                    env["rollout_id"] for _, env in selected_env
-                },
+                set(train_ids) & {env["rollout_id"] for _, env in selected_env},
             )
             self.assertEqual(
                 {identity[id(item)][1]["rollout_id"] for item in test},
-                set(test_ids) & {
-                    env["rollout_id"] for _, env in selected_env
-                },
+                set(test_ids) & {env["rollout_id"] for _, env in selected_env},
             )
             self.assertEqual(set(per_task), {0, 2})
 
@@ -698,9 +777,7 @@ class TestSeenTaskProtocol(unittest.TestCase):
                         "model": model,
                         "seed": seed,
                         "task_type_filter": "atomic",
-                        "task_types": {
-                            f"Task{index}": "atomic" for index in range(10)
-                        },
+                        "task_types": {f"Task{index}": "atomic" for index in range(10)},
                         "num_tasks": 10,
                         "counts": {
                             "train": 140,
@@ -740,7 +817,9 @@ class TestSeenTaskProtocol(unittest.TestCase):
                                 f"Task{index}" for index in range(5)
                             ],
                             "horizon_selector": "1.0",
-                            "diffusion_selector": "concat-2" if config == "high" else "0.0",
+                            "diffusion_selector": "concat-2"
+                            if config == "high"
+                            else "0.0",
                             "learning_rate": 1e-3 if config == "high" else 1e-4,
                             "lambda_reg": 1e-2,
                             "fold": fold,
@@ -764,18 +843,18 @@ class TestSeenTaskProtocol(unittest.TestCase):
             self.assertEqual(summary["task_type_filter"], "atomic")
             self.assertEqual(summary["outer_train_counts"]["rollouts"], 140)
             self.assertEqual(summary["outer_test_counts"]["rollouts"], 60)
-            self.assertEqual(summary["best_by_model"]["lstm"]["diffusion_selector"], "concat-2")
-            resolved = resolve_hyperparameters("lstm", root / "cv_selection_summary.json")
+            self.assertEqual(
+                summary["best_by_model"]["lstm"]["diffusion_selector"], "concat-2"
+            )
+            resolved = resolve_hyperparameters(
+                "lstm", root / "cv_selection_summary.json"
+            )
             self.assertEqual(resolved["horizon_selector"], 1.0)
             self.assertEqual(resolved["diffusion_selector"], "concat-2")
 
-            summary = json.loads(
-                (root / "cv_selection_summary.json").read_text()
-            )
+            summary = json.loads((root / "cv_selection_summary.json").read_text())
             summary["task_type_filter"] = "atomic"
-            (root / "cv_selection_summary.json").write_text(
-                json.dumps(summary)
-            )
+            (root / "cv_selection_summary.json").write_text(json.dumps(summary))
             with self.assertRaisesRegex(ValueError, "does not match"):
                 resolve_hyperparameters(
                     "lstm",

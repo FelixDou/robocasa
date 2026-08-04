@@ -24,6 +24,14 @@ def causal_signature(record):
         "horizons": protocol["horizons"],
         "random_prefixes_per_segment": protocol["random_prefixes_per_segment"],
         "conditioning": conditioning["mode"],
+        "label_mode": protocol.get("label_mode", "eventual"),
+        "failure_horizon": protocol.get("failure_horizon"),
+        "temporal_representation": payload.get(
+            "temporal_representation", {"mode": "raw"}
+        )["mode"],
+        "temporal_window": payload.get("temporal_representation", {"window": 4})[
+            "window"
+        ],
         "min_stage_successes": support["min_successes"],
         "min_stage_failures": support["min_failures"],
         "requested_stages": support["requested_stages"],
@@ -87,6 +95,31 @@ def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
     selection_metrics = {record.get("selection_metric") for record in records}
     if len(selection_metrics) > 1:
         raise ValueError("CV runs mix different hyperparameter-selection metrics")
+    objectives = {
+        json.dumps(
+            record.get(
+                "training_objective",
+                {
+                    "loss_mode": "official",
+                    "focal_gamma": 2.0,
+                    "score_output": "pinned_safe_output",
+                },
+            ),
+            sort_keys=True,
+        )
+        for record in records
+    }
+    if len(objectives) > 1:
+        raise ValueError("CV runs mix incompatible training objectives")
+    training_objective = (
+        json.loads(next(iter(objectives)))
+        if objectives
+        else {
+            "loss_mode": "official",
+            "focal_gamma": 2.0,
+            "score_output": "pinned_safe_output",
+        }
+    )
     rows = []
     for key, values in groups.items():
         folds = {int(value["fold"]) for value in values}
@@ -143,6 +176,7 @@ def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
             list(next(iter(selected_task_sets))) if selected_task_sets else []
         ),
         "causal_subtask_safe": causal_subtask_safe,
+        "training_objective": training_objective,
         "outer_train_counts": outer_counts[0] if outer_counts else None,
         "outer_test_counts": test_counts[0] if test_counts else None,
         "num_completed_fits": len(records),

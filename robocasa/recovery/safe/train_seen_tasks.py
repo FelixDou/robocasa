@@ -19,18 +19,22 @@ import numpy as np
 
 try:
     from .causal_subtask_safe import (
+        CAUSAL_LABEL_MODES,
         CONDITIONING_MODES,
         DEFAULT_PREFIX_HORIZONS,
         PREFIX_TRAINING_MODES,
+        TEMPORAL_REPRESENTATIONS,
         CausalPrefixConfig,
         prepare_causal_splits,
         validate_prefix_horizons,
     )
 except ImportError:
     from causal_subtask_safe import (
+        CAUSAL_LABEL_MODES,
         CONDITIONING_MODES,
         DEFAULT_PREFIX_HORIZONS,
         PREFIX_TRAINING_MODES,
+        TEMPORAL_REPRESENTATIONS,
         CausalPrefixConfig,
         prepare_causal_splits,
         validate_prefix_horizons,
@@ -40,6 +44,7 @@ except ImportError:
 OFFICIAL_SAFE_COMMIT = "b6036abe07b2b2bb9996afb2c07f13d6a9f507c0"
 TASK_TYPE_FILTERS = ("all", "atomic", "composite")
 CLASS_WEIGHTING_MODES = ("official_inverse_frequency", "none")
+LOSS_MODES = ("official", "bce", "focal")
 MODEL_DEFAULTS = {
     "indep": {
         "horizon_selector": 1.0,
@@ -54,6 +59,30 @@ MODEL_DEFAULTS = {
         "lambda_reg": 1e-2,
     },
 }
+
+
+def training_objective_metadata(loss_mode, focal_gamma=2.0):
+    if loss_mode not in LOSS_MODES:
+        raise ValueError(f"Unknown training loss mode {loss_mode!r}")
+    if float(focal_gamma) < 0:
+        raise ValueError("focal_gamma must be non-negative")
+    return {
+        "loss_mode": loss_mode,
+        "focal_gamma": float(focal_gamma),
+        "score_output": (
+            "pinned_safe_output"
+            if loss_mode == "official"
+            else "instantaneous_failure_probability"
+        ),
+    }
+
+
+def configure_training_objective(cfg, loss_mode):
+    """Keep BCE/focal training and evaluation on the same probabilities."""
+    if loss_mode != "official":
+        cfg.model.cumsum = False
+        cfg.model.rmean = False
+    return cfg
 
 
 def set_task_min_step_from_training(train_rollouts, *other_splits):
@@ -123,6 +152,10 @@ def validate_causal_selection_summary(selection_summary, config, requested_stage
             "horizons": list(config.horizons),
             "random_prefixes_per_segment": config.random_prefixes_per_segment,
             "conditioning": config.conditioning,
+            "label_mode": config.label_mode,
+            "failure_horizon": config.failure_horizon,
+            "temporal_representation": config.temporal_representation,
+            "temporal_window": config.temporal_window,
             "min_stage_successes": config.min_stage_successes,
             "min_stage_failures": config.min_stage_failures,
             "requested_stages": requested,
@@ -134,10 +167,17 @@ def validate_causal_selection_summary(selection_summary, config, requested_stage
         )
     if selected is None:
         return
+    backward_compatible_defaults = {
+        "label_mode": "eventual",
+        "failure_horizon": None,
+        "temporal_representation": "raw",
+        "temporal_window": 4,
+    }
     for key, value in current.items():
-        if selected.get(key) != value:
+        selected_value = selected.get(key, backward_compatible_defaults.get(key))
+        if selected_value != value:
             raise ValueError(
-                f"Selection summary causal setting {key}={selected.get(key)!r} "
+                f"Selection summary causal setting {key}={selected_value!r} "
                 f"does not match final refit value {value!r}"
             )
 
@@ -146,6 +186,9 @@ def causal_args_signature(args):
     enabled = bool(
         args.causal_prefix_mode != "none"
         or args.causal_conditioning != "none"
+        or args.causal_label_mode != "eventual"
+        or args.causal_failure_horizon is not None
+        or args.temporal_representation != "raw"
         or args.min_stage_successes
         or args.min_stage_failures
         or args.stages
@@ -157,6 +200,10 @@ def causal_args_signature(args):
         "horizons": list(validate_prefix_horizons(args.causal_prefix_horizons)),
         "random_prefixes_per_segment": int(args.random_prefixes_per_segment),
         "conditioning": args.causal_conditioning,
+        "label_mode": args.causal_label_mode,
+        "failure_horizon": args.causal_failure_horizon,
+        "temporal_representation": args.temporal_representation,
+        "temporal_window": int(args.temporal_window),
         "min_stage_successes": int(args.min_stage_successes),
         "min_stage_failures": int(args.min_stage_failures),
         "requested_stages": None if args.stages is None else sorted(args.stages),
@@ -174,6 +221,14 @@ def causal_metrics_signature(metrics):
             "random_prefixes_per_segment"
         ],
         "conditioning": payload["conditioning"]["mode"],
+        "label_mode": payload["protocol"].get("label_mode", "eventual"),
+        "failure_horizon": payload["protocol"].get("failure_horizon"),
+        "temporal_representation": payload.get(
+            "temporal_representation", {"mode": "raw"}
+        )["mode"],
+        "temporal_window": payload.get("temporal_representation", {"window": 4})[
+            "window"
+        ],
         "min_stage_successes": payload["stage_support"]["min_successes"],
         "min_stage_failures": payload["stage_support"]["min_failures"],
         "requested_stages": payload["stage_support"]["requested_stages"],
@@ -572,6 +627,8 @@ def train_epoch_without_wandb(
     device,
     *,
     class_weighting="official_inverse_frequency",
+    loss_mode="official",
+    focal_gamma=2.0,
 ):
     import torch
     from failure_prob.utils.torch import move_to_device
@@ -581,7 +638,16 @@ def train_epoch_without_wandb(
     losses = []
     for batch in loader:
         batch = move_to_device(batch, device)
-        monitor_loss, _ = model.forward_compute_loss(batch, weights)
+        if loss_mode == "official":
+            monitor_loss, _ = model.forward_compute_loss(batch, weights)
+        else:
+            monitor_loss = causal_binary_monitor_loss(
+                model,
+                batch,
+                weights,
+                loss_mode=loss_mode,
+                focal_gamma=focal_gamma,
+            )
         regularization, _ = model.compute_regularization_loss(
             model.cfg.model.lambda_reg
         )
@@ -597,6 +663,62 @@ def train_epoch_without_wandb(
         optimizer.step()
         losses.append(float(total.detach().cpu()))
     return float(np.mean(losses))
+
+
+def causal_binary_monitor_loss(
+    model,
+    batch,
+    weights,
+    *,
+    loss_mode="bce",
+    focal_gamma=2.0,
+):
+    """BCE/focal alternative on each causal prefix endpoint.
+
+    The official independent monitor cumulatively sums sigmoid outputs. BCE is
+    therefore applied to its pre-accumulation projector probability; LSTM
+    outputs are already instantaneous probabilities in the pinned SAFE code.
+    Only the last valid state is supervised because the finite-horizon target
+    describes the prefix endpoint, not every earlier state in that prefix.
+    """
+    import torch
+
+    if loss_mode not in ("bce", "focal"):
+        raise ValueError(f"Unknown binary causal loss mode {loss_mode!r}")
+    if float(focal_gamma) < 0:
+        raise ValueError("focal_gamma must be non-negative")
+    if getattr(model.cfg.model, "name", None) == "indep":
+        probabilities = model.projector(batch["features"]).squeeze(-1)
+    else:
+        probabilities = model(batch).squeeze(-1)
+        if bool(getattr(model.cfg.model, "cumsum", False)):
+            increments = torch.zeros_like(probabilities)
+            increments[:, 0] = probabilities[:, 0]
+            increments[:, 1:] = probabilities[:, 1:] - probabilities[:, :-1]
+            probabilities = increments
+    probabilities = probabilities.clamp(1e-6, 1.0 - 1e-6)
+    valid = batch["valid_masks"].bool()
+    valid_lengths = valid.sum(dim=1)
+    if torch.any(valid_lengths <= 0):
+        raise ValueError("Binary causal loss received an empty sequence")
+    row_indices = torch.arange(len(probabilities), device=probabilities.device)
+    endpoint_probabilities = probabilities[row_indices, valid_lengths - 1]
+    success_labels = batch["success_labels"]
+    targets = (1 - success_labels).float()
+    losses = torch.nn.functional.binary_cross_entropy(
+        endpoint_probabilities, targets, reduction="none"
+    )
+    if loss_mode == "focal":
+        target_probability = torch.where(
+            targets > 0.5, endpoint_probabilities, 1.0 - endpoint_probabilities
+        )
+        losses = losses * (1.0 - target_probability).pow(float(focal_gamma))
+    failure_mask = success_labels == 0
+    success_mask = success_labels == 1
+    return (
+        float(weights[0]) * losses[failure_mask].sum()
+        + float(weights[1]) * losses[success_mask].sum()
+    ) / len(losses)
 
 
 def score_splits(model, loaders):
@@ -662,7 +784,19 @@ def save_scores(
                     "subtask_instruction": env.get("subtask_instruction"),
                     "subtask_safe_segment": env.get("subtask_safe_segment"),
                     "source_segment_id": env.get("source_segment_id"),
+                    "source_segment_num_inferences": env.get(
+                        "source_segment_num_inferences"
+                    ),
+                    "source_segment_failed": env.get("source_segment_failed"),
                     "causal_prefix_inferences": env.get("causal_prefix_inferences"),
+                    "causal_label_mode": env.get("causal_label_mode"),
+                    "causal_failure_horizon_inferences": env.get(
+                        "causal_failure_horizon_inferences"
+                    ),
+                    "causal_target_failed": env.get("causal_target_failed"),
+                    "remaining_inferences_to_terminal": env.get(
+                        "remaining_inferences_to_terminal"
+                    ),
                     "split": split,
                     "task_id": int(rollout.task_id),
                     "task_name": names[int(rollout.task_id)],
@@ -701,6 +835,17 @@ def train_seen_model(args):
             raise ValueError(
                 f"Existing final refit uses an incompatible causal protocol: {output}"
             )
+        previous_objective = previous_metrics.get(
+            "training_objective",
+            training_objective_metadata("official"),
+        )
+        current_objective = training_objective_metadata(
+            args.loss_mode, args.focal_gamma
+        )
+        if previous_objective != current_objective:
+            raise ValueError(
+                f"Existing final refit uses an incompatible objective: {output}"
+            )
         return previous_metrics
     if output.exists() and any(output.iterdir()) and not args.resume:
         raise FileExistsError(f"Output directory is not empty: {output}; pass --resume")
@@ -720,6 +865,19 @@ def train_seen_model(args):
         args.selection_summary,
         expected_task_type=args.task_type,
     )
+    if args.selection_summary is not None:
+        selection = json.loads(Path(args.selection_summary).read_text())
+        selected_objective = selection.get(
+            "training_objective",
+            training_objective_metadata("official"),
+        )
+        current_objective = training_objective_metadata(
+            args.loss_mode, args.focal_gamma
+        )
+        if selected_objective != current_objective:
+            raise ValueError(
+                "Selection summary training objective does not match final refit"
+            )
     cfg = make_config(
         args.export_dir,
         args.model,
@@ -728,6 +886,7 @@ def train_seen_model(args):
         args.device,
         hyperparameters,
     )
+    configure_training_objective(cfg, args.loss_mode)
     seed_everything(0)
     source_rollouts = load_rollouts_from_root(Path(args.export_dir), cfg)
     source_env_records = load_env_records(args.export_dir)
@@ -779,6 +938,9 @@ def train_seen_model(args):
     causal_requested = bool(
         args.causal_prefix_mode != "none"
         or args.causal_conditioning != "none"
+        or args.causal_label_mode != "eventual"
+        or args.causal_failure_horizon is not None
+        or args.temporal_representation != "raw"
         or args.min_stage_successes
         or args.min_stage_failures
         or args.stages
@@ -795,6 +957,10 @@ def train_seen_model(args):
             horizons=validate_prefix_horizons(args.causal_prefix_horizons),
             random_prefixes_per_segment=args.random_prefixes_per_segment,
             conditioning=args.causal_conditioning,
+            label_mode=args.causal_label_mode,
+            failure_horizon=args.causal_failure_horizon,
+            temporal_representation=args.temporal_representation,
+            temporal_window=args.temporal_window,
             min_stage_successes=args.min_stage_successes,
             min_stage_failures=args.min_stage_failures,
         )
@@ -860,6 +1026,8 @@ def train_seen_model(args):
                 loaders["train"],
                 args.device,
                 class_weighting=args.class_weighting,
+                loss_mode=args.loss_mode,
+                focal_gamma=args.focal_gamma,
             )
         )
         if scheduler is not None:
@@ -934,13 +1102,18 @@ def train_seen_model(args):
             None if args.selection_manifest is not None else args.train_per_class
         ),
         "class_weighting": args.class_weighting,
+        "training_objective": training_objective_metadata(
+            args.loss_mode, args.focal_gamma
+        ),
         "training_class_weights": training_class_weights,
         "causal_subtask_safe": (
             {
                 "protocol": causal_payload["protocol"],
                 "conditioning": causal_payload["conditioning"],
+                "temporal_representation": causal_payload["temporal_representation"],
                 "stage_support": causal_payload["support"],
                 "prefix_counts": causal_payload["prefix_counts"],
+                "target_counts_by_prefix": causal_payload["target_counts_by_prefix"],
                 "source_counts": {
                     "train_segments": len(causal_payload["source_train"]),
                     "test_segments": len(causal_payload["source_test"]),
@@ -1020,14 +1193,19 @@ def train_seen_model(args):
             fixed_split_ids["path"] if args.selection_manifest is not None else None
         ),
         "class_weighting": args.class_weighting,
+        "training_objective": training_objective_metadata(
+            args.loss_mode, args.focal_gamma
+        ),
         "split_unit": ("parent_rollout" if parent_grouped_split else "rollout"),
         "training_class_weights": training_class_weights,
         "causal_subtask_safe": (
             {
                 "protocol": causal_payload["protocol"],
                 "conditioning": causal_payload["conditioning"],
+                "temporal_representation": causal_payload["temporal_representation"],
                 "stage_support": causal_payload["support"],
                 "prefix_counts": causal_payload["prefix_counts"],
+                "target_counts_by_prefix": causal_payload["target_counts_by_prefix"],
                 "source_counts": {
                     "train_segments": len(causal_payload["source_train"]),
                     "test_segments": len(causal_payload["source_test"]),
@@ -1093,6 +1271,13 @@ def build_parser():
         default="official_inverse_frequency",
         help="Official inverse-frequency SAFE weighting or an unweighted ablation",
     )
+    parser.add_argument(
+        "--loss-mode",
+        choices=LOSS_MODES,
+        default="official",
+        help="Pinned SAFE loss, per-inference BCE, or focal BCE",
+    )
+    parser.add_argument("--focal-gamma", type=float, default=2.0)
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--selection-summary")
@@ -1118,6 +1303,19 @@ def build_parser():
         default="none",
         help="Append training-catalog stage one-hot and optional causal elapsed feature",
     )
+    parser.add_argument(
+        "--causal-label-mode",
+        choices=CAUSAL_LABEL_MODES,
+        default="eventual",
+        help="Eventual segment failure or failure within the configured future horizon",
+    )
+    parser.add_argument("--causal-failure-horizon", type=int)
+    parser.add_argument(
+        "--temporal-representation",
+        choices=TEMPORAL_REPRESENTATIONS,
+        default="raw",
+    )
+    parser.add_argument("--temporal-window", type=int, default=4)
     parser.add_argument("--min-stage-successes", type=int, default=0)
     parser.add_argument("--min-stage-failures", type=int, default=0)
     parser.add_argument(

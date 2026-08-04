@@ -11,10 +11,13 @@ install_lightweight_robocasa_packages()
 
 from robocasa.recovery.safe.causal_subtask_safe import (  # noqa: E402
     CausalPrefixConfig,
+    apply_causal_target,
     clone_prefix_rollout,
     prefix_lengths_for_rollout,
     prepare_causal_splits,
     select_supported_stages,
+    transform_temporal_representation,
+    validate_causal_config,
 )
 from robocasa.recovery.safe.evaluate_causal_subtask_gates import (  # noqa: E402
     evaluate_root,
@@ -59,6 +62,31 @@ def fake_item(index, success, split, stage="Task::stage", parent=None):
 
 
 class TestCausalSubtaskSafe(unittest.TestCase):
+    def test_within_horizon_requires_prefixes_and_positive_horizon(self):
+        with self.assertRaisesRegex(ValueError, "causal prefix training"):
+            validate_causal_config(
+                CausalPrefixConfig(
+                    training_mode="none",
+                    label_mode="within_horizon",
+                    failure_horizon=8,
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "positive failure_horizon"):
+            validate_causal_config(
+                CausalPrefixConfig(
+                    training_mode="fixed",
+                    label_mode="within_horizon",
+                )
+            )
+        with self.assertRaisesRegex(ValueError, "only meaningful"):
+            validate_causal_config(
+                CausalPrefixConfig(
+                    training_mode="fixed",
+                    label_mode="eventual",
+                    failure_horizon=8,
+                )
+            )
+
     def test_prefix_clone_truncates_all_official_time_aligned_tensors(self):
         rollout, env = fake_item(0, 1, "train")
         rollout.hidden_states = np.zeros((43, 4), dtype=np.float32)
@@ -135,6 +163,38 @@ class TestCausalSubtaskSafe(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(len(first), 4)
         self.assertTrue(all(1 <= value <= 16 for value in first))
+
+    def test_within_horizon_target_is_negative_until_failure_is_near(self):
+        rollout, env = fake_item(0, 0, "train")
+        early, early_env = clone_prefix_rollout(rollout, env, 4)
+        late, late_env = clone_prefix_rollout(rollout, env, 16)
+        self.assertFalse(
+            apply_causal_target(
+                early, early_env, label_mode="within_horizon", failure_horizon=8
+            )
+        )
+        self.assertTrue(
+            apply_causal_target(
+                late, late_env, label_mode="within_horizon", failure_horizon=8
+            )
+        )
+        self.assertEqual((early.episode_success, late.episode_success), (1, 0))
+        self.assertEqual(early_env["remaining_inferences_to_terminal"], 16)
+        self.assertEqual(late_env["remaining_inferences_to_terminal"], 4)
+
+    def test_temporal_representations_are_causal_and_length_preserving(self):
+        rollout = FakeRollout(0, 1, length=5, dimensions=2)
+        original = rollout.hidden_states.copy()
+        metadata = transform_temporal_representation(
+            [rollout], mode="raw_delta_mean_slope", window=3
+        )
+        self.assertEqual(rollout.hidden_states.shape, (5, 8))
+        self.assertEqual(metadata["source_dimension"], 2)
+        np.testing.assert_array_equal(rollout.hidden_states[:, :2], original)
+        np.testing.assert_array_equal(rollout.hidden_states[0, 2:4], 0)
+        np.testing.assert_array_equal(
+            rollout.hidden_states[2, 2:4], original[2] - original[1]
+        )
 
     def test_stage_support_uses_training_only(self):
         train_pairs = [fake_item(i, int(i == 0), "train") for i in range(3)]
@@ -249,9 +309,22 @@ class TestCausalSubtaskSafe(unittest.TestCase):
             result = summary["models"]["indep"]
             self.assertTrue(result["continue_to_recovery_integration"])
             self.assertGreater(result["observed"]["causal_prefix_roc_auc"], 0.99)
+            self.assertAlmostEqual(result["observed"]["stage_prior_roc_auc"], 0.5)
+            self.assertAlmostEqual(result["observed"]["duration_progress_roc_auc"], 0.5)
             self.assertGreater(
                 result["bootstrap"]["safe_minus_elapsed_roc_auc"]["ci_95_low"],
                 0,
+            )
+            self.assertFalse(
+                set(summary["calibration"]["calibration_parent_ids"])
+                & set(summary["calibration"]["evaluation_parent_ids"])
+            )
+            self.assertTrue(
+                all(
+                    row["threshold_source"]
+                    == "successful parent-disjoint held-out calibration prefixes"
+                    for row in summary["operating_points"]
+                )
             )
 
 
