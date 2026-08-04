@@ -988,6 +988,87 @@ parent rollout, parent task, subtask ID, instruction, original environment-step
 alignment, and semantic segment boundaries, so later overlay videos can place
 the Subtask-SAFE score on the correct portion of the original rollout.
 
+### Parent-aware Subtask-SAFE evaluation and calibration
+
+Semantic segments from one environment rollout are correlated and must never
+be treated as independent calibration/evaluation units. Run the dedicated
+analysis after all six final refits. It reports natural single-class subtask
+support without inventing an AUC, resamples complete parent rollouts for 95%
+bootstrap intervals, and compares SAFE against a causal elapsed-time hazard
+fitted exclusively from training segment survival:
+
+```bash
+export SUBTASK_ANALYSIS_ROOT="$SUBTASK_SAFE_FINAL_ROOT/parent_causal_analysis"
+
+python -u -m robocasa.recovery.safe.analyze_subtask_safe_results \
+  --final-root "$SUBTASK_SAFE_FINAL_ROOT" \
+  --output-dir "$SUBTASK_ANALYSIS_ROOT" \
+  --models indep lstm \
+  --seeds 0 1 2 \
+  --prefix-horizons 1 2 4 8 16 32 64 128 \
+  --bootstrap-replicates 2000 \
+  --bootstrap-seed 0 \
+  --formats png pdf
+```
+
+At a prefix horizon, only segments that are still active after that many
+genuine policy inferences are eligible. The elapsed baseline is therefore
+causal: at inference `k` it uses only the semantic task identity, the fact that
+the subtask remains active, and training data. It never uses the held-out final
+segment length. The analysis writes exact per-seed, per-subtask, and prefix CSV
+files plus support, prefix, and parent-bootstrap figures.
+
+Functional conformal calibration also assigns complete held-out parents. All
+successful segments from selected calibration parents may contribute to the
+threshold; their failure segments are consumed but excluded. Every segment
+from every remaining parent is evaluation-only. Reference and nonconformity
+successes are themselves parent-disjoint:
+
+```bash
+export SUBTASK_CALIBRATION_ROOT="$SUBTASK_SAFE_FINAL_ROOT/parent_calibration"
+
+python -u -m robocasa.recovery.safe.calibrate_seen_tasks \
+  --final-root "$SUBTASK_SAFE_FINAL_ROOT" \
+  --output-dir "$SUBTASK_CALIBRATION_ROOT" \
+  --model indep \
+  --seeds 0 1 2 \
+  --task-type composite \
+  --split-unit parent_rollout \
+  --calibration-parent-fraction 0.4 \
+  --split-seed 0 \
+  --conformal-seed 0 \
+  --reference-fraction 0.3 \
+  --alphas 0.05 0.10 0.15 0.20 \
+  --selected-alpha 0.15 \
+  --modulation tfunc
+```
+
+Each alpha directory contains both the Subtask-SAFE calibration and a separately
+calibrated training-only elapsed-hazard baseline. `detection_events.csv`
+records causal detection environment steps and lead time before each failed
+semantic segment ends. The selected alpha remains predeclared; the other alpha
+values are sensitivity analyses rather than post-hoc operating-point choices.
+
+Render one annotated video per evaluation parent using normalized scores and
+the calibration for the same model seed:
+
+```bash
+python -u -m robocasa.recovery.safe.render_score_videos \
+  --scores "$SUBTASK_CALIBRATION_ROOT/indep_seed0/normalized_scores.jsonl" \
+  --calibration "$SUBTASK_CALIBRATION_ROOT/indep_seed0/alpha_0p15/calibration.json" \
+  --output-dir "$SUBTASK_CALIBRATION_ROOT/indep_seed0/alpha_0p15/parent_videos" \
+  --split evaluation \
+  --group-by-parent \
+  --max-videos 10
+```
+
+The overlay identifies the parent task and outcome, active natural-language
+subtask, segment outcome, elapsed environment steps, causal SAFE risk, growing
+score trace, conformal threshold, and alert state. SAFE output is called a risk
+score, not a calibrated probability. The semantic subtask boundary remains an
+oracle diagnostic input; online subtask recognition is a separate future
+module.
+
 ## Local structural validation
 
 These checks require no GPU, RoboSuite, simulator, checkpoint, or server:

@@ -19,11 +19,25 @@ import random
 import numpy as np
 
 try:
-    from .conformal import calibrate_functional_threshold
+    from .conformal import calibrate_functional_threshold, first_detection
     from .evaluate import evaluate_groups
+    from .subtask_safe_evaluation import (
+        detection_event,
+        fit_elapsed_hazard,
+        parent_grouped_calibration_split,
+        parent_id,
+        replace_with_elapsed_scores,
+    )
 except ImportError:
-    from conformal import calibrate_functional_threshold
+    from conformal import calibrate_functional_threshold, first_detection
     from evaluate import evaluate_groups
+    from subtask_safe_evaluation import (
+        detection_event,
+        fit_elapsed_hazard,
+        parent_grouped_calibration_split,
+        parent_id,
+        replace_with_elapsed_scores,
+    )
 
 
 NORMALIZATION_EPS = 1e-8
@@ -97,6 +111,9 @@ def record_signature(record):
         record["task_name"],
         bool(record["failed"]),
         int(record["task_min_step"]),
+        record.get("parent_rollout_id"),
+        record.get("parent_task_name"),
+        record.get("parent_rollout_failed"),
     )
 
 
@@ -326,6 +343,9 @@ def normalize_records(
     task_types=None,
 ):
     calibration_ids = set(split_manifest["calibration_success_ids"])
+    calibration_excluded_ids = set(
+        split_manifest.get("calibration_failure_ids_excluded", [])
+    )
     evaluation_ids = set(split_manifest["evaluation_ids"])
     normalized = []
     for record in records:
@@ -336,6 +356,8 @@ def normalize_records(
             split = "train"
         elif record["rollout_id"] in calibration_ids:
             split = "calibration"
+        elif record["rollout_id"] in calibration_excluded_ids:
+            split = "calibration_excluded"
         elif record["rollout_id"] in evaluation_ids:
             split = "evaluation"
         else:
@@ -377,9 +399,50 @@ def _count_records(records):
     }
 
 
-def _flatten_overall(seed, alpha, metrics):
+def _lead_time_summary(records, calibration):
+    events = []
+    for record in records:
+        if not record["failed"]:
+            continue
+        index = first_detection(record["scores"], calibration)
+        events.append(
+            {
+                "rollout_id": record["rollout_id"],
+                "parent_rollout_id": parent_id(record),
+                "parent_task_name": record.get("parent_task_name"),
+                "task_name": record["task_name"],
+                "subtask_id": record.get("subtask_id"),
+                "detection_index": index,
+                **detection_event(record, index),
+            }
+        )
+    detected = [event for event in events if event["detected"]]
+    lead = [
+        event["lead_environment_steps"]
+        for event in detected
+        if event["lead_environment_steps"] is not None
+    ]
+    normalized = [
+        event["normalized_lead_time"]
+        for event in detected
+        if event["normalized_lead_time"] is not None
+    ]
+    return {
+        "num_failures": len(events),
+        "num_detected_failures": len(detected),
+        "mean_lead_environment_steps": float(np.mean(lead)) if lead else None,
+        "median_lead_environment_steps": float(np.median(lead)) if lead else None,
+        "mean_normalized_lead_time": (
+            float(np.mean(normalized)) if normalized else None
+        ),
+        "events": events,
+    }
+
+
+def _flatten_overall(seed, alpha, metrics, *, method, lead_time):
     overall = metrics["overall"]
     return {
+        "method": method,
         "seed": seed,
         "alpha": alpha,
         "num_rollouts": overall["num_rollouts"],
@@ -392,6 +455,9 @@ def _flatten_overall(seed, alpha, metrics):
         "true_negative_rate": overall["true_negative_rate"],
         "balanced_accuracy": overall["balanced_accuracy"],
         "normalized_detection_time": overall["normalized_detection_time"],
+        "mean_lead_environment_steps": lead_time["mean_lead_environment_steps"],
+        "median_lead_environment_steps": lead_time["median_lead_environment_steps"],
+        "mean_normalized_lead_time": lead_time["mean_normalized_lead_time"],
         **{
             f"confusion_{key}": value
             for key, value in overall["confusion"].items()
@@ -411,8 +477,8 @@ def _write_csv(path, rows):
     return path
 
 
-def aggregate_metrics(overall_rows, task_rows, selected_alpha):
-    metrics = (
+def _aggregate_method_metrics(overall_rows, task_rows, selected_alpha):
+    task_metrics = (
         "roc_auc",
         "auprc",
         "true_positive_rate",
@@ -421,11 +487,16 @@ def aggregate_metrics(overall_rows, task_rows, selected_alpha):
         "balanced_accuracy",
         "normalized_detection_time",
     )
+    overall_metrics = task_metrics + (
+        "mean_lead_environment_steps",
+        "median_lead_environment_steps",
+        "mean_normalized_lead_time",
+    )
     by_alpha = {}
     for alpha in sorted({row["alpha"] for row in overall_rows}):
         selected = [row for row in overall_rows if row["alpha"] == alpha]
         summary = {"seeds": sorted(row["seed"] for row in selected)}
-        for metric in metrics:
+        for metric in overall_metrics:
             values = np.asarray(
                 [row[metric] for row in selected if row[metric] is not None],
                 dtype=np.float64,
@@ -444,7 +515,7 @@ def aggregate_metrics(overall_rows, task_rows, selected_alpha):
     for task in sorted({row["task_name"] for row in selected_rows}):
         values = [row for row in selected_rows if row["task_name"] == task]
         summary = {}
-        for metric in metrics:
+        for metric in task_metrics:
             array = np.asarray(
                 [row[metric] for row in values if row[metric] is not None],
                 dtype=np.float64,
@@ -463,6 +534,21 @@ def aggregate_metrics(overall_rows, task_rows, selected_alpha):
     }
 
 
+def aggregate_metrics(overall_rows, task_rows, selected_alpha):
+    methods = {}
+    for method in sorted({row["method"] for row in overall_rows}):
+        methods[method] = _aggregate_method_metrics(
+            [row for row in overall_rows if row["method"] == method],
+            [row for row in task_rows if row["method"] == method],
+            selected_alpha,
+        )
+    safe = methods["safe"]
+    return {
+        **safe,
+        "methods": methods,
+    }
+
+
 def create_plots(summary, output_dir):
     import matplotlib
 
@@ -471,13 +557,14 @@ def create_plots(summary, output_dir):
 
     output_dir = Path(output_dir)
     by_alpha = summary["aggregate"]["by_alpha"]
+    methods = summary["aggregate"].get("methods", {})
     alphas = np.asarray(sorted(float(alpha) for alpha in by_alpha))
     paths = []
     fig, ax = plt.subplots(figsize=(7.2, 4.6))
     for metric, label, color in (
         ("true_positive_rate", "TPR", "#D55E00"),
         ("false_positive_rate", "FPR", "#0072B2"),
-        ("balanced_accuracy", "Balanced accuracy", "#009E73"),
+        ("balanced_accuracy", "Balanced accuracy", "#374151"),
     ):
         mean = np.asarray(
             [by_alpha[f"{alpha:g}"][f"{metric}_mean"] for alpha in alphas]
@@ -487,6 +574,23 @@ def create_plots(summary, output_dir):
         )
         ax.plot(alphas, mean, marker="o", label=label, color=color)
         ax.fill_between(alphas, mean - std, mean + std, color=color, alpha=0.15)
+    elapsed = methods.get("elapsed_time", {}).get("by_alpha", {})
+    if elapsed:
+        mean = np.asarray(
+            [elapsed[f"{alpha:g}"]["balanced_accuracy_mean"] for alpha in alphas]
+        )
+        std = np.asarray(
+            [elapsed[f"{alpha:g}"]["balanced_accuracy_std"] for alpha in alphas]
+        )
+        ax.plot(
+            alphas,
+            mean,
+            marker="s",
+            linestyle="--",
+            label="Elapsed-time balanced accuracy",
+            color="#6B7280",
+        )
+        ax.fill_between(alphas, mean - std, mean + std, color="#6B7280", alpha=0.10)
     ax.set(
         xlabel="Conformal significance level (alpha)",
         ylabel="Rate",
@@ -505,12 +609,56 @@ def create_plots(summary, output_dir):
     paths.append(path)
 
     per_task = summary["aggregate"]["per_task_at_selected_alpha"]
+    elapsed_per_task = methods.get("elapsed_time", {}).get(
+        "per_task_at_selected_alpha", {}
+    )
     tasks = sorted(per_task)
-    means = [per_task[task]["balanced_accuracy_mean"] for task in tasks]
-    stds = [per_task[task]["balanced_accuracy_std"] for task in tasks]
+    means = [
+        np.nan
+        if per_task[task]["balanced_accuracy_mean"] is None
+        else per_task[task]["balanced_accuracy_mean"]
+        for task in tasks
+    ]
+    stds = [
+        0.0
+        if per_task[task]["balanced_accuracy_std"] is None
+        else per_task[task]["balanced_accuracy_std"]
+        for task in tasks
+    ]
     fig, ax = plt.subplots(figsize=(10.5, 5.2))
     positions = np.arange(len(tasks))
-    ax.bar(positions, means, yerr=stds, capsize=3, color="#56B4E9")
+    width = 0.38
+    ax.bar(
+        positions - width / 2,
+        means,
+        width,
+        yerr=stds,
+        capsize=3,
+        color="#2563A6",
+        label="Subtask-SAFE",
+    )
+    if elapsed_per_task:
+        elapsed_means = [
+            np.nan
+            if elapsed_per_task.get(task, {}).get("balanced_accuracy_mean") is None
+            else elapsed_per_task[task]["balanced_accuracy_mean"]
+            for task in tasks
+        ]
+        elapsed_stds = [
+            0.0
+            if elapsed_per_task.get(task, {}).get("balanced_accuracy_std") is None
+            else elapsed_per_task[task]["balanced_accuracy_std"]
+            for task in tasks
+        ]
+        ax.bar(
+            positions + width / 2,
+            elapsed_means,
+            width,
+            yerr=elapsed_stds,
+            capsize=3,
+            color="#D97706",
+            label="Elapsed-time hazard",
+        )
     ax.axhline(0.5, color="#555555", linestyle="--", linewidth=1)
     ax.set(
         ylabel="Balanced accuracy",
@@ -523,6 +671,7 @@ def create_plots(summary, output_dir):
     ax.set_xticks(positions)
     ax.set_xticklabels(tasks, rotation=38, ha="right")
     ax.grid(axis="y", alpha=0.5)
+    ax.legend(frameon=False)
     fig.tight_layout()
     path = output_dir / "per_task_balanced_accuracy.png"
     fig.savefig(path, dpi=180)
@@ -538,6 +687,8 @@ def run_seen_calibration(
     model="indep",
     seeds=(0, 1, 2),
     calibration_successes_per_task=3,
+    calibration_parent_fraction=0.4,
+    split_unit="auto",
     split_seed=0,
     conformal_seed=0,
     reference_fraction=0.3,
@@ -582,13 +733,40 @@ def run_seen_calibration(
         task_type,
     )
     validate_seed_alignment(records_by_seed)
-    split_manifest = deterministic_calibration_split(
-        records_by_seed[seeds[0]],
-        successes_per_task=calibration_successes_per_task,
-        split_seed=split_seed,
-        reference_fraction=reference_fraction,
-        conformal_seed=conformal_seed,
+    reference_records = records_by_seed[seeds[0]]
+    has_parent_ids = all(
+        record.get("parent_rollout_id") for record in reference_records
     )
+    if split_unit not in ("auto", "rollout", "parent_rollout"):
+        raise ValueError(
+            "split_unit must be one of auto, rollout, parent_rollout"
+        )
+    resolved_split_unit = (
+        "parent_rollout"
+        if split_unit == "parent_rollout" or (split_unit == "auto" and has_parent_ids)
+        else "rollout"
+    )
+    if resolved_split_unit == "parent_rollout":
+        if not has_parent_ids:
+            raise ValueError(
+                "Parent-rollout calibration requires parent_rollout_id on every score record"
+            )
+        split_manifest = parent_grouped_calibration_split(
+            reference_records,
+            parent_fraction=calibration_parent_fraction,
+            split_seed=split_seed,
+            reference_fraction=reference_fraction,
+            conformal_seed=conformal_seed,
+        )
+    else:
+        split_manifest = deterministic_calibration_split(
+            reference_records,
+            successes_per_task=calibration_successes_per_task,
+            split_seed=split_seed,
+            reference_fraction=reference_fraction,
+            conformal_seed=conformal_seed,
+        )
+        split_manifest["split_unit"] = "rollout"
     split_manifest.update(
         {
             "model": model,
@@ -614,6 +792,7 @@ def run_seen_calibration(
     conformal_ids = split_manifest["calibration_nonconformity_ids"]
     overall_rows = []
     task_rows = []
+    detection_rows = []
     seed_summaries = {}
     for seed in seeds:
         seed_root = output_dir / f"{model}_seed{seed}"
@@ -631,6 +810,24 @@ def run_seen_calibration(
         conformal = [by_id[rollout_id] for rollout_id in conformal_ids]
         evaluation = [
             record for record in records if record["split"] == "evaluation"
+        ]
+        elapsed_model = fit_elapsed_hazard(
+            records,
+            lambda record: len(truncated_scores(record)),
+        )
+        write_json(seed_root / "elapsed_hazard_model.json", elapsed_model)
+        elapsed_records = replace_with_elapsed_scores(
+            records,
+            elapsed_model,
+            lambda record: len(truncated_scores(record)),
+        )
+        elapsed_by_id = {
+            record["rollout_id"]: record for record in elapsed_records
+        }
+        elapsed_reference = [elapsed_by_id[rollout_id] for rollout_id in reference_ids]
+        elapsed_conformal = [elapsed_by_id[rollout_id] for rollout_id in conformal_ids]
+        elapsed_evaluation = [
+            record for record in elapsed_records if record["split"] == "evaluation"
         ]
         seed_summary = {
             "normalization": "training_task_early_max_z",
@@ -667,6 +864,39 @@ def run_seen_calibration(
             )
             write_json(alpha_root / "calibration.json", calibration)
             metrics = evaluate_groups(evaluation, calibration)
+            lead_time = _lead_time_summary(evaluation, calibration)
+            elapsed_calibration = calibrate_functional_threshold(
+                [record["scores"] for record in elapsed_reference],
+                [record["scores"] for record in elapsed_conformal],
+                alpha=alpha,
+                modulation=modulation,
+                alignment="extend",
+            )
+            elapsed_calibration.update(
+                {
+                    "protocol": "training_elapsed_subtask_hazard",
+                    "model": model,
+                    "model_seed": seed,
+                    "task_type_filter": task_type,
+                    "split_manifest": str(
+                        (output_dir / "split_manifest.json").resolve()
+                    ),
+                    "reference_rollout_ids": reference_ids,
+                    "calibration_rollout_ids": conformal_ids,
+                }
+            )
+            write_json(
+                alpha_root / "elapsed_time_calibration.json",
+                elapsed_calibration,
+            )
+            elapsed_metrics = evaluate_groups(
+                elapsed_evaluation,
+                elapsed_calibration,
+            )
+            elapsed_lead_time = _lead_time_summary(
+                elapsed_evaluation,
+                elapsed_calibration,
+            )
             result = {
                 "schema_version": 1,
                 "model": model,
@@ -681,36 +911,87 @@ def run_seen_calibration(
                     (alpha_root / "calibration.json").resolve()
                 ),
                 **metrics,
+                "lead_time": {
+                    key: value
+                    for key, value in lead_time.items()
+                    if key != "events"
+                },
+                "elapsed_time_baseline": {
+                    "calibration": str(
+                        (alpha_root / "elapsed_time_calibration.json").resolve()
+                    ),
+                    "lead_time": {
+                        key: value
+                        for key, value in elapsed_lead_time.items()
+                        if key != "events"
+                    },
+                    **elapsed_metrics,
+                },
             }
             write_json(alpha_root / "metrics.json", result)
-            overall_rows.append(_flatten_overall(seed, alpha, metrics))
-            for task, values in metrics["per_task"].items():
-                task_rows.append(
-                    {
-                        "seed": seed,
-                        "alpha": alpha,
-                        "task_name": task,
-                        **{
-                            key: value
-                            for key, value in values.items()
-                            if key != "confusion"
-                        },
-                        **{
-                            f"confusion_{key}": value
-                            for key, value in values["confusion"].items()
-                        },
-                    }
+            for method, method_metrics, method_lead in (
+                ("safe", metrics, lead_time),
+                ("elapsed_time", elapsed_metrics, elapsed_lead_time),
+            ):
+                overall_rows.append(
+                    _flatten_overall(
+                        seed,
+                        alpha,
+                        method_metrics,
+                        method=method,
+                        lead_time=method_lead,
+                    )
                 )
+                for event in method_lead["events"]:
+                    detection_rows.append(
+                        {
+                            "method": method,
+                            "seed": seed,
+                            "alpha": alpha,
+                            **event,
+                        }
+                    )
+                for task, values in method_metrics["per_task"].items():
+                    task_rows.append(
+                        {
+                            "method": method,
+                            "seed": seed,
+                            "alpha": alpha,
+                            "task_name": task,
+                            **{
+                                key: value
+                                for key, value in values.items()
+                                if key != "confusion"
+                            },
+                            **{
+                                f"confusion_{key}": value
+                                for key, value in values["confusion"].items()
+                            },
+                        }
+                    )
             seed_summary["alphas"][f"{alpha:g}"] = {
                 "calibration": str(alpha_root / "calibration.json"),
                 "metrics": str(alpha_root / "metrics.json"),
                 "overall": metrics["overall"],
+                "lead_time": {
+                    key: value for key, value in lead_time.items() if key != "events"
+                },
+                "elapsed_time_baseline": {
+                    "calibration": str(alpha_root / "elapsed_time_calibration.json"),
+                    "overall": elapsed_metrics["overall"],
+                    "lead_time": {
+                        key: value
+                        for key, value in elapsed_lead_time.items()
+                        if key != "events"
+                    },
+                },
             }
         seed_summaries[str(seed)] = seed_summary
     aggregate = aggregate_metrics(overall_rows, task_rows, selected_alpha)
     summary = {
         "schema_version": 1,
         "protocol": "task-normalized held-out seen-task functional conformal calibration",
+        "split_unit": resolved_split_unit,
         "model": model,
         "model_seeds": list(seeds),
         "task_type_filter": task_type,
@@ -729,6 +1010,8 @@ def run_seen_calibration(
             "Task normalization uses training rollouts only.",
             "Calibration uses held-out successful rollouts only.",
             "Calibration and evaluation rollout IDs are disjoint.",
+            "For Subtask-SAFE, complete parent rollouts are disjoint across calibration and evaluation.",
+            "The elapsed-time baseline is fitted from training subtask survival only.",
             "This task-conditioned normalization protocol applies to known seen tasks only.",
             "The selected alpha is fixed before evaluation; other alphas are sensitivity analyses.",
             "Standard deviations are population standard deviations across model seeds.",
@@ -736,6 +1019,7 @@ def run_seen_calibration(
     }
     _write_csv(output_dir / "per_seed_alpha_metrics.csv", overall_rows)
     _write_csv(output_dir / "per_task_alpha_metrics.csv", task_rows)
+    _write_csv(output_dir / "detection_events.csv", detection_rows)
     plot_paths = create_plots(summary, output_dir) if make_plots else []
     summary["plots"] = [str(path) for path in plot_paths]
     write_json(output_dir / "summary.json", summary)
@@ -754,6 +1038,12 @@ def build_parser():
     )
     parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
     parser.add_argument("--calibration-successes-per-task", type=int, default=3)
+    parser.add_argument("--calibration-parent-fraction", type=float, default=0.4)
+    parser.add_argument(
+        "--split-unit",
+        choices=("auto", "rollout", "parent_rollout"),
+        default="auto",
+    )
     parser.add_argument("--split-seed", type=int, default=0)
     parser.add_argument("--conformal-seed", type=int, default=0)
     parser.add_argument("--reference-fraction", type=float, default=0.3)
@@ -776,6 +1066,8 @@ def main(argv=None):
         model=args.model,
         seeds=args.seeds,
         calibration_successes_per_task=args.calibration_successes_per_task,
+        calibration_parent_fraction=args.calibration_parent_fraction,
+        split_unit=args.split_unit,
         split_seed=args.split_seed,
         conformal_seed=args.conformal_seed,
         reference_fraction=args.reference_fraction,

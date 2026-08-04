@@ -7,6 +7,7 @@ from tests.safe_import_helper import install_lightweight_robocasa_packages
 install_lightweight_robocasa_packages()
 
 from robocasa.recovery.safe import (
+    analyze_subtask_safe_results,
     analyze_natural_rate_screen,
     audit_subtask_safe_dataset,
     calibrate_seen_tasks,
@@ -40,6 +41,7 @@ from robocasa.recovery.safe import (
 class TestSafeCLIHelp(unittest.TestCase):
     def test_all_cli_help_exits_cleanly(self):
         for module in (
+            analyze_subtask_safe_results,
             analyze_natural_rate_screen,
             audit_subtask_safe_dataset,
             calibrate_seen_tasks,
