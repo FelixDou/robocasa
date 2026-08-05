@@ -25,7 +25,96 @@ def require_cv2():
     return cv2
 
 
-def draw_overlay(frame, record, frame_index, total_frames, calibration=None):
+SCORE_VARIANTS = ("auto", "unnormalized", "normalized")
+
+
+def resolve_score_variant(record, requested="auto"):
+    if requested not in SCORE_VARIANTS:
+        raise ValueError(
+            f"Unknown score variant {requested!r}; expected one of {SCORE_VARIANTS}"
+        )
+    if requested != "auto":
+        return requested
+    explicit = record.get("score_variant")
+    if explicit in SCORE_VARIANTS[1:]:
+        return explicit
+    normalization = record.get("normalization")
+    return (
+        "normalized"
+        if normalization not in (None, "", "none", "raw")
+        else "unnormalized"
+    )
+
+
+def _score_arrays(record, calibration=None):
+    scores = np.asarray(record["scores"], dtype=float)
+    if scores.ndim != 1 or not len(scores) or not np.all(np.isfinite(scores)):
+        raise ValueError(
+            f"Rollout {record.get('rollout_id')} has an invalid score trajectory"
+        )
+    steps = np.asarray(record["inference_environment_steps"], dtype=int)
+    if steps.ndim != 1 or len(steps) != len(scores):
+        raise ValueError(
+            f"Rollout {record.get('rollout_id')} has {len(scores)} scores but "
+            f"{len(steps)} inference environment steps"
+        )
+    if np.any(np.diff(steps) < 0):
+        raise ValueError(
+            f"Rollout {record.get('rollout_id')} has non-monotonic inference steps"
+        )
+    threshold = (
+        threshold_for_length(calibration, len(scores))
+        if calibration is not None
+        else None
+    )
+    return scores, steps, threshold
+
+
+def detector_prediction(record, calibration=None):
+    if calibration is None:
+        return None
+    scores, _, threshold = _score_arrays(record, calibration)
+    return bool(np.any(scores >= threshold))
+
+
+def detector_result_tag(record, calibration=None, *, ground_truth_failed=None):
+    prediction = detector_prediction(record, calibration)
+    if prediction is None:
+        return "detector-no-threshold"
+    failed = bool(
+        record["failed"] if ground_truth_failed is None else ground_truth_failed
+    )
+    return "detector-correct" if prediction == failed else "detector-incorrect"
+
+
+def timeline_x_positions(record, total_frames, left, right):
+    _, steps, _ = _score_arrays(record)
+    stride = int(record.get("video_frame_stride", 1))
+    if stride < 1:
+        raise ValueError("video_frame_stride must be positive")
+    video_last_environment_step = max(1, (int(total_frames) - 1) * stride)
+    clipped = np.clip(steps, 0, video_last_environment_step)
+    return (left + clipped / video_last_environment_step * (right - left)).astype(int)
+
+
+def _output_filename(
+    task, identity, variant, ground_truth_failed, detector_tag, suffix
+):
+    ground_truth = "gt-failure" if ground_truth_failed else "gt-success"
+    return (
+        f"{task}--{identity}--{variant}--{ground_truth}--"
+        f"{detector_tag}--{suffix}.mp4"
+    )
+
+
+def draw_overlay(
+    frame,
+    record,
+    frame_index,
+    total_frames,
+    calibration=None,
+    score_variant="auto",
+):
     cv2 = require_cv2()
     height, width = frame.shape[:2]
     subtask_mode = bool(record.get("subtask_instruction"))
@@ -36,16 +125,11 @@ def draw_overlay(frame, record, frame_index, total_frames, calibration=None):
     overlay = frame.copy()
     cv2.rectangle(overlay, (0, height - overlay_height), (width, height), (0, 0, 0), -1)
     frame = cv2.addWeighted(overlay, 0.72, frame, 0.28, 0)
-    scores = np.asarray(record["scores"], dtype=float)
+    scores, steps, threshold = _score_arrays(record, calibration)
+    variant = resolve_score_variant(record, score_variant)
     env_step = frame_index * int(record.get("video_frame_stride", 1))
-    steps = np.asarray(record["inference_environment_steps"], dtype=int)
     current = int(np.searchsorted(steps, env_step, side="right") - 1)
     current = min(max(current, 0), len(scores) - 1)
-    threshold = (
-        threshold_for_length(calibration, len(scores))
-        if calibration is not None
-        else None
-    )
     crossings = (
         np.flatnonzero(scores[: current + 1] >= threshold[: current + 1])
         if threshold is not None
@@ -59,9 +143,18 @@ def draw_overlay(frame, record, frame_index, total_frames, calibration=None):
     title = (
         f"{parent_task} | parent GT "
         f"{'FAILURE' if record.get('parent_rollout_failed', record['failed']) else 'SUCCESS'} "
-        f"| SAFE {record['model']} seed {record['seed']}"
+        f"| SAFE {record['model']} seed {record['seed']} | {variant.upper()}"
     )
-    cv2.putText(frame, title, (18, height - overlay_height + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
+    cv2.putText(
+        frame,
+        title,
+        (18, height - overlay_height + 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        color,
+        2,
+        cv2.LINE_AA,
+    )
     line_offset = 0
     if subtask_mode:
         instruction = str(record["subtask_instruction"])
@@ -107,6 +200,8 @@ def draw_overlay(frame, record, frame_index, total_frames, calibration=None):
             f"alpha={calibration['alpha']:.2f}"
         )
         status_color = (80, 80, 255) if alert_active else (180, 180, 180)
+    if env_step > int(steps[-1]):
+        status_text += f" | scored window ended at env step {int(steps[-1])}"
     cv2.putText(
         frame,
         status_text,
@@ -125,15 +220,18 @@ def draw_overlay(frame, record, frame_index, total_frames, calibration=None):
     minimum, maximum = float(np.min(plot_values)), float(np.max(plot_values))
     if np.isclose(minimum, maximum):
         maximum = minimum + 1.0
-    xs = np.linspace(left, right, len(scores)).astype(int)
-    ys = (bottom - (scores - minimum) / (maximum - minimum) * (bottom - top)).astype(int)
+    xs = timeline_x_positions(record, total_frames, left, right)
+    ys = (bottom - (scores - minimum) / (maximum - minimum) * (bottom - top)).astype(
+        int
+    )
     if current >= 1:
-        points = np.column_stack((xs[: current + 1], ys[: current + 1])).astype(np.int32)
+        points = np.column_stack((xs[: current + 1], ys[: current + 1])).astype(
+            np.int32
+        )
         cv2.polylines(frame, [points], False, (80, 210, 255), 2, cv2.LINE_AA)
     if threshold is not None:
         threshold_ys = (
-            bottom
-            - (threshold - minimum) / (maximum - minimum) * (bottom - top)
+            bottom - (threshold - minimum) / (maximum - minimum) * (bottom - top)
         ).astype(int)
         if current >= 1:
             points = np.column_stack(
@@ -147,9 +245,45 @@ def draw_overlay(frame, record, frame_index, total_frames, calibration=None):
                 2,
                 cv2.LINE_AA,
             )
+    video_last_environment_step = max(
+        1,
+        (int(total_frames) - 1) * int(record.get("video_frame_stride", 1)),
+    )
+    cursor_x = int(
+        left
+        + min(env_step, video_last_environment_step)
+        / video_last_environment_step
+        * (right - left)
+    )
+    cv2.line(frame, (cursor_x, top), (cursor_x, bottom), (150, 150, 150), 1)
+    if int(steps[-1]) < video_last_environment_step:
+        cv2.line(
+            frame,
+            (int(xs[-1]), top),
+            (int(xs[-1]), bottom),
+            (200, 160, 80),
+            1,
+            cv2.LINE_AA,
+        )
     cv2.circle(frame, (xs[current], ys[current]), 4, (0, 255, 255), -1)
-    cv2.putText(frame, f"{maximum:.3g}", (left + 3, top + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1)
-    cv2.putText(frame, f"{minimum:.3g}", (left + 3, bottom - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1)
+    cv2.putText(
+        frame,
+        f"{maximum:.3g}",
+        (left + 3, top + 14),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.38,
+        (180, 180, 180),
+        1,
+    )
+    cv2.putText(
+        frame,
+        f"{minimum:.3g}",
+        (left + 3, bottom - 4),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.38,
+        (180, 180, 180),
+        1,
+    )
     return frame
 
 
@@ -171,12 +305,26 @@ def _active_subtask_record(records, environment_step):
     return None
 
 
-def draw_parent_overlay(frame, records, frame_index, total_frames, calibration=None):
+def draw_parent_overlay(
+    frame,
+    records,
+    frame_index,
+    total_frames,
+    calibration=None,
+    score_variant="auto",
+):
     stride = int(records[0].get("video_frame_stride", 1))
     environment_step = frame_index * stride
     active = _active_subtask_record(records, environment_step)
     if active is not None:
-        return draw_overlay(frame, active, frame_index, total_frames, calibration)
+        return draw_overlay(
+            frame,
+            active,
+            frame_index,
+            total_frames,
+            calibration,
+            score_variant,
+        )
 
     cv2 = require_cv2()
     height, width = frame.shape[:2]
@@ -220,7 +368,7 @@ def draw_parent_overlay(frame, records, frame_index, total_frames, calibration=N
     return frame
 
 
-def render_record(record, output_path, calibration=None):
+def render_record(record, output_path, calibration=None, score_variant="auto"):
     cv2 = require_cv2()
     source = Path(record["video_path"])
     if not source.is_file():
@@ -246,7 +394,16 @@ def render_record(record, output_path, calibration=None):
         ok, frame = capture.read()
         if not ok:
             break
-        writer.write(draw_overlay(frame, record, index, frames, calibration))
+        writer.write(
+            draw_overlay(
+                frame,
+                record,
+                index,
+                frames,
+                calibration,
+                score_variant,
+            )
+        )
         index += 1
     capture.release()
     writer.release()
@@ -255,7 +412,12 @@ def render_record(record, output_path, calibration=None):
     return output_path
 
 
-def render_parent_record(records, output_path, calibration=None):
+def render_parent_record(
+    records,
+    output_path,
+    calibration=None,
+    score_variant="auto",
+):
     cv2 = require_cv2()
     records = sorted(
         records,
@@ -294,7 +456,14 @@ def render_parent_record(records, output_path, calibration=None):
         if not ok:
             break
         writer.write(
-            draw_parent_overlay(frame, records, index, frames, calibration)
+            draw_parent_overlay(
+                frame,
+                records,
+                index,
+                frames,
+                calibration,
+                score_variant,
+            )
         )
         index += 1
     capture.release()
@@ -312,6 +481,7 @@ def render_score_videos(
     max_videos=None,
     calibration_path=None,
     group_by_parent=False,
+    score_variant="auto",
 ):
     records = [
         json.loads(line)
@@ -320,9 +490,7 @@ def render_score_videos(
     ]
     records = [record for record in records if record["split"] == split]
     calibration = (
-        load_calibration(calibration_path)
-        if calibration_path is not None
-        else None
+        load_calibration(calibration_path) if calibration_path is not None else None
     )
     if group_by_parent:
         grouped = defaultdict(list)
@@ -340,12 +508,36 @@ def render_score_videos(
         for parent, values in groups:
             first = values[0]
             parent_task = first.get("parent_task_name") or "parent"
-            filename = f"{parent_task}--{parent}--subtask-safe.mp4"
+            variant = resolve_score_variant(first, score_variant)
+            parent_failed = bool(first.get("parent_rollout_failed", first["failed"]))
+            parent_prediction = (
+                None
+                if calibration is None
+                else any(detector_prediction(value, calibration) for value in values)
+            )
+            detector_tag = (
+                "detector-no-threshold"
+                if parent_prediction is None
+                else (
+                    "detector-correct"
+                    if parent_prediction == parent_failed
+                    else "detector-incorrect"
+                )
+            )
+            filename = _output_filename(
+                parent_task,
+                parent,
+                variant,
+                parent_failed,
+                detector_tag,
+                "subtask-safe",
+            )
             outputs.append(
                 render_parent_record(
                     values,
                     Path(output_dir) / filename,
                     calibration=calibration,
+                    score_variant=score_variant,
                 )
             )
         return outputs
@@ -353,12 +545,22 @@ def render_score_videos(
         records = records[:max_videos]
     outputs = []
     for record in records:
-        filename = f"{record['task_name']}--{record['rollout_id']}--scores.mp4"
+        variant = resolve_score_variant(record, score_variant)
+        detector_tag = detector_result_tag(record, calibration)
+        filename = _output_filename(
+            record["task_name"],
+            record["rollout_id"],
+            variant,
+            bool(record["failed"]),
+            detector_tag,
+            "scores",
+        )
         outputs.append(
             render_record(
                 record,
                 Path(output_dir) / filename,
                 calibration=calibration,
+                score_variant=score_variant,
             )
         )
     return outputs
@@ -379,6 +581,15 @@ def build_parser():
         action="store_true",
         help="Render one full rollout video with its ordered semantic segments",
     )
+    parser.add_argument(
+        "--score-variant",
+        choices=SCORE_VARIANTS,
+        default="auto",
+        help=(
+            "Label output filenames and overlays as normalized or unnormalized; "
+            "auto infers this from score-record metadata"
+        ),
+    )
     return parser
 
 
@@ -391,6 +602,7 @@ def main(argv=None):
         max_videos=args.max_videos,
         calibration_path=args.calibration,
         group_by_parent=args.group_by_parent,
+        score_variant=args.score_variant,
     )
     print(json.dumps([str(path) for path in outputs], indent=2))
 

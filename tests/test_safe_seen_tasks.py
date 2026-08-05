@@ -18,6 +18,10 @@ except ImportError:
     cv2 = None
 
 from robocasa.recovery.safe.render_score_videos import render_score_videos
+from robocasa.recovery.safe.render_score_videos import (
+    detector_result_tag,
+    timeline_x_positions,
+)
 from robocasa.recovery.safe.summarize_seen_tasks import summarize
 from robocasa.recovery.safe.summarize_seen_cv import summarize_seen_cv
 from robocasa.recovery.safe.run_seen_cv_grid import generate_cv_runs, make_inner_folds
@@ -877,6 +881,40 @@ class TestSeenTaskProtocol(unittest.TestCase):
 
 
 class TestScoreVideo(unittest.TestCase):
+    def test_timeline_positions_use_video_time_instead_of_score_count(self):
+        record = {
+            "rollout_id": "short",
+            "scores": [0.1, 0.2, 0.3],
+            "inference_environment_steps": [0, 2, 4],
+            "video_frame_stride": 1,
+        }
+        positions = timeline_x_positions(record, 9, 10, 90)
+        np.testing.assert_array_equal(positions, [10, 30, 50])
+
+    def test_detector_result_tag_uses_threshold_and_ground_truth(self):
+        calibration = {
+            "alignment": "extend",
+            "threshold": [0.4, 0.4, 0.4],
+        }
+        record = {
+            "rollout_id": "abc",
+            "failed": True,
+            "scores": [0.1, 0.3, 0.8],
+            "inference_environment_steps": [0, 3, 6],
+        }
+        self.assertEqual(
+            detector_result_tag(record, calibration),
+            "detector-correct",
+        )
+        self.assertEqual(
+            detector_result_tag({**record, "failed": False}, calibration),
+            "detector-incorrect",
+        )
+        self.assertEqual(
+            detector_result_tag(record),
+            "detector-no-threshold",
+        )
+
     @unittest.skipIf(cv2 is None, "OpenCV is not installed locally")
     def test_score_overlay_video_is_rendered(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -922,8 +960,13 @@ class TestScoreVideo(unittest.TestCase):
                 score_file,
                 root / "rendered",
                 calibration_path=calibration_file,
+                score_variant="unnormalized",
             )
             self.assertEqual(len(outputs), 1)
+            self.assertEqual(
+                outputs[0].name,
+                "OpenDrawer--abc--unnormalized--gt-failure--detector-correct--scores.mp4",
+            )
             self.assertGreater(outputs[0].stat().st_size, 0)
             capture = cv2.VideoCapture(str(outputs[0]))
             self.assertEqual(int(capture.get(cv2.CAP_PROP_FRAME_COUNT)), 8)

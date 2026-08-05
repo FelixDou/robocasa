@@ -593,10 +593,18 @@ python "$ROBOCASA_REPO/robocasa/recovery/safe/render_score_videos.py" \
   --scores "$SAFE_SEEN_ROOT/lstm_seed0/scores.jsonl" \
   --output-dir "$SAFE_SEEN_ROOT/lstm_seed0/score_videos" \
   --split test \
+  --score-variant unnormalized \
   --max-videos 6
 ```
 
 Omit `--max-videos` to render all 30 held-out videos.
+The plot x-axis follows recorded environment time, so a training-derived
+matched-horizon cutoff is shown at its actual position instead of being
+stretched to the end of the video. Output filenames record the score variant,
+ground-truth outcome, and calibrated detector result. For example,
+`OpenDrawer--abc--normalized--gt-failure--detector-correct--scores.mp4` is a
+failed rollout that crossed its supplied threshold. Without `--calibration`,
+the detector field is `detector-no-threshold`.
 
 ### Final all-seen result figures
 
@@ -1059,6 +1067,7 @@ python -u -m robocasa.recovery.safe.render_score_videos \
   --output-dir "$SUBTASK_CALIBRATION_ROOT/indep_seed0/alpha_0p15/parent_videos" \
   --split evaluation \
   --group-by-parent \
+  --score-variant normalized \
   --max-videos 10
 ```
 
