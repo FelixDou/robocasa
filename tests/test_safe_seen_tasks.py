@@ -891,6 +891,53 @@ class TestScoreVideo(unittest.TestCase):
         positions = timeline_x_positions(record, 9, 10, 90)
         np.testing.assert_array_equal(positions, [10, 30, 50])
 
+    def test_timeline_scope_selects_matched_window_or_full_rollout(self):
+        record = {
+            "rollout_id": "long",
+            "scores": [0.1, 0.2, 0.3, 0.4, 0.5],
+            "task_min_step": 3,
+            "inference_environment_steps": [0, 2, 4, 6, 8],
+            "video_frame_stride": 1,
+        }
+        matched = timeline_x_positions(record, 9, 10, 90)
+        full = timeline_x_positions(
+            record,
+            9,
+            10,
+            90,
+            timeline_scope="full-rollout",
+        )
+        np.testing.assert_array_equal(matched, [10, 30, 50])
+        np.testing.assert_array_equal(full, [10, 30, 50, 70, 90])
+
+    def test_full_normalized_detector_uses_preserved_full_scores(self):
+        calibration = {
+            "alignment": "extend",
+            "threshold": [0.4, 0.4, 0.4],
+        }
+        record = {
+            "rollout_id": "normalized",
+            "failed": True,
+            "scores": [0.1, 0.2, 0.3],
+            "full_scores": [0.1, 0.2, 0.3, 0.8],
+            "task_min_step": 3,
+            "inference_environment_steps": [0, 2, 4],
+            "full_inference_environment_steps": [0, 2, 4, 6],
+            "normalization": "training_task_early_max_z",
+        }
+        self.assertEqual(
+            detector_result_tag(record, calibration),
+            "detector-incorrect",
+        )
+        self.assertEqual(
+            detector_result_tag(
+                record,
+                calibration,
+                timeline_scope="full-rollout",
+            ),
+            "detector-correct",
+        )
+
     def test_detector_result_tag_uses_threshold_and_ground_truth(self):
         calibration = {
             "alignment": "extend",
@@ -940,6 +987,7 @@ class TestScoreVideo(unittest.TestCase):
                 "model": "lstm",
                 "seed": 0,
                 "scores": [0.1, 0.3, 0.8],
+                "task_min_step": 2,
                 "video_path": str(source),
                 "video_frame_stride": 1,
                 "inference_environment_steps": [0, 3, 6],
@@ -965,12 +1013,24 @@ class TestScoreVideo(unittest.TestCase):
             self.assertEqual(len(outputs), 1)
             self.assertEqual(
                 outputs[0].name,
-                "OpenDrawer--abc--unnormalized--gt-failure--detector-correct--scores.mp4",
+                "OpenDrawer--abc--unnormalized--gt-failure--detector-incorrect--scores-evaluation-window.mp4",
             )
             self.assertGreater(outputs[0].stat().st_size, 0)
             capture = cv2.VideoCapture(str(outputs[0]))
             self.assertEqual(int(capture.get(cv2.CAP_PROP_FRAME_COUNT)), 8)
             capture.release()
+
+            outputs = render_score_videos(
+                score_file,
+                root / "rendered_full",
+                calibration_path=calibration_file,
+                score_variant="unnormalized",
+                timeline_scope="full-rollout",
+            )
+            self.assertEqual(
+                outputs[0].name,
+                "OpenDrawer--abc--unnormalized--gt-failure--detector-correct--scores-full-rollout.mp4",
+            )
 
 
 if __name__ == "__main__":

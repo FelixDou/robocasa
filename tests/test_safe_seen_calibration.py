@@ -8,6 +8,7 @@ from tests.safe_import_helper import install_lightweight_robocasa_packages
 install_lightweight_robocasa_packages()
 
 from robocasa.recovery.safe.calibrate_seen_tasks import (  # noqa: E402
+    normalize_records,
     run_seen_calibration,
     validate_seed_alignment,
 )
@@ -47,6 +48,39 @@ def score_record(
 
 
 class TestSeenTaskCalibration(unittest.TestCase):
+    def test_normalization_preserves_full_trajectory_for_visualization(self):
+        record = {
+            "rollout_id": "long",
+            "split": "test",
+            "task_name": "TaskA",
+            "failed": True,
+            "scores": [1.0, 2.0, 3.0, 4.0],
+            "task_min_step": 2,
+            "inference_environment_steps": [0, 8, 16, 24],
+        }
+        normalized = normalize_records(
+            [record],
+            {
+                "TaskA": {
+                    "location": 1.0,
+                    "scale": 2.0,
+                }
+            },
+            {
+                "calibration_success_ids": [],
+                "calibration_failure_ids_excluded": [],
+                "evaluation_ids": ["long"],
+            },
+        )[0]
+        self.assertEqual(normalized["scores"], [0.0, 0.5])
+        self.assertEqual(normalized["inference_environment_steps"], [0, 8])
+        self.assertEqual(normalized["full_scores"], [0.0, 0.5, 1.0, 1.5])
+        self.assertEqual(
+            normalized["full_inference_environment_steps"],
+            [0, 8, 16, 24],
+        )
+        self.assertEqual(normalized["full_num_inferences"], 4)
+
     def make_final_root(self, root):
         final_root = root / "final"
         for seed in (0, 1, 2):

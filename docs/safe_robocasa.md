@@ -594,6 +594,7 @@ python "$ROBOCASA_REPO/robocasa/recovery/safe/render_score_videos.py" \
   --output-dir "$SAFE_SEEN_ROOT/lstm_seed0/score_videos" \
   --split test \
   --score-variant unnormalized \
+  --timeline-scope evaluation-window \
   --max-videos 6
 ```
 
@@ -602,9 +603,23 @@ The plot x-axis follows recorded environment time, so a training-derived
 matched-horizon cutoff is shown at its actual position instead of being
 stretched to the end of the video. Output filenames record the score variant,
 ground-truth outcome, and calibrated detector result. For example,
-`OpenDrawer--abc--normalized--gt-failure--detector-correct--scores.mp4` is a
-failed rollout that crossed its supplied threshold. Without `--calibration`,
-the detector field is `detector-no-threshold`.
+`OpenDrawer--abc--normalized--gt-failure--detector-correct--scores-evaluation-window.mp4`
+is a failed rollout that crossed its supplied threshold inside the matched
+evaluation window. Without `--calibration`, the detector field is
+`detector-no-threshold`.
+
+To render and evaluate the threshold over the complete recorded score
+trajectory instead, use `--timeline-scope full-rollout`. The filename then ends
+in `scores-full-rollout.mp4`, and both the detector-result tag and alert state
+refer to the full trajectory. This is the official-style `by final end` view;
+the default `evaluation-window` mode remains the stricter training-derived
+matched-horizon view used to control rollout-duration leakage.
+
+Task-normalized full-rollout videos require `normalized_scores.jsonl` generated
+by the current `calibrate_seen_tasks` implementation. It preserves both the
+matched arrays in `scores` and the normalized complete arrays in `full_scores`.
+Older normalized score files must be regenerated; the renderer deliberately
+refuses to invent the missing tail by stretching or freezing the cropped data.
 
 ### Final all-seen result figures
 
@@ -1068,6 +1083,7 @@ python -u -m robocasa.recovery.safe.render_score_videos \
   --split evaluation \
   --group-by-parent \
   --score-variant normalized \
+  --timeline-scope evaluation-window \
   --max-videos 10
 ```
 

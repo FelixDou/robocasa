@@ -349,9 +349,19 @@ def normalize_records(
     evaluation_ids = set(split_manifest["evaluation_ids"])
     normalized = []
     for record in records:
+        full_raw = np.asarray(record["scores"], dtype=np.float64)
+        if (
+            full_raw.ndim != 1
+            or not len(full_raw)
+            or not np.all(np.isfinite(full_raw))
+        ):
+            raise ValueError(
+                f"Rollout {record.get('rollout_id')} has an invalid full score trajectory"
+            )
         raw = truncated_scores(record)
         stats = normalization[record["task_name"]]
         scores = (raw - stats["location"]) / stats["scale"]
+        full_scores = (full_raw - stats["location"]) / stats["scale"]
         if record["split"] == "train":
             split = "train"
         elif record["rollout_id"] in calibration_ids:
@@ -365,6 +375,7 @@ def normalize_records(
                 f"Rollout {record['rollout_id']} is absent from the calibration manifest"
             )
         inference_steps = record.get("inference_environment_steps")
+        full_inference_steps = inference_steps
         if inference_steps is not None:
             inference_steps = inference_steps[: len(scores)]
         normalized.append(
@@ -379,8 +390,12 @@ def normalize_records(
                 "split": split,
                 "raw_scores": raw.tolist(),
                 "scores": scores.tolist(),
+                "full_raw_scores": full_raw.tolist(),
+                "full_scores": full_scores.tolist(),
                 "num_inferences": int(len(scores)),
+                "full_num_inferences": int(len(full_scores)),
                 "inference_environment_steps": inference_steps,
+                "full_inference_environment_steps": full_inference_steps,
                 "normalization": "training_task_early_max_z",
                 "normalization_location": stats["location"],
                 "normalization_scale": stats["scale"],

@@ -26,6 +26,7 @@ def require_cv2():
 
 
 SCORE_VARIANTS = ("auto", "unnormalized", "normalized")
+TIMELINE_SCOPES = ("evaluation-window", "full-rollout")
 
 
 def resolve_score_variant(record, requested="auto"):
@@ -46,13 +47,49 @@ def resolve_score_variant(record, requested="auto"):
     )
 
 
-def _score_arrays(record, calibration=None):
+def _timeline_values(record, timeline_scope="evaluation-window"):
+    if timeline_scope not in TIMELINE_SCOPES:
+        raise ValueError(
+            f"Unknown timeline scope {timeline_scope!r}; expected one of "
+            f"{TIMELINE_SCOPES}"
+        )
     scores = np.asarray(record["scores"], dtype=float)
+    steps = np.asarray(record["inference_environment_steps"], dtype=int)
+    if timeline_scope == "evaluation-window":
+        cutoff = min(int(record.get("task_min_step", len(scores))), len(scores))
+        return scores[:cutoff], steps[:cutoff]
+    if "full_scores" in record:
+        scores = np.asarray(record["full_scores"], dtype=float)
+        steps = np.asarray(
+            record.get(
+                "full_inference_environment_steps",
+                record["inference_environment_steps"],
+            ),
+            dtype=int,
+        )
+    elif (
+        record.get("normalization") not in (None, "", "none", "raw")
+        and len(scores) <= int(record.get("task_min_step", len(scores)))
+    ):
+        raise ValueError(
+            f"Normalized rollout {record.get('rollout_id')} contains only the "
+            "matched evaluation window. Regenerate normalized_scores.jsonl "
+            "with the current calibrate_seen_tasks implementation before "
+            "using --timeline-scope full-rollout."
+        )
+    return scores, steps
+
+
+def _score_arrays(
+    record,
+    calibration=None,
+    timeline_scope="evaluation-window",
+):
+    scores, steps = _timeline_values(record, timeline_scope)
     if scores.ndim != 1 or not len(scores) or not np.all(np.isfinite(scores)):
         raise ValueError(
             f"Rollout {record.get('rollout_id')} has an invalid score trajectory"
         )
-    steps = np.asarray(record["inference_environment_steps"], dtype=int)
     if steps.ndim != 1 or len(steps) != len(scores):
         raise ValueError(
             f"Rollout {record.get('rollout_id')} has {len(scores)} scores but "
@@ -70,15 +107,25 @@ def _score_arrays(record, calibration=None):
     return scores, steps, threshold
 
 
-def detector_prediction(record, calibration=None):
+def detector_prediction(
+    record,
+    calibration=None,
+    timeline_scope="evaluation-window",
+):
     if calibration is None:
         return None
-    scores, _, threshold = _score_arrays(record, calibration)
+    scores, _, threshold = _score_arrays(record, calibration, timeline_scope)
     return bool(np.any(scores >= threshold))
 
 
-def detector_result_tag(record, calibration=None, *, ground_truth_failed=None):
-    prediction = detector_prediction(record, calibration)
+def detector_result_tag(
+    record,
+    calibration=None,
+    *,
+    ground_truth_failed=None,
+    timeline_scope="evaluation-window",
+):
+    prediction = detector_prediction(record, calibration, timeline_scope)
     if prediction is None:
         return "detector-no-threshold"
     failed = bool(
@@ -87,8 +134,17 @@ def detector_result_tag(record, calibration=None, *, ground_truth_failed=None):
     return "detector-correct" if prediction == failed else "detector-incorrect"
 
 
-def timeline_x_positions(record, total_frames, left, right):
-    _, steps, _ = _score_arrays(record)
+def timeline_x_positions(
+    record,
+    total_frames,
+    left,
+    right,
+    timeline_scope="evaluation-window",
+):
+    _, steps, _ = _score_arrays(
+        record,
+        timeline_scope=timeline_scope,
+    )
     stride = int(record.get("video_frame_stride", 1))
     if stride < 1:
         raise ValueError("video_frame_stride must be positive")
@@ -114,6 +170,7 @@ def draw_overlay(
     total_frames,
     calibration=None,
     score_variant="auto",
+    timeline_scope="evaluation-window",
 ):
     cv2 = require_cv2()
     height, width = frame.shape[:2]
@@ -125,7 +182,11 @@ def draw_overlay(
     overlay = frame.copy()
     cv2.rectangle(overlay, (0, height - overlay_height), (width, height), (0, 0, 0), -1)
     frame = cv2.addWeighted(overlay, 0.72, frame, 0.28, 0)
-    scores, steps, threshold = _score_arrays(record, calibration)
+    scores, steps, threshold = _score_arrays(
+        record,
+        calibration,
+        timeline_scope,
+    )
     variant = resolve_score_variant(record, score_variant)
     env_step = frame_index * int(record.get("video_frame_stride", 1))
     current = int(np.searchsorted(steps, env_step, side="right") - 1)
@@ -140,10 +201,16 @@ def draw_overlay(
     outcome = "FAILURE" if record["failed"] else "SUCCESS"
     color = (80, 80, 255) if record["failed"] else (80, 220, 80)
     parent_task = record.get("parent_task_name") or record["task_name"]
+    scope_label = (
+        "FULL ROLLOUT"
+        if timeline_scope == "full-rollout"
+        else "MATCHED EVALUATION WINDOW"
+    )
     title = (
         f"{parent_task} | parent GT "
         f"{'FAILURE' if record.get('parent_rollout_failed', record['failed']) else 'SUCCESS'} "
-        f"| SAFE {record['model']} seed {record['seed']} | {variant.upper()}"
+        f"| SAFE {record['model']} seed {record['seed']} | {variant.upper()} | "
+        f"{scope_label}"
     )
     cv2.putText(
         frame,
@@ -201,7 +268,12 @@ def draw_overlay(
         )
         status_color = (80, 80, 255) if alert_active else (180, 180, 180)
     if env_step > int(steps[-1]):
-        status_text += f" | scored window ended at env step {int(steps[-1])}"
+        ended = (
+            "full score trajectory ended"
+            if timeline_scope == "full-rollout"
+            else "matched scored window ended"
+        )
+        status_text += f" | {ended} at env step {int(steps[-1])}"
     cv2.putText(
         frame,
         status_text,
@@ -220,7 +292,13 @@ def draw_overlay(
     minimum, maximum = float(np.min(plot_values)), float(np.max(plot_values))
     if np.isclose(minimum, maximum):
         maximum = minimum + 1.0
-    xs = timeline_x_positions(record, total_frames, left, right)
+    xs = timeline_x_positions(
+        record,
+        total_frames,
+        left,
+        right,
+        timeline_scope,
+    )
     ys = (bottom - (scores - minimum) / (maximum - minimum) * (bottom - top)).astype(
         int
     )
@@ -312,6 +390,7 @@ def draw_parent_overlay(
     total_frames,
     calibration=None,
     score_variant="auto",
+    timeline_scope="evaluation-window",
 ):
     stride = int(records[0].get("video_frame_stride", 1))
     environment_step = frame_index * stride
@@ -324,6 +403,7 @@ def draw_parent_overlay(
             total_frames,
             calibration,
             score_variant,
+            timeline_scope,
         )
 
     cv2 = require_cv2()
@@ -368,7 +448,13 @@ def draw_parent_overlay(
     return frame
 
 
-def render_record(record, output_path, calibration=None, score_variant="auto"):
+def render_record(
+    record,
+    output_path,
+    calibration=None,
+    score_variant="auto",
+    timeline_scope="evaluation-window",
+):
     cv2 = require_cv2()
     source = Path(record["video_path"])
     if not source.is_file():
@@ -402,6 +488,7 @@ def render_record(record, output_path, calibration=None, score_variant="auto"):
                 frames,
                 calibration,
                 score_variant,
+                timeline_scope,
             )
         )
         index += 1
@@ -417,6 +504,7 @@ def render_parent_record(
     output_path,
     calibration=None,
     score_variant="auto",
+    timeline_scope="evaluation-window",
 ):
     cv2 = require_cv2()
     records = sorted(
@@ -463,6 +551,7 @@ def render_parent_record(
                 frames,
                 calibration,
                 score_variant,
+                timeline_scope,
             )
         )
         index += 1
@@ -482,7 +571,13 @@ def render_score_videos(
     calibration_path=None,
     group_by_parent=False,
     score_variant="auto",
+    timeline_scope="evaluation-window",
 ):
+    if timeline_scope not in TIMELINE_SCOPES:
+        raise ValueError(
+            f"Unknown timeline scope {timeline_scope!r}; expected one of "
+            f"{TIMELINE_SCOPES}"
+        )
     records = [
         json.loads(line)
         for line in Path(scores_path).read_text().splitlines()
@@ -513,7 +608,10 @@ def render_score_videos(
             parent_prediction = (
                 None
                 if calibration is None
-                else any(detector_prediction(value, calibration) for value in values)
+                else any(
+                    detector_prediction(value, calibration, timeline_scope)
+                    for value in values
+                )
             )
             detector_tag = (
                 "detector-no-threshold"
@@ -530,7 +628,7 @@ def render_score_videos(
                 variant,
                 parent_failed,
                 detector_tag,
-                "subtask-safe",
+                f"subtask-safe-{timeline_scope}",
             )
             outputs.append(
                 render_parent_record(
@@ -538,6 +636,7 @@ def render_score_videos(
                     Path(output_dir) / filename,
                     calibration=calibration,
                     score_variant=score_variant,
+                    timeline_scope=timeline_scope,
                 )
             )
         return outputs
@@ -546,14 +645,18 @@ def render_score_videos(
     outputs = []
     for record in records:
         variant = resolve_score_variant(record, score_variant)
-        detector_tag = detector_result_tag(record, calibration)
+        detector_tag = detector_result_tag(
+            record,
+            calibration,
+            timeline_scope=timeline_scope,
+        )
         filename = _output_filename(
             record["task_name"],
             record["rollout_id"],
             variant,
             bool(record["failed"]),
             detector_tag,
-            "scores",
+            f"scores-{timeline_scope}",
         )
         outputs.append(
             render_record(
@@ -561,6 +664,7 @@ def render_score_videos(
                 Path(output_dir) / filename,
                 calibration=calibration,
                 score_variant=score_variant,
+                timeline_scope=timeline_scope,
             )
         )
     return outputs
@@ -590,6 +694,17 @@ def build_parser():
             "auto infers this from score-record metadata"
         ),
     )
+    parser.add_argument(
+        "--timeline-scope",
+        choices=TIMELINE_SCOPES,
+        default="evaluation-window",
+        help=(
+            "Render either the training-derived matched evaluation window or "
+            "the complete recorded score trajectory. Full normalized rendering "
+            "requires normalized score files generated by the current "
+            "calibration code."
+        ),
+    )
     return parser
 
 
@@ -603,6 +718,7 @@ def main(argv=None):
         calibration_path=args.calibration,
         group_by_parent=args.group_by_parent,
         score_variant=args.score_variant,
+        timeline_scope=args.timeline_scope,
     )
     print(json.dumps([str(path) for path in outputs], indent=2))
 
