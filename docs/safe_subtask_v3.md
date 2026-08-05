@@ -258,3 +258,50 @@ python -u -m robocasa.recovery.safe.evaluate_causal_subtask_gates \
 With an allocation manifest, fractional calibration sampling is disabled. Only
 the preregistered parents and stages enter threshold calibration, ROC/AP,
 operating points, or parent bootstrap intervals.
+
+## Locked-holdout training-distribution expansion
+
+If a frozen checkpoint performs well in training-only CV but collapses on the
+new-seed allocation, the next paired diagnostic may add only the allocation's
+unassigned parents to training. The immutable partition is:
+
+```text
+training     = original parent_train + target allocation unassigned parents
+calibration  = target allocation calibration parents (unchanged)
+evaluation   = target allocation evaluation parents (unchanged)
+unused       = original parent_test + all other parents
+```
+
+Use `build_augmented_causal_split` after merging the original and new raw
+collections and exporting them together. The command verifies exact parent
+counts, rejects cross-pool overlap, confirms that every frozen parent exists,
+keeps the old test parents out of both train and test, fingerprints the
+assignment, and reports how many nominal training parents actually contribute
+one of the selected semantic stages.
+
+```bash
+python -u -m robocasa.recovery.safe.build_augmented_causal_split \
+  --export-dir "$AUGMENTED_SUBTASK_EXPORT" \
+  --original-split-manifest "$ORIGINAL_PARENT_SPLIT" \
+  --target-allocation-manifest "$TARGET_AWARE_MANIFEST" \
+  --output "$AUGMENTED_SELECTION_MANIFEST" \
+  --expected-original-train-parents 100 \
+  --expected-original-test-parents 50 \
+  --expected-unassigned-parents 180 \
+  --expected-calibration-parents 20 \
+  --expected-evaluation-parents 80
+```
+
+Pass the resulting file through `--selection-manifest` for both inner CV and
+final refits. Parent grouping is mandatory. Fold normalization, temporal
+transformation parameters, stage support, and inverse-frequency class weights
+must be derived from each inner training fold; the final refit derives them
+from the complete augmented training pool. The outer test is not scored during
+CV. Each final seed scores the frozen calibration/evaluation pool once, and
+`evaluate_causal_subtask_gates --allocation-manifest` separates calibration
+from evaluation without another model forward pass.
+
+This is a locked-holdout paired follow-up, not a pristine confirmatory test:
+the same holdout was inspected in the earlier frozen-checkpoint experiment.
+If the augmented model is promising, freeze the entire pipeline and collect a
+new seed-disjoint confirmatory holdout for the headline result.

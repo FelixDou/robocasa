@@ -22,6 +22,9 @@ from robocasa.recovery.safe.causal_subtask_safe import (  # noqa: E402
 from robocasa.recovery.safe.allocate_causal_subtask_data import (  # noqa: E402
     build_target_aware_allocation,
 )
+from robocasa.recovery.safe.build_augmented_causal_split import (  # noqa: E402
+    build_augmented_causal_split,
+)
 from robocasa.recovery.safe.evaluate_causal_subtask_gates import (  # noqa: E402
     evaluate_root,
 )
@@ -65,6 +68,114 @@ def fake_item(index, success, split, stage="Task::stage", parent=None):
 
 
 class TestCausalSubtaskSafe(unittest.TestCase):
+    @staticmethod
+    def _augmented_split_fixture():
+        original_train = {"old-train-a", "old-train-b"}
+        original_test = {"old-test"}
+        unassigned = {"new-train-a", "new-train-b", "new-train-c"}
+        calibration = {"new-cal"}
+        evaluation = {"new-eval-a", "new-eval-b"}
+        parents = (
+            original_train
+            | original_test
+            | unassigned
+            | calibration
+            | evaluation
+            | {"new-ineligible"}
+        )
+        env_records = []
+        for index, parent in enumerate(sorted(parents)):
+            task_id = index % 2
+            task_name = "TaskA::stage" if task_id == 0 else "TaskB::stage"
+            env_records.append(
+                (
+                    Path(f"/{parent}.pkl"),
+                    {
+                        "rollout_id": f"segment-{parent}",
+                        "parent_rollout_id": parent,
+                        "task_id": task_id,
+                        "task_name": task_name,
+                        "episode_success": index % 2,
+                    },
+                )
+            )
+        original = {
+            "split_unit": "parent_rollout",
+            "split_seed": 0,
+            "parent_train": sorted(original_train),
+            "parent_test": sorted(original_test),
+        }
+        allocation = {
+            "protocol": "causal_subtask_finite_horizon_parent_allocation",
+            "complete": True,
+            "target_definition": {
+                "label": "failure_within_H",
+                "causal_prefix_inferences": 32,
+                "failure_horizon_inferences": 128,
+            },
+            "selected_stages": ["TaskA::stage", "TaskB::stage"],
+            "unassigned_parent_ids": sorted(unassigned),
+            "calibration_parent_ids": sorted(calibration),
+            "evaluation_parent_ids": sorted(evaluation),
+        }
+        return env_records, original, allocation
+
+    def test_augmented_split_freezes_holdout_and_excludes_old_test(self):
+        env_records, original, allocation = self._augmented_split_fixture()
+        manifest = build_augmented_causal_split(
+            env_records,
+            original_split=original,
+            target_allocation=allocation,
+            expected_original_train_parents=2,
+            expected_original_test_parents=1,
+            expected_unassigned_parents=3,
+            expected_calibration_parents=1,
+            expected_evaluation_parents=2,
+        )
+
+        self.assertEqual(manifest["counts"]["train_parents"], 5)
+        self.assertEqual(manifest["counts"]["test_parents"], 3)
+        self.assertEqual(manifest["counts"]["unused_original_test_parents"], 1)
+        self.assertEqual(
+            set(manifest["frozen_calibration_parent_ids"]), {"new-cal"}
+        )
+        self.assertEqual(
+            set(manifest["frozen_evaluation_parent_ids"]),
+            {"new-eval-a", "new-eval-b"},
+        )
+        self.assertIn("old-test", manifest["parent_unused"])
+        self.assertNotIn("old-test", manifest["parent_train"])
+        self.assertNotIn("old-test", manifest["parent_test"])
+        self.assertFalse(set(manifest["train"]) & set(manifest["test"]))
+        self.assertTrue(manifest["audit"]["training_holdout_parent_disjoint"])
+        self.assertTrue(manifest["audit"]["original_old_test_excluded"])
+        self.assertFalse(manifest["audit"]["outer_test_used_for_selection"])
+        self.assertEqual(len(manifest["manifest_fingerprint"]), 64)
+
+    def test_augmented_split_rejects_original_and_new_parent_overlap(self):
+        env_records, original, allocation = self._augmented_split_fixture()
+        allocation["unassigned_parent_ids"].append("old-train-a")
+        with self.assertRaisesRegex(ValueError, "Original and new-seed"):
+            build_augmented_causal_split(
+                env_records,
+                original_split=original,
+                target_allocation=allocation,
+            )
+
+    def test_augmented_split_rejects_missing_frozen_parent(self):
+        env_records, original, allocation = self._augmented_split_fixture()
+        env_records = [
+            item
+            for item in env_records
+            if item[1]["parent_rollout_id"] != "new-eval-b"
+        ]
+        with self.assertRaisesRegex(ValueError, "Required parents are absent"):
+            build_augmented_causal_split(
+                env_records,
+                original_split=original,
+                target_allocation=allocation,
+            )
+
     def test_within_horizon_requires_prefixes_and_positive_horizon(self):
         with self.assertRaisesRegex(ValueError, "causal prefix training"):
             validate_causal_config(
