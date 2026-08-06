@@ -28,9 +28,10 @@ def collect_single_rollout(
     record_subtask_trace=False,
     subtask_eval_fn=None,
     task_name=None,
+    reset_kwargs=None,
 ):
     """Simulator-light collection core used by the live CLI and mocked tests."""
-    reset_result = env.reset()
+    reset_result = env.reset(**(reset_kwargs or {}))
     obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
     reset_info = (
         reset_result[1]

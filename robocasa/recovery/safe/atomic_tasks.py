@@ -99,6 +99,30 @@ def registered_safe_task_horizons(
     }
 
 
+def registered_target50_tasks(path: str | Path | None = None) -> list[str]:
+    """Parse the ordered RoboCasa365 target50 task set without importing RoboCasa."""
+    registry = _registry_call("TARGET_TASKS", path)
+    groups = {}
+    for keyword in registry.keywords:
+        if keyword.arg in {"atomic_seen", "composite_seen", "composite_unseen"}:
+            value = ast.literal_eval(keyword.value)
+            if not isinstance(value, list) or not all(
+                isinstance(task, str) for task in value
+            ):
+                raise RuntimeError(
+                    f"TARGET_TASKS.{keyword.arg} must be a list of task names"
+                )
+            groups[keyword.arg] = value
+    required = ("atomic_seen", "composite_seen", "composite_unseen")
+    missing = [name for name in required if name not in groups]
+    if missing:
+        raise RuntimeError(f"TARGET_TASKS is missing groups: {missing}")
+    tasks = [task for name in required for task in groups[name]]
+    if len(tasks) != 50 or len(tasks) != len(set(tasks)):
+        raise RuntimeError("RoboCasa365 target50 must contain 50 unique tasks")
+    return tasks
+
+
 def validate_atomic_tasks(tasks, *, allow_unregistered=False, registry_path=None):
     tasks = list(tasks)
     if not tasks:

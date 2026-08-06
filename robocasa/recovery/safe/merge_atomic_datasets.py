@@ -38,6 +38,9 @@ COMPATIBLE_CONFIG_KEYS = (
     "official_safe_openpi_commit",
     "openpi_repository_commit",
     "rldx_repository_commit",
+    "xiaomi_repository_commit",
+    "xiaomi_checkpoint_revision",
+    "xiaomi_num_trials",
 )
 
 

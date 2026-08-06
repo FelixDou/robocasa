@@ -1,0 +1,62 @@
+--- a/deploy/server.py
++++ b/deploy/server.py
+@@ -15,6 +15,7 @@
+     def __init__(self, model_path, host, port):
+         self.host = host
+         self.port = port
++        self.model_path = str(model_path)
+
+         print("Loading model...")
+         self.model = AutoModel.from_pretrained(model_path, trust_remote_code=True, attn_implementation="flash_attention_2", dtype=torch.bfloat16).cuda().to(torch.bfloat16)
+@@ -55,12 +56,49 @@
+                             tic = time.time()
+
+                             input_data = pickle.loads(data)
++                            request_safe_features = bool(
++                                input_data.pop("request_safe_features", False)
++                            )
+                             robot_type = input_data["task_id"]
+                             data = {key: (value.to(device=self.model.device, dtype=self.model.dtype) if isinstance(value, torch.Tensor) and value.is_floating_point() else value.to(device=self.model.device) if isinstance(value, torch.Tensor) else value) for key, value in input_data.items()}
+
+-                            outputs = self.model(**data)
++                            outputs = self.model(
++                                **data,
++                                return_safe_features=request_safe_features,
++                            )
+
+-                            response = pickle.dumps(outputs.actions.cpu())
++                            response_data = outputs.actions.cpu()
++                            if request_safe_features:
++                                features = outputs.safe_features.cpu()
++                                if features.ndim != 4:
++                                    raise RuntimeError(
++                                        "XR-1 SAFE features must have shape "
++                                        "(batch, flow_steps, action_horizon, hidden_dim); "
++                                        f"got {tuple(features.shape)}"
++                                    )
++                                if not torch.isfinite(features).all() or not torch.any(features):
++                                    raise RuntimeError(
++                                        "XR-1 SAFE features must be finite and nonzero"
++                                    )
++                                response_data = {
++                                    "actions": response_data,
++                                    "safe_features": features,
++                                    "safe_feature_metadata": {
++                                        "schema_version": 1,
++                                        "model_family": "xiaomi_robotics_1",
++                                        "model_id": type(self.model).__name__,
++                                        "checkpoint": self.model_path,
++                                        "feature_layer": (
++                                            "dit_action_tokens_pre_action_output_layer"
++                                        ),
++                                        "feature_shape": list(features.shape[1:]),
++                                        "feature_dtype": "float32",
++                                        "action_horizon": int(features.shape[2]),
++                                        "flow_steps": int(features.shape[1]),
++                                        "aggregation": "raw",
++                                    },
++                                }
++                            response = pickle.dumps(response_data)
+                             conn.sendall(struct.pack(">I", len(response)) + response)
+
+                             toc = time.time()

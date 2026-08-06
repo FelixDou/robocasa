@@ -282,12 +282,20 @@ def export_to_official_safe(
                 "episode_success": int(not record.failed),
             }
         )
+    format_by_family = {
+        "pi0": "official_safe_pizero_env_records_policy_records",
+        "rldx1": "official_safe_rldx1_env_records_policy_records",
+        "xiaomi_robotics_1": (
+            "official_safe_xiaomi_robotics_1_env_records_policy_records"
+        ),
+    }
+    model_families = plan["model_families"]
     report = {
         "schema_version": 1,
         "format": (
-            "official_safe_pizero_env_records_policy_records"
-            if plan["model_families"] == ["pi0"]
-            else "official_safe_rldx1_env_records_policy_records"
+            format_by_family[model_families[0]]
+            if len(model_families) == 1
+            else "official_safe_mixed_model_families_env_records_policy_records"
         ),
         "complete": True,
         "created_at": utc_now(),

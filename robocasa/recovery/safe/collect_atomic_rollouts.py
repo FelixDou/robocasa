@@ -18,6 +18,7 @@ import numpy as np
 from .atomic_tasks import (
     registered_atomic_tasks,
     registered_safe_task_horizons,
+    registered_target50_tasks,
     validate_safe_tasks,
 )
 from .collect_rollouts import collect_single_rollout
@@ -33,6 +34,10 @@ SAFE_COMMIT = "b6036abe07b2b2bb9996afb2c07f13d6a9f507c0"
 OFFICIAL_SAFE_OPENPI_COMMIT = "9c99ed53f6a0c9be93a1c63cee5792620777d96b"
 ROBOCASA_OPENPI_COMMIT = "5a6beda9ff99da30b4e1b59320f6a32971d7c397"
 RLDX1_BENCHMARK_COMMIT = "ef05cd4ae634ff97d672d42275febbc0b92cc192"
+XIAOMI_ROBOTICS_1_COMMIT = "4da1db0a4deefa6de7ebb4ef0b8754017290f5f7"
+XIAOMI_ROBOTICS_1_CHECKPOINT_REVISION = (
+    "0d1aa76d0d82debc9b611e4d1e231096434d5be4"
+)
 SUMMARY_NAME = "summary.json"
 ERRORS_NAME = "errors.jsonl"
 SKIPPED_NAME = "skipped.jsonl"
@@ -123,7 +128,11 @@ def planned_seeds(args):
 
 
 def uses_repeated_reset_protocol(seed_protocol):
-    return seed_protocol in {"official_openpi", "official_rldx"}
+    return seed_protocol in {
+        "official_openpi",
+        "official_rldx",
+        "official_xiaomi",
+    }
 
 
 def quota_reached(successes, failures, success_quota, failure_quota):
@@ -311,11 +320,15 @@ def prepare_plan(args):
         raise ValueError(
             "--seed-end is incompatible with official repeated-reset seed protocols"
         )
-    incompatible_protocol = {
-        "pi0": "official_rldx",
-        "rldx1": "official_openpi",
+    official_protocol = {
+        "pi0": "official_openpi",
+        "rldx1": "official_rldx",
+        "xiaomi_robotics_1": "official_xiaomi",
     }[args.model_family]
-    if args.seed_protocol == incompatible_protocol:
+    if (
+        args.seed_protocol.startswith("official_")
+        and args.seed_protocol != official_protocol
+    ):
         raise ValueError(
             f"--seed-protocol {args.seed_protocol} is incompatible with "
             f"--model-family {args.model_family}"
@@ -357,7 +370,22 @@ def prepare_plan(args):
             )
         task_horizons = {task: registered_horizons[task] for task in tasks}
         horizon_source = "robocasa_dataset_registry"
-    if uses_repeated_reset_protocol(args.seed_protocol):
+    target50_tasks = None
+    if args.seed_protocol == "official_xiaomi":
+        target50_tasks = registered_target50_tasks()
+        non_target_tasks = sorted(set(tasks) - set(target50_tasks))
+        if non_target_tasks:
+            raise ValueError(
+                "--seed-protocol official_xiaomi only supports target50 tasks: "
+                + ", ".join(non_target_tasks)
+            )
+        seeds = [
+            args.seed + target50_tasks.index(task) * args.num_rollouts + episode
+            for task in tasks
+            for episode in range(args.num_rollouts)
+        ]
+        attempt_coordinates = None
+    elif uses_repeated_reset_protocol(args.seed_protocol):
         seeds = [args.seed]
         attempt_coordinates = [
             (args.seed, reset_index) for reset_index in range(args.num_rollouts)
@@ -392,10 +420,30 @@ def prepare_plan(args):
         "rldx_repository_commit": (
             args.rldx_repository_commit if args.model_family == "rldx1" else None
         ),
+        "xiaomi_repository_commit": (
+            args.xiaomi_repository_commit
+            if args.model_family == "xiaomi_robotics_1"
+            else None
+        ),
+        "xiaomi_checkpoint_revision": (
+            args.xiaomi_checkpoint_revision
+            if args.model_family == "xiaomi_robotics_1"
+            else None
+        ),
     }
     attempts = []
     for task in tasks:
-        for seed, reset_index in attempt_coordinates:
+        task_attempt_coordinates = attempt_coordinates
+        if args.seed_protocol == "official_xiaomi":
+            task_index = target50_tasks.index(task)
+            task_attempt_coordinates = [
+                (
+                    args.seed + task_index * args.num_rollouts + episode,
+                    episode,
+                )
+                for episode in range(args.num_rollouts)
+            ]
+        for seed, reset_index in task_attempt_coordinates:
             attempt_identity = {
                 **identity,
                 "rollout_horizon": task_horizons[task],
@@ -421,6 +469,11 @@ def prepare_plan(args):
         "environment_reset_indices": (
             list(range(args.num_rollouts))
             if uses_repeated_reset_protocol(args.seed_protocol)
+            else None
+        ),
+        "xiaomi_num_trials": (
+            args.num_rollouts
+            if args.seed_protocol == "official_xiaomi"
             else None
         ),
         "split": args.split,
@@ -455,6 +508,16 @@ def prepare_plan(args):
         ),
         "rldx_repository_commit": (
             args.rldx_repository_commit if args.model_family == "rldx1" else None
+        ),
+        "xiaomi_repository_commit": (
+            args.xiaomi_repository_commit
+            if args.model_family == "xiaomi_robotics_1"
+            else None
+        ),
+        "xiaomi_checkpoint_revision": (
+            args.xiaomi_checkpoint_revision
+            if args.model_family == "xiaomi_robotics_1"
+            else None
         ),
         "robocasa_commit": robocasa_commit,
     }
@@ -508,6 +571,9 @@ def _assert_resume_compatible(previous, current):
         "max_errors",
         "openpi_repository_commit",
         "rldx_repository_commit",
+        "xiaomi_repository_commit",
+        "xiaomi_checkpoint_revision",
+        "xiaomi_num_trials",
     )
     mismatches = []
     previous_reset_indices = previous.get("environment_reset_indices")
@@ -650,7 +716,12 @@ def run_collection(args, runtime=None):
                                 shared_env.close()
                                 shared_env = None
                                 raise
-                        shared_env.reset()
+                        reset_kwargs = (
+                            {"seed": attempt["environment_seed"]}
+                            if args.seed_protocol == "official_xiaomi"
+                            else {}
+                        )
+                        shared_env.reset(**reset_kwargs)
                         reset_policy = getattr(shared_policy, "reset", None)
                         if reset_policy is not None:
                             reset_policy()
@@ -738,6 +809,11 @@ def run_collection(args, runtime=None):
                     require_safe_features=True,
                     record_subtask_trace=args.record_subtask_trace,
                     task_name=task_name,
+                    reset_kwargs=(
+                        {"seed": seed}
+                        if args.seed_protocol == "official_xiaomi"
+                        else None
+                    ),
                 )
                 if writer is not None:
                     writer.close()
@@ -855,6 +931,9 @@ def run_collection(args, runtime=None):
                     rldx_repository_commit=plan["config"][
                         "rldx_repository_commit"
                     ],
+                    xiaomi_repository_commit=plan["config"][
+                        "xiaomi_repository_commit"
+                    ],
                     robocasa_commit=plan["config"]["robocasa_commit"],
                     action_recording_requested=args.record_actions,
                     video_recording_requested=args.record_videos,
@@ -955,7 +1034,12 @@ def build_parser():
     parser.add_argument("--seed-end", type=int)
     parser.add_argument(
         "--seed-protocol",
-        choices=("rollout_index", "official_openpi", "official_rldx"),
+        choices=(
+            "rollout_index",
+            "official_openpi",
+            "official_rldx",
+            "official_xiaomi",
+        ),
         default="rollout_index",
         help=(
             "Use a distinct seed per rollout, or match an official policy evaluator "
@@ -967,7 +1051,11 @@ def build_parser():
     parser.add_argument("--policy-name", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--policy-config", default="{}", help="JSON object")
-    parser.add_argument("--model-family", choices=("pi0", "rldx1"), default="pi0")
+    parser.add_argument(
+        "--model-family",
+        choices=("pi0", "rldx1", "xiaomi_robotics_1"),
+        default="pi0",
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8120)
     parser.add_argument("--replan-steps", type=int, default=5)
@@ -1024,6 +1112,14 @@ def build_parser():
     parser.add_argument("--official-safe-openpi-commit", default=OFFICIAL_SAFE_OPENPI_COMMIT)
     parser.add_argument("--openpi-repository-commit", default=ROBOCASA_OPENPI_COMMIT)
     parser.add_argument("--rldx-repository-commit", default=RLDX1_BENCHMARK_COMMIT)
+    parser.add_argument(
+        "--xiaomi-repository-commit",
+        default=XIAOMI_ROBOTICS_1_COMMIT,
+    )
+    parser.add_argument(
+        "--xiaomi-checkpoint-revision",
+        default=XIAOMI_ROBOTICS_1_CHECKPOINT_REVISION,
+    )
     parser.add_argument("--robocasa-commit")
     return parser
 

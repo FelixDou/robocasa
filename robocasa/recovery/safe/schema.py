@@ -15,6 +15,7 @@ SAFE_SCHEMA_VERSION = 1
 SAFE_FEATURE_SCHEMA_VERSION = 1
 OFFICIAL_PI0_FEATURE_LAYER = "action_expert_suffix_pre_action_out_proj"
 RLDX1_FEATURE_LAYER = "action_model_msat_action_suffix_pre_action_decoder"
+XIAOMI_ROBOTICS_1_FEATURE_LAYER = "dit_action_tokens_pre_action_output_layer"
 
 
 @dataclass
@@ -58,6 +59,7 @@ class SafeRolloutMetadata:
     safe_repository_commit: str | None = None
     openpi_repository_commit: str | None = None
     rldx_repository_commit: str | None = None
+    xiaomi_repository_commit: str | None = None
     robocasa_commit: str | None = None
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -92,11 +94,12 @@ class SafeRolloutMetadata:
             raise ValueError("feature_shape horizon axis disagrees with action_horizon")
         if self.feature_dtype != "float32":
             raise ValueError("raw SAFE storage dtype must be float32")
-        if self.model_family not in {"pi0", "rldx1"}:
+        if self.model_family not in {"pi0", "rldx1", "xiaomi_robotics_1"}:
             raise ValueError(f"Unsupported SAFE model_family {self.model_family!r}")
         expected_layer = {
             "pi0": OFFICIAL_PI0_FEATURE_LAYER,
             "rldx1": RLDX1_FEATURE_LAYER,
+            "xiaomi_robotics_1": XIAOMI_ROBOTICS_1_FEATURE_LAYER,
         }[self.model_family]
         if self.feature_layer != expected_layer:
             raise ValueError(
@@ -107,9 +110,14 @@ class SafeRolloutMetadata:
             "rollout_index",
             "official_openpi",
             "official_rldx",
+            "official_xiaomi",
         }:
             raise ValueError(f"Unsupported seed_protocol {self.seed_protocol!r}")
-        if self.seed_protocol in {"official_openpi", "official_rldx"}:
+        if self.seed_protocol in {
+            "official_openpi",
+            "official_rldx",
+            "official_xiaomi",
+        }:
             if self.environment_reset_index is None or self.environment_reset_index < 0:
                 raise ValueError(
                     "official policy seed protocols require a non-negative "

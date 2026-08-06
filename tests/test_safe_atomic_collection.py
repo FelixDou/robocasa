@@ -16,6 +16,7 @@ from robocasa.recovery.safe.collect_atomic_rollouts import (
     prepare_plan,
     run_collection,
 )
+from robocasa.recovery.safe.atomic_tasks import registered_target50_tasks
 from robocasa.recovery.safe.audit_subtask_safe_dataset import (
     audit_subtask_datasets,
 )
@@ -36,7 +37,9 @@ class FakeEnv:
         self.reset_calls = 0
         self.closed = False
 
-    def reset(self):
+    def reset(self, seed=None):
+        if seed is not None:
+            self.seed = int(seed)
         self.reset_calls += 1
         self.steps = 0
         return {"annotation.human.task_description": "turn on the sink faucet"}, {}
@@ -115,6 +118,21 @@ class FakeRLDXPolicy(FakePolicy):
                     ),
                     "policy_name": "mock-rldx1",
                     "policy_checkpoint": "mock-rldx-checkpoint",
+                }
+            )
+        return action
+
+
+class FakeXiaomiPolicy(FakePolicy):
+    def __call__(self, obs, instruction=None):
+        action = super().__call__(obs, instruction=instruction)
+        if self.pending is not None:
+            self.pending["metadata"].update(
+                {
+                    "model_family": "xiaomi_robotics_1",
+                    "feature_layer": "dit_action_tokens_pre_action_output_layer",
+                    "policy_name": "mock-xiaomi",
+                    "policy_checkpoint": "mock-xiaomi-checkpoint",
                 }
             )
         return action
@@ -317,11 +335,77 @@ class TestSafeAtomicCollection(unittest.TestCase):
             self.assertEqual(policy_record["model_family"], "rldx1")
             self.assertEqual(policy_record["pre_velocity"].shape, (2, 4, 8))
 
+    def test_xiaomi_collection_uses_target50_global_seeds_and_binary_labels(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as exported,
+        ):
+            args = collection_args(tmp, num_rollouts=2)
+            args.seed = 7
+            args.seed_protocol = "official_xiaomi"
+            args.model_family = "xiaomi_robotics_1"
+            args.policy_module = (
+                "robocasa.recovery.xiaomi_robotics_1_policy:make_policy"
+            )
+            args.policy_name = "mock-xiaomi"
+            args.checkpoint = "mock-xiaomi-checkpoint"
+            tracker = {}
+            task_index = registered_target50_tasks().index(TASK)
+            expected_seeds = [
+                7 + task_index * args.num_rollouts + episode
+                for episode in range(args.num_rollouts)
+            ]
+
+            plan = prepare_plan(args)
+            self.assertEqual(
+                [attempt["environment_seed"] for attempt in plan["attempts"]],
+                expected_seeds,
+            )
+            self.assertEqual(plan["config"]["xiaomi_num_trials"], 2)
+
+            result = run_collection(
+                args,
+                runtime=fake_runtime(tracker, policy_cls=FakeXiaomiPolicy),
+            )
+            records = load_manifest(tmp)
+            self.assertEqual(result["counts"]["valid_rollouts"], 2)
+            self.assertEqual(len(tracker["envs"]), 1)
+            self.assertEqual(
+                [record.environment_seed for record in records], expected_seeds
+            )
+            self.assertTrue(
+                all(
+                    record.model_family == "xiaomi_robotics_1"
+                    and record.seed_protocol == "official_xiaomi"
+                    and not record.subtask_recording_requested
+                    for record in records
+                )
+            )
+            self.assertTrue(all(record.xiaomi_repository_commit for record in records))
+            validation = validate_atomic_dataset(tmp)
+            self.assertTrue(validation["valid"], validation["errors"])
+            report = export_to_official_safe(tmp, exported)
+            self.assertEqual(
+                report["format"],
+                "official_safe_xiaomi_robotics_1_env_records_policy_records",
+            )
+
     def test_model_family_rejects_other_policy_seed_protocol(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = collection_args(tmp)
             args.model_family = "rldx1"
             args.seed_protocol = "official_openpi"
+            with self.assertRaisesRegex(ValueError, "incompatible"):
+                prepare_plan(args)
+
+            args = collection_args(tmp)
+            args.model_family = "xiaomi_robotics_1"
+            args.seed_protocol = "official_rldx"
+            with self.assertRaisesRegex(ValueError, "incompatible"):
+                prepare_plan(args)
+
+            args = collection_args(tmp)
+            args.seed_protocol = "official_xiaomi"
             with self.assertRaisesRegex(ValueError, "incompatible"):
                 prepare_plan(args)
 
