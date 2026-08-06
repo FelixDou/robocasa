@@ -460,6 +460,8 @@ class TestSubtaskSafe(unittest.TestCase):
                 "task_subtask_pairs": 2,
                 "usable_success_segments": 4,
                 "usable_failure_segments": 1,
+                "usable_active_failure_segments": 1,
+                "usable_regression_failure_segments": 0,
                 "labeled_without_inference": 1,
                 "excluded_completed_without_activation": 0,
                 "excluded_bypassed_optional": 0,
@@ -470,6 +472,60 @@ class TestSubtaskSafe(unittest.TestCase):
         report = format_audit_report(result)
         self.assertIn("CompositeTask", report)
         self.assertIn("diagnostic, not rollout counts", report)
+
+    def test_coverage_audit_separates_active_and_regression_failures(self):
+        active_failure = build_subtask_safe_record(
+            [
+                subtask_eval(),
+                subtask_eval(first=True),
+                subtask_eval(first=True),
+            ],
+            [0, 1],
+            rollout_failed=True,
+            rollout_id="active-failure",
+        )
+        regression_failure = build_subtask_safe_record(
+            [
+                subtask_eval(),
+                subtask_eval(first=True),
+                subtask_eval(first=False, second=True),
+            ],
+            [0, 1],
+            rollout_failed=True,
+            rollout_id="regression-failure",
+        )
+        result = summarize_subtask_records(
+            [
+                {
+                    "task_name": "CompositeTask",
+                    "task_type": "composite",
+                    "rollout_id": "active-failure",
+                    "failed": True,
+                    "subtask_record": active_failure,
+                },
+                {
+                    "task_name": "CompositeTask",
+                    "task_type": "composite",
+                    "rollout_id": "regression-failure",
+                    "failed": True,
+                    "subtask_record": regression_failure,
+                },
+            ],
+            task_type_filter="composite",
+        )
+
+        first, second = result["task_subtask_rows"]
+        self.assertEqual(first["usable_active_failures"], 0)
+        self.assertEqual(first["usable_regression_failures"], 1)
+        self.assertEqual(second["usable_active_failures"], 1)
+        self.assertEqual(second["usable_regression_failures"], 0)
+        self.assertEqual(result["counts"]["usable_active_failure_segments"], 1)
+        self.assertEqual(
+            result["counts"]["usable_regression_failure_segments"],
+            1,
+        )
+        report = format_audit_report(result)
+        self.assertIn("active=1, later-regression=1", report)
 
     def test_coverage_audit_filters_before_duplicate_check(self):
         atomic_record = build_subtask_safe_record(
