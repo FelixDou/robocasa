@@ -747,7 +747,6 @@ class TestRecoveryFailureDataset(unittest.TestCase):
             "StackBowlsCabinet": [
                 "larger_bowl_placed_in_cabinet",
                 "smaller_bowl_stacked_on_larger_bowl",
-                "smaller_bowl_released_on_stack",
             ],
             "SteamInMicrowave": [
                 "vegetable_placed_in_bowl",
@@ -857,6 +856,60 @@ class TestRecoveryFailureDataset(unittest.TestCase):
                         ),
                         task_name,
                     )
+
+        stack_bowls = self.module.mapped_subtask_sequence(
+            {
+                "task_success": False,
+                "final_subtask_eval": {
+                    "required_predicates": [
+                        "cabinet_open",
+                        "larger_bowl_in_cabinet",
+                        "smaller_bowl_in_cabinet",
+                        "bowls_stacked",
+                        "gripper_released",
+                    ],
+                    "predicates": {
+                        name: {"value": False, "required": True}
+                        for name in [
+                            "cabinet_open",
+                            "larger_bowl_in_cabinet",
+                            "smaller_bowl_in_cabinet",
+                            "bowls_stacked",
+                            "gripper_released",
+                        ]
+                    },
+                },
+                "ordered_completed_required_subtasks": [],
+                "failed_required_predicates_final": [],
+            },
+            "StackBowlsCabinet",
+        )
+        merged_stack = stack_bowls[1]
+        self.assertEqual(
+            merged_stack["subtask_id"],
+            "smaller_bowl_stacked_on_larger_bowl",
+        )
+        self.assertEqual(
+            merged_stack["predicate_names"],
+            [
+                "smaller_bowl_in_cabinet",
+                "bowls_stacked",
+                "gripper_released",
+            ],
+        )
+        self.assertEqual(
+            merged_stack["source_subtask_ids"],
+            [
+                "smaller_bowl_grasped",
+                "smaller_bowl_stacked_on_larger_bowl",
+                "smaller_bowl_released_on_stack",
+            ],
+        )
+        self.assertEqual(
+            merged_stack["instruction"],
+            "Pick the smaller bowl from the counter, then place and release "
+            "the smaller bowl on top of the larger bowl in the cabinet.",
+        )
 
     def test_composite_atomic_task_sequence_uses_task_level_steps(self):
         summary = {

@@ -1284,8 +1284,12 @@ _TASK_SUBTASK_GROUP_OVERRIDES.update(
             ),
             (
                 "smaller_bowl_stacked_on_larger_bowl",
-                "Stack the smaller bowl on top of the larger bowl in the cabinet.",
-                ["smaller_bowl_in_cabinet", "bowls_stacked"],
+                "Place and release the smaller bowl on top of the larger bowl in the cabinet.",
+                [
+                    "smaller_bowl_in_cabinet",
+                    "bowls_stacked",
+                    "gripper_released",
+                ],
             ),
             (
                 "smaller_bowl_released_on_stack",
