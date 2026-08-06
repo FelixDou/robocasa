@@ -145,6 +145,8 @@ def summarize_subtask_records(
                 "unlabeled_segments": 0,
                 "usable_successes": 0,
                 "usable_failures": 0,
+                "usable_active_failures": 0,
+                "usable_regression_failures": 0,
                 "labeled_without_inference": 0,
                 "excluded_completed_without_activation": 0,
                 "excluded_bypassed_optional": 0,
@@ -185,7 +187,17 @@ def summarize_subtask_records(
             group["unlabeled_segments"] += int(label is None)
             usable = bool(segment.get("usable_for_safe"))
             if usable:
-                group["usable_failures" if label == 1 else "usable_successes"] += 1
+                if label == 1:
+                    group["usable_failures"] += 1
+                    failure_key = (
+                        "usable_regression_failures"
+                        if segment.get("terminal_failure_reason")
+                        == "completed_subtask_regressed_before_task_completion"
+                        else "usable_active_failures"
+                    )
+                    group[failure_key] += 1
+                else:
+                    group["usable_successes"] += 1
             elif label is not None:
                 group["labeled_without_inference"] += 1
             group["_inference_counts"].append(
@@ -206,6 +218,12 @@ def summarize_subtask_records(
             + row["labeled_without_inference"]
         )
         usable = row["usable_successes"] + row["usable_failures"]
+        if (
+            row["usable_active_failures"]
+            + row["usable_regression_failures"]
+            != row["usable_failures"]
+        ):
+            raise ValueError("Subtask failure-mode counts are inconsistent")
         row.update(
             {
                 "labeled_segments": labeled,
@@ -304,6 +322,12 @@ def summarize_subtask_records(
             "task_subtask_pairs": len(rows),
             "usable_success_segments": sum(row["usable_successes"] for row in rows),
             "usable_failure_segments": sum(row["usable_failures"] for row in rows),
+            "usable_active_failure_segments": sum(
+                row["usable_active_failures"] for row in rows
+            ),
+            "usable_regression_failure_segments": sum(
+                row["usable_regression_failures"] for row in rows
+            ),
             "labeled_without_inference": sum(
                 row["labeled_without_inference"] for row in rows
             ),
@@ -438,6 +462,12 @@ def format_report(result: dict[str, Any]) -> str:
             f"{counts['labeled_without_inference']}"
         ),
         (
+            "Usable failure modes: "
+            f"active={counts['usable_active_failure_segments']}, "
+            "later-regression="
+            f"{counts['usable_regression_failure_segments']}"
+        ),
+        (
             "Completed without observed activation: "
             f"{counts['excluded_completed_without_activation']}"
         ),
@@ -474,6 +504,8 @@ def format_report(result: dict[str, Any]) -> str:
             lines.append("    merged from: " + ", ".join(row["source_subtask_ids"]))
         lines.append(
             "    rollout states: "
+            f"active-failure={row['usable_active_failures']} "
+            f"later-regression={row['usable_regression_failures']} "
             f"excluded-completed={row['excluded_completed_without_activation']} "
             f"bypassed-optional={row['excluded_bypassed_optional']} "
             f"not-reached={row['not_reached_rollouts']}"
