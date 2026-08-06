@@ -159,12 +159,16 @@ def _first_terminally_unsatisfied_subtask(
     Ordered completion is intentionally monotonic so a later manipulation does
     not erase genuine progress.  An unsuccessful rollout can therefore finish
     after every semantic unit was observed complete, while one of those units'
-    predicates is false at the terminal state.  In that case, the earliest
-    terminally-unsatisfied unit is the ordered subtask whose success did not
-    persist until overall task completion.
+    required predicates is false at the terminal state.  Optional transient
+    units, such as grasp predicates that normally become false after release,
+    cannot explain official task failure and are skipped.  The earliest
+    terminally-unsatisfied required unit is the ordered subtask whose success
+    did not persist until overall task completion.
     """
     values = _predicate_values(payload)
     for definition in definitions:
+        if not definition["required_for_official_success"]:
+            continue
         unsatisfied = [
             name
             for name in definition["predicate_names"]

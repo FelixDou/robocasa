@@ -259,6 +259,64 @@ class TestSubtaskSafe(unittest.TestCase):
         self.assertEqual(counts["failed_segments"], 1)
         self.assertEqual(counts["successful_segments"], 1)
 
+    def test_terminal_regression_skips_optional_transient_subtask(self):
+        def payload(
+            *,
+            grasped=False,
+            placed=False,
+            closed=False,
+        ):
+            return {
+                "task_name": "OptionalTransientTask",
+                "required_predicates": ["grasped", "placed", "closed"],
+                "predicates": {
+                    "grasped": {
+                        "value": grasped,
+                        "required": False,
+                        "stage": "transient",
+                        "description": "Grasp the object.",
+                    },
+                    "placed": {
+                        "value": placed,
+                        "required": True,
+                        "stage": "subtask",
+                        "description": "Place the object.",
+                    },
+                    "closed": {
+                        "value": closed,
+                        "required": True,
+                        "stage": "task_success",
+                        "description": "Close the fixture.",
+                    },
+                },
+                "task_success": False,
+            }
+
+        record = build_subtask_safe_record(
+            [
+                payload(),
+                payload(grasped=True),
+                payload(placed=True),
+                payload(closed=True),
+            ],
+            [0, 1, 2],
+            rollout_failed=True,
+            rollout_id="optional-transient-regression",
+        )
+
+        self.assertEqual(record["terminal_active_subtask"], "placed")
+        self.assertEqual(
+            record["terminal_unsatisfied_predicate_names"],
+            ["placed"],
+        )
+        self.assertEqual(
+            [
+                (segment["subtask_id"], segment["failure_label"])
+                for segment in record["segments"]
+            ],
+            [("grasped", 0), ("placed", 1), ("closed", 0)],
+        )
+
     def test_failed_rollout_with_all_terminal_predicates_true_is_rejected(self):
         with self.assertRaisesRegex(
             ValueError,
