@@ -706,7 +706,7 @@ def run_collection(args, runtime=None):
                                 args.env_interface,
                                 args.split,
                                 seed,
-                                args.record_videos,
+                                True,
                             )
                             try:
                                 shared_policy = runtime["call_factory"](
@@ -768,7 +768,11 @@ def run_collection(args, runtime=None):
                         args.env_interface,
                         args.split,
                         seed,
-                        args.record_videos,
+                        # Visual policies require live camera observations even
+                        # when MP4 artifact recording is disabled. RoboCasa's
+                        # Gym wrapper substitutes black frames when rendering
+                        # is disabled.
+                        True,
                     )
                 if uses_repeated_reset_protocol(args.seed_protocol):
                     if shared_policy is None:

@@ -143,6 +143,7 @@ def fake_runtime(tracker=None, policy_cls=FakePolicy):
         env = FakeEnv(seed)
         if tracker is not None:
             tracker.setdefault("envs", []).append(env)
+            tracker.setdefault("render_flags", []).append(render)
         return env
 
     return {
@@ -209,6 +210,16 @@ class TestSafeAtomicCollection(unittest.TestCase):
             self.assertTrue(result["dry_run"])
             self.assertEqual(len(result["attempts"]), 2)
             self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_camera_rendering_stays_enabled_without_video_recording(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(tmp, num_rollouts=1)
+            args.record_videos = False
+            tracker = {}
+
+            run_collection(args, runtime=fake_runtime(tracker))
+
+            self.assertEqual(tracker["render_flags"], [True])
 
     def test_environment_split_is_provenance_and_rollout_identity(self):
         with tempfile.TemporaryDirectory() as tmp:
