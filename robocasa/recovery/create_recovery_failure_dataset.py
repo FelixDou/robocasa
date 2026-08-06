@@ -472,6 +472,66 @@ def _merge_group_metadata(
     return result
 
 
+_SEMANTIC_SUBTASK_MERGE_OVERRIDES = {
+    # The sponge placement and release predicates can become true between the
+    # same two policy inferences.  Keeping separate units then manufactures a
+    # zero-duration placement segment even though placing and leaving the
+    # sponge in the sink is one observable semantic action.
+    "PreSoakPan": [
+        {
+            "subtask_ids": [
+                "PickPlaceCounterToSink_2_place",
+                "PickPlaceCounterToSink_2_release",
+            ],
+            "subtask_id": "PickPlaceCounterToSink_2_place_and_release",
+            "instruction": "Place and release the sponge in the sink.",
+        }
+    ],
+}
+
+
+def _apply_semantic_subtask_merge_overrides(task_name, groups):
+    result = list(groups)
+    for override in _SEMANTIC_SUBTASK_MERGE_OVERRIDES.get(task_name, []):
+        subtask_ids = list(override["subtask_ids"])
+        width = len(subtask_ids)
+        start = next(
+            (
+                index
+                for index in range(len(result) - width + 1)
+                if [
+                    group["subtask_id"]
+                    for group in result[index : index + width]
+                ]
+                == subtask_ids
+            ),
+            None,
+        )
+        if start is None:
+            continue
+        matched = result[start : start + width]
+        merged = {
+            "subtask_id": override["subtask_id"],
+            "instruction": override["instruction"],
+            "predicate_names": list(
+                dict.fromkeys(
+                    predicate_name
+                    for group in matched
+                    for predicate_name in group["predicate_names"]
+                )
+            ),
+            "source_subtask_ids": list(
+                dict.fromkeys(
+                    source_subtask_id
+                    for group in matched
+                    for source_subtask_id in group["source_subtask_ids"]
+                )
+            ),
+        }
+        result[start : start + width] = [merged]
+    return result
+
+
 def normalize_semantic_subtask_groups(task_name, groups):
     """Return observable ordered natural-language units for one task.
 
@@ -500,6 +560,8 @@ def normalize_semantic_subtask_groups(task_name, groups):
             )
         )
         prepared.append(group)
+
+    prepared = _apply_semantic_subtask_merge_overrides(task_name, prepared)
 
     deduplicated = []
     index = 0

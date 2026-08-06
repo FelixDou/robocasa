@@ -706,8 +706,7 @@ class TestRecoveryFailureDataset(unittest.TestCase):
                 "PickPlaceCounterToSink_1_pick",
                 "PickPlaceCounterToSink_1_place",
                 "PickPlaceCounterToSink_2_pick",
-                "PickPlaceCounterToSink_2_place",
-                "PickPlaceCounterToSink_2_release",
+                "PickPlaceCounterToSink_2_place_and_release",
                 "TurnOnSinkFaucet_3",
             ],
             "PrepareCoffee": [
@@ -909,6 +908,53 @@ class TestRecoveryFailureDataset(unittest.TestCase):
             merged_stack["instruction"],
             "Pick the smaller bowl from the counter, then place and release "
             "the smaller bowl on top of the larger bowl in the cabinet.",
+        )
+
+        pre_soak_pan = self.module.mapped_subtask_sequence(
+            {
+                "task_success": False,
+                "final_subtask_eval": {
+                    "required_predicates": [
+                        "pan_grasped",
+                        "pan_in_sink",
+                        "sponge_grasped",
+                        "sponge_in_sink",
+                        "gripper_released",
+                        "water_on",
+                    ],
+                    "predicates": {
+                        "pan_grasped": {"value": False, "required": False},
+                        "pan_in_sink": {"value": False, "required": True},
+                        "sponge_grasped": {"value": False, "required": False},
+                        "sponge_in_sink": {"value": False, "required": True},
+                        "gripper_released": {"value": False, "required": True},
+                        "water_on": {"value": False, "required": True},
+                    },
+                },
+                "ordered_completed_required_subtasks": [],
+                "failed_required_predicates_final": [],
+            },
+            "PreSoakPan",
+        )
+        merged_sponge_placement = pre_soak_pan[3]
+        self.assertEqual(
+            merged_sponge_placement["subtask_id"],
+            "PickPlaceCounterToSink_2_place_and_release",
+        )
+        self.assertEqual(
+            merged_sponge_placement["predicate_names"],
+            ["sponge_in_sink", "gripper_released"],
+        )
+        self.assertEqual(
+            merged_sponge_placement["source_subtask_ids"],
+            [
+                "PickPlaceCounterToSink_2_place",
+                "PickPlaceCounterToSink_2_release",
+            ],
+        )
+        self.assertEqual(
+            merged_sponge_placement["instruction"],
+            "Place and release the sponge in the sink.",
         )
 
     def test_composite_atomic_task_sequence_uses_task_level_steps(self):
