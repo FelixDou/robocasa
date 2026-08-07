@@ -1138,3 +1138,36 @@ The durable outputs are:
 - `roc_aggregation_comparison.{png,pdf}`;
 - `per_task_roc_indep.{png,pdf}`;
 - `per_task_roc_lstm.{png,pdf}`.
+
+## One normal SAFE model per task: balanced versus natural rate
+
+This experiment is rollout-level SAFE and is deliberately unrelated to
+Subtask-SAFE. It trains an independent monitor for each of the ten original
+RLDX tasks. The primary comparison keeps the training size fixed at 22
+rollouts per task and reuses the same frozen 8-success/8-failure test episodes:
+
+- `matched_weighted`: 11 successes and 11 failures with official SAFE weights;
+- `natural_weighted`: 22 examples sampled at the task's observed policy outcome
+  rate, also with official SAFE inverse-frequency weights.
+
+The MLP (`indep`) is the preregistered primary architecture because it was the
+stronger normal-SAFE RLDX model. Hyperparameters remain frozen at the completed
+all-task training-only CV choice (`concat-2`, `concat-2`, `1e-3`, `1e-3`), so
+the task test sets are never used for model or hyperparameter selection. Five
+training-subset resamples and three optimization seeds produce 300 fits. Model
+seeds are averaged within each subset; the five subset seeds are the reported
+training-resampling units. Reusing the same test episodes does not create 15
+independent test sets.
+
+The workflow is:
+
+1. rebuild or reuse `build_natural_rate_experiment`'s immutable all-task plan;
+2. derive task-only manifests with `build_task_specific_rate_experiment`;
+3. run disjoint five-task shards with `run_task_specific_rate_screen`;
+4. summarize task ROC-AUC/AP, task-type macro metrics, and paired
+   natural-minus-balanced effects with `summarize_task_specific_rate_screen`.
+
+The durable outputs are `task_specific_summary.json`,
+`task_specific_metrics.csv`, and balanced/natural ROC-AUC and AP figures in PNG
+and PDF. Because each fitted monitor sees only one task, task-z normalization is
+neither required nor applied.
