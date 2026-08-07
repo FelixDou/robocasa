@@ -6,6 +6,8 @@ restore the last good state, restore only the robot state, or continue from the
 failure state, then retry only the currently failed subtask.
 """
 
+from __future__ import annotations
+
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
@@ -59,6 +61,7 @@ class RecoveryConfig:
     include_trace: bool = True
     video_separator_frames: int = 80
     video_separator_text: str | None = None
+    require_subtask_target: bool = False
 
 
 def normalize_recovery_mode(mode):
@@ -1228,6 +1231,53 @@ def _latest_ordered_trace_entry(subtask_evals):
     return None
 
 
+def _reset_failure_monitor(failure_monitor):
+    if failure_monitor is None:
+        return
+    reset = getattr(failure_monitor, "reset", None)
+    if callable(reset):
+        reset()
+
+
+def _monitor_policy_inference(failure_monitor, policy):
+    """Score one new policy inference, if the policy made one on this call."""
+    if failure_monitor is None:
+        return None
+    pop_record = getattr(policy, "pop_inference_record", None)
+    if not callable(pop_record):
+        raise TypeError(
+            "SAFE recovery requires a policy exposing pop_inference_record(); "
+            "enable SAFE feature capture in the policy adapter"
+        )
+    record = pop_record()
+    if record is None:
+        return None
+
+    observe = getattr(failure_monitor, "observe_inference", None)
+    if not callable(observe):
+        observe = failure_monitor if callable(failure_monitor) else None
+    if observe is None:
+        raise TypeError(
+            "failure_monitor must be callable or expose observe_inference(record)"
+        )
+    value = observe(record)
+    if isinstance(value, (bool, np.bool_)):
+        decision = {"failure_detected": bool(value)}
+    elif isinstance(value, dict):
+        decision = deepcopy(value)
+    else:
+        raise TypeError("SAFE monitor decision must be a bool or dictionary")
+    if "failure_detected" not in decision:
+        if "detected" not in decision:
+            raise ValueError(
+                "SAFE monitor decision must contain 'failure_detected'"
+            )
+        decision["failure_detected"] = bool(decision["detected"])
+    else:
+        decision["failure_detected"] = bool(decision["failure_detected"])
+    return decision
+
+
 def run_recovery_after_failed_rollout(
     policy,
     env,
@@ -1240,6 +1290,7 @@ def run_recovery_after_failed_rollout(
     video_width=768,
     video_direct_sim_render=False,
     video_render_source="auto",
+    failure_monitor=None,
 ):
     """
     Run a high-level rollout, then retry only the failed subtask if needed.
@@ -1257,6 +1308,9 @@ def run_recovery_after_failed_rollout(
         recovery_video_writer: Optional imageio writer for separator and recovery
             frames. Use a separate writer to avoid carrying a video stream across
             simulator reset/recovery boundaries.
+        failure_monitor: Optional online SAFE monitor. It receives one record per
+            genuine policy inference. A positive decision stops before executing
+            the first action from the flagged inference and starts recovery.
 
     Returns:
         A dictionary with the high-level rollout summary, chosen subtask prompt,
@@ -1267,6 +1321,7 @@ def run_recovery_after_failed_rollout(
     elif isinstance(config, dict):
         config = RecoveryConfig(**config)
     mode = normalize_recovery_mode(config.mode)
+    _reset_failure_monitor(failure_monitor)
 
     if initial_obs is None:
         reset_result = env.reset()
@@ -1286,13 +1341,34 @@ def run_recovery_after_failed_rollout(
     )
     high_level_success = False
     high_level_steps = 0
+    high_level_policy_calls = 0
     last_good_step = 0
     last_video_frame = None
+    safe_events = []
+    failure_trigger = None
+    termination_reason = "time_limit"
 
     for step_i in range(config.high_level_horizon):
-        high_level_steps = step_i + 1
+        high_level_policy_calls = step_i + 1
         action = call_policy(policy, obs)
+        safe_decision = _monitor_policy_inference(failure_monitor, policy)
+        if safe_decision is not None:
+            safe_events.append(safe_decision)
+            if safe_decision["failure_detected"]:
+                trace_entry = _latest_ordered_trace_entry(subtask_evals) or {}
+                failure_trigger = {
+                    "type": "safe_failure_detection",
+                    "policy_call": high_level_policy_calls,
+                    "environment_step": high_level_steps,
+                    "ordered_current_subtask": trace_entry.get(
+                        "ordered_current_subtask"
+                    ),
+                    "safe_decision": safe_decision,
+                }
+                termination_reason = "safe_failure_detected"
+                break
         obs, reward, done, info = _step_env(env, action)
+        high_level_steps += 1
         video_frame = _append_video_frame_from_env(
             env,
             video_writer,
@@ -1321,8 +1397,10 @@ def run_recovery_after_failed_rollout(
 
         if _is_task_success(info, reward=reward, env=env):
             high_level_success = True
+            termination_reason = "task_success"
             break
         if done:
+            termination_reason = "environment_done"
             break
 
     high_level_summary = summarize_subtask_rollout(
@@ -1332,6 +1410,23 @@ def run_recovery_after_failed_rollout(
     )
     high_level_summary["success"] = high_level_success
     high_level_summary["num_steps"] = high_level_steps
+    high_level_summary["num_policy_calls"] = high_level_policy_calls
+    high_level_summary["termination_reason"] = termination_reason
+    high_level_summary["failure_trigger"] = failure_trigger or {
+        "type": termination_reason,
+        "environment_step": high_level_steps,
+    }
+    high_level_summary["safe_monitor"] = {
+        "enabled": failure_monitor is not None,
+        "num_scored_inferences": len(safe_events),
+        "num_detections": sum(
+            int(event.get("failure_detected", False)) for event in safe_events
+        ),
+        "events": safe_events,
+    }
+    describe_monitor = getattr(failure_monitor, "describe", None)
+    if callable(describe_monitor):
+        high_level_summary["safe_monitor"]["config"] = describe_monitor()
     high_level_summary["last_good_ordered_subtask"] = last_good_subtask
     high_level_summary["last_good_ordered_subtask_count"] = best_ordered_count
     high_level_summary["last_good_step"] = last_good_step
@@ -1414,6 +1509,11 @@ def run_recovery_after_failed_rollout(
         atomic_instruction=atomic_instruction,
         evaluated_task_name=config.evaluated_task_name,
     )
+    if config.require_subtask_target and (subtask_name is None or instruction is None):
+        raise RuntimeError(
+            "Recovery was triggered but ordered subtask tracking could not resolve "
+            "a current subtask and instruction"
+        )
     recovery_meta["high_level_target_subtask"] = high_level_subtask_name
     recovery_meta["high_level_target_instruction"] = high_level_instruction
     recovery_meta["high_level_recovery_target_subtask"] = high_level_recovery_target_name
@@ -1424,6 +1524,7 @@ def run_recovery_after_failed_rollout(
     recovery_meta["recovery_start_target_subtask"] = subtask_name
     recovery_meta["recovery_start_target_instruction"] = instruction
     recovery_meta["recovery_target_kind"] = recovery_target_kind
+    recovery_meta["trigger"] = high_level_summary["failure_trigger"]
     _set_env_instruction(env, instruction)
     obs = _get_obs_after_state_change(env, fallback_obs=obs)
     obs = set_observation_instruction(obs, instruction)

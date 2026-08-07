@@ -734,6 +734,10 @@ def summarize_results(results):
     recovery_successes = [
         r for r in attempted if (r.get("subtask") or {}).get("success")
     ]
+    termination_reasons = {}
+    for result in results:
+        reason = (result.get("high_level") or {}).get("termination_reason", "unknown")
+        termination_reasons[reason] = termination_reasons.get(reason, 0) + 1
     return {
         "num_rollouts": len(results),
         "high_level_success_count": len(high_level_successes),
@@ -745,6 +749,7 @@ def summarize_results(results):
         "recovery_subtask_success_rate": len(recovery_successes) / len(attempted)
         if attempted
         else 0.0,
+        "high_level_termination_reasons": termination_reasons,
     }
 
 
@@ -755,11 +760,16 @@ def run_benchmark(args):
         run_recovery_after_failed_rollout,
     )
 
-    modes = args.modes or [
-        "eef_to_last_good",
-        "env_to_last_good",
-        "continue_from_failure",
-    ]
+    safe_enabled = args.safe_checkpoint is not None
+    modes = args.modes or (
+        ["continue_from_failure", "env_to_last_good"]
+        if safe_enabled
+        else [
+            "eef_to_last_good",
+            "env_to_last_good",
+            "continue_from_failure",
+        ]
+    )
     tasks = resolve_tasks(args)
 
     def resolve_atomic_recovery_horizon(
@@ -783,6 +793,18 @@ def run_benchmark(args):
 
     policy_factory = None if args.random_policy else load_factory(args.policy_module)
     policy_args = parse_policy_args(args.policy_arg)
+    safe_monitor = None
+    if safe_enabled:
+        from robocasa.recovery.safe.runtime_monitor import CheckpointSafeMonitor
+
+        policy_args["collect_safe_features"] = True
+        safe_monitor = CheckpointSafeMonitor(
+            args.safe_checkpoint,
+            args.safe_calibration,
+            device=args.safe_device,
+            aggregation=args.safe_aggregation,
+        )
+    recovery_level = args.recovery_level or ("subtask" if safe_enabled else "atomic")
 
     output = {
         "config": vars(args),
@@ -796,6 +818,7 @@ def run_benchmark(args):
             for task_name in tasks
         },
         "modes": {},
+        "resolved_recovery_level": recovery_level,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -908,7 +931,7 @@ def run_benchmark(args):
                         env,
                         RecoveryConfig(
                             mode=mode,
-                            recovery_level=args.recovery_level,
+                            recovery_level=recovery_level,
                             evaluated_task_name=task_name,
                             high_level_horizon=high_level_horizon,
                             subtask_horizon=args.subtask_horizon,
@@ -924,6 +947,7 @@ def run_benchmark(args):
                             include_trace=args.include_trace,
                             video_separator_frames=max(0, int(video_separator_frames)),
                             video_separator_text=args.video_separator_text,
+                            require_subtask_target=safe_enabled,
                         ),
                         video_writer=video_writer,
                         recovery_video_writer=recovery_video_writer,
@@ -932,6 +956,7 @@ def run_benchmark(args):
                         video_width=args.video_width,
                         video_direct_sim_render=args.video_direct_sim_render,
                         video_render_source=args.video_render_source,
+                        failure_monitor=safe_monitor,
                     )
                     result["task"] = task_name
                     result["rollout_index"] = rollout_i
@@ -1068,7 +1093,7 @@ def main():
     parser.add_argument(
         "--recovery-level",
         choices=["atomic", "subtask"],
-        default="atomic",
+        default=None,
         help=(
             "Granularity of the recovery retry. 'atomic' keeps subtask-level "
             "diagnostics but retries with the dataset-style atomic task "
@@ -1107,6 +1132,27 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--enable-render", action="store_true")
     parser.add_argument("--include-trace", action="store_true")
+    parser.add_argument(
+        "--safe-checkpoint",
+        type=Path,
+        default=None,
+        help=(
+            "Enable online SAFE-triggered recovery with a checkpoint written by "
+            "robocasa.recovery.safe.models.save_checkpoint."
+        ),
+    )
+    parser.add_argument(
+        "--safe-calibration",
+        type=Path,
+        default=None,
+        help="Functional conformal calibration JSON used by online SAFE.",
+    )
+    parser.add_argument("--safe-device", default="cpu")
+    parser.add_argument(
+        "--safe-aggregation",
+        default=None,
+        help="Override the raw-feature aggregation stored in the SAFE checkpoint.",
+    )
     parser.add_argument(
         "--video-dir",
         type=Path,
@@ -1185,6 +1231,10 @@ def main():
 
     if not args.random_policy and args.policy_module is None:
         parser.error("Pass --policy-module module:callable or --random-policy")
+    if (args.safe_checkpoint is None) != (args.safe_calibration is None):
+        parser.error("Pass --safe-checkpoint and --safe-calibration together")
+    if args.safe_checkpoint is not None and args.random_policy:
+        parser.error("Online SAFE requires a feature-producing policy, not --random-policy")
     if args.no_merge_split_video and not args.split_recovery_video:
         parser.error("Pass --split-recovery-video with --no-merge-split-video")
 

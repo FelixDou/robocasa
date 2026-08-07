@@ -27,6 +27,10 @@ _EXPORTS = {
         "robocasa.recovery.recovery_rollout",
         "run_recovery_after_failed_rollout",
     ),
+    "CheckpointSafeMonitor": (
+        "robocasa.recovery.safe.runtime_monitor",
+        "CheckpointSafeMonitor",
+    ),
     "run_dataset_creation": (
         "robocasa.recovery.create_recovery_failure_dataset",
         "run_dataset_creation",
