@@ -44,6 +44,18 @@ def causal_signature(record):
     }
 
 
+def online_signature(record):
+    payload = record.get("online_safe")
+    if payload is None:
+        return None
+    protocol = payload["protocol"]
+    return {
+        "mode": protocol["mode"],
+        "seed": int(protocol["seed"]),
+        "landmark_fraction": float(protocol["landmark_fraction"]),
+    }
+
+
 def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
     root = Path(root).resolve()
     records = []
@@ -92,6 +104,16 @@ def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
     causal_subtask_safe = (
         json.loads(next(iter(causal_signatures))) if causal_signatures else None
     )
+    online_signatures = {
+        json.dumps(online_signature(record), sort_keys=True) for record in records
+    }
+    if len(online_signatures) > 1:
+        raise ValueError("CV runs mix incompatible online SAFE protocols")
+    online_safe = (
+        json.loads(next(iter(online_signatures))) if online_signatures else None
+    )
+    if causal_subtask_safe is not None and online_safe is not None:
+        raise ValueError("CV runs cannot combine online SAFE and causal Subtask-SAFE")
     selection_metrics = {record.get("selection_metric") for record in records}
     if len(selection_metrics) > 1:
         raise ValueError("CV runs mix different hyperparameter-selection metrics")
@@ -157,13 +179,21 @@ def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
         "protocol": (
             "parent-grouped causal-prefix CV inside a fixed outer training pool"
             if causal_subtask_safe is not None
-            else "training-only outcome-stratified CV inside a fixed outer training pool"
+            else (
+                "post-split online-prefix CV inside a fixed outer training pool"
+                if online_safe is not None
+                else "training-only outcome-stratified CV inside a fixed outer training pool"
+            )
         ),
         "selection_rule": (
             f"maximum mean inner-validation ROC-AUC at causal prefix "
             f"{causal_subtask_safe['selection_prefix']}"
             if causal_subtask_safe is not None
-            else "maximum mean matched-earliest inner-validation ROC-AUC"
+            else (
+                "maximum mean online-prefix inner-validation ROC-AUC"
+                if online_safe is not None
+                else "maximum mean matched-earliest inner-validation ROC-AUC"
+            )
         ),
         "outer_test_used_for_selection": False,
         "selection_metric": (
@@ -176,6 +206,7 @@ def summarize_seen_cv(root, expected_folds=(0, 1, 2)):
             list(next(iter(selected_task_sets))) if selected_task_sets else []
         ),
         "causal_subtask_safe": causal_subtask_safe,
+        "online_safe": online_safe,
         "training_objective": training_objective,
         "outer_train_counts": outer_counts[0] if outer_counts else None,
         "outer_test_counts": test_counts[0] if test_counts else None,

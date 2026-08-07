@@ -264,3 +264,102 @@ Train MLP/LSTM and calibrate functional conformal thresholds from the exported
 XR-1 dataset with the existing SAFE tools. Treat the result as a new XR-1
 detector experiment until its task split, sample counts, seeds, hyperparameter
 selection, calibration set, and held-out evaluation have all been recorded.
+
+## Online failure-detection prefix comparison
+
+Variable final rollout length is not a causal online feature: successful
+rollouts stop at first success while failures usually reach the task timeout.
+The seen-task CV and final-refit tools therefore expose two original-SAFE-only
+views. Neither mode reads or creates subtask annotations.
+
+`matched_success_length` pairs successes and failures within each task and
+split, then truncates each failure to its paired success length. The complete
+success prefix is retained. The two outcome classes consequently have exactly
+the same inference-length distribution per task.
+
+`fixed_landmark` estimates each task timeout from failures in the training
+split only. It evaluates a declared fraction of that timeout and retains only
+rollouts still active at that causal time. Training is rebalanced to equal
+success/failure support within each task after this at-risk filter; evaluation
+retains the natural at-risk support. A separate detector experiment is required
+for every landmark fraction; do not select a landmark using the outer test.
+
+Both transformations happen only after the source rollout split. The source
+500-rollout export remains immutable, outer identities stay fixed, and all
+generated labels remain the original binary final rollout outcome.
+
+Use the same frozen outer split as the completed unmodified Xiaomi refit:
+
+```bash
+export XR1_SAFE_EXPORT="$STORAGE_BS/robocasa_rollouts/safe/xr1_safe_balanced_25x25_seed0_20260807_122434/official_safe_25x25_seed0"
+export XR1_ORIGINAL_FINAL_ROOT=/path/to/completed/xiaomi/final_refits
+export XR1_OUTER_SPLIT="$XR1_ORIGINAL_FINAL_ROOT/indep_seed0/split_manifest.json"
+export SAFE_REPO="$PROJECT_FS/SAFE"
+
+test -f "$XR1_SAFE_EXPORT/conversion_report.json"
+test -f "$XR1_OUTER_SPLIT"
+test -f "$SAFE_REPO/failure_prob/train.py"
+```
+
+Run a three-fold, one-configuration smoke for each view before a full grid. The
+smoke intentionally does not open the outer test:
+
+```bash
+export XR1_ONLINE_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/xr1_online_safe_$(date +%Y%m%d_%H%M%S)"
+
+for mode in matched_success_length fixed_landmark; do
+  for model in indep lstm; do
+    "$XR1_CLIENT_ENV/bin/python" -u -m \
+      robocasa.recovery.safe.run_seen_cv_grid \
+      --export-dir "$XR1_SAFE_EXPORT" \
+      --safe-repo "$SAFE_REPO" \
+      --output-root "$XR1_ONLINE_ROOT/${mode}_smoke" \
+      --model "$model" \
+      --outer-split-manifest "$XR1_OUTER_SPLIT" \
+      --train-per-class 17 \
+      --online-safe-mode "$mode" \
+      --online-safe-seed 0 \
+      --online-landmark-fraction 0.5 \
+      --horizon-selectors 1.0 \
+      --diffusion-selectors 1.0 \
+      --learning-rates 1e-4 \
+      --regularization 1e-3 \
+      --num-folds 3 \
+      --epochs 1 \
+      --device cuda \
+      --fail-fast
+  done
+done
+```
+
+Each smoke must complete six fits per mode. Inspect each `metrics.json` and
+confirm:
+
+- `outer_test_scored` is false;
+- `online_safe.protocol.subtask_safe` is false;
+- source train and validation parents are disjoint;
+- matched-length per-task duration ROC-AUC is exactly 0.5;
+- a fixed landmark reports both outcomes for every retained task.
+
+For the full comparison, use distinct roots and the complete existing selector,
+learning-rate, and regularization grids. Summarize each mode independently:
+
+```bash
+"$XR1_CLIENT_ENV/bin/python" -m \
+  robocasa.recovery.safe.summarize_seen_cv \
+  --root "$XR1_ONLINE_ROOT/matched_success_length_full"
+
+"$XR1_CLIENT_ENV/bin/python" -m \
+  robocasa.recovery.safe.summarize_seen_cv \
+  --root "$XR1_ONLINE_ROOT/fixed_landmark_0p50_full"
+```
+
+Use each root's own `cv_selection_summary.json` for its final three-seed refits.
+Pass the identical online options, outer split, and `--train-per-class 17` to
+`train_seen_tasks`. The final command rejects a selection summary produced by
+a different online mode, seed, or landmark fraction.
+
+Start with the preregistered 0.50 landmark. Fractions 0.25 and 0.75 are
+separate sensitivity experiments. A fraction is unsupported when a task has no
+eventually successful rollout still active at that point; reduce the fraction
+rather than silently dropping that task from the primary ten-task comparison.

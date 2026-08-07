@@ -60,9 +60,26 @@ def summarize(root, expected_seeds=(0, 1, 2)):
     }
     if len(causal_protocols) > 1:
         raise ValueError("Final runs mix incompatible causal Subtask-SAFE protocols")
+    online_protocols = {
+        json.dumps(run.get("online_safe"), sort_keys=True) for run in runs
+    }
+    if len(online_protocols) > 1:
+        raise ValueError("Final runs mix incompatible online SAFE protocols")
+    online_safe = json.loads(next(iter(online_protocols))) if online_protocols else None
+    causal_subtask_safe = (
+        json.loads(next(iter(causal_protocols))) if causal_protocols else None
+    )
+    if online_safe is not None and causal_subtask_safe is not None:
+        raise ValueError(
+            "Final runs cannot combine online SAFE and causal Subtask-SAFE"
+        )
     output = {
         "schema_version": 1,
-        "protocol": "same tasks in train and test; fixed outcome-stratified outer split",
+        "protocol": (
+            "post-split online prefixes on one fixed outcome-stratified outer split"
+            if online_safe is not None
+            else "same tasks in train and test; fixed outcome-stratified outer split"
+        ),
         "num_tasks": num_tasks,
         "task_type_filter": (
             next(iter(task_type_filters)) if task_type_filters else "all"
@@ -74,9 +91,8 @@ def summarize(root, expected_seeds=(0, 1, 2)):
         "training_objective": (
             json.loads(next(iter(objectives))) if objectives else None
         ),
-        "causal_subtask_safe": (
-            json.loads(next(iter(causal_protocols))) if causal_protocols else None
-        ),
+        "causal_subtask_safe": causal_subtask_safe,
+        "online_safe": online_safe,
         "models": {},
     }
     for model in sorted({run["model"] for run in runs}):

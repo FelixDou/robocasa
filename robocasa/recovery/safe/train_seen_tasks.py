@@ -19,6 +19,23 @@ import sys
 import numpy as np
 
 try:
+    from .online_safe import (
+        ONLINE_SAFE_MODES,
+        OnlineSafeConfig,
+        online_config_dict,
+        online_payload_summary,
+        prepare_online_splits,
+    )
+except ImportError:
+    from online_safe import (
+        ONLINE_SAFE_MODES,
+        OnlineSafeConfig,
+        online_config_dict,
+        online_payload_summary,
+        prepare_online_splits,
+    )
+
+try:
     from .causal_subtask_safe import (
         CAUSAL_LABEL_MODES,
         CONDITIONING_MODES,
@@ -236,6 +253,40 @@ def causal_metrics_signature(metrics):
     }
 
 
+def online_args_signature(args):
+    config = OnlineSafeConfig(
+        mode=args.online_safe_mode,
+        seed=args.online_safe_seed,
+        landmark_fraction=args.online_landmark_fraction,
+    )
+    return None if config.mode == "none" else online_config_dict(config)
+
+
+def online_metrics_signature(metrics):
+    payload = metrics.get("online_safe")
+    if payload is None:
+        return None
+    protocol = payload["protocol"]
+    return {
+        "mode": protocol["mode"],
+        "seed": int(protocol["seed"]),
+        "landmark_fraction": float(protocol["landmark_fraction"]),
+    }
+
+
+def validate_online_selection_summary(selection_summary, config):
+    if selection_summary is None:
+        return
+    summary = json.loads(Path(selection_summary).read_text())
+    selected = summary.get("online_safe")
+    requested = None if config.mode == "none" else online_config_dict(config)
+    if selected != requested:
+        raise ValueError(
+            "Selection summary and final refit use different online SAFE protocols: "
+            f"selected={selected!r}, requested={requested!r}"
+        )
+
+
 def json_value(value):
     if isinstance(value, dict):
         return {str(key): json_value(item) for key, item in value.items()}
@@ -281,8 +332,7 @@ def _natural_sort_key(value):
     """Return a deterministic numeric-aware key without requiring natsort."""
 
     return tuple(
-        int(part) if part.isdigit() else part
-        for part in re.split(r"(\d+)", str(value))
+        int(part) if part.isdigit() else part for part in re.split(r"(\d+)", str(value))
     )
 
 
@@ -808,6 +858,17 @@ def save_scores(
                     "remaining_inferences_to_terminal": env.get(
                         "remaining_inferences_to_terminal"
                     ),
+                    "online_safe_mode": env.get("online_safe_mode"),
+                    "online_source_rollout_id": env.get("online_source_rollout_id"),
+                    "online_source_num_inferences": env.get(
+                        "online_source_num_inferences"
+                    ),
+                    "online_prefix_inferences": env.get("online_prefix_inferences"),
+                    "online_partner_rollout_id": env.get("online_partner_rollout_id"),
+                    "online_task_timeout_inferences": env.get(
+                        "online_task_timeout_inferences"
+                    ),
+                    "online_landmark_fraction": env.get("online_landmark_fraction"),
                     "split": split,
                     "task_id": int(rollout.task_id),
                     "task_name": names[int(rollout.task_id)],
@@ -845,6 +906,10 @@ def train_seen_model(args):
         if causal_metrics_signature(previous_metrics) != causal_args_signature(args):
             raise ValueError(
                 f"Existing final refit uses an incompatible causal protocol: {output}"
+            )
+        if online_metrics_signature(previous_metrics) != online_args_signature(args):
+            raise ValueError(
+                f"Existing final refit uses an incompatible online SAFE protocol: {output}"
             )
         previous_objective = previous_metrics.get(
             "training_objective",
@@ -958,7 +1023,35 @@ def train_seen_model(args):
     )
     causal_payload = None
     causal_config = None
-    if causal_requested:
+    online_config = OnlineSafeConfig(
+        mode=args.online_safe_mode,
+        seed=args.online_safe_seed,
+        landmark_fraction=args.online_landmark_fraction,
+    )
+    online_requested = online_config.mode != "none"
+    if causal_requested and online_requested:
+        raise ValueError(
+            "Original online SAFE and causal Subtask-SAFE modes are mutually exclusive"
+        )
+    validate_online_selection_summary(args.selection_summary, online_config)
+    online_payload = None
+    if online_requested:
+        validate_causal_selection_summary(args.selection_summary, None, None)
+        online_payload = prepare_online_splits(
+            train_rollouts,
+            test_rollouts,
+            identity,
+            config=online_config,
+        )
+        train_rollouts = online_payload["train"]
+        test_rollouts = online_payload["test"]
+        identity = online_payload["identity"]
+        all_rollouts = train_rollouts + test_rollouts
+        task_cutoffs = {
+            int(task_id): "per_online_prefix_length"
+            for task_id in sorted({int(item.task_id) for item in all_rollouts})
+        }
+    elif causal_requested:
         if not parent_grouped_split:
             raise ValueError(
                 "Causal Subtask-SAFE requires a parent_rollout selection manifest"
@@ -1066,7 +1159,7 @@ def train_seen_model(args):
     train_failures = len(train_rollouts) - train_successes
     test_successes = sum(int(rollout.episode_success) for rollout in test_rollouts)
     test_failures = len(test_rollouts) - test_successes
-    if causal_payload is not None:
+    if causal_payload is not None or online_payload is not None:
         per_task = {}
         for task_id in selected_task_ids:
             per_task[task_id] = {}
@@ -1094,9 +1187,13 @@ def train_seen_model(args):
     split_manifest = {
         "schema_version": 1,
         "protocol": (
-            "subtask_safe_parent_rollout_stratified"
-            if parent_grouped_split
-            else "same_task_outcome_stratified"
+            "online_safe_source_rollout_stratified"
+            if online_payload is not None
+            else (
+                "subtask_safe_parent_rollout_stratified"
+                if parent_grouped_split
+                else "same_task_outcome_stratified"
+            )
         ),
         "split_unit": ("parent_rollout" if parent_grouped_split else "rollout"),
         "split_seed": args.split_seed,
@@ -1133,6 +1230,7 @@ def train_seen_model(args):
             if causal_payload is not None
             else None
         ),
+        "online_safe": online_payload_summary(online_payload),
         "test_per_task_class": test_per_task_class,
         "counts": {
             "train": len(train_rollouts),
@@ -1225,9 +1323,14 @@ def train_seen_model(args):
             if causal_payload is not None
             else None
         ),
+        "online_safe": online_payload_summary(online_payload),
         "task_min_step_source": (
-            f"minimum inference length per task in the {len(train_rollouts)}-rollout "
-            "training split only"
+            "online SAFE transformed prefix length"
+            if online_payload is not None
+            else (
+                f"minimum inference length per task in the {len(train_rollouts)}-rollout "
+                "training split only"
+            )
         ),
         "task_min_steps": {names[key]: value for key, value in task_cutoffs.items()},
         "counts": {
@@ -1292,6 +1395,27 @@ def build_parser():
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--selection-summary")
+    parser.add_argument(
+        "--online-safe-mode",
+        choices=ONLINE_SAFE_MODES,
+        default="none",
+        help=(
+            "Original binary SAFE view: unmodified rollouts, per-task paired "
+            "success-length matching, or a training-derived fixed at-risk landmark"
+        ),
+    )
+    parser.add_argument(
+        "--online-safe-seed",
+        type=int,
+        default=0,
+        help="Pairing seed shared across detector model seeds",
+    )
+    parser.add_argument(
+        "--online-landmark-fraction",
+        type=float,
+        default=0.5,
+        help="Fraction of each training-derived task timeout for fixed_landmark mode",
+    )
     parser.add_argument(
         "--causal-prefix-mode",
         choices=PREFIX_TRAINING_MODES,

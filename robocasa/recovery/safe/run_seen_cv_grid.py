@@ -16,6 +16,23 @@ import sys
 import numpy as np
 
 try:
+    from .online_safe import (
+        ONLINE_SAFE_MODES,
+        OnlineSafeConfig,
+        online_config_dict,
+        online_payload_summary,
+        prepare_online_splits,
+    )
+except ImportError:
+    from online_safe import (
+        ONLINE_SAFE_MODES,
+        OnlineSafeConfig,
+        online_config_dict,
+        online_payload_summary,
+        prepare_online_splits,
+    )
+
+try:
     from .causal_subtask_safe import (
         CAUSAL_LABEL_MODES,
         CONDITIONING_MODES,
@@ -349,6 +366,16 @@ def run_cv_grid(args):
         or args.min_stage_failures
         or args.stages
     )
+    online_config = OnlineSafeConfig(
+        mode=args.online_safe_mode,
+        seed=args.online_safe_seed,
+        landmark_fraction=args.online_landmark_fraction,
+    )
+    online_requested = online_config.mode != "none"
+    if causal_requested and online_requested:
+        raise ValueError(
+            "Original online SAFE and causal Subtask-SAFE modes are mutually exclusive"
+        )
     if causal_requested and inner_group_field != "parent_rollout_id":
         raise ValueError(
             "Causal Subtask-SAFE CV requires a parent_rollout selection manifest"
@@ -441,7 +468,14 @@ def run_cv_grid(args):
         "selection_metric": (
             f"mean causal prefix-{args.causal_selection_prefix} ROC-AUC across folds"
             if causal_requested
-            else "mean falert_early_roc_auc/model_inner_val across folds"
+            else (
+                "mean online-prefix falert_early_roc_auc/model_inner_val across folds"
+                if online_requested
+                else "mean falert_early_roc_auc/model_inner_val across folds"
+            )
+        ),
+        "online_safe": (
+            online_config_dict(online_config) if online_requested else None
         ),
         "causal_subtask_safe": (
             {
@@ -549,6 +583,13 @@ def run_cv_grid(args):
                     "protocol": "per_causal_prefix_length",
                     "selected_stages": stage_selection["selected_stages"],
                 }
+            elif online_requested:
+                task_cutoffs = {
+                    "protocol": "per_online_prefix_length",
+                    "mode": online_config.mode,
+                    "landmark_fraction": online_config.landmark_fraction,
+                    "derived_inside_each_inner_training_fold": True,
+                }
             else:
                 task_cutoffs = set_task_min_step_from_training(outer_train, outer_test)
             folds = make_inner_folds(
@@ -574,7 +615,18 @@ def run_cv_grid(args):
                 inner_train_source, inner_val_source = folds[run.fold]
                 run_identity = identity
                 causal_fold = None
-                if causal_requested:
+                online_fold = None
+                if online_requested:
+                    online_fold = prepare_online_splits(
+                        inner_train_source,
+                        inner_val_source,
+                        identity,
+                        config=online_config,
+                    )
+                    inner_train = online_fold["train"]
+                    inner_val = online_fold["test"]
+                    run_identity = online_fold["identity"]
+                elif causal_requested:
                     fold_config = CausalPrefixConfig(
                         training_mode=causal_config.training_mode,
                         horizons=causal_config.horizons,
@@ -750,6 +802,7 @@ def run_cv_grid(args):
                         if causal_fold is not None
                         else None
                     ),
+                    "online_safe": online_payload_summary(online_fold),
                     "inner_train_ids": [
                         run_identity[id(item)][1]["rollout_id"] for item in inner_train
                     ],
@@ -852,6 +905,13 @@ def build_parser():
         "--regularization", nargs="+", type=float, default=list(REGULARIZATION)
     )
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--online-safe-mode",
+        choices=ONLINE_SAFE_MODES,
+        default="none",
+    )
+    parser.add_argument("--online-safe-seed", type=int, default=0)
+    parser.add_argument("--online-landmark-fraction", type=float, default=0.5)
     parser.add_argument(
         "--causal-prefix-mode",
         choices=PREFIX_TRAINING_MODES,
