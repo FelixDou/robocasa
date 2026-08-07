@@ -14,6 +14,7 @@ from robocasa.recovery.safe.audit_subtask_safe_dataset import (
 from robocasa.recovery.safe.subtask_safe import (
     SUBTASK_FAILURE_LABEL_SEMANTICS,
     atomic_write_subtask_safe_record,
+    build_runtime_semantic_subtask_state,
     build_subtask_safe_record,
     validate_subtask_safe_record,
 )
@@ -48,6 +49,42 @@ def subtask_eval(
 
 
 class TestSubtaskSafe(unittest.TestCase):
+    def test_runtime_state_reuses_semantic_order_and_instruction(self):
+        state = build_runtime_semantic_subtask_state(
+            [subtask_eval(), subtask_eval(first=True)],
+            task_name="TestSemanticTask",
+        )
+
+        self.assertEqual(state["completed_subtask_ids"], ["first"])
+        self.assertEqual(
+            state["current_subtask"],
+            {
+                "subtask_index": 1,
+                "subtask_id": "second",
+                "instruction": "Complete the second semantic subtask.",
+                "predicate_names": ["second"],
+                "source_subtask_ids": ["second"],
+                "required_for_official_success": True,
+            },
+        )
+
+    def test_runtime_state_retries_terminally_regressed_semantic_unit(self):
+        state = build_runtime_semantic_subtask_state(
+            [
+                subtask_eval(),
+                subtask_eval(first=True),
+                subtask_eval(first=False, second=True),
+            ],
+            task_name="TestSemanticTask",
+        )
+
+        self.assertEqual(state["current_subtask"]["subtask_id"], "first")
+        self.assertEqual(
+            state["current_subtask_reason"],
+            "completed_subtask_regressed_before_task_completion",
+        )
+        self.assertEqual(state["current_unsatisfied_predicate_names"], ["first"])
+
     def test_get_subtask_eval_traverses_nested_wrappers(self):
         payload = subtask_eval()
 
@@ -214,6 +251,22 @@ class TestSubtaskSafe(unittest.TestCase):
         )
         self.assertEqual(record["terminal_unsatisfied_predicate_names"], ["second"])
         self.assertEqual(record["labeling_status"], "complete")
+
+    def test_validation_rejects_predicate_owned_by_two_subtasks(self):
+        record = build_subtask_safe_record(
+            [subtask_eval(), subtask_eval(first=True)],
+            [0],
+            rollout_failed=True,
+            rollout_id="duplicate-predicate-owner",
+        )
+        record["semantic_subtasks"][1]["predicate_names"] = ["first"]
+        with self.assertRaisesRegex(ValueError, "more than one subtask"):
+            validate_subtask_safe_record(
+                record,
+                rollout_id="duplicate-predicate-owner",
+                rollout_failed=True,
+                inference_environment_steps=[0],
+            )
 
     def test_terminal_regression_relabels_first_unsatisfied_subtask(self):
         record = build_subtask_safe_record(

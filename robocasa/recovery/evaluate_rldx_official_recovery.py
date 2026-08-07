@@ -48,6 +48,20 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
+RLDX_SAFE_10X10_TASKS = [
+    "CloseToasterOvenDoor",
+    "CoffeeSetupMug",
+    "PickPlaceCounterToStove",
+    "PickPlaceDrawerToCounter",
+    "TurnOnSinkFaucet",
+    "LoadDishwasher",
+    "PreSoakPan",
+    "ScrubCuttingBoard",
+    "StackBowlsCabinet",
+    "WashLettuce",
+]
+
+
 def json_default(value):
     if isinstance(value, np.ndarray):
         return value.tolist()
@@ -69,10 +83,12 @@ def parse_policy_args(values):
 
 
 def resolve_tasks(task_set, envs):
-    from robocasa.utils.dataset_registry import TARGET_TASKS
-
     if envs:
         return envs
+    if task_set == "rldx_safe_10x10":
+        return list(RLDX_SAFE_10X10_TASKS)
+    from robocasa.utils.dataset_registry import TARGET_TASKS
+
     if task_set == "all_composite":
         return TARGET_TASKS["composite_seen"] + TARGET_TASKS["composite_unseen"]
     if task_set == "all_target":
@@ -545,17 +561,56 @@ def _step_official(
     session_id,
     video_history=4,
     normalize_policy_io=False,
+    failure_monitor=None,
+    environment_step=0,
 ):
     options = {
         "reset_memory": [bool(is_first_step)],
         "session_ids": [session_id],
     }
+    if failure_monitor is not None:
+        options["request_safe_features"] = True
     policy_observations = observations
     if normalize_policy_io:
         policy_observations = _normalize_rldx_observation(
             observations, video_history=video_history
         )
-    actions, _ = policy.get_action(policy_observations, options=options)
+    actions, policy_info = policy.get_action(policy_observations, options=options)
+    safe_decision = None
+    if failure_monitor is not None:
+        if not isinstance(policy_info, dict) or "safe_features" not in policy_info:
+            raise RuntimeError(
+                "SAFE monitoring was enabled, but the official RLDX policy did "
+                "not return info['safe_features']. Apply the pinned RLDX SAFE "
+                "patch before starting the server."
+            )
+        features = np.asarray(policy_info["safe_features"])
+        if features.ndim == 4:
+            if features.shape[0] != 1:
+                raise RuntimeError("SAFE recovery requires one RLDX environment")
+            features = features[0]
+        record = {
+            "environment_step": int(environment_step),
+            "env_step": int(environment_step),
+            "inference_index": len(getattr(failure_monitor, "decisions", [])),
+            "features": features,
+            "metadata": copy.deepcopy(
+                policy_info.get("safe_feature_metadata") or {}
+            ),
+        }
+        safe_decision = failure_monitor.observe_inference(record)
+        if not isinstance(safe_decision, dict) or "failure_detected" not in safe_decision:
+            raise TypeError(
+                "SAFE monitor must return a decision with failure_detected"
+            )
+        safe_decision = copy.deepcopy(safe_decision)
+        safe_decision["failure_detected"] = bool(
+            safe_decision["failure_detected"]
+        )
+        if safe_decision["failure_detected"]:
+            # The detector sees the inference output, but its proposed action
+            # chunk is never applied after the first threshold crossing.
+            return observations, 0.0, False, {}, False, safe_decision
     if normalize_policy_io:
         actions = _normalize_actions_for_env(actions, vec_env)
     next_obs, rewards, terminations, truncations, infos = vec_env.step(actions)
@@ -569,38 +624,29 @@ def _step_official(
         final_info = infos["final_info"][0]
         if "success" in final_info:
             success = success or _bool_from_vector(final_info["success"])
-    return next_obs, reward, done, info, success
+    return next_obs, reward, done, info, success, safe_decision
 
 
-def _latest_ordered_trace_entry(subtask_evals):
-    from robocasa.recovery.subtask_eval import build_subtask_trace
+def _runtime_semantic_state(subtask_evals, task_name):
+    from robocasa.recovery.safe.subtask_safe import (
+        build_runtime_semantic_subtask_state,
+    )
 
-    trace = build_subtask_trace(subtask_evals)
-    for entry in reversed(trace):
-        if entry.get("subtask_eval_available"):
-            return entry
-    return None
-
-
-def _subtask_is_complete(subtask_eval, subtask_name):
-    if subtask_name is None:
-        return False
-    predicate = (subtask_eval or {}).get("predicates", {}).get(subtask_name, {})
-    return bool(predicate.get("value", False))
+    return build_runtime_semantic_subtask_state(
+        subtask_evals,
+        task_name=task_name,
+    )
 
 
-def _subtask_instruction(subtask_eval, subtask_name):
-    if subtask_name is None:
-        return None
-    predicate = (subtask_eval or {}).get("predicates", {}).get(subtask_name, {})
-    return predicate.get("description") or f"Complete this subtask: {subtask_name}."
+def _semantic_target(state):
+    target = (state or {}).get("current_subtask")
+    return copy.deepcopy(target) if target is not None else None
 
 
-def _ordered_current_subtask_from_eval(subtask_eval):
-    entry = _latest_ordered_trace_entry([subtask_eval])
-    if not entry:
-        return None
-    return entry.get("ordered_current_subtask") or entry.get("current_subtask_estimate")
+def _semantic_target_is_complete(subtask_eval, target):
+    from robocasa.recovery.safe.subtask_safe import semantic_subtask_is_complete
+
+    return semantic_subtask_is_complete(subtask_eval, target)
 
 
 def _safe_get_subtask_eval(env, warnings, context):
@@ -730,6 +776,7 @@ def run_one_official_rldx_recovery_rollout(
     include_trace,
     n_action_steps,
     normalize_policy_io,
+    failure_monitor=None,
 ):
     import gymnasium as gym
 
@@ -757,6 +804,8 @@ def run_one_official_rldx_recovery_rollout(
         single_env = _single_env_from_vector(vec_env)
         if hasattr(policy, "reset"):
             policy.reset()
+        if failure_monitor is not None:
+            failure_monitor.reset(task_name=env_name)
         session_id = f"{env_name}_env{env_idx}_ep{start_episode_id}_{uuid.uuid4().hex[:8]}"
         is_first_step = True
         subtask_eval_warnings = []
@@ -764,23 +813,33 @@ def run_one_official_rldx_recovery_rollout(
         subtask_evals = [
             _safe_get_subtask_eval(single_env, subtask_eval_warnings, "initial")
         ]
-        initial_trace_entry = _latest_ordered_trace_entry(subtask_evals) or {}
-        best_ordered_count = len(
-            initial_trace_entry.get("ordered_completed_subtasks", [])
-        )
+        semantic_state = _runtime_semantic_state(subtask_evals, env_name)
+        best_ordered_count = len(semantic_state["completed_subtask_ids"])
         last_good_subtask = (
-            initial_trace_entry.get("ordered_completed_subtasks", [])[-1]
+            semantic_state["completed_subtask_ids"][-1]
             if best_ordered_count
             else None
         )
         last_good_state = _capture_state(single_env)
+        last_good_subtask_evals = list(subtask_evals)
         last_good_step = 0
         high_level_success = False
         high_level_steps = 0
+        high_level_policy_calls = 0
+        safe_events = []
+        failure_trigger = None
+        termination_reason = "time_limit"
 
         for step_i in range(high_level_horizon):
-            high_level_steps = step_i + 1
-            observations, reward, done, info, step_success = _step_official(
+            high_level_policy_calls = step_i + 1
+            (
+                observations,
+                reward,
+                done,
+                info,
+                step_success,
+                safe_decision,
+            ) = _step_official(
                 vec_env,
                 policy,
                 observations,
@@ -788,10 +847,31 @@ def run_one_official_rldx_recovery_rollout(
                 session_id=session_id,
                 video_history=video_history,
                 normalize_policy_io=normalize_policy_io,
+                failure_monitor=failure_monitor,
+                environment_step=high_level_steps,
             )
+            if safe_decision is not None:
+                safe_events.append(safe_decision)
+                if safe_decision["failure_detected"]:
+                    semantic_state = _runtime_semantic_state(
+                        subtask_evals, env_name
+                    )
+                    failure_trigger = {
+                        "type": "safe_failure_detection",
+                        "policy_call": high_level_policy_calls,
+                        "environment_step": high_level_steps,
+                        "semantic_current_subtask": _semantic_target(
+                            semantic_state
+                        ),
+                        "safe_decision": safe_decision,
+                    }
+                    termination_reason = "safe_failure_detected"
+                    break
             is_first_step = False
+            high_level_steps += 1
             if step_success or reward > 0:
                 high_level_success = True
+                termination_reason = "task_success"
                 break
             current_eval = _get_info_value(info, "subtask_eval")
             if current_eval is None:
@@ -800,15 +880,17 @@ def run_one_official_rldx_recovery_rollout(
                 )
             subtask_evals.append(current_eval)
 
-            trace_entry = _latest_ordered_trace_entry(subtask_evals) or {}
-            ordered_completed = trace_entry.get("ordered_completed_subtasks", [])
+            semantic_state = _runtime_semantic_state(subtask_evals, env_name)
+            ordered_completed = semantic_state["completed_subtask_ids"]
             if len(ordered_completed) > best_ordered_count:
                 best_ordered_count = len(ordered_completed)
                 last_good_subtask = ordered_completed[-1] if ordered_completed else None
                 last_good_state = _capture_state(single_env)
+                last_good_subtask_evals = list(subtask_evals)
                 last_good_step = high_level_steps
 
             if done:
+                termination_reason = "environment_done"
                 break
 
         high_level_summary = summarize_subtask_rollout(
@@ -818,6 +900,7 @@ def run_one_official_rldx_recovery_rollout(
         )
         high_level_summary["success"] = high_level_success
         high_level_summary["num_policy_steps"] = high_level_steps
+        high_level_summary["num_policy_calls"] = high_level_policy_calls
         high_level_summary["num_action_steps_estimate"] = high_level_steps * n_action_steps
         high_level_summary["last_good_ordered_subtask"] = last_good_subtask
         high_level_summary["last_good_ordered_subtask_count"] = best_ordered_count
@@ -826,6 +909,30 @@ def run_one_official_rldx_recovery_rollout(
             high_level_steps - last_good_step
         )
         high_level_summary["subtask_eval_warnings"] = subtask_eval_warnings
+        semantic_state = _runtime_semantic_state(subtask_evals, env_name)
+        high_level_summary["semantic_subtasks"] = semantic_state[
+            "semantic_subtasks"
+        ]
+        high_level_summary["semantic_final"] = semantic_state["latest"]
+        if include_trace:
+            high_level_summary["semantic_trace"] = semantic_state["trace"]
+        high_level_summary["termination_reason"] = termination_reason
+        high_level_summary["failure_trigger"] = failure_trigger or {
+            "type": termination_reason,
+            "environment_step": high_level_steps,
+            "semantic_current_subtask": _semantic_target(semantic_state),
+        }
+        high_level_summary["safe_monitor"] = {
+            "enabled": failure_monitor is not None,
+            "num_scored_inferences": len(safe_events),
+            "num_detections": sum(
+                int(event.get("failure_detected", False)) for event in safe_events
+            ),
+            "events": safe_events,
+        }
+        describe_monitor = getattr(failure_monitor, "describe", None)
+        if callable(describe_monitor):
+            high_level_summary["safe_monitor"]["config"] = describe_monitor()
 
         result = {
             "high_level": high_level_summary,
@@ -836,15 +943,12 @@ def run_one_official_rldx_recovery_rollout(
         if high_level_success:
             return result
 
-        final_eval = high_level_summary.get("final_subtask_eval")
-        high_level_subtask_name = (
-            high_level_summary.get("ordered_current_subtask")
-            or high_level_summary.get("current_subtask_estimate")
-            or high_level_summary.get("stuck_subtask")
-        )
-        high_level_instruction = _subtask_instruction(
-            final_eval, high_level_subtask_name
-        )
+        high_level_target = _semantic_target(semantic_state)
+        if high_level_target is None:
+            raise RuntimeError(
+                "Recovery was triggered after all semantic subtasks completed, "
+                "but the task did not report success"
+            )
 
         recovery_meta = _apply_recovery_mode_same_env(
             single_env, mode, last_good_state
@@ -852,15 +956,21 @@ def run_one_official_rldx_recovery_rollout(
         recovery_start_eval = _safe_get_subtask_eval(
             single_env, subtask_eval_warnings, "recovery_start"
         )
-        subtask_name = (
-            _ordered_current_subtask_from_eval(recovery_start_eval)
-            or high_level_subtask_name
+        if recovery_meta.get("state_restored"):
+            recovery_history = list(last_good_subtask_evals)
+        else:
+            recovery_history = list(subtask_evals)
+        if not recovery_history or recovery_history[-1] is not recovery_start_eval:
+            recovery_history.append(recovery_start_eval)
+        recovery_semantic_state = _runtime_semantic_state(
+            recovery_history, env_name
         )
-        instruction = _subtask_instruction(recovery_start_eval, subtask_name)
-        recovery_meta["high_level_target_subtask"] = high_level_subtask_name
-        recovery_meta["high_level_target_instruction"] = high_level_instruction
-        recovery_meta["recovery_start_target_subtask"] = subtask_name
-        recovery_meta["recovery_start_target_instruction"] = instruction
+        target = _semantic_target(recovery_semantic_state) or high_level_target
+        subtask_name = target["subtask_id"]
+        instruction = target["instruction"]
+        recovery_meta["high_level_target_subtask"] = high_level_target
+        recovery_meta["recovery_start_target_subtask"] = copy.deepcopy(target)
+        recovery_meta["trigger"] = high_level_summary["failure_trigger"]
         _set_env_instruction(single_env, instruction)
         observations = _refresh_multistep_observation(single_env, instruction)
         # The high-level phase uses the official raw vector-env observations.
@@ -872,7 +982,7 @@ def run_one_official_rldx_recovery_rollout(
         session_id = f"{env_name}_recovery_{uuid.uuid4().hex[:8]}"
 
         retry_evals = [recovery_start_eval]
-        retry_success = _subtask_is_complete(retry_evals[-1], subtask_name)
+        retry_success = _semantic_target_is_complete(retry_evals[-1], target)
         retry_steps = 0
         retry_horizon = (
             max(1, high_level_steps - last_good_step)
@@ -883,7 +993,7 @@ def run_one_official_rldx_recovery_rollout(
             if retry_success:
                 break
             retry_steps = step_i + 1
-            observations, reward, done, info, _ = _step_official(
+            observations, reward, done, info, _, _ = _step_official(
                 vec_env,
                 policy,
                 observations,
@@ -900,7 +1010,7 @@ def run_one_official_rldx_recovery_rollout(
                     single_env, subtask_eval_warnings, f"recovery_step_{step_i}"
                 )
             retry_evals.append(current_eval)
-            retry_success = _subtask_is_complete(current_eval, subtask_name)
+            retry_success = _semantic_target_is_complete(current_eval, target)
             if done:
                 break
 
@@ -921,6 +1031,10 @@ def run_one_official_rldx_recovery_rollout(
         )
         retry_summary["target_subtask"] = subtask_name
         retry_summary["target_instruction"] = instruction
+        retry_summary["target_predicate_names"] = list(
+            target["predicate_names"]
+        )
+        retry_summary["semantic_target"] = copy.deepcopy(target)
         result.update(
             {
                 "recovery_attempted": True,
@@ -947,6 +1061,44 @@ def run_benchmark(args):
         policy_client_host=args.policy_client_host,
         policy_client_port=args.policy_client_port,
     )
+    safe_enabled = args.safe_run is not None or args.safe_checkpoint is not None
+    failure_monitor = None
+    if safe_enabled:
+        from robocasa.recovery.safe.runtime_monitor import (
+            OfficialSafeCheckpointMonitor,
+        )
+
+        safe_run = args.safe_run.expanduser().resolve() if args.safe_run else None
+        safe_checkpoint = args.safe_checkpoint or (
+            safe_run / "model_final.ckpt" if safe_run is not None else None
+        )
+        safe_config = args.safe_config or (
+            safe_run / "config.yaml" if safe_run is not None else None
+        )
+        if safe_checkpoint is None or safe_config is None:
+            raise ValueError(
+                "SAFE monitoring requires --safe-run or both --safe-checkpoint "
+                "and --safe-config"
+            )
+        failure_monitor = OfficialSafeCheckpointMonitor(
+            args.safe_repo,
+            safe_checkpoint,
+            safe_config,
+            device=args.safe_device,
+            calibration=args.safe_calibration,
+            fixed_threshold=args.safe_threshold,
+            task_normalization=args.safe_task_normalization,
+            expected_commit=args.safe_expected_commit,
+        )
+        if args.safe_threshold is not None:
+            print(
+                colored(
+                    "WARNING: using an uncalibrated fixed SAFE threshold; "
+                    "this run validates pipeline behavior, not conformal "
+                    "false-alert control.",
+                    "yellow",
+                )
+            )
     tasks = resolve_tasks(args.task_set, args.envs)
     output = {
         "config": vars(args),
@@ -961,6 +1113,8 @@ def run_benchmark(args):
         },
         "modes": {},
         "uses_official_rldx_rollout_path": True,
+        "uses_subtask_safe_semantic_tracking": True,
+        "safe_monitor_enabled": safe_enabled,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -977,7 +1131,13 @@ def run_benchmark(args):
         with args.output.open("w") as f:
             json.dump(output, f, indent=2, default=json_default)
 
-    for mode in args.modes:
+    modes = args.modes or (
+        ["continue_from_failure", "env_to_last_good"]
+        if safe_enabled
+        else ["env_to_last_good"]
+    )
+    output["resolved_modes"] = modes
+    for mode in modes:
         mode_results = []
         update_mode_output(mode, mode_results, completed=False)
         write_output(partial=True)
@@ -1035,6 +1195,7 @@ def run_benchmark(args):
                         include_trace=args.include_trace,
                         n_action_steps=args.n_action_steps,
                         normalize_policy_io=args.compat_normalize_policy_io,
+                        failure_monitor=failure_monitor,
                     )
                     result["task"] = task_name
                     result["rollout_index"] = rollout_i
@@ -1090,6 +1251,7 @@ def main():
             "composite_unseen",
             "all_composite",
             "all_target",
+            "rldx_safe_10x10",
         ],
         default="atomic_seen",
     )
@@ -1097,7 +1259,7 @@ def main():
     parser.add_argument(
         "--modes",
         nargs="+",
-        default=["env_to_last_good"],
+        default=None,
         choices=["env_to_last_good", "eef_to_last_good", "continue_from_failure"],
     )
     parser.add_argument("--split", default="target", choices=["pretrain", "target"])
@@ -1143,6 +1305,34 @@ def main():
             "disabled to match the official RLDX rollout loop."
         ),
     )
+    parser.add_argument(
+        "--safe-run",
+        type=Path,
+        default=None,
+        help=(
+            "Official SAFE final-refit directory containing model_final.ckpt "
+            "and config.yaml (for example indep_seed0)."
+        ),
+    )
+    parser.add_argument("--safe-checkpoint", type=Path, default=None)
+    parser.add_argument("--safe-config", type=Path, default=None)
+    parser.add_argument("--safe-repo", type=Path, default=None)
+    parser.add_argument("--safe-calibration", type=Path, default=None)
+    parser.add_argument("--safe-task-normalization", type=Path, default=None)
+    parser.add_argument(
+        "--safe-threshold",
+        type=float,
+        default=None,
+        help=(
+            "Fixed raw SAFE score threshold for an uncalibrated pilot. Use "
+            "--safe-calibration instead for a calibrated operating point."
+        ),
+    )
+    parser.add_argument("--safe-device", default="cpu")
+    parser.add_argument(
+        "--safe-expected-commit",
+        default="b6036abe07b2b2bb9996afb2c07f13d6a9f507c0",
+    )
     args = parser.parse_args()
 
     if bool(args.model_path) == bool(args.policy_client_host or args.policy_client_port):
@@ -1154,6 +1344,31 @@ def main():
         args.policy_client_port is not None and not args.policy_client_host
     ):
         parser.error("--policy-client-host and --policy-client-port must be passed together")
+    safe_enabled = args.safe_run is not None or args.safe_checkpoint is not None
+    if safe_enabled:
+        if args.safe_repo is None:
+            parser.error("Official SAFE monitoring requires --safe-repo")
+        if (args.safe_calibration is None) == (args.safe_threshold is None):
+            parser.error(
+                "Provide exactly one of --safe-calibration or --safe-threshold"
+            )
+        if args.safe_run is None and (
+            args.safe_checkpoint is None or args.safe_config is None
+        ):
+            parser.error(
+                "Provide --safe-run or both --safe-checkpoint and --safe-config"
+            )
+    elif any(
+        value is not None
+        for value in (
+            args.safe_config,
+            args.safe_repo,
+            args.safe_calibration,
+            args.safe_task_normalization,
+            args.safe_threshold,
+        )
+    ):
+        parser.error("SAFE options require --safe-run or --safe-checkpoint")
 
     run_benchmark(args)
 

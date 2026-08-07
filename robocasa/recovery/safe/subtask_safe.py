@@ -116,6 +116,17 @@ def _semantic_subtasks(
         raise ValueError(
             f"Semantic subtask identifiers contain duplicates for {task_name}"
         )
+    predicate_owner = {}
+    for definition in definitions:
+        for predicate_name in definition["predicate_names"]:
+            previous = predicate_owner.get(predicate_name)
+            if previous is not None:
+                raise ValueError(
+                    "Semantic predicate is assigned to more than one subtask for "
+                    f"{task_name}: {predicate_name!r} belongs to both "
+                    f"{previous!r} and {definition['subtask_id']!r}"
+                )
+            predicate_owner[predicate_name] = definition["subtask_id"]
     available_predicates = {
         name for payload in subtask_evals for name in payload.get("predicates", {})
     }
@@ -263,6 +274,81 @@ def _build_semantic_trace(
         )
         previous_predicate_values = values
     return trace, completion_steps, active_steps, bypass_steps
+
+
+def build_runtime_semantic_subtask_state(
+    subtask_evals: list[dict[str, Any] | None],
+    *,
+    task_name: str | None = None,
+) -> dict[str, Any]:
+    """Resolve the latest Subtask-SAFE semantic unit during a live rollout.
+
+    This is the runtime counterpart of :func:`build_subtask_safe_record`.  It
+    deliberately reuses the same semantic normalization and monotonic ordered
+    trace, so recovery does not fall back to the older one-predicate/one-prompt
+    tracker.  Every runtime predicate may belong to at most one semantic
+    subtask, while one semantic subtask may require several predicates.
+    """
+    if not subtask_evals:
+        raise ValueError("Runtime semantic subtask tracking received an empty trace")
+    valid_evals = _valid_evals(subtask_evals)
+    resolved_task_name = _task_name(valid_evals, task_name)
+    _validate_predicate_contract(valid_evals)
+    definitions = _semantic_subtasks(resolved_task_name, valid_evals)
+    trace, _, _, _ = _build_semantic_trace(valid_evals, definitions)
+    latest = trace[-1]
+    by_id = {
+        definition["subtask_id"]: definition for definition in definitions
+    }
+    current_id = latest["current_subtask_id"]
+    current = by_id.get(current_id) if current_id is not None else None
+    current_reason = "ordered_incomplete_subtask"
+    terminal_unsatisfied_predicates = []
+    if current is None and not latest["task_success"]:
+        current_id, terminal_unsatisfied_predicates = (
+            _first_terminally_unsatisfied_subtask(valid_evals[-1], definitions)
+        )
+        current = by_id.get(current_id) if current_id is not None else None
+        current_reason = "completed_subtask_regressed_before_task_completion"
+    return {
+        "schema_version": SUBTASK_SAFE_SCHEMA_VERSION,
+        "task_name": resolved_task_name,
+        "semantic_subtasks": definitions,
+        "trace": trace,
+        "latest": dict(latest),
+        "completed_subtask_ids": list(latest["completed_subtask_ids"]),
+        "bypassed_optional_subtask_ids": list(
+            latest["bypassed_optional_subtask_ids"]
+        ),
+        "current_subtask": copy_semantic_definition(current),
+        "current_subtask_reason": current_reason if current is not None else None,
+        "current_unsatisfied_predicate_names": terminal_unsatisfied_predicates,
+    }
+
+
+def copy_semantic_definition(
+    definition: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Return a mutation-safe JSON-shaped semantic definition."""
+    if definition is None:
+        return None
+    return {
+        **definition,
+        "predicate_names": list(definition["predicate_names"]),
+        "source_subtask_ids": list(definition["source_subtask_ids"]),
+    }
+
+
+def semantic_subtask_is_complete(
+    subtask_eval: dict[str, Any] | None,
+    definition: dict[str, Any] | None,
+) -> bool:
+    """Return whether all predicates owned by a semantic subtask are true."""
+    if not subtask_eval or not definition:
+        return False
+    values = _predicate_values(subtask_eval)
+    names = list(definition.get("predicate_names") or [])
+    return bool(names) and all(values.get(name, False) for name in names)
 
 
 def _transition_trace(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -582,6 +668,7 @@ def validate_subtask_safe_record(
     if not definitions:
         raise ValueError("Subtask-SAFE semantic subtask definitions are empty")
     definition_by_id = {}
+    predicate_owner = {}
     for expected_index, definition in enumerate(definitions):
         subtask_id = definition.get("subtask_id")
         if (
@@ -594,6 +681,12 @@ def validate_subtask_safe_record(
             raise ValueError("Invalid natural-language subtask definition")
         if subtask_id in definition_by_id:
             raise ValueError("Duplicate semantic subtask identifier")
+        for predicate_name in definition["predicate_names"]:
+            if predicate_name in predicate_owner:
+                raise ValueError(
+                    "Semantic predicate is assigned to more than one subtask"
+                )
+            predicate_owner[predicate_name] = subtask_id
         definition_by_id[subtask_id] = definition
 
     inference_records = record.get("inference_records", [])

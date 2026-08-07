@@ -540,6 +540,92 @@ CUDA_VISIBLE_DEVICES=1 nohup python -u \
 echo "lstm_pid=$!"
 ```
 
+## Online RLDX SAFE-triggered recovery on the original ten tasks
+
+The runtime recovery pilot uses the official RLDX rollout wrapper, the
+independent MLP from the original 10-success/10-failure-per-task refit, and the
+same ten task identities listed above.  Runtime subtask selection is resolved
+with Subtask-SAFE schema v3: semantic units are ordered and each predicate is
+owned by at most one subtask.  A semantic unit may contain multiple predicates
+when the normalization intentionally merged redundant stages.
+
+The evaluator requests the raw action-token hidden states from the patched
+RLDX server, scores each genuine inference before executing its action chunk,
+and starts recovery at the first SAFE crossing.  If no crossing occurs, the
+task horizon triggers the same recovery branch.  Recovery either continues
+from the current simulator state or restores the last state at which a
+semantic subtask completed, then resets RLDX policy memory and retries the
+current semantic subtask instruction.
+
+The original ten-task refit did not retain a disjoint conformal calibration
+set.  The command below therefore uses an explicitly chosen raw score threshold
+of `0.5` only to exercise the wiring.  That value is not a validated operating
+point, so this is an uncalibrated pipeline pilot, not a false-alert-controlled
+SAFE result.  It selects `indep_seed0` explicitly rather than averaging model
+seeds at runtime.
+
+Start the RLDX server as described in the cluster experiment runbook, using the
+pinned RLDX SAFE feature patch and port `20100`.  Then preflight the simulator
+interpreter and run one rollout per mode on each of the ten tasks:
+
+```bash
+set -euo pipefail
+
+export PROJECT_FS=/gs/fs/tga-shinoda/felid
+export STORAGE_BS=/gs/bs/tga-shinoda/felid
+export ROBOCASA_REPO="$PROJECT_FS/robocasa"
+export RLDX_REPO="$PROJECT_FS/RLDX-1"
+export SAFE_REPO="$PROJECT_FS/SAFE"
+export RLDX_SIM_PY="$RLDX_REPO/rldx/eval/sim/robocasa365/robocasa365_uv/.venv/bin/python"
+export SAFE_RLDX10_FINAL_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/safe_rldx1_seen10_final_refit_20260727_155824"
+export SAFE_RLDX10_RUN="$SAFE_RLDX10_FINAL_ROOT/indep_seed0"
+export ROBOCASA_LOG_ROOT="$STORAGE_BS/robocasa_logs"
+export ROBOCASA_ROLLOUT_ROOT="$STORAGE_BS/robocasa_rollouts"
+
+test "$(git -C "$SAFE_REPO" rev-parse HEAD)" = \
+  "b6036abe07b2b2bb9996afb2c07f13d6a9f507c0"
+test -f "$SAFE_RLDX10_RUN/model_final.ckpt"
+test -f "$SAFE_RLDX10_RUN/config.yaml"
+ss -ltn | grep -q ':20100'
+
+# The evaluator loads the small SAFE MLP locally while RLDX remains on its
+# policy server. Stop here if this environment preflight fails.
+PYTHONPATH="$SAFE_REPO:$ROBOCASA_REPO" "$RLDX_SIM_PY" - <<'PY'
+import omegaconf
+import torch
+from failure_prob.model import get_model
+print("SAFE runtime dependencies OK", torch.__version__)
+PY
+
+export RUN_TAG=rldx10_safe_recovery_$(date +%Y%m%d_%H%M%S)
+export RUN_ROOT="$ROBOCASA_ROLLOUT_ROOT/$RUN_TAG"
+mkdir -p "$RUN_ROOT" "$ROBOCASA_LOG_ROOT/eval"
+
+cd "$ROBOCASA_REPO"
+PYTHONPATH="$SAFE_REPO:$ROBOCASA_REPO" \
+CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
+"$RLDX_SIM_PY" -u robocasa/recovery/evaluate_rldx_official_recovery.py \
+  --rldx-repo "$RLDX_REPO" \
+  --policy-client-host 127.0.0.1 \
+  --policy-client-port 20100 \
+  --task-set rldx_safe_10x10 \
+  --split target \
+  --modes continue_from_failure env_to_last_good \
+  --num-rollouts 1 \
+  --safe-repo "$SAFE_REPO" \
+  --safe-run "$SAFE_RLDX10_RUN" \
+  --safe-threshold 0.5 \
+  --safe-device cpu \
+  --include-trace \
+  --output "$RUN_ROOT/results.json" \
+  2>&1 | tee "$ROBOCASA_LOG_ROOT/eval/${RUN_TAG}.log"
+```
+
+For a later calibrated run, replace `--safe-threshold 0.5` with a calibration
+JSON via `--safe-calibration` and, if that calibration is task-normalized, pass
+its matching `--safe-task-normalization` JSON.  Never combine a calibration
+from the 25/25 refit with this 10/10 checkpoint.
+
 ## Leakage-free seen-task calibration for the 25/25 dataset
 
 After selecting and refitting the final MLP on the 25-success/25-failure
