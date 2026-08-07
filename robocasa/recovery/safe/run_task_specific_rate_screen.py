@@ -158,6 +158,8 @@ def run_screen(args):
             run["class_weighting"],
             "--task-type",
             "all",
+            "--tasks",
+            run["task_name"],
             "--epochs",
             str(args.epochs),
             "--device",

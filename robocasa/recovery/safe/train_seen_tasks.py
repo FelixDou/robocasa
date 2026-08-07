@@ -337,22 +337,37 @@ def task_catalog(export_dir):
     }
 
 
-def resolve_task_type_selection(export_dir, task_type="all"):
+def resolve_task_type_selection(export_dir, task_type="all", tasks=None):
     if task_type not in TASK_TYPE_FILTERS:
         raise ValueError(
             f"Unknown task type {task_type!r}; expected one of {TASK_TYPE_FILTERS}"
         )
     catalog = task_catalog(export_dir)
-    selected_names = sorted(
+    type_selected_names = sorted(
         name
         for name, value in catalog["task_types"].items()
         if task_type == "all" or value == task_type
     )
+    if tasks is None:
+        selected_names = type_selected_names
+    else:
+        requested = list(dict.fromkeys(map(str, tasks)))
+        unknown = sorted(set(requested) - set(catalog["task_ids"]))
+        if unknown:
+            raise ValueError("Unknown requested tasks: " + ", ".join(unknown))
+        incompatible = sorted(set(requested) - set(type_selected_names))
+        if incompatible:
+            raise ValueError(
+                f"Requested tasks are incompatible with task type {task_type}: "
+                + ", ".join(incompatible)
+            )
+        selected_names = sorted(requested)
     if not selected_names:
         raise ValueError(f"No {task_type} tasks are present in the official export")
     selected_ids = sorted(catalog["task_ids"][name] for name in selected_names)
     return {
         "task_type_filter": task_type,
+        "task_name_filter": None if tasks is None else selected_names,
         "source_num_tasks": len(catalog["task_ids"]),
         "selected_task_ids": selected_ids,
         "selected_task_names": selected_names,
@@ -904,6 +919,7 @@ def train_seen_model(args):
     task_selection = resolve_task_type_selection(
         args.export_dir,
         args.task_type,
+        args.tasks,
     )
     all_rollouts, env_records, identity = filter_aligned_task_type(
         source_rollouts,
@@ -1264,6 +1280,11 @@ def build_parser():
         "--task-type",
         choices=TASK_TYPE_FILTERS,
         default="all",
+    )
+    parser.add_argument(
+        "--tasks",
+        nargs="+",
+        help="Optional exact task-name allowlist within --task-type",
     )
     parser.add_argument(
         "--outer-split-manifest",

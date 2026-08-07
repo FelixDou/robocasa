@@ -8,6 +8,7 @@ from robocasa.recovery.safe.build_task_specific_rate_experiment import (
     build_task_specific_experiment,
 )
 from robocasa.recovery.safe.summarize_task_specific_rate_screen import summarize
+from robocasa.recovery.safe.train_seen_tasks import resolve_task_type_selection
 
 
 class TestTaskSpecificRateExperiment(unittest.TestCase):
@@ -138,6 +139,19 @@ class TestTaskSpecificRateExperiment(unittest.TestCase):
                         for item in natural
                     )
                 )
+
+    def test_exact_task_selection_is_validated_within_task_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            export, _ = self.make_source_experiment(root)
+            selection = resolve_task_type_selection(export, "all", ["TaskB"])
+            self.assertEqual(selection["selected_task_names"], ["TaskB"])
+            self.assertEqual(selection["selected_task_ids"], [1])
+            self.assertEqual(selection["task_name_filter"], ["TaskB"])
+            with self.assertRaisesRegex(ValueError, "incompatible"):
+                resolve_task_type_selection(export, "atomic", ["TaskB"])
+            with self.assertRaisesRegex(ValueError, "Unknown requested"):
+                resolve_task_type_selection(export, "all", ["MissingTask"])
 
     def test_summary_uses_subset_means_as_resampling_units(self):
         with tempfile.TemporaryDirectory() as tmp:
