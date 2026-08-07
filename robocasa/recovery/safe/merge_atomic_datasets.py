@@ -40,7 +40,6 @@ COMPATIBLE_CONFIG_KEYS = (
     "rldx_repository_commit",
     "xiaomi_repository_commit",
     "xiaomi_checkpoint_revision",
-    "xiaomi_num_trials",
 )
 
 
@@ -236,6 +235,22 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
         }
         for source, config in zip(sources, configs)
     ]
+    xiaomi_num_trials_values = sorted(
+        {
+            int(config["xiaomi_num_trials"])
+            for config in configs
+            if config.get("xiaomi_num_trials") is not None
+        }
+    )
+    source_xiaomi_seed_batches = [
+        {
+            "source_dataset": str(source),
+            "base_environment_seed": config.get("base_environment_seed"),
+            "xiaomi_num_trials": config.get("xiaomi_num_trials"),
+        }
+        for source, config in zip(sources, configs)
+        if config.get("seed_protocol") == "official_xiaomi"
+    ]
     record_video_values = {config.get("record_videos") for config in configs}
     robocasa_commits = sorted(
         {
@@ -272,6 +287,13 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
             "source_datasets": [str(source) for source in sources],
             "source_collection_quotas": source_collection_quotas,
             "source_artifact_recording": source_artifact_recording,
+            "xiaomi_num_trials": (
+                xiaomi_num_trials_values[0]
+                if len(xiaomi_num_trials_values) == 1
+                else None
+            ),
+            "xiaomi_num_trials_values": xiaomi_num_trials_values,
+            "source_xiaomi_seed_batches": source_xiaomi_seed_batches,
             "source_ports": [source_config.get("port") for source_config in configs],
             "artifact_materialization": materialization_counts,
         }

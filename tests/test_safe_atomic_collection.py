@@ -829,6 +829,50 @@ class TestSafeAtomicCollection(unittest.TestCase):
             )
             self.assertTrue(result["validation"]["valid"])
 
+    def test_merge_preserves_distinct_xiaomi_seed_batch_sizes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_a = root / "xiaomi_50_style_batch"
+            source_b = root / "xiaomi_continuation_batch"
+            output = root / "merged"
+
+            args_a = collection_args(source_a, num_rollouts=2)
+            args_b = collection_args(source_b, num_rollouts=3)
+            for args in (args_a, args_b):
+                args.seed_protocol = "official_xiaomi"
+                args.model_family = "xiaomi_robotics_1"
+                args.policy_module = (
+                    "robocasa.recovery.xiaomi_robotics_1_policy:make_policy"
+                )
+                args.policy_name = "mock-xiaomi"
+                args.checkpoint = "mock-xiaomi-checkpoint"
+            args_a.seed = 7
+            args_b.seed = 10007
+
+            run_collection(
+                args_a,
+                runtime=fake_runtime(policy_cls=FakeXiaomiPolicy),
+            )
+            run_collection(
+                args_b,
+                runtime=fake_runtime(policy_cls=FakeXiaomiPolicy),
+            )
+
+            result = merge_atomic_datasets([source_a, source_b], output)
+            config = result["summary"]["config"]
+
+            self.assertTrue(result["validation"]["valid"])
+            self.assertIsNone(config["xiaomi_num_trials"])
+            self.assertEqual(config["xiaomi_num_trials_values"], [2, 3])
+            self.assertEqual(len(config["source_xiaomi_seed_batches"]), 2)
+            self.assertEqual(
+                {
+                    batch["base_environment_seed"]
+                    for batch in config["source_xiaomi_seed_batches"]
+                },
+                {7, 10007},
+            )
+
     def test_resume_quarantines_orphan_then_recollects(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = collection_args(tmp, num_rollouts=1, resume=True)
