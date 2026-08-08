@@ -363,3 +363,59 @@ Start with the preregistered 0.50 landmark. Fractions 0.25 and 0.75 are
 separate sensitivity experiments. A fraction is unsupported when a task has no
 eventually successful rollout still active at that point; reduce the fraction
 rather than silently dropping that task from the primary ten-task comparison.
+
+## Causal elapsed-time and SAFE hybrid
+
+When elapsed time is allowed as an online feature, the relevant question is
+whether SAFE improves on the strongest causal time-only detector. Do not use a
+rollout's final duration as an input: it is unknown until the rollout has
+finished. The hybrid analyzer instead compares three deployable scores:
+
+- `time_only`: a monotone, task-conditioned estimate of eventual failure among
+  training rollouts still active at the current inference index;
+- `safe_only`: the running maximum SAFE score with task normalization fitted
+  from source-training rollouts only;
+- `safe_time_task`: logistic risk from the current SAFE prefix, elapsed
+  progress, time-only survival risk, and task identity.
+
+Complete source-training rollouts are deterministically divided into meta-fit
+and threshold-validation sets before prefix rows are created. Each rollout has
+equal total weight during hybrid fitting. Thresholds maximize validation
+balanced accuracy, and the source test split remains evaluation-only within
+the command. No subtask, progress-predicate, failure-onset, future-score, or
+final-duration field is used.
+
+Run the comparison on the original, unmodified Xiaomi final-refit scores rather
+than either duration-controlled refit:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_online_safe_latest.env
+
+export XR1_ORIGINAL_FINAL_ROOT="$(dirname "$(dirname "$XR1_OUTER_SPLIT")")"
+export XR1_TIME_HYBRID_ROOT="$XR1_ONLINE_ROOT/original_natural_time_safe_hybrid"
+
+"$SAFE_PY" -u \
+  "$ROBOCASA_REPO/robocasa/recovery/safe/analyze_time_safe_hybrid.py" \
+  --final-root "$XR1_ORIGINAL_FINAL_ROOT" \
+  --output-dir "$XR1_TIME_HYBRID_ROOT" \
+  --models indep lstm \
+  --seeds 0 1 2 \
+  --validation-per-class 5 \
+  --split-seed 0 \
+  --regularizations 0.01 0.1 1.0 10.0 \
+  --landmark-fractions 0.10 0.25 0.50 0.75 1.00 \
+  --formats png pdf
+```
+
+The output contains `analysis.json`, `per_seed_event_metrics.csv`,
+`landmark_metrics.csv`, `event_predictions.jsonl`, per-model event-comparison
+figures, and a `runtime/<model>_seed<seed>/` directory with the fitted hybrid
+model plus its training-derived time curves, task normalization, horizons, and
+thresholds. Event metrics use the first threshold crossing during each
+naturally terminated rollout. Landmark rows include only test rollouts still
+active at that causal time.
+
+The existing Xiaomi outer test was opened by the preceding detector analyses.
+Consequently this run is a post-hoc comparison and must not be presented as a
+new confirmatory test. Freeze the chosen time/hybrid protocol and collect a new
+independent natural-rate test pool before making a final performance claim.
