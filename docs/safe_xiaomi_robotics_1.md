@@ -237,6 +237,114 @@ VALID` and `Official SAFE loader compatible: True`, the tensor is finite and
 nonzero, its expected tail shape is `(5, 30, 1024)`, and inference steps are
 spaced by at least 16 environment actions.
 
+## Plan collection from the official 2,500-rollout results
+
+Use Xiaomi's task-level `eval_robocasa365/summary.json`, not a reduced local
+pilot, to select collection tasks. The planner validates the pinned release
+totals (50 tasks, 50 trials per task, and 1,432 successes), checks every task
+and horizon against the local target50 registry, and uses an inclusive official
+success-count interval. This experiment selects tasks with 5 through 45
+successes out of 50, collects 50 new rollouts per task, keeps both classes at
+their natural rate, and records no Subtask-SAFE trace.
+
+```bash
+export XR1_OFFICIAL_SUMMARY="$XR1_REPO/eval_robocasa365/summary.json"
+export XR1_COLLECTION_TAG=xr1_safe_official_5to45_50each_$(date +%Y%m%d_%H%M%S)
+export XR1_COLLECTION_ROOT="$STORAGE_BS/robocasa_rollouts/safe/$XR1_COLLECTION_TAG"
+export XR1_COLLECTION_LATEST_ENV="$STORAGE_BS/robocasa_rollouts/safe/xr1_safe_official_5to45_latest.env"
+
+cd "$ROBOCASA_REPO"
+"$XR1_CLIENT_ENV/bin/python" -u -m \
+  robocasa.recovery.safe.plan_xiaomi_official_collection \
+  --official-summary "$XR1_OFFICIAL_SUMMARY" \
+  --output-dir "$XR1_COLLECTION_ROOT" \
+  --latest-env "$XR1_COLLECTION_LATEST_ENV" \
+  --min-successes 5 \
+  --max-successes 45 \
+  --rollouts-per-task 50 \
+  --num-shards 2
+```
+
+The plan is valid only if it reports 39 eligible tasks, 1,950 expected new
+rollouts, and a passing storage preflight. Preserve any earlier pilot-derived
+plan as provenance, but do not launch it.
+
+Launch one collector per verified SAFE server. Use a new base seed so these
+rollouts cannot collide with the released evaluation or earlier SAFE batches.
+There are deliberately no class quotas and no `--retain-only-quota`: every
+valid success and failure is retained.
+
+```bash
+source "$XR1_COLLECTION_LATEST_ENV"
+mapfile -t XR1_SHARD0_TASKS < "$XR1_SHARD0_TASK_FILE"
+mapfile -t XR1_SHARD1_TASKS < "$XR1_SHARD1_TASK_FILE"
+
+export XR1_COLLECTION_BASE_SEED=100007
+export XR1_SHARD0_LOG="$STORAGE_BS/robocasa_logs/eval/$(basename "$XR1_COLLECTION_ROOT")_shard0.log"
+export XR1_SHARD1_LOG="$STORAGE_BS/robocasa_logs/eval/$(basename "$XR1_COLLECTION_ROOT")_shard1.log"
+
+cd "$ROBOCASA_REPO"
+CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
+nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
+  robocasa.recovery.safe.collect_atomic_rollouts \
+  --output-dir "$XR1_SHARD0_DIR" \
+  --tasks "${XR1_SHARD0_TASKS[@]}" \
+  --num-rollouts "$XR1_COLLECTION_ROLLOUTS_PER_TASK" \
+  --seed "$XR1_COLLECTION_BASE_SEED" \
+  --seed-protocol official_xiaomi \
+  --policy-module robocasa.recovery.xiaomi_robotics_1_policy:make_policy \
+  --model-family xiaomi_robotics_1 \
+  --policy-name Xiaomi-Robotics-1-RoboCasa365 \
+  --checkpoint "$XR1_SAFE_CHECKPOINT" \
+  --policy-config '{"source_checkpoint":"XiaomiRobotics/Xiaomi-Robotics-1-RoboCasa365","checkpoint_revision":"0d1aa76d0d82debc9b611e4d1e231096434d5be4","crop_ratio":0.95,"observation_history":4,"observation_interval":2}' \
+  --host 127.0.0.1 \
+  --port 10096 \
+  --split pretrain \
+  --replan-steps 16 \
+  --record-safe-features \
+  --record-actions \
+  --no-record-videos \
+  --no-record-subtask-trace \
+  --continue-on-error \
+  --max-errors 50 \
+  > "$XR1_SHARD0_LOG" 2>&1 &
+export XR1_SHARD0_PID=$!
+
+CUDA_VISIBLE_DEVICES=1 MUJOCO_EGL_DEVICE_ID=1 \
+nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
+  robocasa.recovery.safe.collect_atomic_rollouts \
+  --output-dir "$XR1_SHARD1_DIR" \
+  --tasks "${XR1_SHARD1_TASKS[@]}" \
+  --num-rollouts "$XR1_COLLECTION_ROLLOUTS_PER_TASK" \
+  --seed "$XR1_COLLECTION_BASE_SEED" \
+  --seed-protocol official_xiaomi \
+  --policy-module robocasa.recovery.xiaomi_robotics_1_policy:make_policy \
+  --model-family xiaomi_robotics_1 \
+  --policy-name Xiaomi-Robotics-1-RoboCasa365 \
+  --checkpoint "$XR1_SAFE_CHECKPOINT" \
+  --policy-config '{"source_checkpoint":"XiaomiRobotics/Xiaomi-Robotics-1-RoboCasa365","checkpoint_revision":"0d1aa76d0d82debc9b611e4d1e231096434d5be4","crop_ratio":0.95,"observation_history":4,"observation_interval":2}' \
+  --host 127.0.0.1 \
+  --port 10097 \
+  --split pretrain \
+  --replan-steps 16 \
+  --record-safe-features \
+  --record-actions \
+  --no-record-videos \
+  --no-record-subtask-trace \
+  --continue-on-error \
+  --max-errors 50 \
+  > "$XR1_SHARD1_LOG" 2>&1 &
+export XR1_SHARD1_PID=$!
+
+printf 'export XR1_SHARD0_PID=%q\nexport XR1_SHARD1_PID=%q\nexport XR1_SHARD0_LOG=%q\nexport XR1_SHARD1_LOG=%q\n' \
+  "$XR1_SHARD0_PID" "$XR1_SHARD1_PID" "$XR1_SHARD0_LOG" "$XR1_SHARD1_LOG" \
+  > "$XR1_COLLECTION_ROOT/runtime.env"
+```
+
+Ports `10096` and `10097` must already be listening and each server log must
+contain `Model loaded` before starting the collectors. Do not aim two parallel
+collectors at one Xiaomi server.
+
 ## Dataset and detector workflow
 
 After the one-rollout smoke, collect naturally successful and failed target50
