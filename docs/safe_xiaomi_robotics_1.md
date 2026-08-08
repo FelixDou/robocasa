@@ -419,3 +419,97 @@ The existing Xiaomi outer test was opened by the preceding detector analyses.
 Consequently this run is a post-hoc comparison and must not be presented as a
 new confirmatory test. Freeze the chosen time/hybrid protocol and collect a new
 independent natural-rate test pool before making a final performance claim.
+
+## Outcome-only causal-prefix residual SAFE
+
+The natural event comparison can be very accurate while detecting failures too
+late for recovery. The causal-prefix residual experiment therefore optimizes a
+different, preregistered target: task-macro ROC-AUC among rollouts still active
+at 25 and 50 percent of a task timeout estimated from meta-fit failures only.
+
+The experiment remains normal outcome SAFE. It uses the final binary rollout
+outcome and does not read or construct Subtask-SAFE annotations, predicate
+progress, failure-onset labels, future observations, or final rollout duration
+as an online input. Complete source rollouts are divided into meta-fit,
+threshold-validation, and fixed outer-test parents before any prefix examples
+are created.
+
+For each supported task and landmark at 10, 25, 50, and 75 percent, training
+failures are deterministically downsampled to the number of naturally at-risk
+successes. Unsupported task/landmark strata are excluded from feature-residual
+training rather than teaching the residual a deterministic time label. Every
+retained source parent has equal total weight across its prefixes.
+
+The runner compares:
+
+- `time_only`: monotone task-conditioned failure risk among meta-fit rollouts
+  still active at the current inference;
+- `prefix_safe`: an MLP over the current Xiaomi hidden vector, the change from
+  the previous inference, recent-window mean, and recent-window slope;
+- `residual_safe_time`: the same MLP added as a logit residual to the frozen
+  task-conditioned time-only risk.
+
+Regularization and early stopping use meta-validation only. Model selection
+uses the task-macro mean of the 25 and 50 percent landmark ROC-AUC values.
+Online thresholds are selected on complete meta-validation trajectories at a
+fixed empirical false-positive-rate cap. The fixed outer test is
+evaluation-only within the command.
+
+Run a bounded single-seed smoke first:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_online_safe_latest.env
+
+export XR1_CAUSAL_PREFIX_SMOKE="$XR1_ONLINE_ROOT/causal_prefix_residual_smoke"
+
+"$SAFE_PY" -u -m robocasa.recovery.safe.run_causal_prefix_residual \
+  --export-dir "$XR1_SAFE_EXPORT" \
+  --safe-repo "$SAFE_REPO" \
+  --output-dir "$XR1_CAUSAL_PREFIX_SMOKE" \
+  --outer-split-manifest "$XR1_OUTER_SPLIT" \
+  --seeds 0 \
+  --landmarks 0.10 0.25 0.50 0.75 \
+  --primary-landmarks 0.25 0.50 \
+  --horizon-selector 1.0 \
+  --diffusion-selector 1.0 \
+  --regularizations 0.0001 \
+  --epochs 20 \
+  --patience 5 \
+  --device cuda
+```
+
+After the smoke produces `analysis.json` with `status=complete`, run the full
+three-seed developmental comparison in a new timestamped durable directory:
+
+```bash
+export XR1_CAUSAL_PREFIX_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/xr1_causal_prefix_residual_$(date +%Y%m%d_%H%M%S)"
+
+"$SAFE_PY" -u -m robocasa.recovery.safe.run_causal_prefix_residual \
+  --export-dir "$XR1_SAFE_EXPORT" \
+  --safe-repo "$SAFE_REPO" \
+  --output-dir "$XR1_CAUSAL_PREFIX_ROOT" \
+  --outer-split-manifest "$XR1_OUTER_SPLIT" \
+  --seeds 0 1 2 \
+  --landmarks 0.10 0.25 0.50 0.75 \
+  --primary-landmarks 0.25 0.50 \
+  --horizon-selector 1.0 \
+  --diffusion-selector 1.0 \
+  --temporal-window 4 \
+  --hidden-dim 128 \
+  --dropout 0.1 \
+  --learning-rate 0.0003 \
+  --regularizations 0.00001 0.0001 0.001 0.01 \
+  --epochs 1000 \
+  --patience 100 \
+  --target-fpr 0.05 \
+  --device cuda
+```
+
+The output contains `analysis.json`, `split_manifest.json`,
+`selection_audit.csv`, `per_seed_event_metrics.csv`, `landmark_metrics.csv`,
+`event_predictions.jsonl`, training histories, and deployable per-seed runtime
+directories. Advance the residual model only if it improves over `time_only`
+at the fixed 25/50 percent causal risk sets and improves detection time at the
+same validation-selected false-positive-rate target. Because the existing
+outer test has already been inspected, a fresh natural-rate test collection is
+still required for a confirmatory performance claim.
