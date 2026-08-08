@@ -513,3 +513,89 @@ at the fixed 25/50 percent causal risk sets and improves detection time at the
 same validation-selected false-positive-rate target. Because the existing
 outer test has already been inspected, a fresh natural-rate test collection is
 still required for a confirmatory performance claim.
+
+## Staged early SAFE with a late elapsed-time fallback
+
+The causal-prefix result shows useful Xiaomi representation signal at 10 and 25
+percent, but the prefix-only detector misses too many failures to deploy alone.
+`run_early_safe_time_cascade` evaluates a staged policy that preserves that
+early signal while retaining elapsed time as a late safety net:
+
+1. an outcome-only SAFE head trained only at 10 percent may alarm at that
+   checkpoint;
+2. a separate outcome-only SAFE head trained only at 25 percent may alarm at
+   that checkpoint;
+3. task-conditioned elapsed-time risk is ineligible before 50 percent and acts
+   as the fallback thereafter.
+
+The two SAFE heads have separate weights and feature scalers. They share one
+early-SAFE operating threshold; the late time fallback has a second threshold.
+Those two thresholds are searched jointly on complete meta-validation parents
+under one event-level 5 percent FPR cap. Feasible pairs are ranked by failure
+recall, then lower missed-failure-adjusted detection fraction, then lower FPR.
+The fixed outer test is used only after model and threshold selection.
+
+The comparison reports `early_safe`, `staged_safe_time`, and `time_only`
+separately. `time_only` is allowed to inspect its causal time-risk trajectory
+from the beginning, making it a deliberately strong reference rather than the
+50-percent fallback component. Every event prediction records its first alarm
+inference, horizon fraction, and whether SAFE or time caused the alarm.
+
+Run a bounded one-seed smoke before the full experiment:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_online_safe_latest.env
+
+export XR1_EARLY_CASCADE_SMOKE="$XR1_ONLINE_ROOT/early_safe_time_cascade_smoke"
+
+"$SAFE_PY" -u -m robocasa.recovery.safe.run_early_safe_time_cascade \
+  --export-dir "$XR1_SAFE_EXPORT" \
+  --safe-repo "$SAFE_REPO" \
+  --output-dir "$XR1_EARLY_CASCADE_SMOKE" \
+  --outer-split-manifest "$XR1_OUTER_SPLIT" \
+  --seeds 0 \
+  --early-landmarks 0.10 0.25 \
+  --time-fallback 0.50 \
+  --horizon-selector 1.0 \
+  --diffusion-selector 1.0 \
+  --regularizations 0.0001 \
+  --epochs 20 \
+  --patience 5 \
+  --target-fpr 0.05 \
+  --device cuda
+```
+
+After the smoke completes, use a new durable timestamped output directory for
+the three-seed comparison:
+
+```bash
+export XR1_EARLY_CASCADE_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/xr1_early_safe_time_cascade_$(date +%Y%m%d_%H%M%S)"
+
+"$SAFE_PY" -u -m robocasa.recovery.safe.run_early_safe_time_cascade \
+  --export-dir "$XR1_SAFE_EXPORT" \
+  --safe-repo "$SAFE_REPO" \
+  --output-dir "$XR1_EARLY_CASCADE_ROOT" \
+  --outer-split-manifest "$XR1_OUTER_SPLIT" \
+  --seeds 0 1 2 \
+  --early-landmarks 0.10 0.25 \
+  --time-fallback 0.50 \
+  --horizon-selector 1.0 \
+  --diffusion-selector 1.0 \
+  --temporal-window 4 \
+  --hidden-dim 128 \
+  --dropout 0.1 \
+  --learning-rate 0.0003 \
+  --regularizations 0.00001 0.0001 0.001 0.01 \
+  --epochs 1000 \
+  --patience 100 \
+  --target-fpr 0.05 \
+  --device cuda
+```
+
+The output includes `analysis.json`, a parent-disjoint `split_manifest.json`,
+per-head `selection_audit.csv`, joint `threshold_selection.csv`, event and
+landmark metrics, per-rollout prediction traces, and a deployable runtime bundle
+for each seed. The primary comparison is staged versus time-only recall and
+missed-failure-adjusted detection fraction at the same validation FPR target.
+Because this reuses the already inspected outer test, it remains developmental;
+freeze the cascade before evaluating a new confirmatory test collection.
