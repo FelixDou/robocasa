@@ -22,7 +22,10 @@ from robocasa.recovery.safe.audit_subtask_safe_dataset import (
 from robocasa.recovery.safe.dataset import load_manifest
 from robocasa.recovery.safe.export_to_official_safe import export_to_official_safe
 from robocasa.recovery.safe.export_subtask_safe import export_subtask_safe
-from robocasa.recovery.safe.merge_atomic_datasets import merge_atomic_datasets
+from robocasa.recovery.safe.merge_atomic_datasets import (
+    _assert_configs_compatible,
+    merge_atomic_datasets,
+)
 from robocasa.recovery.safe.validate_atomic_dataset import validate_atomic_dataset
 
 
@@ -807,6 +810,42 @@ class TestSafeAtomicCollection(unittest.TestCase):
                 self.assertEqual(
                     (source / record.tensor_path).stat().st_ino,
                     (output / record.tensor_path).stat().st_ino,
+                )
+
+    def test_merge_strips_per_server_policy_provenance_but_preserves_audit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_a = root / "source_a"
+            source_b = root / "source_b"
+            output = root / "merged"
+            args_a = collection_args(source_a, num_rollouts=1)
+            args_b = collection_args(source_b, num_rollouts=1)
+            args_b.seed = 2
+            args_a.policy_config = json.dumps(
+                {"mode": "fused", "collection_provenance": {"server_rng_seed": 1000}}
+            )
+            args_b.policy_config = json.dumps(
+                {"mode": "fused", "collection_provenance": {"server_rng_seed": 1001}}
+            )
+            run_collection(args_a, runtime=fake_runtime())
+            run_collection(args_b, runtime=fake_runtime())
+
+            result = merge_atomic_datasets([source_a, source_b], output)
+            config = result["summary"]["config"]
+            self.assertEqual(config["policy_config"], {"mode": "fused"})
+            self.assertEqual(
+                [
+                    item["server_rng_seed"]
+                    for item in config["source_policy_provenance"]
+                ],
+                [1000, 1001],
+            )
+            with self.assertRaisesRegex(ValueError, "policy_config"):
+                _assert_configs_compatible(
+                    [
+                        {"policy_config": {"mode": "fused"}},
+                        {"policy_config": {"mode": "action-only"}},
+                    ]
                 )
 
     def test_merge_atomic_and_composite_shards_records_mixed_scope(self):

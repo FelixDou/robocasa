@@ -391,3 +391,191 @@ least 59 successful segments per stage to put the one-sided 95% upper bound
 below 5% when zero false alarms are observed; target 60 or more, plus 30–50
 failed evaluation segments per stage. Freeze the feature view, training
 pipeline, and online threshold rule before that final evaluation.
+
+## Four-GPU seeded collection of the fresh parent pool
+
+The clean matched-reset smoke must report `ACTION PARITY: PASS` before this
+collection. The formal launcher addresses the stateful RLDX sampling RNG and
+the earlier single-server task-order confound:
+
+- each block starts four fresh RLDX servers with explicit, recorded RNG seeds;
+- each server receives exactly one task;
+- a cyclic Latin schedule rotates all four tasks over all four GPUs;
+- 12 blocks complete three task/GPU rotations and allocate exactly 250 natural
+  rollouts per task (1,000 total, with 62–63 per task/GPU cell);
+- there are no success/failure quotas or class-dependent stopping rules;
+- an interrupted block is preserved and replayed from its declared seeds; it
+  is never continued from a later position in the server RNG stream;
+- all 48 shards must validate before the launcher creates `merged_raw`.
+
+The previous seed-31 single-server root and the parity/control roots are
+diagnostics and must not be included in this pool.
+
+Start from the exports in `docs/cluster_experiment_runbook.md`, check out the
+Subtask-SAFE branch, and verify the four-GPU allocation:
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+conda activate /gs/bs/tga-shinoda/felid/envs/robocasa_openpi
+
+export USER_ID=ut06746
+export PROJECT_FS=/gs/fs/tga-shinoda/felid
+export STORAGE_BS=/gs/bs/tga-shinoda/felid
+export ROBOCASA_REPO="$PROJECT_FS/robocasa"
+export RLDX_REPO="$PROJECT_FS/RLDX-1"
+export RLDX_SIM_PY="$RLDX_REPO/rldx/eval/sim/robocasa365/robocasa365_uv/.venv/bin/python"
+export ROBOCASA_LOG_ROOT="$STORAGE_BS/robocasa_logs"
+export ROBOCASA_ROLLOUT_ROOT="$STORAGE_BS/robocasa_rollouts"
+export UV_CACHE_DIR="$STORAGE_BS/uv_cache"
+export UV_LINK_MODE=copy
+export HF_HOME="$STORAGE_BS/hf_home"
+export TRANSFORMERS_CACHE="$HF_HOME/transformers"
+export WANDB_MODE=disabled
+export WANDB_DISABLED=true
+export WANDB_ENABLED=0
+
+cd "$ROBOCASA_REPO"
+git fetch origin
+git checkout codex/safe-rldx-task-models
+git pull --ff-only origin codex/safe-rldx-task-models
+
+test -x "$RLDX_SIM_PY"
+test "$(git -C "$RLDX_REPO" rev-parse HEAD)" = \
+  ef05cd4ae634ff97d672d42275febbc0b92cc192
+git -C "$RLDX_REPO" diff --check
+nvidia-smi --query-gpu=index,name,memory.total --format=csv
+ss -ltn | grep -E ':20100|:20101|:20102|:20103' && \
+  { echo "stop the processes already using an experiment port"; exit 1; } || true
+```
+
+Create the immutable 1,000-rollout allocation plan. Use a new tag; never point
+this command at any diagnostic root:
+
+```bash
+export MULTISEED_TAG="rldx1_subtask_dual_multiseed1000_$(date +%Y%m%d_%H%M%S)"
+export MULTISEED_ROOT="$ROBOCASA_ROLLOUT_ROOT/safe/$MULTISEED_TAG"
+export MULTISEED_LOG_ROOT="$ROBOCASA_LOG_ROOT/eval/$MULTISEED_TAG"
+export MULTISEED_ORCHESTRATOR_LOG="$MULTISEED_LOG_ROOT/orchestrator.log"
+mkdir -p "$MULTISEED_LOG_ROOT"
+
+cd "$ROBOCASA_REPO"
+python -u -m robocasa.recovery.safe.run_rldx_multiseed_collection \
+  --output-root "$MULTISEED_ROOT" \
+  --log-root "$MULTISEED_LOG_ROOT" \
+  --rldx-repo "$RLDX_REPO" \
+  --sim-python "$RLDX_SIM_PY" \
+  --tasks LoadDishwasher PreSoakPan ScrubCuttingBoard WashLettuce \
+  --gpus 0 1 2 3 \
+  --ports 20100 20101 20102 20103 \
+  --total-rollouts-per-task 250 \
+  --num-blocks 12 \
+  --environment-seed-start 32 \
+  --server-seed-start 1000 \
+  --no-record-videos \
+  --plan-only
+
+python - "$MULTISEED_ROOT/allocation_plan.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+p = json.loads(Path(sys.argv[1]).read_text())
+print("fingerprint:", p["plan_fingerprint"])
+print("total:", p["total_rollouts"])
+print("per task:", p["per_task_rollouts"])
+print("per block:", p["rollouts_per_block"])
+print("task/GPU rollouts:", json.dumps(p["schedule"]["task_gpu_rollouts"], indent=2))
+assert p["total_rollouts"] == 1000
+assert set(p["per_task_rollouts"].values()) == {250}
+assert all(
+    max(v.values()) - min(v.values()) <= 1
+    for v in p["schedule"]["task_gpu_rollouts"].values()
+)
+PY
+```
+
+Run block 0 first as an in-protocol four-GPU smoke. It produces 21 rollouts per
+task and remains part of the final pool if all four shards validate:
+
+```bash
+cd "$ROBOCASA_REPO"
+nohup python -u -m robocasa.recovery.safe.run_rldx_multiseed_collection \
+  --output-root "$MULTISEED_ROOT" \
+  --log-root "$MULTISEED_LOG_ROOT" \
+  --rldx-repo "$RLDX_REPO" \
+  --sim-python "$RLDX_SIM_PY" \
+  --tasks LoadDishwasher PreSoakPan ScrubCuttingBoard WashLettuce \
+  --gpus 0 1 2 3 \
+  --ports 20100 20101 20102 20103 \
+  --total-rollouts-per-task 250 \
+  --num-blocks 12 \
+  --environment-seed-start 32 \
+  --server-seed-start 1000 \
+  --no-record-videos \
+  --resume \
+  --action-parity-verified \
+  --block-indices 0 \
+  --no-merge \
+  > "$MULTISEED_ORCHESTRATOR_LOG" 2>&1 &
+
+export MULTISEED_PID=$!
+echo "pid=$MULTISEED_PID"
+echo "root=$MULTISEED_ROOT"
+echo "log=$MULTISEED_ORCHESTRATOR_LOG"
+```
+
+After block 0 reports `complete`, launch the remaining planned blocks. Complete
+blocks are verified and skipped. The merge occurs only after all 12 complete:
+
+```bash
+cd "$ROBOCASA_REPO"
+nohup python -u -m robocasa.recovery.safe.run_rldx_multiseed_collection \
+  --output-root "$MULTISEED_ROOT" \
+  --log-root "$MULTISEED_LOG_ROOT" \
+  --rldx-repo "$RLDX_REPO" \
+  --sim-python "$RLDX_SIM_PY" \
+  --tasks LoadDishwasher PreSoakPan ScrubCuttingBoard WashLettuce \
+  --gpus 0 1 2 3 \
+  --ports 20100 20101 20102 20103 \
+  --total-rollouts-per-task 250 \
+  --num-blocks 12 \
+  --environment-seed-start 32 \
+  --server-seed-start 1000 \
+  --no-record-videos \
+  --resume \
+  --action-parity-verified \
+  >> "$MULTISEED_ORCHESTRATOR_LOG" 2>&1 &
+
+export MULTISEED_PID=$!
+echo "pid=$MULTISEED_PID"
+```
+
+Monitor without modifying the collection:
+
+```bash
+tail -f "$MULTISEED_ORCHESTRATOR_LOG"
+watch -n 20 "cat '$MULTISEED_ROOT/status.json'; nvidia-smi"
+find "$MULTISEED_ROOT/blocks" -name block_status.json -exec \
+  sh -c 'printf "\\n%s\\n" "$1"; python -m json.tool "$1" | tail -30' _ {} \;
+ps -ef | grep -E '[r]un_rldx_multiseed_collection|[r]un_rldx_server|[c]ollect_atomic_rollouts'
+ss -ltnp | grep -E ':20100|:20101|:20102|:20103' || true
+tail -40 "$MULTISEED_LOG_ROOT"/block_*/client_*.log
+tail -40 "$MULTISEED_LOG_ROOT"/block_*/server_*.log
+```
+
+If a block is interrupted, keep its evidence and replay that entire block from
+its planned environment/server seeds by adding `--restart-incomplete-blocks` to
+the full resume command. The old directory is moved below
+`$MULTISEED_ROOT/incomplete_blocks/`. Do not pass the underlying collector's
+rollout-level `--resume` flag.
+
+Final validation and coverage audit:
+
+```bash
+cat "$MULTISEED_ROOT/status.json"
+python -m robocasa.recovery.safe.validate_atomic_dataset \
+  --dataset-dir "$MULTISEED_ROOT/merged_raw"
+python -m robocasa.recovery.safe.audit_subtask_safe_dataset \
+  --dataset-dir "$MULTISEED_ROOT/merged_raw"
+```

@@ -39,35 +39,34 @@ COMPATIBLE_CONFIG_KEYS = (
     "openpi_repository_commit",
     "rldx_repository_commit",
 )
+POLICY_PROVENANCE_KEY = "collection_provenance"
+
+
+def _compatible_config_value(config, key):
+    if key == "policy_config":
+        policy_config = dict(config.get(key) or {})
+        policy_config.pop(POLICY_PROVENANCE_KEY, None)
+        return policy_config
+    return config.get(
+        key,
+        (
+            "pi0"
+            if key == "model_family"
+            else False
+            if key == "record_subtask_trace"
+            else None
+        ),
+    )
 
 
 def _assert_configs_compatible(configs):
     reference = configs[0]
     for index, config in enumerate(configs[1:], 1):
         mismatches = [
-            key for key in COMPATIBLE_CONFIG_KEYS
-            if (
-                config.get(
-                    key,
-                    (
-                        "pi0"
-                        if key == "model_family"
-                        else False
-                        if key == "record_subtask_trace"
-                        else None
-                    ),
-                )
-                != reference.get(
-                    key,
-                    (
-                        "pi0"
-                        if key == "model_family"
-                        else False
-                        if key == "record_subtask_trace"
-                        else None
-                    ),
-                )
-            )
+            key
+            for key in COMPATIBLE_CONFIG_KEYS
+            if _compatible_config_value(config, key)
+            != _compatible_config_value(reference, key)
         ]
         if mismatches:
             raise ValueError(
@@ -233,6 +232,14 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
         }
         for source, config in zip(sources, configs)
     ]
+    source_policy_provenance = [
+        {
+            "source_dataset": str(source),
+            **config.get("policy_config", {}).get(POLICY_PROVENANCE_KEY, {}),
+        }
+        for source, config in zip(sources, configs)
+        if config.get("policy_config", {}).get(POLICY_PROVENANCE_KEY) is not None
+    ]
     record_video_values = {config.get("record_videos") for config in configs}
     robocasa_commits = sorted(
         {
@@ -242,6 +249,7 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
         }
     )
     config = dict(configs[0])
+    config["policy_config"] = _compatible_config_value(config, "policy_config")
     config.update(
         {
             "tasks": tasks,
@@ -269,6 +277,7 @@ def merge_atomic_datasets(source_dirs, output_dir, *, copy=False):
             "source_datasets": [str(source) for source in sources],
             "source_collection_quotas": source_collection_quotas,
             "source_artifact_recording": source_artifact_recording,
+            "source_policy_provenance": source_policy_provenance,
             "source_ports": [source_config.get("port") for source_config in configs],
             "artifact_materialization": materialization_counts,
         }
