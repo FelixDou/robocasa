@@ -15,6 +15,12 @@ SAFE_SCHEMA_VERSION = 1
 SAFE_FEATURE_SCHEMA_VERSION = 1
 OFFICIAL_PI0_FEATURE_LAYER = "action_expert_suffix_pre_action_out_proj"
 RLDX1_FEATURE_LAYER = "action_model_msat_action_suffix_pre_action_decoder"
+RLDX1_OBSERVATION_FEATURE_LAYER = (
+    "memory_aware_backbone_mean_plus_state_encoder_mean"
+)
+RLDX1_FUSED_EXPORT_LAYER = (
+    "action_model_msat_final_step_horizon_mean_plus_memory_aware_observation_context"
+)
 
 
 @dataclass
@@ -36,6 +42,11 @@ class SafeRolloutMetadata:
     feature_aggregation: str = "raw"
     feature_shape: list[int] = field(default_factory=list)
     feature_dtype: str = "float32"
+    feature_mode: str = "action"
+    observation_feature_layer: str | None = None
+    observation_context_shape: list[int] = field(default_factory=list)
+    observation_components: dict[str, list[int]] = field(default_factory=dict)
+    observation_context_pooling: dict[str, str] = field(default_factory=dict)
     flow_steps: int = 0
     termination_reason: str = "unknown"
     timeout_horizon: int = 0
@@ -70,6 +81,10 @@ class SafeRolloutMetadata:
     def validate(self) -> None:
         if self.schema_version != SAFE_SCHEMA_VERSION:
             raise ValueError(f"Unsupported SAFE schema version {self.schema_version}")
+        if self.feature_schema_version not in {1, 2}:
+            raise ValueError(
+                f"Unsupported SAFE feature schema version {self.feature_schema_version}"
+            )
         if not self.rollout_id or not self.task_name or not self.policy_id or not self.checkpoint:
             raise ValueError("rollout_id, task_name, policy_id, and checkpoint are required")
         if self.num_env_steps < 0 or self.valid_sequence_length < 1:
@@ -103,6 +118,51 @@ class SafeRolloutMetadata:
                 f"Feature layer {self.feature_layer!r} is incompatible with "
                 f"model_family {self.model_family!r}"
             )
+        if self.feature_mode not in {"action", "action_observation_context"}:
+            raise ValueError(f"Unsupported SAFE feature_mode {self.feature_mode!r}")
+        if (
+            self.feature_mode == "action_observation_context"
+            and self.model_family != "rldx1"
+        ):
+            raise ValueError("observation context capture is available only for rldx1")
+        expected_feature_schema = (
+            2 if self.feature_mode == "action_observation_context" else 1
+        )
+        if self.feature_schema_version != expected_feature_schema:
+            raise ValueError(
+                "feature_schema_version disagrees with the captured feature mode"
+            )
+        if self.feature_mode == "action":
+            if (
+                self.observation_feature_layer is not None
+                or self.observation_context_shape
+                or self.observation_components
+                or self.observation_context_pooling
+            ):
+                raise ValueError(
+                    "action-only SAFE records cannot declare observation context"
+                )
+        else:
+            if self.observation_feature_layer != RLDX1_OBSERVATION_FEATURE_LAYER:
+                raise ValueError("unexpected RLDX observation feature layer")
+            if (
+                len(self.observation_context_shape) != 2
+                or self.observation_context_shape[0] != self.valid_sequence_length
+                or self.observation_context_shape[1] < 1
+            ):
+                raise ValueError(
+                    "observation_context_shape must be [inferences, feature_dim]"
+                )
+            validate_feature_components(
+                self.observation_components,
+                feature_dim=self.observation_context_shape[-1],
+                required_names={"backbone_context", "state_context"},
+                field_name="observation_components",
+            )
+            if set(self.observation_context_pooling) != {"backbone", "state"}:
+                raise ValueError(
+                    "observation_context_pooling must describe backbone and state"
+                )
         if self.seed_protocol not in {
             "rollout_index",
             "official_openpi",
@@ -212,6 +272,51 @@ def validate_feature_tensor(features: np.ndarray, metadata: SafeRolloutMetadata)
         raise ValueError("SAFE feature tensor contains NaN or infinite values")
 
 
+def validate_feature_components(
+    components,
+    *,
+    feature_dim,
+    required_names=None,
+    field_name="feature_components",
+) -> None:
+    """Validate named, non-overlapping slices over the final feature axis."""
+    if components is None:
+        components = {}
+    if not isinstance(components, dict):
+        raise ValueError(f"{field_name} must be a dictionary")
+    if required_names:
+        missing = set(required_names) - set(components)
+        if missing:
+            raise ValueError(
+                f"{field_name} is missing components: "
+                + ", ".join(sorted(missing))
+            )
+    previous_end = 0
+    for name, bounds in sorted(
+        components.items(),
+        key=lambda item: item[1][0] if isinstance(item[1], (list, tuple)) and item[1] else -1,
+    ):
+        if not isinstance(name, str) or not name:
+            raise ValueError("feature component names must be nonempty strings")
+        if (
+            not isinstance(bounds, (list, tuple))
+            or len(bounds) != 2
+            or any(not isinstance(value, int) for value in bounds)
+        ):
+            raise ValueError(
+                f"feature component {name!r} must be an integer [start, end] slice"
+            )
+        start, end = bounds
+        if start != previous_end or end <= start or end > int(feature_dim):
+            raise ValueError(
+                f"feature component {name!r} has invalid or non-contiguous "
+                f"slice {list(bounds)} for feature_dim={feature_dim}"
+            )
+        previous_end = end
+    if components and previous_end != int(feature_dim):
+        raise ValueError("feature component slices do not cover the feature axis")
+
+
 def compatibility_key(metadata: SafeRolloutMetadata) -> str:
     """Hash all fields that must match before rollouts can be mixed."""
     identity = {
@@ -223,6 +328,11 @@ def compatibility_key(metadata: SafeRolloutMetadata) -> str:
         "feature_aggregation": metadata.feature_aggregation,
         "feature_tail_shape": metadata.feature_shape[1:],
         "feature_dtype": metadata.feature_dtype,
+        "feature_mode": metadata.feature_mode,
+        "observation_feature_layer": metadata.observation_feature_layer,
+        "observation_context_tail_shape": metadata.observation_context_shape[1:],
+        "observation_components": metadata.observation_components,
+        "observation_context_pooling": metadata.observation_context_pooling,
         "action_horizon": metadata.action_horizon,
         "flow_steps": metadata.flow_steps,
         "environment_split": metadata.environment_split,

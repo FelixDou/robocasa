@@ -15,6 +15,7 @@ sys.modules["robocasa.utils.env_utils"] = env_utils
 
 from robocasa.recovery.rldx_zmq_policy import (  # noqa: E402
     RLDX_SAFE_FEATURE_LAYER,
+    RLDX_SAFE_OBSERVATION_FEATURE_LAYER,
     RLDXZeroMQPolicy,
 )
 
@@ -51,21 +52,47 @@ def observation():
     }
 
 
-def response(with_features=True, shape=(3, 4, 8)):
+def response(with_features=True, shape=(3, 4, 8), mode="action"):
     actions = np.zeros((1, shape[1], 12), dtype=np.float32)
     info = {}
     if with_features:
         features = np.arange(np.prod(shape), dtype=np.float32).reshape(
             (1, *shape)
         )
+        if mode == "action":
+            schema_version = 1
+            observation_context = None
+            observation_layer = None
+            observation_shape = []
+            observation_components = {}
+            observation_pooling = {}
+        else:
+            observation_context = np.arange(6, dtype=np.float32).reshape(1, 6)
+            observation_layer = RLDX_SAFE_OBSERVATION_FEATURE_LAYER
+            observation_shape = [6]
+            observation_components = {
+                "backbone_context": [0, 3],
+                "state_context": [3, 6],
+            }
+            observation_pooling = {
+                "backbone": "attention_masked_mean_after_memory",
+                "state": "token_mean_after_state_encoder",
+            }
+            schema_version = 2
         info = {
             "safe_features": features,
+            "safe_observation_context": observation_context,
             "safe_feature_metadata": {
-                "schema_version": 1,
+                "schema_version": schema_version,
                 "model_family": "rldx1",
                 "model_id": "RLDX",
                 "checkpoint": "RLWRLD/RLDX-1-FT-RC365",
                 "feature_layer": RLDX_SAFE_FEATURE_LAYER,
+                "feature_mode": mode,
+                "observation_feature_layer": observation_layer,
+                "observation_context_shape": observation_shape,
+                "observation_components": observation_components,
+                "observation_context_pooling": observation_pooling,
                 "feature_shape": list(shape),
                 "feature_dtype": "float32",
                 "action_horizon": shape[1],
@@ -154,6 +181,32 @@ class TestSafeRLDXPolicy(unittest.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "NaN"):
             policy(observation())
+
+    def test_observation_conditioned_mode_preserves_component_contract(self):
+        policy = self.make_policy(
+            [response(mode="action_observation_context")],
+            collect_safe_features=True,
+            safe_feature_mode="action_observation_context",
+        )
+        policy(observation())
+        record = policy.pop_inference_record()
+        self.assertEqual(
+            record["metadata"]["observation_feature_layer"],
+            RLDX_SAFE_OBSERVATION_FEATURE_LAYER,
+        )
+        self.assertEqual(record["metadata"]["schema_version"], 2)
+        self.assertEqual(
+            record["metadata"]["observation_components"]["backbone_context"],
+            [0, 3],
+        )
+        self.assertEqual(record["features"].shape, (3, 4, 8))
+        self.assertEqual(record["observation_context"].shape, (6,))
+        request = policy.client.requests[0][1]
+        self.assertTrue(request["request_safe_features"])
+        self.assertEqual(
+            request["safe_feature_mode"],
+            "action_observation_context",
+        )
 
     def test_action_horizon_mismatch_and_reset(self):
         actions, info = response()

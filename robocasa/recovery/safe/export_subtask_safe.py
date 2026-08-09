@@ -14,7 +14,13 @@ import re
 import numpy as np
 
 from .collect_atomic_rollouts import SUMMARY_NAME, atomic_write_json, utc_now
-from .dataset import MANIFEST_NAME, assert_compatible, load_manifest
+from .dataset import (
+    FEATURE_VIEWS,
+    MANIFEST_NAME,
+    assert_compatible,
+    load_manifest,
+    select_feature_view,
+)
 from .export_to_official_safe import atomic_pickle, _check_existing_pickle
 from .subtask_safe import validate_subtask_safe_record
 from .validate_atomic_dataset import validate_atomic_dataset
@@ -318,6 +324,7 @@ def export_subtask_safe(
     resume=False,
     dry_run=False,
     allow_unregistered=False,
+    feature_view="all",
 ):
     dataset_dir = Path(dataset_dir).resolve()
     output_dir = Path(output_dir).resolve()
@@ -326,6 +333,21 @@ def export_subtask_safe(
         allow_unregistered=allow_unregistered,
     )
     compatibility = assert_compatible(records)
+    selected_feature_layers = set()
+    for record in records:
+        _, selected_layer = select_feature_view(
+            np.empty((0, 1, 1, record.feature_shape[-1]), dtype=np.float32),
+            record,
+            feature_view,
+            observation_context=(
+                np.empty(
+                    (0, record.observation_context_shape[-1]), dtype=np.float32
+                )
+                if record.feature_mode == "action_observation_context"
+                else None
+            ),
+        )
+        selected_feature_layers.add(selected_layer)
     fingerprint = subtask_source_fingerprint(dataset_dir, records)
     split = build_parent_rollout_split(
         segments,
@@ -365,6 +387,8 @@ def export_subtask_safe(
         "task_types": task_types,
         "parent_task_names": sorted({item["parent_task_name"] for item in segments}),
         "model_families": sorted({record.model_family for record in records}),
+        "feature_view": feature_view,
+        "selected_feature_layers": sorted(selected_feature_layers),
         "excluded": excluded,
         "split_fingerprint": split_fingerprint,
         "split": {
@@ -386,6 +410,8 @@ def export_subtask_safe(
             raise ValueError("Existing export uses a different parent-rollout split")
         if previous.get("split_fingerprint") != split_fingerprint:
             raise ValueError("Existing export has a different parent-rollout assignment")
+        if previous.get("feature_view", "all") != feature_view:
+            raise ValueError("Existing export uses a different feature view")
         if previous.get("complete"):
             expected_env = len(segments)
             expected_policy = plan["num_policy_records"]
@@ -483,13 +509,26 @@ def export_subtask_safe(
 
         with np.load(dataset_dir / source.tensor_path, allow_pickle=False) as payload:
             features = payload["features"]
+            observation_context = (
+                payload["observation_context"]
+                if "observation_context" in payload
+                else None
+            )
             chunks = payload["policy_action_chunks"]
             steps = payload["inference_environment_steps"]
             start = segment["inference_start_index"]
             end = segment["inference_end_index_exclusive"]
             features = features[start:end]
+            if observation_context is not None:
+                observation_context = observation_context[start:end]
             chunks = chunks[start:end]
             steps = steps[start:end]
+        features, selected_feature_layer = select_feature_view(
+            features,
+            source,
+            feature_view,
+            observation_context=observation_context,
+        )
         policy_paths = []
         for local_index in range(segment["num_policy_inferences"]):
             source_index = segment["inference_start_index"] + local_index
@@ -506,7 +545,14 @@ def export_subtask_safe(
                 "environment_step": int(steps[local_index]),
                 "pre_velocity": np.asarray(features[local_index], dtype=np.float32),
                 "actions": np.asarray(chunks[local_index], dtype=np.float32),
-                "feature_layer": source.feature_layer,
+                "feature_layer": selected_feature_layer,
+                "source_feature_layer": source.feature_layer,
+                "feature_view": feature_view,
+                "source_feature_mode": source.feature_mode,
+                "source_observation_feature_layer": (
+                    source.observation_feature_layer
+                ),
+                "source_observation_components": source.observation_components,
                 "model_family": source.model_family,
                 "policy_name": source.policy_id,
                 "policy_checkpoint": source.checkpoint,
@@ -533,6 +579,7 @@ def export_subtask_safe(
                     segment["inference_end_index_exclusive"],
                 ],
                 "source_feature_path": source.tensor_path,
+                "feature_view": feature_view,
                 "env_record": str(env_path.relative_to(output_dir)),
                 "policy_records": policy_paths,
             }
@@ -564,6 +611,15 @@ def build_parser():
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--allow-unregistered-tasks", action="store_true")
+    parser.add_argument(
+        "--feature-view",
+        choices=FEATURE_VIEWS,
+        default="all",
+        help=(
+            "Export all captured features, the legacy action component, or "
+            "the pooled observation-context components"
+        ),
+    )
     return parser
 
 
@@ -578,6 +634,7 @@ def main(argv=None):
             resume=args.resume,
             dry_run=args.dry_run,
             allow_unregistered=args.allow_unregistered_tasks,
+            feature_view=args.feature_view,
         )
     except (FileExistsError, ValueError) as error:
         raise SystemExit(f"error: {error}") from error

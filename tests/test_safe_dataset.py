@@ -16,8 +16,14 @@ from robocasa.recovery.safe.dataset import (
     load_rollout,
     pad_sequences,
     save_rollout,
+    select_feature_view,
 )
-from robocasa.recovery.safe.schema import SafeRolloutMetadata
+from robocasa.recovery.safe.schema import (
+    RLDX1_FEATURE_LAYER,
+    RLDX1_FUSED_EXPORT_LAYER,
+    RLDX1_OBSERVATION_FEATURE_LAYER,
+    SafeRolloutMetadata,
+)
 
 
 def metadata(
@@ -75,6 +81,81 @@ class TestSafeDataset(unittest.TestCase):
         batch, mask = pad_sequences([np.ones((2, 8)), np.ones((3, 8))])
         self.assertEqual(batch.shape, (2, 3, 8))
         self.assertEqual(mask.tolist(), [[True, True, False], [True, True, True]])
+
+    def test_action_view_is_identity_for_legacy_dataset(self):
+        record = metadata("legacy-action")
+        raw = np.ones((3, 2, 4, 8), dtype=np.float32)
+        selected, layer = select_feature_view(raw, record, "action")
+        np.testing.assert_array_equal(selected, raw)
+        self.assertEqual(layer, record.feature_layer)
+
+    def test_dual_stream_rldx_feature_views_are_paired(self):
+        record = metadata("rldx-dual")
+        record.model_family = "rldx1"
+        record.feature_layer = RLDX1_FEATURE_LAYER
+        record.feature_mode = "action_observation_context"
+        record.feature_schema_version = 2
+        record.observation_feature_layer = RLDX1_OBSERVATION_FEATURE_LAYER
+        record.observation_context_shape = [3, 6]
+        record.observation_components = {
+            "backbone_context": [0, 3],
+            "state_context": [3, 6],
+        }
+        record.observation_context_pooling = {
+            "backbone": "attention_masked_mean_after_memory",
+            "state": "token_mean_after_state_encoder",
+        }
+        record.validate()
+        raw = np.arange(3 * 2 * 4 * 8, dtype=np.float32).reshape(3, 2, 4, 8)
+        context = np.arange(3 * 6, dtype=np.float32).reshape(3, 6)
+        action, action_layer = select_feature_view(
+            raw, record, "action", observation_context=context
+        )
+        observation, observation_layer = select_feature_view(
+            raw, record, "observation_context", observation_context=context
+        )
+        fused, fused_layer = select_feature_view(
+            raw, record, "all", observation_context=context
+        )
+        np.testing.assert_array_equal(action, raw)
+        np.testing.assert_array_equal(observation[:, 0, 0], context)
+        np.testing.assert_allclose(fused[:, 0, 0, :8], raw[:, -1].mean(axis=1))
+        np.testing.assert_array_equal(fused[:, 0, 0, 8:], context)
+        self.assertEqual(action_layer, RLDX1_FEATURE_LAYER)
+        self.assertEqual(observation_layer, RLDX1_OBSERVATION_FEATURE_LAYER)
+        self.assertEqual(fused_layer, RLDX1_FUSED_EXPORT_LAYER)
+        self.assertEqual(observation.shape, (3, 1, 1, 6))
+        self.assertEqual(fused.shape, (3, 1, 1, 14))
+
+        record.observation_components["state_context"] = [4, 6]
+        with self.assertRaisesRegex(ValueError, "non-contiguous"):
+            record.validate()
+
+    def test_dual_stream_round_trip_stores_context_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = metadata("rldx-dual")
+            record.model_family = "rldx1"
+            record.feature_layer = RLDX1_FEATURE_LAYER
+            record.feature_mode = "action_observation_context"
+            record.feature_schema_version = 2
+            record.observation_feature_layer = RLDX1_OBSERVATION_FEATURE_LAYER
+            record.observation_components = {
+                "backbone_context": [0, 3],
+                "state_context": [3, 6],
+            }
+            record.observation_context_pooling = {
+                "backbone": "attention_masked_mean_after_memory",
+                "state": "token_mean_after_state_encoder",
+            }
+            raw = np.ones((3, 2, 4, 8), dtype=np.float32)
+            context = np.ones((3, 6), dtype=np.float32)
+            save_rollout(tmp, record, raw, observation_context=context)
+            loaded_record = load_manifest(tmp)[0]
+            with np.load(
+                Path(tmp) / loaded_record.tensor_path, allow_pickle=False
+            ) as payload:
+                self.assertEqual(payload["features"].shape, (3, 2, 4, 8))
+                self.assertEqual(payload["observation_context"].shape, (3, 6))
 
     def test_splits_deterministic_and_leakage_free(self):
         records = []

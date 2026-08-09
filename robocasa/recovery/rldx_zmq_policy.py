@@ -17,9 +17,16 @@ import uuid
 import numpy as np
 
 from robocasa.utils.env_utils import convert_action
+from robocasa.recovery.safe.schema import (
+    RLDX1_FEATURE_LAYER,
+    RLDX1_OBSERVATION_FEATURE_LAYER,
+    validate_feature_components,
+)
 
 
-RLDX_SAFE_FEATURE_LAYER = "action_model_msat_action_suffix_pre_action_decoder"
+RLDX_SAFE_FEATURE_LAYER = RLDX1_FEATURE_LAYER
+RLDX_SAFE_OBSERVATION_FEATURE_LAYER = RLDX1_OBSERVATION_FEATURE_LAYER
+RLDX_SAFE_FEATURE_MODES = ("action", "action_observation_context")
 
 
 class MsgSerializer:
@@ -123,6 +130,7 @@ class RLDXZeroMQPolicy:
         session_id: str | None = None,
         reset_memory_on_instruction_change: bool = True,
         collect_safe_features: bool = False,
+        safe_feature_mode: str = "action",
         safe_feature_shape: tuple[int, ...] | None = None,
         policy_name: str | None = None,
         policy_checkpoint: str | None = None,
@@ -144,6 +152,12 @@ class RLDXZeroMQPolicy:
             reset_memory_on_instruction_change
         )
         self.collect_safe_features = bool(collect_safe_features)
+        self.safe_feature_mode = str(safe_feature_mode)
+        if self.safe_feature_mode not in RLDX_SAFE_FEATURE_MODES:
+            raise ValueError(
+                f"safe_feature_mode must be one of {RLDX_SAFE_FEATURE_MODES}, "
+                f"got {self.safe_feature_mode!r}"
+            )
         self.safe_feature_shape = (
             tuple(int(value) for value in safe_feature_shape)
             if safe_feature_shape is not None
@@ -178,6 +192,7 @@ class RLDXZeroMQPolicy:
             }
             if self.collect_safe_features:
                 options["request_safe_features"] = True
+                options["safe_feature_mode"] = self.safe_feature_mode
             action_chunk, info = self.client.get_action(element, options=options)
             self.needs_memory_reset = False
             if self.collect_safe_features:
@@ -280,6 +295,32 @@ class RLDXZeroMQPolicy:
         if not np.any(features):
             raise RuntimeError("RLDX SAFE features are entirely zero")
 
+        observation_context = info.get("safe_observation_context")
+        if observation_context is not None:
+            observation_context = np.asarray(observation_context)
+            if observation_context.ndim == 2:
+                if observation_context.shape[0] != 1:
+                    raise RuntimeError(
+                        "SAFE collection requires one RLDX environment per client"
+                    )
+                observation_context = observation_context[0]
+        if self.safe_feature_mode == "action_observation_context":
+            if observation_context is None or observation_context.ndim != 1:
+                raise RuntimeError(
+                    "RLDX SAFE observation context must have shape (feature_dim,)"
+                )
+            if observation_context.dtype != np.float32:
+                raise RuntimeError(
+                    "RLDX SAFE observation context must be float32, got "
+                    f"{observation_context.dtype}"
+                )
+            if not np.all(np.isfinite(observation_context)):
+                raise RuntimeError("RLDX SAFE observation context contains NaN or Inf")
+            if not np.any(observation_context):
+                raise RuntimeError("RLDX SAFE observation context is entirely zero")
+        elif observation_context is not None:
+            raise RuntimeError("Action-only RLDX SAFE response included observation context")
+
         action_matrix = self._action_chunk_matrix(action_chunk)
         if not np.all(np.isfinite(action_matrix)):
             raise RuntimeError("RLDX action chunk contains NaN or infinite values")
@@ -302,6 +343,17 @@ class RLDXZeroMQPolicy:
         metadata.setdefault("feature_shape", list(features.shape))
         metadata.setdefault("action_horizon", int(features.shape[1]))
         metadata.setdefault("flow_steps", int(features.shape[0]))
+        metadata.setdefault("feature_mode", self.safe_feature_mode)
+        metadata.setdefault("observation_feature_layer", None)
+        metadata.setdefault("observation_context_shape", [])
+        metadata.setdefault("observation_components", {})
+        metadata.setdefault("observation_context_pooling", {})
+        if metadata["observation_context_shape"] is None:
+            metadata["observation_context_shape"] = []
+        if metadata["observation_components"] is None:
+            metadata["observation_components"] = {}
+        if metadata["observation_context_pooling"] is None:
+            metadata["observation_context_pooling"] = {}
         required = (
             "schema_version",
             "model_family",
@@ -313,18 +365,65 @@ class RLDXZeroMQPolicy:
             "policy_checkpoint",
             "action_horizon",
             "flow_steps",
+            "feature_mode",
+            "observation_context_shape",
+            "observation_components",
+            "observation_context_pooling",
         )
         missing = [key for key in required if metadata.get(key) is None]
         if missing:
             raise RuntimeError(f"RLDX SAFE metadata is missing required fields: {missing}")
-        if int(metadata["schema_version"]) != 1:
-            raise RuntimeError("RLDX SAFE metadata schema_version is unsupported")
+        expected_schema = 1 if self.safe_feature_mode == "action" else 2
+        if int(metadata["schema_version"]) != expected_schema:
+            raise RuntimeError(
+                "RLDX SAFE metadata schema_version disagrees with feature mode"
+            )
         if metadata["model_family"] != "rldx1":
             raise RuntimeError("RLDX SAFE metadata model_family must be 'rldx1'")
         if metadata["feature_layer"] != RLDX_SAFE_FEATURE_LAYER:
             raise RuntimeError(
-                "RLDX SAFE feature_layer is not the action-token pre-decoder "
+                "RLDX SAFE feature_layer is not the action-token pre-decoder layer: "
                 f"layer: {metadata['feature_layer']!r}"
+            )
+        if metadata["feature_mode"] != self.safe_feature_mode:
+            raise RuntimeError("RLDX SAFE metadata feature_mode disagrees with request")
+        if self.safe_feature_mode == "action_observation_context":
+            if (
+                metadata.get("observation_feature_layer")
+                != RLDX_SAFE_OBSERVATION_FEATURE_LAYER
+            ):
+                raise RuntimeError("Unexpected RLDX SAFE observation feature layer")
+            if (
+                tuple(metadata["observation_context_shape"])
+                != observation_context.shape
+            ):
+                raise RuntimeError(
+                    "RLDX SAFE observation shape disagrees with metadata"
+                )
+            try:
+                validate_feature_components(
+                    metadata["observation_components"],
+                    feature_dim=observation_context.shape[-1],
+                    required_names={"backbone_context", "state_context"},
+                    field_name="observation_components",
+                )
+            except ValueError as error:
+                raise RuntimeError(
+                    f"Invalid RLDX SAFE observation components: {error}"
+                ) from error
+            if set(metadata["observation_context_pooling"]) != {
+                "backbone",
+                "state",
+            }:
+                raise RuntimeError("Incomplete RLDX SAFE observation pooling metadata")
+        elif (
+            metadata.get("observation_feature_layer") is not None
+            or metadata["observation_context_shape"]
+            or metadata["observation_components"]
+            or metadata["observation_context_pooling"]
+        ):
+            raise RuntimeError(
+                "Action-only RLDX SAFE metadata declares observation context"
             )
         if metadata["feature_aggregation"] != "raw":
             raise RuntimeError("RLDX SAFE inference capture must preserve raw features")
@@ -343,6 +442,10 @@ class RLDXZeroMQPolicy:
             "actions": np.asarray(action_matrix, dtype=np.float32),
             "metadata": metadata,
         }
+        if observation_context is not None:
+            record["observation_context"] = np.asarray(
+                observation_context, dtype=np.float32
+            )
         self._inference_index += 1
         self._pending_inference_record = record
         self._latest_inference_record = record
@@ -569,6 +672,7 @@ def make_policy(
     session_id=None,
     reset_memory_on_instruction_change=True,
     collect_safe_features=False,
+    safe_feature_mode="action",
     safe_feature_shape=None,
     policy_name=None,
     policy_checkpoint=None,
@@ -586,6 +690,7 @@ def make_policy(
         session_id=session_id,
         reset_memory_on_instruction_change=reset_memory_on_instruction_change,
         collect_safe_features=collect_safe_features,
+        safe_feature_mode=safe_feature_mode,
         safe_feature_shape=safe_feature_shape,
         policy_name=policy_name,
         policy_checkpoint=policy_checkpoint,

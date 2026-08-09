@@ -320,6 +320,11 @@ def prepare_plan(args):
             f"--seed-protocol {args.seed_protocol} is incompatible with "
             f"--model-family {args.model_family}"
         )
+    if args.model_family != "rldx1" and args.safe_feature_mode != "action":
+        raise ValueError(
+            "--safe-feature-mode action_observation_context is available only "
+            "with --model-family rldx1"
+        )
     for name in ("success_quota", "failure_quota"):
         value = getattr(args, name)
         if value is not None and value < 0:
@@ -393,6 +398,8 @@ def prepare_plan(args):
             args.rldx_repository_commit if args.model_family == "rldx1" else None
         ),
     }
+    if args.model_family == "rldx1":
+        identity["safe_feature_mode"] = args.safe_feature_mode
     attempts = []
     for task in tasks:
         for seed, reset_index in attempt_coordinates:
@@ -440,6 +447,9 @@ def prepare_plan(args):
         "record_safe_features": args.record_safe_features,
         "record_subtask_trace": args.record_subtask_trace,
         "model_family": args.model_family,
+        "safe_feature_mode": (
+            args.safe_feature_mode if args.model_family == "rldx1" else None
+        ),
         "success_quota": args.success_quota,
         "failure_quota": args.failure_quota,
         "retain_only_quota": args.retain_only_quota,
@@ -508,6 +518,7 @@ def _assert_resume_compatible(previous, current):
         "max_errors",
         "openpi_repository_commit",
         "rldx_repository_commit",
+        "safe_feature_mode",
     )
     mismatches = []
     previous_reset_indices = previous.get("environment_reset_indices")
@@ -530,6 +541,8 @@ def _assert_resume_compatible(previous, current):
             previous_value = "pi0"
         if key == "record_subtask_trace" and previous_value is None:
             previous_value = False
+        if key == "safe_feature_mode" and previous_value is None:
+            previous_value = "action" if current.get("model_family") == "rldx1" else None
         if previous_value != current.get(key):
             mismatches.append(key)
     if mismatches:
@@ -576,6 +589,8 @@ def run_collection(args, runtime=None):
             "policy_checkpoint": args.checkpoint,
         }
     )
+    if args.model_family == "rldx1":
+        policy_args["safe_feature_mode"] = args.safe_feature_mode
     counts = defaultdict(lambda: Counter(successes=0, failures=0))
     for record in records:
         counts[record.task_name]["failures" if record.failed else "successes"] += 1
@@ -821,6 +836,22 @@ def run_collection(args, runtime=None):
                         "feature_aggregation", feature_meta.get("aggregation", "raw")
                     ),
                     feature_dtype=feature_meta["feature_dtype"],
+                    feature_mode=feature_meta.get("feature_mode", "action"),
+                    observation_feature_layer=feature_meta.get(
+                        "observation_feature_layer"
+                    ),
+                    observation_context_shape=(
+                        list(rollout["observation_context"].shape)
+                        if rollout["observation_context"] is not None
+                        else []
+                    ),
+                    observation_components=feature_meta.get(
+                        "observation_components", {}
+                    ),
+                    observation_context_pooling=feature_meta.get(
+                        "observation_context_pooling", {}
+                    ),
+                    feature_schema_version=int(feature_meta.get("schema_version", 1)),
                     feature_shape=list(rollout["features"].shape),
                     flow_steps=int(rollout["features"].shape[1]),
                     termination_reason=rollout["termination_reason"],
@@ -839,6 +870,11 @@ def run_collection(args, runtime=None):
                                 )
                             }
                             if args.model_family == "pi0"
+                            else {}
+                        ),
+                        **(
+                            {"safe_feature_mode": args.safe_feature_mode}
+                            if args.model_family == "rldx1"
                             else {}
                         ),
                     },
@@ -877,6 +913,7 @@ def run_collection(args, runtime=None):
                     metadata,
                     rollout["features"],
                     rollout["policy_action_chunks"],
+                    observation_context=rollout["observation_context"],
                 )
                 records.append(metadata)
                 record_by_id[rollout_id] = metadata
@@ -968,6 +1005,15 @@ def build_parser():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--policy-config", default="{}", help="JSON object")
     parser.add_argument("--model-family", choices=("pi0", "rldx1"), default="pi0")
+    parser.add_argument(
+        "--safe-feature-mode",
+        choices=("action", "action_observation_context"),
+        default="action",
+        help=(
+            "RLDX SAFE representation: the legacy action latent alone or that "
+            "latent plus a separately stored pooled vision/language and state context"
+        ),
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8120)
     parser.add_argument("--replan-steps", type=int, default=5)

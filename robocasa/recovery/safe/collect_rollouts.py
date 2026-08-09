@@ -125,6 +125,11 @@ def collect_single_rollout(
             "schema_version",
             "model_family",
             "feature_layer",
+            "feature_mode",
+            "observation_feature_layer",
+            "observation_context_shape",
+            "observation_components",
+            "observation_context_pooling",
             "feature_dtype",
             "feature_aggregation",
             "policy_name",
@@ -136,6 +141,16 @@ def collect_single_rollout(
     features = (
         np.stack([record["features"] for record in records]).astype(np.float32)
         if records
+        else None
+    )
+    has_observation_context = ["observation_context" in record for record in records]
+    if any(has_observation_context) and not all(has_observation_context):
+        raise RuntimeError("Observation context is missing from part of the rollout")
+    observation_context = (
+        np.stack([record["observation_context"] for record in records]).astype(
+            np.float32
+        )
+        if records and all(has_observation_context)
         else None
     )
     policy_action_chunks = (
@@ -159,6 +174,7 @@ def collect_single_rollout(
         "instruction": instruction or "",
         "termination_reason": termination_reason,
         "features": features,
+        "observation_context": observation_context,
         "inference_env_steps": inference_steps,
         "feature_metadata": metadata,
         "policy_action_chunks": policy_action_chunks,

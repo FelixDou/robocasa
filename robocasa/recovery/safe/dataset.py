@@ -12,11 +12,63 @@ from typing import Iterable
 
 import numpy as np
 
-from .schema import SafeRolloutMetadata, compatibility_key, validate_feature_tensor
+from .schema import (
+    RLDX1_FUSED_EXPORT_LAYER,
+    SafeRolloutMetadata,
+    compatibility_key,
+    validate_feature_tensor,
+)
 
 
 MANIFEST_NAME = "manifest.jsonl"
 SPLIT_MANIFEST_VERSION = 1
+FEATURE_VIEWS = ("all", "action", "observation_context")
+
+
+def select_feature_view(
+    features,
+    metadata,
+    feature_view="all",
+    *,
+    observation_context=None,
+):
+    """Build a paired export view from action latents and optional context."""
+    features = np.asarray(features, dtype=np.float32)
+    feature_view = str(feature_view)
+    if feature_view not in FEATURE_VIEWS:
+        raise ValueError(
+            f"Unknown feature view {feature_view!r}; choose from {FEATURE_VIEWS}"
+        )
+    if feature_view == "action":
+        return features, metadata.feature_layer
+
+    if metadata.feature_mode == "action":
+        if feature_view == "all":
+            return features, metadata.feature_layer
+        raise ValueError(
+            "Observation-context view is unavailable in an action-only dataset"
+        )
+
+    if observation_context is None:
+        raise ValueError(f"Feature view {feature_view!r} requires observation_context")
+    observation_context = np.asarray(observation_context, dtype=np.float32)
+    expected_shape = (features.shape[0], metadata.observation_context_shape[-1])
+    if observation_context.shape != expected_shape:
+        raise ValueError(
+            "Observation context shape disagrees with the action sequence: "
+            f"{observation_context.shape} != {expected_shape}"
+        )
+    if not np.all(np.isfinite(observation_context)):
+        raise ValueError("Observation context contains NaN or infinite values")
+    observation_view = observation_context[:, None, None, :]
+    if feature_view == "observation_context":
+        return observation_view, metadata.observation_feature_layer
+
+    action_mean = features[:, -1].mean(axis=1, dtype=np.float32)
+    fused = np.concatenate((action_mean, observation_context), axis=-1)
+    return fused[:, None, None, :].astype(np.float32, copy=False), (
+        RLDX1_FUSED_EXPORT_LAYER
+    )
 
 
 def save_rollout(
@@ -24,6 +76,7 @@ def save_rollout(
     metadata: SafeRolloutMetadata,
     features: np.ndarray,
     policy_action_chunks: np.ndarray | None = None,
+    observation_context: np.ndarray | None = None,
 ) -> Path:
     output_dir = Path(output_dir)
     tensor_dir = output_dir / "rollouts"
@@ -33,6 +86,9 @@ def save_rollout(
     metadata.valid_sequence_length = int(features.shape[0])
     metadata.flow_steps = int(features.shape[1])
     metadata.action_horizon = int(features.shape[2])
+    if observation_context is not None:
+        observation_context = np.asarray(observation_context, dtype=np.float32)
+        metadata.observation_context_shape = list(observation_context.shape)
     tensor_path = tensor_dir / f"{metadata.rollout_id}.npz"
     if tensor_path.exists():
         raise FileExistsError(
@@ -40,6 +96,22 @@ def save_rollout(
         )
     metadata.tensor_path = str(tensor_path.relative_to(output_dir))
     validate_feature_tensor(features, metadata)
+    if metadata.feature_mode == "action_observation_context":
+        expected_context_shape = (
+            features.shape[0],
+            metadata.observation_context_shape[-1],
+        )
+        if (
+            observation_context is None
+            or observation_context.shape != expected_context_shape
+        ):
+            raise ValueError(
+                "observation_context must be (inferences, feature_dim) for dual-stream SAFE"
+            )
+        if not np.all(np.isfinite(observation_context)):
+            raise ValueError("observation_context contains NaN or infinite values")
+    elif observation_context is not None:
+        raise ValueError("action-only SAFE records cannot store observation_context")
     if policy_action_chunks is not None:
         policy_action_chunks = np.asarray(policy_action_chunks, dtype=np.float32)
         if policy_action_chunks.ndim != 3:
@@ -53,6 +125,11 @@ def save_rollout(
         "feature_shape": metadata.feature_shape,
         "feature_dtype": metadata.feature_dtype,
         "feature_aggregation": metadata.feature_aggregation,
+        "feature_mode": metadata.feature_mode,
+        "observation_feature_layer": metadata.observation_feature_layer,
+        "observation_context_shape": metadata.observation_context_shape,
+        "observation_components": metadata.observation_components,
+        "observation_context_pooling": metadata.observation_context_pooling,
         "policy_name": metadata.policy_id,
         "policy_checkpoint": metadata.checkpoint,
         "action_horizon": metadata.action_horizon,
@@ -72,6 +149,8 @@ def save_rollout(
     }
     if policy_action_chunks is not None:
         payload["policy_action_chunks"] = policy_action_chunks
+    if observation_context is not None:
+        payload["observation_context"] = observation_context
     np.savez_compressed(temp_path, **payload)
     os.replace(temp_path, tensor_path)
     manifest_path = output_dir / MANIFEST_NAME

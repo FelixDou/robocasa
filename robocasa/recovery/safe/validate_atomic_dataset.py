@@ -105,6 +105,8 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
                     "failed",
                     "schema_version",
                 }
+                if record.feature_mode == "action_observation_context":
+                    required.add("observation_context")
                 missing = sorted(required - set(payload.files))
                 if missing:
                     errors.append(f"{prefix}: feature file missing keys {missing}")
@@ -118,7 +120,27 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
                 failed = int(payload["failed"])
                 tensor_schema_version = int(payload["schema_version"])
                 metadata = json.loads(str(payload["feature_metadata_json"]))
+                observation_context = (
+                    payload["observation_context"]
+                    if "observation_context" in payload
+                    else None
+                )
             validate_feature_tensor(features, record)
+            if record.feature_mode == "action_observation_context":
+                if (
+                    observation_context is None
+                    or list(observation_context.shape)
+                    != record.observation_context_shape
+                ):
+                    errors.append(f"{prefix}: observation context shape mismatch")
+                elif not np.isfinite(observation_context).all():
+                    errors.append(
+                        f"{prefix}: observation context contains non-finite values"
+                    )
+            elif observation_context is not None:
+                errors.append(
+                    f"{prefix}: action-only record unexpectedly stores observation context"
+                )
             if features.shape[0] == 0:
                 errors.append(f"{prefix}: empty feature sequence")
             if (
@@ -163,6 +185,11 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
                 "feature_layer": record.feature_layer,
                 "feature_dtype": record.feature_dtype,
                 "feature_aggregation": record.feature_aggregation,
+                "feature_mode": record.feature_mode,
+                "observation_feature_layer": record.observation_feature_layer,
+                "observation_context_shape": record.observation_context_shape,
+                "observation_components": record.observation_components,
+                "observation_context_pooling": record.observation_context_pooling,
                 "feature_shape": record.feature_shape,
                 "policy_name": record.policy_id,
                 "policy_checkpoint": record.checkpoint,
@@ -172,7 +199,23 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
             for key, value in expected_metadata.items():
                 actual = metadata.get(
                     key,
-                    "pi0" if key == "model_family" else None,
+                    (
+                        "pi0"
+                        if key == "model_family"
+                        else (
+                            "action"
+                            if key == "feature_mode"
+                            else {}
+                            if key
+                            in {
+                                "observation_components",
+                                "observation_context_pooling",
+                            }
+                            else []
+                            if key == "observation_context_shape"
+                            else None
+                        )
+                    ),
                 )
                 if actual != value:
                     errors.append(f"{prefix}: feature metadata mismatch for {key}")
@@ -184,7 +227,10 @@ def validate_atomic_dataset(dataset_dir, *, allow_unregistered=False):
                 record.policy_id,
                 record.checkpoint,
                 record.feature_layer,
+                record.feature_mode,
+                record.observation_feature_layer,
                 tuple(record.feature_shape[1:]),
+                tuple(record.observation_context_shape[1:]),
                 record.feature_dtype,
                 record.feature_aggregation,
             )

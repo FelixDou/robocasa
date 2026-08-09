@@ -120,6 +120,38 @@ class FakeRLDXPolicy(FakePolicy):
         return action
 
 
+class FakeRLDXFusedPolicy(FakePolicy):
+    def __call__(self, obs, instruction=None):
+        action = super().__call__(obs, instruction=instruction)
+        if self.pending is not None:
+            self.pending["metadata"].update(
+                {
+                    "schema_version": 2,
+                    "model_family": "rldx1",
+                    "feature_layer": (
+                        "action_model_msat_action_suffix_pre_action_decoder"
+                    ),
+                    "feature_mode": "action_observation_context",
+                    "observation_feature_layer": (
+                        "memory_aware_backbone_mean_plus_state_encoder_mean"
+                    ),
+                    "observation_context_shape": [6],
+                    "observation_components": {
+                        "backbone_context": [0, 3],
+                        "state_context": [3, 6],
+                    },
+                    "observation_context_pooling": {
+                        "backbone": "attention_masked_mean_after_memory",
+                        "state": "token_mean_after_state_encoder",
+                    },
+                    "policy_name": "mock-rldx1",
+                    "policy_checkpoint": "mock-rldx-checkpoint",
+                }
+            )
+            self.pending["observation_context"] = np.arange(6, dtype=np.float32)
+        return action
+
+
 def fake_runtime(tracker=None, policy_cls=FakePolicy):
     def make_env(task, interface, split, seed, render):
         env = FakeEnv(seed)
@@ -549,6 +581,72 @@ class TestSafeAtomicCollection(unittest.TestCase):
                 resume=True,
             )
             self.assertTrue(resumed["complete"])
+
+    def test_fused_rldx_subtask_export_supports_paired_feature_views(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as action_export,
+            tempfile.TemporaryDirectory() as observation_export,
+            tempfile.TemporaryDirectory() as fused_export,
+        ):
+            args = collection_args(tmp, num_rollouts=6)
+            args.record_subtask_trace = True
+            args.model_family = "rldx1"
+            args.policy_name = "mock-rldx1"
+            args.checkpoint = "mock-rldx-checkpoint"
+            args.safe_feature_mode = "action_observation_context"
+            run_collection(args, runtime=fake_runtime(policy_cls=FakeRLDXFusedPolicy))
+
+            validation = validate_atomic_dataset(tmp)
+            self.assertTrue(validation["valid"], validation["errors"])
+            action_report = export_subtask_safe(
+                tmp,
+                action_export,
+                train_fraction=0.5,
+                split_seed=7,
+                feature_view="action",
+            )
+            observation_report = export_subtask_safe(
+                tmp,
+                observation_export,
+                train_fraction=0.5,
+                split_seed=7,
+                feature_view="observation_context",
+            )
+            fused_report = export_subtask_safe(
+                tmp,
+                fused_export,
+                train_fraction=0.5,
+                split_seed=7,
+                feature_view="all",
+            )
+            self.assertEqual(action_report["feature_view"], "action")
+            self.assertEqual(
+                observation_report["feature_view"], "observation_context"
+            )
+            self.assertEqual(fused_report["feature_view"], "all")
+            action_path = next(
+                (Path(action_export) / "policy_records").glob("*meta.pkl")
+            )
+            observation_path = next(
+                (Path(observation_export) / "policy_records").glob("*meta.pkl")
+            )
+            fused_path = next(
+                (Path(fused_export) / "policy_records").glob("*meta.pkl")
+            )
+            with action_path.open("rb") as stream:
+                action_record = pickle.load(stream)
+            with observation_path.open("rb") as stream:
+                observation_record = pickle.load(stream)
+            with fused_path.open("rb") as stream:
+                fused_record = pickle.load(stream)
+            self.assertEqual(action_record["pre_velocity"].shape, (2, 4, 8))
+            self.assertEqual(observation_record["pre_velocity"].shape, (1, 1, 6))
+            self.assertEqual(fused_record["pre_velocity"].shape, (1, 1, 14))
+            self.assertEqual(
+                action_record["source_inference_index"],
+                observation_record["source_inference_index"],
+            )
 
     def test_subtask_audit_can_explicitly_inspect_partial_collection(self):
         with tempfile.TemporaryDirectory() as tmp:

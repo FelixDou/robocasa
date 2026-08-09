@@ -7,6 +7,11 @@ PATCH_PATH = (
     / "patches"
     / "rldx1_safe_features_ef05cd4.patch"
 )
+OBSERVATION_PATCH_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "patches"
+    / "rldx1_safe_observation_context_ef05cd4.patch"
+)
 
 
 class TestRLDXSafePatch(unittest.TestCase):
@@ -38,6 +43,30 @@ class TestRLDXSafePatch(unittest.TestCase):
         self.assertNotIn(
             "+                    pred_velocity = "
             "self.action_decoder(ao.float(), embodiment_id)",
+            patch,
+        )
+
+    def test_observation_patch_preserves_action_stream_and_records_context(self):
+        patch = OBSERVATION_PATCH_PATH.read_text()
+        self.assertIn(
+            '+            observation_context = torch.cat(\n',
+            patch,
+        )
+        self.assertIn(
+            '+                output["safe_observation_context"] = observation_context.float()\n',
+            patch,
+        )
+        self.assertIn(
+            '+                output["safe_observation_components"] = safe_observation_components\n',
+            patch,
+        )
+        self.assertIn(
+            '+            collated["safe_feature_mode"] = request.safe_feature_mode\n',
+            patch,
+        )
+        self.assertNotIn("expanded_context", patch)
+        self.assertIn(
+            '"attention_masked_mean_after_memory"',
             patch,
         )
 

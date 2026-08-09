@@ -1,0 +1,210 @@
+diff --git a/rldx/model/core/rldx.py b/rldx/model/core/rldx.py
+index d73e7f5..be1f47e 100755
+--- a/rldx/model/core/rldx.py
++++ b/rldx/model/core/rldx.py
+@@ -495,6 +495,7 @@ class RLDXActionModel(nn.Module):
+         backbone_output: BatchFeature,
+         action_input: BatchFeature = None,
+         return_safe_features: bool = False,
++        safe_feature_mode: str = "action",
+     ) -> BatchFeature:
+         """
+         Generate actions using the flow matching diffusion process.
+@@ -618,6 +619,30 @@ class RLDXActionModel(nn.Module):
+             timesteps_list = [t / float(n) for t in range(n)] + [1.0]
+ 
+         encoder_attention_mask = backbone_output.get("backbone_attention_mask", None)
++        safe_feature_mode = str(safe_feature_mode)
++        if safe_feature_mode not in {"action", "action_observation_context"}:
++            raise ValueError(f"Unknown SAFE feature mode: {safe_feature_mode!r}")
++        safe_observation_components = None
++        observation_context = None
++        if return_safe_features and safe_feature_mode == "action_observation_context":
++            if encoder_attention_mask is None:
++                backbone_context = vl_embeds.mean(dim=1)
++            else:
++                context_mask = encoder_attention_mask.to(dtype=vl_embeds.dtype)
++                denominator = context_mask.sum(dim=1, keepdim=True).clamp_min(1.0)
++                backbone_context = (
++                    vl_embeds * context_mask.unsqueeze(-1)
++                ).sum(dim=1) / denominator
++            state_context = state_features.mean(dim=1)
++            observation_context = torch.cat(
++                (backbone_context, state_context), dim=-1
++            ).detach()
++            backbone_dim = int(backbone_context.shape[-1])
++            state_dim = int(state_context.shape[-1])
++            safe_observation_components = {
++                "backbone_context": [0, backbone_dim],
++                "state_context": [backbone_dim, backbone_dim + state_dim],
++            }
+         if encoder_attention_mask is not None and encoder_attention_mask.all():
+             encoder_attention_mask = None
+ 
+@@ -742,6 +767,10 @@ class RLDXActionModel(nn.Module):
+         }
+         if safe_feature_steps is not None:
+             output["safe_features"] = torch.stack(safe_feature_steps, dim=1).float()
++            output["safe_feature_mode"] = safe_feature_mode
++            if observation_context is not None:
++                output["safe_observation_context"] = observation_context.float()
++                output["safe_observation_components"] = safe_observation_components
+         return BatchFeature(data=output)
+ 
+     @torch.no_grad()
+@@ -751,6 +780,7 @@ class RLDXActionModel(nn.Module):
+         action_input: BatchFeature,
+         *,
+         return_safe_features: bool = False,
++        safe_feature_mode: str = "action",
+     ) -> BatchFeature:
+         """
+         Generate actions using the flow matching diffusion process.
+@@ -775,6 +805,7 @@ class RLDXActionModel(nn.Module):
+             backbone_output=backbone_output,
+             action_input=action_input,
+             return_safe_features=return_safe_features,
++            safe_feature_mode=safe_feature_mode,
+         )
+ 
+     @property
+@@ -1159,6 +1190,7 @@ class RLDX(PreTrainedModel):
+             inputs = {**inputs, **kwargs}
+ 
+         return_safe_features = bool(inputs.pop("return_safe_features", False))
++        safe_feature_mode = str(inputs.pop("safe_feature_mode", "action"))
+         reset_memory = inputs.pop("reset_memory", None) if self.use_memory else None
+ 
+         backbone_inputs, action_inputs = self.prepare_input(inputs)
+@@ -1171,6 +1203,7 @@ class RLDX(PreTrainedModel):
+             backbone_outputs,
+             action_inputs,
+             return_safe_features=return_safe_features,
++            safe_feature_mode=safe_feature_mode,
+         )
+         return action_outputs
+ 
+diff --git a/rldx/policy/policy_runtime.py b/rldx/policy/policy_runtime.py
+index 1d5e3e5..a7b7731 100644
+--- a/rldx/policy/policy_runtime.py
++++ b/rldx/policy/policy_runtime.py
+@@ -177,16 +177,62 @@ class PolicyRuntime:
+             if not torch.any(features):
+                 raise RuntimeError("RLDX SAFE features are entirely zero")
+             feature_array = features.cpu().numpy()
++            feature_mode = str(model_pred.get("safe_feature_mode", "action"))
++            if feature_mode != request.safe_feature_mode:
++                raise RuntimeError(
++                    "RLDX SAFE feature mode disagrees with the request: "
++                    f"{feature_mode!r} != {request.safe_feature_mode!r}"
++                )
++            observation_array = None
++            observation_components = {}
++            if feature_mode == "action_observation_context":
++                observation_context = model_pred.get("safe_observation_context")
++                if observation_context is None:
++                    raise RuntimeError("RLDX SAFE response lacks observation context")
++                if observation_context.ndim != 2 or observation_context.shape[0] != B:
++                    raise RuntimeError(
++                        "RLDX SAFE observation context must have shape "
++                        f"(batch, feature_dim); got {tuple(observation_context.shape)}"
++                    )
++                if not torch.isfinite(observation_context).all():
++                    raise RuntimeError("RLDX SAFE observation context contains NaN or Inf")
++                observation_components = model_pred.get("safe_observation_components")
++                if not isinstance(observation_components, dict):
++                    raise RuntimeError(
++                        "RLDX SAFE response lacks observation component slices"
++                    )
++                observation_array = observation_context.cpu().numpy()
+             info = {
+                 "safe_features": feature_array,
++                "safe_observation_context": observation_array,
+                 "safe_feature_metadata": {
+-                    "schema_version": 1,
++                    "schema_version": 1 if feature_mode == "action" else 2,
+                     "model_family": "rldx1",
+                     "model_id": self.model_id,
+                     "checkpoint": self.checkpoint,
+                     "feature_layer": (
+                         "action_model_msat_action_suffix_pre_action_decoder"
+                     ),
++                    "feature_mode": feature_mode,
++                    "observation_feature_layer": (
++                        None
++                        if feature_mode == "action"
++                        else "memory_aware_backbone_mean_plus_state_encoder_mean"
++                    ),
++                    "observation_context_shape": (
++                        []
++                        if observation_array is None
++                        else list(observation_array.shape[1:])
++                    ),
++                    "observation_components": observation_components,
++                    "observation_context_pooling": (
++                        {}
++                        if feature_mode == "action"
++                        else {
++                            "backbone": "attention_masked_mean_after_memory",
++                            "state": "token_mean_after_state_encoder",
++                        }
++                    ),
+                     "feature_shape": list(feature_array.shape[1:]),
+                     "feature_dtype": "float32",
+                     "action_horizon": int(feature_array.shape[2]),
+@@ -424,6 +470,7 @@ class PolicyRuntime:
+         """
+         if request.request_safe_features:
+             collated["return_safe_features"] = True
++            collated["safe_feature_mode"] = request.safe_feature_mode
+ 
+         if self.use_memory and hasattr(self.model, "_cached_mq"):
+             # Registry owns model._cached_mq lifecycle via context manager.
+diff --git a/rldx/policy/step_request.py b/rldx/policy/step_request.py
+index 28a1cc2..448af91 100644
+--- a/rldx/policy/step_request.py
++++ b/rldx/policy/step_request.py
+@@ -13,6 +13,7 @@ Options keys consumed (closed set, verified from grep of `rldx_policy.py`):
+   - "action_prefix"   — ndarray or Tensor, (B,d,D) or (d,D) for broadcast
+   - "rtc_prefix_len"  — int, effective prefix length override
+   - "request_safe_features" — bool, return raw SAFE-style RLDX action latents
++  - "safe_feature_mode" — str, action or action_observation_context
+ 
+ Any other field in options is ignored (e.g. third-party extensions).
+ """
+@@ -79,6 +80,7 @@ class StepRequest:
+     action_prefix: "np.ndarray | torch.Tensor | None" = None
+     rtc_prefix_len: int | None = None
+     request_safe_features: bool = False
++    safe_feature_mode: str = "action"
+ 
+     # Extras that were in options but not consumed — kept for caller
+     # debugging, never acted on.
+@@ -137,6 +139,11 @@ class StepRequest:
+                 "request_safe_features must be bool, got "
+                 f"{type(self.request_safe_features).__name__}"
+             )
++        if self.safe_feature_mode not in {"action", "action_observation_context"}:
++            raise ValueError(
++                "safe_feature_mode must be 'action' or "
++                f"'action_observation_context', got {self.safe_feature_mode!r}"
++            )
+ 
+ 
+ # ----------------------------------------------------------------------------
+@@ -150,6 +157,7 @@ _KNOWN_OPTION_KEYS = frozenset(
+         "action_prefix",
+         "rtc_prefix_len",
+         "request_safe_features",
++        "safe_feature_mode",
+     }
+ )
+ 
+@@ -200,6 +208,7 @@ def decode_options_to_step_request(
+         action_prefix=options.get("action_prefix"),
+         rtc_prefix_len=options.get("rtc_prefix_len"),
+         request_safe_features=options.get("request_safe_features", False),
++        safe_feature_mode=options.get("safe_feature_mode", "action"),
+         extras=extras,
+     )
+ 
