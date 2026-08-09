@@ -109,6 +109,35 @@ class TestSubtaskStageAdapter(unittest.TestCase):
             ]
             self.assertEqual(len(selected_segments), 2)
 
+    def test_three_way_split_supports_four_parent_strata_with_five_folds(self):
+        specs = []
+        for parent_task, task_offset in (("TaskA", 0), ("TaskB", 2)):
+            for parent_failed in (False, True):
+                for index in range(4):
+                    parent = f"{parent_task}-{int(parent_failed)}-{index}"
+                    specs.append(
+                        (
+                            parent,
+                            parent_task,
+                            parent_failed,
+                            "stage0",
+                            task_offset,
+                            not parent_failed,
+                        )
+                    )
+        rollouts, identity = make_dataset(specs)
+        split = three_way_parent_split(
+            rollouts,
+            identity,
+            num_folds=5,
+            selection_fold=1,
+            diagnostic_fold=0,
+            seed=7,
+        )
+        self.assertEqual(split["counts"], {"fit": 8, "selection": 4, "diagnostic": 4})
+        for counts in split["strata"].values():
+            self.assertEqual(counts["per_fold"], [1, 1, 1, 1, 0])
+
     def test_fit_only_stage_support_horizons_and_landmarks(self):
         rollouts, identity = make_dataset(
             [

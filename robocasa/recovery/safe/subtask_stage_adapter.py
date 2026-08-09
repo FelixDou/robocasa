@@ -261,18 +261,27 @@ def three_way_parent_split(
     for key, payload in parents.items():
         by_stratum[payload["stratum"]].append(key)
     folds = [set() for _ in range(num_folds)]
+    fold_order = [
+        diagnostic_fold,
+        selection_fold,
+        *[
+            index
+            for index in range(num_folds)
+            if index not in {diagnostic_fold, selection_fold}
+        ],
+    ]
     stratum_counts = {}
     for stratum, values in sorted(by_stratum.items()):
         values = sorted(values)
-        if len(values) < num_folds:
+        if len(values) < 3:
             raise ValueError(
                 f"Parent stratum {stratum} has {len(values)} parents, fewer than "
-                f"num_folds={num_folds}"
+                "the three-way minimum=3"
             )
         rng = random.Random(f"{int(seed)}:{stratum[0]}:{stratum[1]}")
         rng.shuffle(values)
         for index, key in enumerate(values):
-            folds[index % num_folds].add(key)
+            folds[fold_order[index % num_folds]].add(key)
         stratum_counts[f"{stratum[0]}::{stratum[1]}"] = {
             "parents": len(values),
             "per_fold": [sum(key in fold for key in values) for fold in folds],
