@@ -70,6 +70,7 @@ class FakePolicy:
     def __init__(self, env, replan_steps=2, **kwargs):
         self.env = env
         self.replan_steps = int(replan_steps)
+        self.closed = False
         self.reset()
 
     def reset(self):
@@ -104,6 +105,9 @@ class FakePolicy:
     def pop_inference_record(self):
         record, self.pending = self.pending, None
         return record
+
+    def close(self):
+        self.closed = True
 
 
 class FakeRLDXPolicy(FakePolicy):
@@ -146,12 +150,18 @@ def fake_runtime(tracker=None, policy_cls=FakePolicy):
             tracker.setdefault("render_flags", []).append(render)
         return env
 
+    def call_factory(factory, env, args):
+        policy = factory(env, **args)
+        if tracker is not None:
+            tracker.setdefault("policies", []).append(policy)
+        return policy
+
     return {
         "load_factory": lambda spec: policy_cls,
         "parse_policy_args": lambda values: {},
         "make_env": make_env,
         "open_video_writer": lambda path, fps: None,
-        "call_factory": lambda factory, env, args: factory(env, **args),
+        "call_factory": call_factory,
         "append_frame": lambda *args, **kwargs: None,
         "success_fn": lambda info, reward, env: info.get("success", False),
         "step_fn": lambda env, action: env.step(action),
@@ -291,6 +301,8 @@ class TestSafeAtomicCollection(unittest.TestCase):
             self.assertEqual(len(tracker["envs"]), 1)
             self.assertEqual(tracker["envs"][0].reset_calls, 3)
             self.assertTrue(tracker["envs"][0].closed)
+            self.assertEqual(len(tracker["policies"]), 1)
+            self.assertTrue(tracker["policies"][0].closed)
             self.assertEqual([record.environment_seed for record in records], [7, 7, 7])
             self.assertEqual(
                 [record.environment_reset_index for record in records], [0, 1, 2]
@@ -763,6 +775,33 @@ class TestSafeAtomicCollection(unittest.TestCase):
                 for line in (Path(tmp) / "errors.jsonl").read_text().splitlines()
             ]
             self.assertEqual(len(errors), 2)
+
+    def test_transport_error_closes_shared_policy_before_retry(self):
+        class FailFirstPolicy(FakePolicy):
+            failures_remaining = 1
+
+            def __call__(self, obs, instruction=None):
+                if type(self).failures_remaining:
+                    type(self).failures_remaining -= 1
+                    raise TimeoutError("mock transport timeout")
+                return super().__call__(obs, instruction=instruction)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            args = collection_args(tmp, num_rollouts=2)
+            args.seed_protocol = "official_openpi"
+            tracker = {}
+
+            result = run_collection(
+                args,
+                runtime=fake_runtime(tracker, policy_cls=FailFirstPolicy),
+            )
+
+            self.assertEqual(result["counts"]["errors"], 1)
+            self.assertEqual(result["counts"]["valid_rollouts"], 1)
+            self.assertEqual(len(tracker["policies"]), 2)
+            self.assertTrue(all(policy.closed for policy in tracker["policies"]))
+            self.assertEqual(len(tracker["envs"]), 2)
+            self.assertTrue(all(env.closed for env in tracker["envs"]))
 
     def test_merge_atomic_dataset_shards_with_hardlinks(self):
         with tempfile.TemporaryDirectory() as tmp:

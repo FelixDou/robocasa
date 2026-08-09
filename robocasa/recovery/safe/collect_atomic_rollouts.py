@@ -151,6 +151,15 @@ def class_quota_reached(
     return quota is not None and count >= quota
 
 
+def close_policy(policy) -> None:
+    """Close a policy transport when the policy exposes a close method."""
+    if policy is None:
+        return
+    close = getattr(policy, "close", None)
+    if close is not None:
+        close()
+
+
 def artifact_paths(
     output_dir,
     task_name,
@@ -658,6 +667,7 @@ def run_collection(args, runtime=None):
         shared_env = None
         shared_policy = None
         for attempt_index, attempt in enumerate(task_attempts):
+            policy = None
             rollout_id = attempt["rollout_id"]
             seed = attempt["environment_seed"]
             rollout_horizon = attempt["rollout_horizon"]
@@ -966,6 +976,13 @@ def run_collection(args, runtime=None):
                 counts[task_name]["failures" if metadata.failed else "successes"] += 1
                 compatibility_keys.add(new_compatibility_key)
             except KeyboardInterrupt:
+                if shared_policy is not None:
+                    if policy is shared_policy:
+                        policy = None
+                    try:
+                        close_policy(shared_policy)
+                    finally:
+                        shared_policy = None
                 if shared_env is not None:
                     shared_env.close()
                     shared_env = None
@@ -985,31 +1002,44 @@ def run_collection(args, runtime=None):
                 }
                 append_jsonl(output_dir / ERRORS_NAME, event)
                 errors.append(event)
+                # A transport timeout leaves the shared socket unusable and can
+                # also leave the single-client XR-1 server waiting on the old
+                # connection. Explicitly close both shared resources before a
+                # retry so the next attempt establishes a fresh connection.
+                if shared_policy is not None:
+                    if policy is shared_policy:
+                        policy = None
+                    try:
+                        close_policy(shared_policy)
+                    except Exception:
+                        pass
+                    shared_policy = None
+                if shared_env is not None:
+                    shared_env.close()
+                    shared_env = None
+                    env = None
                 if args.max_errors is not None and len(errors) >= args.max_errors:
-                    if shared_env is not None:
-                        shared_env.close()
-                        shared_env = None
-                        env = None
                     raise RuntimeError(
                         f"Collection stopped after reaching --max-errors={args.max_errors}"
                     )
                 if not args.continue_on_error:
-                    if shared_env is not None:
-                        shared_env.close()
-                        shared_env = None
-                        env = None
                     raise
             finally:
                 if writer is not None:
                     writer.close()
+                if policy is not None and policy is not shared_policy:
+                    close_policy(policy)
                 if env is not None and env is not shared_env:
                     env.close()
                 atomic_write_json(
                     summary_path,
                     make_summary(plan["config"], records, errors, skipped, partial=True),
                 )
-        if shared_env is not None:
-            shared_env.close()
+        try:
+            close_policy(shared_policy)
+        finally:
+            if shared_env is not None:
+                shared_env.close()
     quotas_requested = args.success_quota is not None or args.failure_quota is not None
     target_reached = not quotas_requested or all(
         quota_reached(
