@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+import json
 import unittest
 
 import numpy as np
@@ -209,6 +210,40 @@ class TestSubtaskStageAdapter(unittest.TestCase):
         self.assertEqual(metrics["macro"]["false_positive_rate"], 0.0)
         self.assertEqual(metrics["macro"]["true_positive_rate"], 1.0)
         self.assertEqual(metrics["macro"]["mean_detected_lead"], 0.75)
+
+    def test_strict_fpr_uses_finite_abstention_threshold(self):
+        def scored(segment, failed):
+            return {
+                "parent_rollout_id": segment,
+                "segment_id": segment,
+                "stage_name": "Task::stage",
+                "failed": failed,
+                "source_inferences": 2,
+                "trajectories": {
+                    "time_only": np.asarray([0.5, 0.5], dtype=np.float64),
+                },
+            }
+
+        selection = [
+            scored("s0", False),
+            scored("s1", False),
+            scored("f0", True),
+            scored("f1", True),
+        ]
+        thresholds, audit = select_stage_thresholds(
+            selection,
+            "time_only",
+            target_fpr=0.05,
+            min_successes=2,
+        )
+        threshold = thresholds["Task::stage"]
+        self.assertTrue(np.isfinite(threshold))
+        self.assertGreater(threshold, 1.0)
+        self.assertTrue(audit["Task::stage"]["abstains_on_selection"])
+        json.dumps(thresholds, allow_nan=False)
+        metrics = stage_event_metrics(selection, "time_only", thresholds)
+        self.assertEqual(metrics["macro"]["false_positive_rate"], 0.0)
+        self.assertEqual(metrics["macro"]["true_positive_rate"], 0.0)
 
     def test_parent_bootstrap_and_gate_reward_incremental_signal(self):
         rows = []

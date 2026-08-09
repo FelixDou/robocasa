@@ -931,8 +931,13 @@ def select_stage_thresholds(
                 for item in values
             ]
         )
+        if not np.all(np.isfinite(causal_scores)):
+            raise ValueError(f"Stage {name} has non-finite causal scores")
+        if np.any(causal_scores < 0.0) or np.any(causal_scores > 1.0):
+            raise ValueError(f"Stage {name} has scores outside [0, 1]")
+        epsilon = np.finfo(np.float64).eps
         candidates = np.concatenate(
-            [[np.inf], np.unique(causal_scores)[::-1], [-np.inf]]
+            [[1.0 + epsilon], np.unique(causal_scores)[::-1], [-epsilon]]
         )
         feasible = []
         for threshold in candidates:
@@ -950,6 +955,7 @@ def select_stage_thresholds(
             "successes": len(successes),
             "failures": len(failures),
             "threshold": threshold,
+            "abstains_on_selection": bool(threshold > np.max(causal_scores)),
             "target_fpr": float(target_fpr),
             "conformal_resolution_proxy": 1.0 / (len(successes) + 1.0),
         }
