@@ -387,7 +387,7 @@ def task_catalog(export_dir):
     }
 
 
-def resolve_task_type_selection(export_dir, task_type="all"):
+def resolve_task_type_selection(export_dir, task_type="all", task_names=None):
     if task_type not in TASK_TYPE_FILTERS:
         raise ValueError(
             f"Unknown task type {task_type!r}; expected one of {TASK_TYPE_FILTERS}"
@@ -396,8 +396,23 @@ def resolve_task_type_selection(export_dir, task_type="all"):
     selected_names = sorted(
         name
         for name, value in catalog["task_types"].items()
-        if task_type == "all" or value == task_type
+        if (task_type == "all" or value == task_type)
+        and (task_names is None or name in task_names)
     )
+    if task_names is not None:
+        unknown = sorted(set(task_names) - set(catalog["task_ids"]))
+        incompatible = sorted(
+            name
+            for name in task_names
+            if name in catalog["task_types"]
+            and task_type != "all"
+            and catalog["task_types"][name] != task_type
+        )
+        if unknown or incompatible:
+            raise ValueError(
+                f"Invalid explicit task selection: unknown={unknown}, "
+                f"incompatible={incompatible}"
+            )
     if not selected_names:
         raise ValueError(f"No {task_type} tasks are present in the official export")
     selected_ids = sorted(catalog["task_ids"][name] for name in selected_names)
@@ -966,21 +981,27 @@ def train_seen_model(args):
     seed_everything(0)
     source_rollouts = load_rollouts_from_root(Path(args.export_dir), cfg)
     source_env_records = load_env_records(args.export_dir)
-    task_selection = resolve_task_type_selection(
-        args.export_dir,
-        args.task_type,
-    )
-    all_rollouts, env_records, identity = filter_aligned_task_type(
-        source_rollouts,
-        source_env_records,
-        task_selection,
-    )
     if args.outer_split_manifest is not None and args.selection_manifest is not None:
         raise ValueError(
             "--outer-split-manifest and --selection-manifest are mutually exclusive"
         )
     fixed_split_ids = load_outer_split_ids(
         args.selection_manifest or args.outer_split_manifest
+    )
+    selected_task_names = None
+    if args.selection_manifest is not None:
+        selected_task_names = set(
+            fixed_split_ids["manifest"].get("included_tasks", [])
+        ) or None
+    task_selection = resolve_task_type_selection(
+        args.export_dir,
+        args.task_type,
+        selected_task_names,
+    )
+    all_rollouts, env_records, identity = filter_aligned_task_type(
+        source_rollouts,
+        source_env_records,
+        task_selection,
     )
     fixed_outer_split_path = (
         fixed_split_ids["manifest"].get("fixed_outer_split_manifest")

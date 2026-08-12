@@ -328,16 +328,6 @@ def run_cv_grid(args):
         args.regularization,
     )
     source_env_records = load_env_records(args.export_dir)
-    task_selection = resolve_task_type_selection(
-        args.export_dir,
-        args.task_type,
-    )
-    selected_task_ids = set(task_selection["selected_task_ids"])
-    env_records = [
-        env_record
-        for env_record in source_env_records
-        if int(env_record[1]["task_id"]) in selected_task_ids
-    ]
     if args.outer_split_manifest is not None and args.selection_manifest is not None:
         raise ValueError(
             "--outer-split-manifest and --selection-manifest are mutually exclusive"
@@ -345,6 +335,22 @@ def run_cv_grid(args):
     fixed_split_ids = load_outer_split_ids(
         args.selection_manifest or args.outer_split_manifest
     )
+    selected_task_names = None
+    if args.selection_manifest is not None:
+        selected_task_names = set(
+            fixed_split_ids["manifest"].get("included_tasks", [])
+        ) or None
+    task_selection = resolve_task_type_selection(
+        args.export_dir,
+        args.task_type,
+        selected_task_names,
+    )
+    selected_task_ids = set(task_selection["selected_task_ids"])
+    env_records = [
+        env_record
+        for env_record in source_env_records
+        if int(env_record[1]["task_id"]) in selected_task_ids
+    ]
     fixed_outer_split_path = (
         fixed_split_ids["manifest"].get("fixed_outer_split_manifest")
         if args.selection_manifest is not None

@@ -368,6 +368,32 @@ loader continues to receive each inference tensor under `pre_velocity`; that
 field is a loader compatibility name, while `feature_layer` and
 `model_family=xiaomi_robotics_1` preserve its true XR-1 identity.
 
+For a multi-batch pool, `--rollouts-per-task 50 --selection-seed 0` selects
+exactly 50 rollouts per task while preserving each pooled task's natural outcome
+rate as closely as integer counts allow. Selection is deterministic within each
+task and outcome class. This mode is mutually exclusive with the exact
+success/failure balance options.
+
+Build a fixed seen-task split before hyperparameter selection:
+
+```bash
+"$XR1_CLIENT_ENV/bin/python" -m \
+  robocasa.recovery.safe.build_seen_task_split \
+  --export-dir "$XR1_SAFE_EXPORT" \
+  --output "$XR1_SAFE_SPLIT" \
+  --test-per-class 1 \
+  --num-inner-folds 3 \
+  --seed 0
+```
+
+The builder includes only tasks with at least four examples of both outcomes:
+one of each outcome remains untouched for the outer test and three remain in
+the outer-training pool for outcome-stratified three-fold CV. Excluded tasks
+remain in the immutable 50-per-task export and are named in the split manifest;
+they are excluded only from model selection and held-out evaluation. Pass the
+result with `--selection-manifest` to both `run_seen_cv_grid` and
+`train_seen_tasks`.
+
 Train MLP/LSTM and calibrate functional conformal thresholds from the exported
 XR-1 dataset with the existing SAFE tools. Treat the result as a new XR-1
 detector experiment until its task split, sample counts, seeds, hyperparameter

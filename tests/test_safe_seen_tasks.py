@@ -32,6 +32,7 @@ from robocasa.recovery.safe.build_natural_rate_experiment import (
     audit_natural_outcomes,
     build_experiment,
 )
+from robocasa.recovery.safe.build_seen_task_split import build_seen_task_split
 from robocasa.recovery.safe.analyze_natural_rate_screen import (
     analyze as analyze_natural_rate_screen,
 )
@@ -53,6 +54,43 @@ from robocasa.recovery.safe.train_seen_tasks import (
 
 
 class TestSeenTaskProtocol(unittest.TestCase):
+    def test_seen_task_split_excludes_insufficient_minority_support(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            export = root / "export"
+            env_dir = export / "env_records"
+            env_dir.mkdir(parents=True)
+            (export / "conversion_report.json").write_text("{}\n")
+            index = 0
+            for task_id, task, successes, failures in (
+                (0, "Ready", 6, 5),
+                (1, "TooRare", 8, 3),
+            ):
+                for success, count in ((1, successes), (0, failures)):
+                    for episode in range(count):
+                        with (env_dir / f"rollout_{index:04d}.pkl").open("wb") as stream:
+                            pickle.dump(
+                                {
+                                    "rollout_id": f"{task}-{success}-{episode}",
+                                    "task_name": task,
+                                    "task_id": task_id,
+                                    "episode_success": success,
+                                },
+                                stream,
+                            )
+                        index += 1
+            result = build_seen_task_split(
+                export,
+                root / "split.json",
+                test_per_class=1,
+                num_inner_folds=3,
+                seed=0,
+            )
+            self.assertEqual(result["included_tasks"], ["Ready"])
+            self.assertEqual(result["excluded_tasks"], ["TooRare"])
+            self.assertEqual(result["counts"]["train"], 9)
+            self.assertEqual(result["counts"]["test"], 2)
+
     def test_env_records_use_natural_order_without_natsort(self):
         with tempfile.TemporaryDirectory() as directory:
             env_records = Path(directory) / "env_records"
@@ -777,6 +815,22 @@ class TestSeenTaskProtocol(unittest.TestCase):
                 set(test_ids) & {env["rollout_id"] for _, env in selected_env},
             )
             self.assertEqual(set(per_task), {0, 2})
+
+            explicit = resolve_task_type_selection(
+                root,
+                "all",
+                {"AtomicA", "CompositeB"},
+            )
+            self.assertEqual(
+                explicit["selected_task_names"],
+                ["AtomicA", "CompositeB"],
+            )
+            with self.assertRaisesRegex(ValueError, "incompatible"):
+                resolve_task_type_selection(
+                    root,
+                    "atomic",
+                    {"CompositeA"},
+                )
 
     def test_cv_grid_has_405_fits_per_architecture(self):
         runs = generate_cv_runs("lstm")

@@ -36,11 +36,75 @@ def _record_sort_key(record):
 def select_balanced_records(
     records,
     *,
+    rollouts_per_task=None,
     successes_per_task=None,
     failures_per_task=None,
     seed=0,
 ):
     """Select an exact deterministic class balance without mutating source data."""
+    if rollouts_per_task is not None:
+        if successes_per_task is not None or failures_per_task is not None:
+            raise ValueError(
+                "--rollouts-per-task cannot be combined with "
+                "--successes-per-task/--failures-per-task"
+            )
+        if rollouts_per_task < 1:
+            raise ValueError("--rollouts-per-task must be positive")
+        tasks = sorted({record.task_name for record in records})
+        selected = []
+        per_task = {}
+        for task in tasks:
+            candidates = sorted(
+                (record for record in records if record.task_name == task),
+                key=_record_sort_key,
+            )
+            if len(candidates) < rollouts_per_task:
+                raise ValueError(
+                    f"Task {task} has {len(candidates)} rollouts; "
+                    f"requested {rollouts_per_task}"
+                )
+            successes = [record for record in candidates if not record.failed]
+            failures = [record for record in candidates if record.failed]
+            source_total = len(candidates)
+            selected_successes = (
+                rollouts_per_task * len(successes) + source_total // 2
+            ) // source_total
+            lower_successes = max(0, rollouts_per_task - len(failures))
+            upper_successes = min(rollouts_per_task, len(successes))
+            if successes and failures and rollouts_per_task >= 2:
+                lower_successes = max(lower_successes, 1)
+                upper_successes = min(upper_successes, rollouts_per_task - 1)
+            selected_successes = min(
+                max(selected_successes, lower_successes),
+                upper_successes,
+            )
+            selected_failures = rollouts_per_task - selected_successes
+            success_rng = random.Random(f"{seed}:{task}:success")
+            failure_rng = random.Random(f"{seed}:{task}:failure")
+            success_rng.shuffle(successes)
+            failure_rng.shuffle(failures)
+            chosen = (
+                successes[:selected_successes]
+                + failures[:selected_failures]
+            )
+            selected.extend(chosen)
+            per_task[task] = {
+                "source_rollouts": len(candidates),
+                "source_successes": len(successes),
+                "source_failures": len(failures),
+                "selected_rollouts": len(chosen),
+                "selected_successes": selected_successes,
+                "selected_failures": selected_failures,
+            }
+        selected.sort(key=_record_sort_key)
+        return selected, {
+            "mode": "per_task_natural_rate_total",
+            "seed": int(seed),
+            "rollouts_per_task": int(rollouts_per_task),
+            "source_num_rollouts": len(records),
+            "selected_num_rollouts": len(selected),
+            "per_task": per_task,
+        }
     if successes_per_task is None and failures_per_task is None:
         selected = sorted(records, key=_record_sort_key)
         return selected, {
@@ -141,6 +205,7 @@ def export_to_official_safe(
     resume=False,
     dry_run=False,
     allow_unregistered=False,
+    rollouts_per_task=None,
     successes_per_task=None,
     failures_per_task=None,
     selection_seed=0,
@@ -162,6 +227,7 @@ def export_to_official_safe(
     }
     records, selection = select_balanced_records(
         source_records,
+        rollouts_per_task=rollouts_per_task,
         successes_per_task=successes_per_task,
         failures_per_task=failures_per_task,
         seed=selection_seed,
@@ -321,7 +387,17 @@ def build_parser():
     parser.add_argument("--allow-unregistered-atomic-tasks", action="store_true")
     parser.add_argument("--successes-per-task", type=int)
     parser.add_argument("--failures-per-task", type=int)
+    parser.add_argument(
+        "--rollouts-per-task",
+        type=int,
+        help="Select exactly this many natural-outcome rollouts per task",
+    )
     parser.add_argument("--selection-seed", type=int, default=0)
+    parser.add_argument(
+        "--summary-only",
+        action="store_true",
+        help="Print a compact result; the complete mapping remains in conversion_report.json",
+    )
     return parser
 
 
@@ -337,13 +413,28 @@ def main(argv=None):
                 args.allow_unregistered_tasks
                 or args.allow_unregistered_atomic_tasks
             ),
+            rollouts_per_task=args.rollouts_per_task,
             successes_per_task=args.successes_per_task,
             failures_per_task=args.failures_per_task,
             selection_seed=args.selection_seed,
         )
     except (ValueError, FileExistsError) as error:
         raise SystemExit(f"error: {error}") from error
-    print(json.dumps(report, indent=2, sort_keys=True))
+    printed = report
+    if args.summary_only and not report.get("dry_run"):
+        printed = {
+            key: report.get(key)
+            for key in (
+                "complete",
+                "format",
+                "source_dataset",
+                "output_dir",
+                "num_rollouts",
+                "num_policy_records",
+                "selection",
+            )
+        }
+    print(json.dumps(printed, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

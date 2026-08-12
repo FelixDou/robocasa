@@ -1038,6 +1038,43 @@ class TestSafeAtomicCollection(unittest.TestCase):
                     selection_seed=7,
                 )
 
+    def test_official_export_can_select_exact_natural_total_per_task(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as exported:
+            run_collection(
+                collection_args(tmp, num_rollouts=6),
+                runtime=fake_runtime(),
+            )
+            report = export_to_official_safe(
+                tmp,
+                exported,
+                rollouts_per_task=5,
+                selection_seed=7,
+            )
+            self.assertEqual(report["num_rollouts"], 5)
+            self.assertEqual(
+                report["selection"]["mode"],
+                "per_task_natural_rate_total",
+            )
+            self.assertEqual(report["selection"]["rollouts_per_task"], 5)
+            counts = report["selection"]["per_task"][TASK]
+            self.assertEqual(counts["source_rollouts"], 6)
+            self.assertEqual(counts["selected_rollouts"], 5)
+            self.assertEqual(
+                counts["selected_successes"] + counts["selected_failures"],
+                5,
+            )
+            self.assertEqual(counts["selected_successes"], 3)
+            self.assertEqual(counts["selected_failures"], 2)
+
+            with self.assertRaisesRegex(ValueError, "cannot be combined"):
+                export_to_official_safe(
+                    tmp,
+                    Path(exported) / "invalid",
+                    rollouts_per_task=5,
+                    successes_per_task=2,
+                    failures_per_task=2,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
