@@ -18,7 +18,8 @@ eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
 
 export PROJECT_FS=/gs/fs/tga-shinoda/felid
 export STORAGE_BS=/gs/bs/tga-shinoda/felid
-export ROBOCASA_REPO="$PROJECT_FS/robocasa"
+export ROBOCASA_SOURCE_REPO="$PROJECT_FS/robocasa"
+export XR1_CODE_BRANCH=codex/safe-xiaomi-robotics-1
 export SAFE_REPO="$PROJECT_FS/SAFE"
 export XR1_SAFE_REPO="$PROJECT_FS/robocasa_benchmark_repos/Xiaomi-Robotics-1-safe"
 export XR1_SERVER_ENV="$STORAGE_BS/envs/xiaomi_robotics_1_server"
@@ -33,8 +34,41 @@ export WANDB_MODE=disabled
 export WANDB_DISABLED=true
 export WANDB_ENABLED=0
 
+# Do not alter the shared checkout, which may be running an unrelated branch.
+# Resolve the published Xiaomi branch once and create a detached, immutable
+# worktree for this experiment.
+git -C "$ROBOCASA_SOURCE_REPO" fetch origin "$XR1_CODE_BRANCH"
+export XR1_CODE_COMMIT="$(git -C "$ROBOCASA_SOURCE_REPO" rev-parse FETCH_HEAD)"
+export ROBOCASA_REPO="$PROJECT_FS/robocasa_xr1_prospective_${XR1_CODE_COMMIT:0:8}"
+
+if test -e "$ROBOCASA_REPO"; then
+  test -f "$ROBOCASA_REPO/.git" || {
+    echo "STOP: existing worktree path is not a Git checkout: $ROBOCASA_REPO"
+    exit 1
+  }
+else
+  git -C "$ROBOCASA_SOURCE_REPO" worktree add \
+    --detach "$ROBOCASA_REPO" "$XR1_CODE_COMMIT"
+fi
+
+test "$(git -C "$ROBOCASA_REPO" rev-parse HEAD)" = "$XR1_CODE_COMMIT" || {
+  echo "STOP: Xiaomi worktree is not at the resolved branch commit"
+  exit 1
+}
+
+# Git worktrees omit ignored simulator assets. Hard-link the shared asset tree
+# without changing or duplicating the source assets.
+export XR1_SHARED_ASSETS="$ROBOCASA_SOURCE_REPO/robocasa/models/assets"
+export XR1_ASSETS="$ROBOCASA_REPO/robocasa/models/assets"
+test -d "$XR1_SHARED_ASSETS" || {
+  echo "STOP: shared RoboCasa assets are missing"
+  exit 1
+}
+mkdir -p "$XR1_ASSETS"
+cp -aln "$XR1_SHARED_ASSETS/." "$XR1_ASSETS/"
+
 cd "$ROBOCASA_REPO"
-git pull origin main
+echo "XR1 code commit: $(git rev-parse HEAD)"
 
 test -x "$XR1_SERVER_ENV/bin/python"
 test -x "$XR1_CLIENT_ENV/bin/python"
@@ -100,8 +134,9 @@ print("horizon loads:", loads)
 print("shard sizes:", [len(values) for values in shards])
 PY
 
-printf 'export XR1_MATCHED_FPR_TAG=%q\nexport XR1_MATCHED_FPR_ROOT=%q\nexport XR1_MATCHED_FPR_LOG_ROOT=%q\n' \
-  "$XR1_MATCHED_FPR_TAG" "$XR1_MATCHED_FPR_ROOT" "$XR1_MATCHED_FPR_LOG_ROOT" \
+printf 'export XR1_CODE_COMMIT=%q\nexport ROBOCASA_REPO=%q\nexport XR1_MATCHED_FPR_TAG=%q\nexport XR1_MATCHED_FPR_ROOT=%q\nexport XR1_MATCHED_FPR_LOG_ROOT=%q\n' \
+  "$XR1_CODE_COMMIT" "$ROBOCASA_REPO" "$XR1_MATCHED_FPR_TAG" \
+  "$XR1_MATCHED_FPR_ROOT" "$XR1_MATCHED_FPR_LOG_ROOT" \
   > "$STORAGE_BS/robocasa_rollouts/safe/xr1_prospective_matched_fpr_latest.env"
 ```
 
