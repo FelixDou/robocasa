@@ -1,0 +1,5 @@
+stage,eligible_successes,eligible_failures,calibration_successes,evaluation_successes,evaluation_failures,unassigned_training_successes,unassigned_training_failures
+LoadDishwasher::dishwasher_closed,50,34,5,10,10,35,24
+PreSoakPan::TurnOnSinkFaucet_3,92,12,5,10,10,77,2
+ScrubCuttingBoard::cutting_board_scrubbed,24,16,5,10,10,9,6
+WashLettuce::lettuce_rinsed,37,15,5,10,10,22,5

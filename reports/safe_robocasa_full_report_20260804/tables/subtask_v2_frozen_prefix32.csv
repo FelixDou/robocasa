@@ -1,0 +1,6 @@
+stage,raw_roc_mean,raw_roc_std,temporal_roc_mean,temporal_roc_std,successes,failures
+All selected stages,0.512,0.003,0.566,0.004,40,40
+LoadDishwasher::dishwasher_closed,0.547,0.029,0.640,0.014,10,10
+PreSoakPan::TurnOnSinkFaucet_3,0.620,0.022,0.660,0.008,10,10
+ScrubCuttingBoard::cutting_board_scrubbed,0.517,0.005,0.407,0.009,10,10
+WashLettuce::lettuce_rinsed,0.467,0.009,0.527,0.012,10,10

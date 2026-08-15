@@ -1,0 +1,17 @@
+task,stage_order,stage,instruction,parent_rollouts,successes,active_failures,regression_failures,no_usable_inference,not_reached
+LoadDishwasher,1,cup_grasped,Pick cup from counter,30,28,2,0,0,0
+LoadDishwasher,2,cup_on_rack,Place cup on rack,30,21,7,0,0,2
+LoadDishwasher,3,bowl_grasped,Pick bowl from counter,30,16,4,0,1,9
+LoadDishwasher,4,bowl_on_rack,Place bowl on rack,30,13,2,1,1,13
+LoadDishwasher,5,dishwasher_closed,Close dishwasher,30,10,5,0,0,15
+PreSoakPan,1,PickPlaceCounterToSink_1_pick,Pick first object,30,30,0,0,0,0
+PreSoakPan,2,PickPlaceCounterToSink_1_place,Place first object in sink,30,29,0,1,0,0
+PreSoakPan,3,PickPlaceCounterToSink_2_pick,Pick second object,30,25,5,0,0,0
+PreSoakPan,4,PickPlaceCounterToSink_2_place_and_release,Place and release second object in sink,30,25,0,0,0,5
+PreSoakPan,5,TurnOnSinkFaucet_3,Turn on sink faucet,30,17,8,0,0,5
+ScrubCuttingBoard,1,sponge_grasped,Pick sponge,30,30,0,0,0,0
+ScrubCuttingBoard,2,cutting_board_scrubbed,Scrub cutting board,30,15,15,0,0,0
+StackBowlsCabinet,1,larger_bowl_placed_in_cabinet,Place larger bowl in cabinet,30,13,17,0,0,0
+StackBowlsCabinet,2,smaller_bowl_stacked_on_larger_bowl,Place and release smaller bowl on larger bowl,30,9,4,0,0,17
+WashLettuce,1,water_on,Turn water on,30,22,8,0,0,0
+WashLettuce,2,lettuce_rinsed,Rinse lettuce,30,16,6,0,0,8

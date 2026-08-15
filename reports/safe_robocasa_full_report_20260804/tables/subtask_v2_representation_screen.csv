@@ -1,0 +1,16 @@
+rank,representation,loss,inner_cv_roc_mean,inner_cv_roc_std
+1,raw,official,0.9140,0.0534
+2,raw_delta_mean_slope,official,0.8670,0.0655
+3,raw_delta_mean_slope,bce,0.8378,0.0464
+4,raw_delta_mean_slope,focal,0.8218,0.0533
+5,raw_delta,official,0.7984,0.0870
+6,raw_delta,bce,0.7488,0.0520
+7,delta,official,0.7418,0.0761
+8,raw,focal,0.7343,0.0842
+9,raw_delta,focal,0.7280,0.0304
+10,raw,bce,0.7145,0.0982
+11,delta,bce,0.6874,0.0625
+12,delta,focal,0.6832,0.0567
+13,anchor_delta,official,0.5989,0.0637
+14,anchor_delta,focal,0.5962,0.1099
+15,anchor_delta,bce,0.5754,0.1358
