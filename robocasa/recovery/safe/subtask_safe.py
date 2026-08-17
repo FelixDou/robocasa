@@ -182,9 +182,16 @@ def _first_terminally_unsatisfied_subtask(
 def _build_semantic_trace(
     subtask_evals: list[dict[str, Any]],
     definitions: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], dict[str, int], dict[str, list[int]], dict[str, int],]:
+) -> tuple[
+    list[dict[str, Any]],
+    dict[str, int],
+    dict[str, str],
+    dict[str, list[int]],
+    dict[str, int],
+]:
     trace = []
     completion_steps: dict[str, int] = {}
+    completion_evidence: dict[str, str] = {}
     active_steps = {definition["subtask_id"]: [] for definition in definitions}
     completed: list[str] = []
     bypassed: list[str] = []
@@ -194,6 +201,7 @@ def _build_semantic_trace(
     for environment_step, payload in enumerate(subtask_evals):
         values = _predicate_values(payload)
         newly_completed = []
+        newly_inferred_completed = []
         newly_bypassed = []
         while ordered_index < len(definitions):
             definition = definitions[ordered_index]
@@ -205,6 +213,7 @@ def _build_semantic_trace(
                 completed.append(subtask_id)
                 newly_completed.append(subtask_id)
                 completion_steps[subtask_id] = environment_step
+                completion_evidence[subtask_id] = "predicate_observed"
                 ordered_index += 1
                 continue
             next_definition = (
@@ -219,6 +228,22 @@ def _build_semantic_trace(
                     for name in next_definition["predicate_names"]
                 )
             )
+            if definition["required_for_official_success"] and next_satisfied:
+                # Some procedural predicates are deliberately stricter than the
+                # official task (for example, a cabinet-open threshold).  If the
+                # immediately following ordered outcome is observed, that is
+                # causal evidence that the current operation was completed well
+                # enough to proceed.  Preserve the inference explicitly instead
+                # of either blocking the complete trace or fabricating a direct
+                # predicate observation.
+                subtask_id = definition["subtask_id"]
+                completed.append(subtask_id)
+                newly_completed.append(subtask_id)
+                newly_inferred_completed.append(subtask_id)
+                completion_steps[subtask_id] = environment_step
+                completion_evidence[subtask_id] = "downstream_subtask_observed"
+                ordered_index += 1
+                continue
             if not definition["required_for_official_success"] and next_satisfied:
                 subtask_id = definition["subtask_id"]
                 bypassed.append(subtask_id)
@@ -252,6 +277,7 @@ def _build_semantic_trace(
                     list(current["predicate_names"]) if current is not None else []
                 ),
                 "newly_completed_subtask_ids": newly_completed,
+                "newly_inferred_completed_subtask_ids": newly_inferred_completed,
                 "newly_bypassed_optional_subtask_ids": newly_bypassed,
                 "subtask_progress": float(
                     (len(completed) + len(bypassed)) / len(definitions)
@@ -262,7 +288,13 @@ def _build_semantic_trace(
             }
         )
         previous_predicate_values = values
-    return trace, completion_steps, active_steps, bypass_steps
+    return (
+        trace,
+        completion_steps,
+        completion_evidence,
+        active_steps,
+        bypass_steps,
+    )
 
 
 def _transition_trace(trace: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -316,10 +348,13 @@ def build_subtask_safe_record(
     ):
         raise ValueError("Subtask-SAFE inference step lies outside the trace")
 
-    trace, completion_steps, active_steps, bypass_steps = _build_semantic_trace(
-        valid_evals,
-        definitions,
-    )
+    (
+        trace,
+        completion_steps,
+        completion_evidence,
+        active_steps,
+        bypass_steps,
+    ) = _build_semantic_trace(valid_evals, definitions)
     final = trace[-1]
     final_completed = set(final["completed_subtask_ids"])
     final_bypassed = set(final["bypassed_optional_subtask_ids"])
@@ -442,13 +477,17 @@ def build_subtask_safe_record(
         if not observed_active and not is_terminal_failure:
             break
 
-        observed_completion_step = completion_steps.get(subtask_id)
+        completion_step = completion_steps.get(subtask_id)
+        evidence = completion_evidence.get(subtask_id)
+        observed_completion_step = (
+            completion_step if evidence == "predicate_observed" else None
+        )
         entry_step = (
             min(active_steps[subtask_id])
             if observed_active
             else int(observed_completion_step or 0)
         )
-        completion_step = None if is_terminal_failure else observed_completion_step
+        completion_step = None if is_terminal_failure else completion_step
         end_step = (
             len(valid_evals) - 1
             if is_terminal_failure
@@ -485,6 +524,9 @@ def build_subtask_safe_record(
                     int(observed_completion_step)
                     if observed_completion_step is not None
                     else None
+                ),
+                "completion_evidence": (
+                    evidence if not is_terminal_failure else None
                 ),
                 "completed": completed,
                 "eventually_failed": is_terminal_failure,
@@ -526,7 +568,9 @@ def build_subtask_safe_record(
         "semantic_layer": "ordered_natural_language_subtask",
         "subtask_definition_source": SUBTASK_DEFINITION_SOURCE,
         "label_semantics": SUBTASK_FAILURE_LABEL_SEMANTICS,
-        "ordering_semantics": "first_ordered_completion_monotonic",
+        "ordering_semantics": (
+            "first_ordered_completion_monotonic_with_explicit_downstream_implication"
+        ),
         "trace_coordinate": (
             "state at reset is environment_step 0; state after action i is "
             "environment_step i+1"

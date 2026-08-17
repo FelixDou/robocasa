@@ -183,6 +183,45 @@ class TestSubtaskSafe(unittest.TestCase):
         self.assertEqual(counts["excluded_bypassed_subtasks"], 1)
         self.assertEqual(counts["excluded_completed_subtasks"], 1)
 
+    def test_required_stage_can_complete_from_immediate_downstream_evidence(self):
+        record = build_subtask_safe_record(
+            [
+                subtask_eval(),
+                subtask_eval(second=True, task_success=True),
+            ],
+            [0],
+            rollout_failed=False,
+            rollout_id="downstream-implied-success",
+        )
+
+        self.assertIsNone(record["terminal_active_subtask"])
+        self.assertEqual(len(record["segments"]), 1)
+        segment = record["segments"][0]
+        self.assertEqual(segment["subtask_id"], "first")
+        self.assertTrue(segment["completed"])
+        self.assertEqual(segment["failure_label"], 0)
+        self.assertEqual(segment["completion_environment_step"], 1)
+        self.assertIsNone(segment["first_observed_completion_environment_step"])
+        self.assertEqual(
+            segment["completion_evidence"],
+            "downstream_subtask_observed",
+        )
+        self.assertIn(
+            "first",
+            record["transitions"][-1][
+                "newly_inferred_completed_subtask_ids"
+            ],
+        )
+
+        counts = validate_subtask_safe_record(
+            record,
+            rollout_id="downstream-implied-success",
+            rollout_failed=False,
+            inference_environment_steps=[0],
+        )
+        self.assertEqual(counts["successful_segments"], 1)
+        self.assertEqual(counts["failed_segments"], 0)
+
     def test_only_terminal_active_segment_is_failure(self):
         record = build_subtask_safe_record(
             [

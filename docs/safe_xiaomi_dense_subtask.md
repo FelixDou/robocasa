@@ -49,6 +49,12 @@ recorded. Every accepted annotation must satisfy all of the following:
    inference sample for every retained task;
 7. model splits will be made by parent rollout, never by dense sample.
 
+If a strict procedural predicate is not directly observed but its immediately
+following ordered subtask is observed, the earlier stage is completed with
+explicit `downstream_subtask_observed` evidence. This handles transient fixture
+thresholds such as opening a cabinet far enough to remove an object without
+pretending that the stricter predicate itself was seen.
+
 Any terminal mismatch is an error, not a label to keep. The source features,
 actions, videos, and manifest are read-only; annotations live in a separate
 output root with source hashes.
