@@ -57,9 +57,11 @@ pretending that the stricter predicate itself was seen.
 
 If the official task succeeds while a final required diagnostic proxy remains
 false, the final stage uses explicit `official_task_success` evidence. Replay
-defaults to `predicate_only`, which preserves physics, actions, and predicates
-while disabling camera rendering and camera observations. Observation modes
-cannot be mixed when resuming an annotation root.
+defaults to the original full-observation environment. A Xiaomi diagnostic
+showed that disabling camera observables changed reset RNG consumption and
+caused terminal-outcome drift, so `predicate_only` is retained only as a
+rejected diagnostic mode. Observation modes cannot be mixed when resuming an
+annotation root.
 
 Any terminal mismatch is an error, not a label to keep. The source features,
 actions, videos, and manifest are read-only; annotations live in a separate

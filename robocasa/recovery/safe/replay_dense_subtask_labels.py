@@ -673,10 +673,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--replay-observation-mode",
         choices=("predicate_only", "full"),
-        default="predicate_only",
+        default="full",
         help=(
-            "predicate_only disables unused camera rendering; full preserves "
-            "the historical observation-producing environment"
+            "full preserves the trajectory-generating environment and is the "
+            "validated default; predicate_only is diagnostic only because "
+            "changing observables can alter reset RNG and terminal outcomes"
         ),
     )
     parser.add_argument("--split", default="pretrain")

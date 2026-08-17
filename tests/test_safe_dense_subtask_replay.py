@@ -14,6 +14,7 @@ from robocasa.recovery.safe.replay_dense_subtask_labels import (  # noqa: E402
     DEFAULT_XR1_DENSE_EXPANDED_TASKS,
     DEFAULT_XR1_DENSE_PILOT_TASKS,
     dense_inference_labels,
+    build_parser,
     load_action_trajectory,
     load_selection_rollout_ids,
     make_predicate_only_env,
@@ -82,6 +83,12 @@ def failed_bread_record():
 
 
 class TestDenseSubtaskReplay(unittest.TestCase):
+    def test_full_observation_replay_is_the_safe_default(self):
+        args = build_parser().parse_args(
+            ["--dataset-dir", "source", "--output-dir", "output"]
+        )
+        self.assertEqual(args.replay_observation_mode, "full")
+
     def test_default_task_sets_are_nested_and_composite(self):
         self.assertEqual(len(DEFAULT_XR1_DENSE_PILOT_TASKS), 5)
         self.assertEqual(len(DEFAULT_XR1_DENSE_EXPANDED_TASKS), 10)
