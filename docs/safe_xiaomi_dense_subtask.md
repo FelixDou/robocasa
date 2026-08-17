@@ -55,6 +55,12 @@ explicit `downstream_subtask_observed` evidence. This handles transient fixture
 thresholds such as opening a cabinet far enough to remove an object without
 pretending that the stricter predicate itself was seen.
 
+If the official task succeeds while a final required diagnostic proxy remains
+false, the final stage uses explicit `official_task_success` evidence. Replay
+defaults to `predicate_only`, which preserves physics, actions, and predicates
+while disabling camera rendering and camera observations. Observation modes
+cannot be mixed when resuming an annotation root.
+
 Any terminal mismatch is an error, not a label to keep. The source features,
 actions, videos, and manifest are read-only; annotations live in a separate
 output root with source hashes.

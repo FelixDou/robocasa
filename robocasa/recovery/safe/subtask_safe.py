@@ -251,6 +251,23 @@ def _build_semantic_trace(
                 bypass_steps[subtask_id] = environment_step
                 ordered_index += 1
                 continue
+            if payload.get("task_success", False):
+                subtask_id = definition["subtask_id"]
+                if definition["required_for_official_success"]:
+                    # Official task completion is authoritative evidence for a
+                    # remaining required semantic outcome when a stricter
+                    # diagnostic proxy (commonly release distance) never fires.
+                    completed.append(subtask_id)
+                    newly_completed.append(subtask_id)
+                    newly_inferred_completed.append(subtask_id)
+                    completion_steps[subtask_id] = environment_step
+                    completion_evidence[subtask_id] = "official_task_success"
+                else:
+                    bypassed.append(subtask_id)
+                    newly_bypassed.append(subtask_id)
+                    bypass_steps[subtask_id] = environment_step
+                ordered_index += 1
+                continue
             break
         current = (
             definitions[ordered_index] if ordered_index < len(definitions) else None

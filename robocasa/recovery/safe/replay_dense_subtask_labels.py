@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import time
 from typing import Any, Callable, Iterable
 
 import numpy as np
@@ -67,6 +68,32 @@ def sha256_file(path: str | Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def make_predicate_only_env(
+    task_name: str,
+    env_interface: str,
+    split: str,
+    seed: int,
+    enable_render: bool,
+    *,
+    gym_make_fn=None,
+):
+    """Create the Gym action adapter without camera rendering or observations."""
+    if env_interface != "gym":
+        raise ValueError("Predicate-only replay currently requires env_interface=gym")
+    if gym_make_fn is None:
+        import gymnasium as gym
+
+        gym_make_fn = gym.make
+    return gym_make_fn(
+        f"robocasa/{task_name}",
+        split=split,
+        seed=seed,
+        enable_render=False,
+        has_offscreen_renderer=False,
+        use_camera_obs=False,
+    )
 
 
 def load_action_trajectory(path: str | Path) -> list[Any]:
@@ -431,6 +458,8 @@ def build_summary(
         serializable[task]["stages"] = {
             stage: dict(counts) for stage, counts in sorted(payload["stages"].items())
         }
+    durations = [row.get("replay_wall_seconds") for row in rows]
+    fully_timed = bool(durations) and all(value is not None for value in durations)
     return {
         "schema_version": ANNOTATION_SCHEMA_VERSION,
         "status": "complete" if not errors else "complete_with_errors",
@@ -447,6 +476,12 @@ def build_summary(
         ),
         "dense_failure_samples": sum(
             int(row["dense_failure_samples"]) for row in rows
+        ),
+        "total_replay_wall_seconds": (
+            float(sum(durations)) if fully_timed else None
+        ),
+        "mean_replay_wall_seconds": (
+            float(sum(durations) / len(durations)) if fully_timed else None
         ),
         "support": serializable,
         "error_records": errors,
@@ -499,6 +534,7 @@ def annotate_dataset(args) -> dict[str, Any]:
                 for task in tasks
             },
             "missing_action_artifacts": missing_actions,
+            "replay_observation_mode": args.replay_observation_mode,
             "replay_required_before_training": True,
         }
 
@@ -509,12 +545,27 @@ def annotate_dataset(args) -> dict[str, Any]:
         raise FileExistsError(
             f"Annotation output already exists; use --resume: {manifest_path}"
         )
+    existing_modes = {
+        row.get("replay_observation_mode", "full") for row in existing
+    }
+    if existing_modes and existing_modes != {args.replay_observation_mode}:
+        raise ValueError(
+            "Cannot mix replay observation modes in one annotation dataset: "
+            f"existing={sorted(existing_modes)}, requested="
+            f"{args.replay_observation_mode}"
+        )
     row_by_id = {row["source_rollout_id"]: row for row in existing}
     rows = list(existing)
     errors = []
 
     from robocasa.recovery.evaluate_recovery_benchmark import make_env
     from robocasa.recovery.recovery_rollout import _is_task_success, _step_env
+
+    make_env_fn = (
+        make_predicate_only_env
+        if args.replay_observation_mode == "predicate_only"
+        else make_env
+    )
 
     for index, record in enumerate(records, 1):
         if record.rollout_id in row_by_id:
@@ -525,6 +576,7 @@ def annotate_dataset(args) -> dict[str, Any]:
                 )
             continue
         try:
+            replay_start = time.monotonic()
             action_path = dataset_dir / str(record.action_path)
             if not action_path.is_file():
                 raise FileNotFoundError(
@@ -534,7 +586,7 @@ def annotate_dataset(args) -> dict[str, Any]:
             annotation, audit = replay_rollout(
                 record,
                 actions,
-                make_env_fn=make_env,
+                make_env_fn=make_env_fn,
                 step_fn=_step_env,
                 success_fn=_is_task_success,
                 env_interface=args.env_interface,
@@ -553,6 +605,8 @@ def annotate_dataset(args) -> dict[str, Any]:
                 "source_action_path": record.action_path,
                 "source_action_sha256": sha256_file(action_path),
                 "annotation_path": str(relative),
+                "replay_observation_mode": args.replay_observation_mode,
+                "replay_wall_seconds": float(time.monotonic() - replay_start),
                 **audit,
             }
             rows.append(row)
@@ -560,7 +614,8 @@ def annotate_dataset(args) -> dict[str, Any]:
             _atomic_write_jsonl(manifest_path, rows)
             print(
                 f"[{index}/{len(records)}] {record.task_name} {record.rollout_id} "
-                f"dense={row['dense_samples']}"
+                f"dense={row['dense_samples']} "
+                f"seconds={row['replay_wall_seconds']:.2f}"
             )
         except Exception as error:
             event = {
@@ -594,6 +649,7 @@ def annotate_dataset(args) -> dict[str, Any]:
     summary["selection_report_sha256"] = (
         sha256_file(args.selection_report) if args.selection_report else None
     )
+    summary["replay_observation_mode"] = args.replay_observation_mode
     atomic_write_json(output_dir / SUMMARY_NAME, summary)
     return summary
 
@@ -614,6 +670,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--env-interface", choices=("gym", "robosuite"), default="gym")
+    parser.add_argument(
+        "--replay-observation-mode",
+        choices=("predicate_only", "full"),
+        default="predicate_only",
+        help=(
+            "predicate_only disables unused camera rendering; full preserves "
+            "the historical observation-producing environment"
+        ),
+    )
     parser.add_argument("--split", default="pretrain")
     parser.add_argument(
         "--continue-on-error",

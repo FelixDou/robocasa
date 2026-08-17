@@ -103,13 +103,14 @@ def create_env(
     else:
         raise ValueError('split must be either {None, "all", "pretrain", "target"}')
 
-    # Allow camera_depths via kwargs (e.g. gym.make(..., camera_depths=True)) without
-    # conflicting with the explicit env_kwargs entry below.
-    if "camera_depths" in kwargs:
-        camera_depths = kwargs["camera_depths"]
-        del kwargs["camera_depths"]
-    else:
-        camera_depths = False
+    # Allow callers such as state-only action replay to disable image rendering
+    # without conflicting with the explicit defaults below. Ordinary policy
+    # evaluation keeps the historical camera-enabled defaults.
+    camera_depths = kwargs.pop("camera_depths", False)
+    has_offscreen_renderer = kwargs.pop(
+        "has_offscreen_renderer", not render_onscreen
+    )
+    use_camera_obs = kwargs.pop("use_camera_obs", not render_onscreen)
 
     env_kwargs = dict(
         env_name=env_name,
@@ -119,10 +120,10 @@ def create_env(
         camera_widths=camera_widths,
         camera_heights=camera_heights,
         has_renderer=render_onscreen,
-        has_offscreen_renderer=(not render_onscreen),
+        has_offscreen_renderer=has_offscreen_renderer,
         ignore_done=True,
         use_object_obs=True,
-        use_camera_obs=(not render_onscreen),
+        use_camera_obs=use_camera_obs,
         camera_depths=camera_depths,
         seed=seed,
         obj_instance_split=obj_instance_split,

@@ -222,6 +222,28 @@ class TestSubtaskSafe(unittest.TestCase):
         self.assertEqual(counts["successful_segments"], 1)
         self.assertEqual(counts["failed_segments"], 0)
 
+    def test_final_required_stage_can_complete_from_official_success(self):
+        record = build_subtask_safe_record(
+            [subtask_eval(), subtask_eval(task_success=True)],
+            [0],
+            rollout_failed=False,
+            rollout_id="official-success-implied-final-stage",
+        )
+
+        self.assertIsNone(record["terminal_active_subtask"])
+        self.assertEqual(len(record["segments"]), 1)
+        segment = record["segments"][0]
+        self.assertEqual(segment["subtask_id"], "first")
+        self.assertEqual(segment["failure_label"], 0)
+        self.assertEqual(segment["completion_evidence"], "official_task_success")
+        self.assertIsNone(segment["first_observed_completion_environment_step"])
+
+        transition = record["transitions"][-1]
+        self.assertEqual(
+            transition["newly_inferred_completed_subtask_ids"],
+            ["first", "second"],
+        )
+
     def test_only_terminal_active_segment_is_failure(self):
         record = build_subtask_safe_record(
             [

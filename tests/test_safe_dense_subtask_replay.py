@@ -16,6 +16,7 @@ from robocasa.recovery.safe.replay_dense_subtask_labels import (  # noqa: E402
     dense_inference_labels,
     load_action_trajectory,
     load_selection_rollout_ids,
+    make_predicate_only_env,
     replay_rollout,
     select_records,
 )
@@ -114,6 +115,30 @@ class TestDenseSubtaskReplay(unittest.TestCase):
             values = load_action_trajectory(mapping)
             self.assertEqual(set(values[0]), {"arm/action", "gripper"})
             self.assertEqual(float(values[1]["gripper"]), 1.0)
+
+    def test_predicate_only_env_disables_unused_camera_rendering(self):
+        captured = {}
+        sentinel = object()
+
+        def fake_make(env_id, **kwargs):
+            captured["env_id"] = env_id
+            captured.update(kwargs)
+            return sentinel
+
+        result = make_predicate_only_env(
+            "ArrangeTea",
+            "gym",
+            "pretrain",
+            17,
+            False,
+            gym_make_fn=fake_make,
+        )
+
+        self.assertIs(result, sentinel)
+        self.assertEqual(captured["env_id"], "robocasa/ArrangeTea")
+        self.assertFalse(captured["enable_render"])
+        self.assertFalse(captured["has_offscreen_renderer"])
+        self.assertFalse(captured["use_camera_obs"])
 
     def test_dense_labels_use_one_for_completed_and_zero_for_failed_stage(self):
         record = {
