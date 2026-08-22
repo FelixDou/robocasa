@@ -5,6 +5,7 @@ import unittest
 from robocasa.recovery.safe.run_seen_cv_grid import make_inner_folds
 from robocasa.recovery.safe.subtask_safe_evaluation import (
     fixed_prefix_subtask_metrics,
+    freeze_common_subtask_stage_catalog,
     parent_aggregated_early_metrics,
     parent_group_id,
     semantic_subtask_score_records,
@@ -197,6 +198,7 @@ class TestSubtaskLabelFixedPrefixSelection(unittest.TestCase):
             "rollout_id": f"{parent}:{stage}",
             "parent_rollout_id": parent,
             "parent_task_name": task,
+            "parent_rollout_failed": parent.endswith("F"),
             "task_name": f"{task}::{stage}",
             "subtask_id": stage,
             "episode_success": int(not failed),
@@ -360,6 +362,98 @@ class TestSubtaskLabelFixedPrefixSelection(unittest.TestCase):
             result["time_model"]["Composite::Stage"]["source"],
             "training segments only",
         )
+
+    def test_common_stage_catalog_uses_identical_supported_stages_in_every_fold(self):
+        catalog = []
+        parents = []
+        for failed in (False, True):
+            for index in range(3):
+                parent = f"parent-{index}-{'F' if failed else 'S'}"
+                parents.append(parent)
+                catalog.append(
+                    self.catalog_record(
+                        parent,
+                        "Composite",
+                        "Common",
+                        failed,
+                        0,
+                        2,
+                    )
+                )
+                if not failed:
+                    catalog.append(
+                        self.catalog_record(
+                            parent,
+                            "Composite",
+                            "OneSided",
+                            False,
+                            2,
+                            3,
+                        )
+                    )
+
+        result = freeze_common_subtask_stage_catalog(
+            catalog,
+            parents,
+            num_folds=3,
+            seed=7,
+        )
+
+        self.assertEqual(result["selected_stages"], ["Composite::Common"])
+        self.assertIn("Composite::OneSided", result["excluded_stages"])
+        self.assertEqual(
+            {
+                tuple(
+                    sorted(
+                        (
+                            values["Composite::Common"]["successes"],
+                            values["Composite::Common"]["failures"],
+                        )
+                    )
+                )
+                for values in result["support_by_fold"].values()
+            },
+            {(1, 1)},
+        )
+
+    def test_fixed_prefix_metrics_use_only_frozen_evaluation_stages(self):
+        rows = [
+            {
+                "rollout_id": "common-S",
+                "parent_rollout_id": "parent-S",
+                "parent_task_name": "Composite",
+                "task_name": "Composite::Common",
+                "failed": False,
+                "scores": [0.1],
+            },
+            {
+                "rollout_id": "common-F",
+                "parent_rollout_id": "parent-F",
+                "parent_task_name": "Composite",
+                "task_name": "Composite::Common",
+                "failed": True,
+                "scores": [0.9],
+            },
+            {
+                "rollout_id": "excluded-S",
+                "parent_rollout_id": "parent-extra",
+                "parent_task_name": "Composite",
+                "task_name": "Composite::OneSided",
+                "failed": False,
+                "scores": [0.99],
+            },
+        ]
+
+        result = fixed_prefix_subtask_metrics(
+            rows,
+            prefixes=(1,),
+            evaluation_stages=("Composite::Common",),
+        )
+
+        self.assertEqual(result["selection_value"], 1.0)
+        self.assertEqual(result["input_segments"], 3)
+        self.assertEqual(result["selected_segments"], 2)
+        self.assertEqual(result["excluded_segments"], 1)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ import numpy as np
 
 try:
     from .subtask_safe_evaluation import (
+        freeze_common_subtask_stage_catalog,
         parent_aggregated_early_metrics,
         parent_failed,
         parent_group_id,
@@ -27,6 +28,7 @@ try:
     )
 except ImportError:
     from subtask_safe_evaluation import (
+        freeze_common_subtask_stage_catalog,
         parent_aggregated_early_metrics,
         parent_failed,
         parent_group_id,
@@ -433,6 +435,14 @@ def run_cv_grid(args):
         raise ValueError(
             "--subtask-evaluation-export-dir is required for subtask-label selection"
         )
+    if (
+        args.selection_unit == "subtask_fixed_prefix"
+        and args.selection_manifest is None
+    ):
+        raise ValueError(
+            "--selection-manifest is required to freeze the outer-development "
+            "parents for subtask-label selection"
+        )
     if args.selection_unit == "subtask_fixed_prefix":
         prefixes = [int(value) for value in args.subtask_selection_prefixes]
         if not prefixes or any(value <= 0 for value in prefixes):
@@ -463,9 +473,22 @@ def run_cv_grid(args):
             "--causal-selection-prefix must be included in " "--causal-prefix-horizons"
         )
     subtask_catalog = None
+    common_subtask_stage_catalog = None
     if args.selection_unit == "subtask_fixed_prefix":
         subtask_catalog = validate_subtask_catalog(
             load_env_records(args.subtask_evaluation_export_dir)
+        )
+        split_manifest = fixed_split_ids["manifest"]
+        outer_train_parent_ids = set(split_manifest.get("parent_train", []))
+        if not outer_train_parent_ids:
+            outer_train_parent_ids = set(fixed_split_ids["train"])
+        common_subtask_stage_catalog = freeze_common_subtask_stage_catalog(
+            subtask_catalog,
+            outer_train_parent_ids,
+            num_folds=args.num_folds,
+            seed=args.inner_seed,
+            min_successes=args.subtask_min_fold_successes,
+            min_failures=args.subtask_min_fold_failures,
         )
     if (
         fixed_split_ids is not None
@@ -573,6 +596,7 @@ def run_cv_grid(args):
         "subtask_evaluation_catalog_segments": (
             len(subtask_catalog) if subtask_catalog is not None else None
         ),
+        "common_subtask_stage_catalog": common_subtask_stage_catalog,
         "online_safe": (
             online_config_dict(online_config) if online_requested else None
         ),
@@ -698,6 +722,21 @@ def run_cv_grid(args):
                 seed=args.inner_seed,
                 group_field=inner_group_field,
             )
+            if common_subtask_stage_catalog is not None:
+                expected_folds = common_subtask_stage_catalog[
+                    "validation_parent_ids_by_fold"
+                ]
+                for fold_index, (_, validation) in enumerate(folds):
+                    actual = {
+                        parent_group_id(identity[id(rollout)][1])
+                        for rollout in validation
+                    }
+                    expected = set(expected_folds[str(fold_index)])
+                    if actual != expected:
+                        raise AssertionError(
+                            "Loaded SAFE fold disagrees with the frozen common-stage "
+                            f"catalog for fold {fold_index}"
+                        )
             if cfg.dataset.load_to_cuda:
                 all_rollouts = [rollout.to(args.device) for rollout in all_rollouts]
             for run in pair_runs:
@@ -857,6 +896,9 @@ def run_cv_grid(args):
                             training_catalog,
                             validation_score_records,
                             prefixes=args.subtask_selection_prefixes,
+                            evaluation_stages=common_subtask_stage_catalog[
+                                "selected_stages"
+                            ],
                         )
                         value = subtask_selection["selection_value"]
                         selection_metric = subtask_selection["selection_metric"]
@@ -932,6 +974,11 @@ def run_cv_grid(args):
                     "inner_group_field": inner_group_field,
                     "parent_aggregated_selection": parent_selection,
                     "subtask_fixed_prefix_selection": subtask_selection,
+                    "common_subtask_stage_catalog": (
+                        common_subtask_stage_catalog
+                        if subtask_selection is not None
+                        else None
+                    ),
                     "task_min_steps_from_outer_train": task_cutoffs,
                     "causal_subtask_safe": (
                         {
@@ -1087,6 +1134,8 @@ def build_parser():
         default=[1, 2, 4, 8],
         help="Causal inference counts since semantic-stage entry",
     )
+    parser.add_argument("--subtask-min-fold-successes", type=int, default=1)
+    parser.add_argument("--subtask-min-fold-failures", type=int, default=1)
     parser.add_argument(
         "--online-safe-mode",
         choices=ONLINE_SAFE_MODES,

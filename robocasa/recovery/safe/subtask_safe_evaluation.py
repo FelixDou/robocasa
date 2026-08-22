@@ -94,6 +94,120 @@ def validate_subtask_catalog(records):
     return output
 
 
+def freeze_common_subtask_stage_catalog(
+    records,
+    outer_train_parent_ids,
+    *,
+    num_folds=3,
+    seed=0,
+    min_successes=1,
+    min_failures=1,
+):
+    """Freeze stages with the requested label support in every inner fold.
+
+    The fold construction intentionally mirrors ``make_inner_folds`` for
+    ``parent_or_rollout_id``. It depends only on the fixed development-parent
+    pool and labels, never on model scores or the untouched outer test.
+    """
+    if int(num_folds) < 2:
+        raise ValueError("Common-stage selection requires at least two folds")
+    if int(min_successes) < 1 or int(min_failures) < 1:
+        raise ValueError("Common-stage fold support thresholds must be positive")
+    catalog = validate_subtask_catalog(records)
+    requested_parents = {str(value) for value in outer_train_parent_ids}
+    if not requested_parents:
+        raise ValueError("Common-stage selection has no outer-training parents")
+
+    parent_contract = {}
+    for record in catalog:
+        parent = parent_group_id(record)
+        contract = (parent_task_name(record), int(parent_failed(record)))
+        previous = parent_contract.setdefault(parent, contract)
+        if previous != contract:
+            raise ValueError(f"Subtask catalog parent metadata changed for {parent}")
+    missing = sorted(requested_parents - set(parent_contract))
+    if missing:
+        raise ValueError(
+            "Subtask catalog is missing outer-training parents: "
+            + ", ".join(missing[:5])
+        )
+
+    strata = defaultdict(list)
+    for parent in sorted(requested_parents):
+        strata[parent_contract[parent]].append(parent)
+    validation_parents = [set() for _ in range(int(num_folds))]
+    for stratum, parents in sorted(strata.items()):
+        if len(parents) < int(num_folds):
+            raise ValueError(
+                f"Parent stratum {stratum} has {len(parents)} groups, fewer "
+                f"than {num_folds} folds"
+            )
+        values = sorted(parents)
+        random.Random(f"{seed}:{stratum[0]}:{stratum[1]}").shuffle(values)
+        for index, parent in enumerate(values):
+            validation_parents[index % int(num_folds)].add(parent)
+    if set().union(*validation_parents) != requested_parents:
+        raise AssertionError("Common-stage folds do not cover outer-training parents")
+    if sum(len(values) for values in validation_parents) != len(requested_parents):
+        raise AssertionError("Common-stage folds overlap parent IDs")
+
+    outer_catalog = [
+        record for record in catalog if parent_group_id(record) in requested_parents
+    ]
+    all_stages = sorted({subtask_stage_name(record) for record in outer_catalog})
+    support_by_fold = {}
+    for fold, parents in enumerate(validation_parents):
+        counts = defaultdict(lambda: {"successes": 0, "failures": 0})
+        for record in outer_catalog:
+            if parent_group_id(record) not in parents:
+                continue
+            outcome = "failures" if subtask_failed(record) else "successes"
+            counts[subtask_stage_name(record)][outcome] += 1
+        support_by_fold[str(fold)] = {
+            stage: {
+                "successes": int(counts[stage]["successes"]),
+                "failures": int(counts[stage]["failures"]),
+            }
+            for stage in all_stages
+        }
+
+    selected = []
+    excluded = {}
+    for stage in all_stages:
+        invalid = {
+            fold: values[stage]
+            for fold, values in support_by_fold.items()
+            if values[stage]["successes"] < int(min_successes)
+            or values[stage]["failures"] < int(min_failures)
+        }
+        if invalid:
+            excluded[stage] = invalid
+        else:
+            selected.append(stage)
+    if not selected:
+        raise ValueError("No semantic stage has both outcomes in every inner fold")
+    return {
+        "schema_version": 1,
+        "protocol": (
+            "fixed outer-development parents; common semantic stages with both "
+            "outcomes in every deterministic parent-grouped inner fold"
+        ),
+        "num_folds": int(num_folds),
+        "inner_seed": int(seed),
+        "minimum_fold_successes": int(min_successes),
+        "minimum_fold_failures": int(min_failures),
+        "outer_training_parents": len(requested_parents),
+        "all_stages": all_stages,
+        "selected_stages": selected,
+        "excluded_stages": excluded,
+        "validation_parent_ids_by_fold": {
+            str(fold): sorted(parents)
+            for fold, parents in enumerate(validation_parents)
+        },
+        "support_by_fold": support_by_fold,
+    }
+
+
 def semantic_subtask_score_records(
     rollouts,
     scores,
@@ -198,7 +312,12 @@ def _fixed_prefix_risk(record, prefix):
     return float(np.max(values[:observed])), observed
 
 
-def fixed_prefix_subtask_metrics(records, *, prefixes=(1, 2, 4, 8)):
+def fixed_prefix_subtask_metrics(
+    records,
+    *,
+    prefixes=(1, 2, 4, 8),
+    evaluation_stages=None,
+):
     """Evaluate active-subtask labels at causal inference-count prefixes.
 
     Short stages are retained at later prefixes using their maximum available
@@ -214,6 +333,27 @@ def fixed_prefix_subtask_metrics(records, *, prefixes=(1, 2, 4, 8)):
         raise ValueError("Subtask selection prefixes must be unique")
     if not records:
         raise ValueError("Fixed-prefix subtask evaluation has no records")
+    input_records = list(records)
+    selected_stages = (
+        sorted({str(value) for value in evaluation_stages})
+        if evaluation_stages is not None
+        else sorted({str(record["task_name"]) for record in input_records})
+    )
+    if not selected_stages:
+        raise ValueError("Fixed-prefix subtask evaluation selected no stages")
+    selected_stage_set = set(selected_stages)
+    records = [
+        record
+        for record in input_records
+        if str(record["task_name"]) in selected_stage_set
+    ]
+    observed_stages = {str(record["task_name"]) for record in records}
+    missing_stages = sorted(selected_stage_set - observed_stages)
+    if missing_stages:
+        raise ValueError(
+            "Fixed-prefix validation fold is missing selected stages: "
+            + ", ".join(missing_stages)
+        )
 
     per_prefix = {}
     for prefix in prefixes:
@@ -312,6 +452,10 @@ def fixed_prefix_subtask_metrics(records, *, prefixes=(1, 2, 4, 8)):
             "mean hierarchical task/stage-macro subtask ROC-AUC across fixed prefixes"
         ),
         "selection_value": float(np.mean(values)),
+        "evaluation_stages": selected_stages,
+        "input_segments": len(input_records),
+        "selected_segments": len(records),
+        "excluded_segments": len(input_records) - len(records),
         "per_prefix": per_prefix,
     }
 
@@ -321,6 +465,7 @@ def subtask_fixed_prefix_selection(
     validation_score_records,
     *,
     prefixes=(1, 2, 4, 8),
+    evaluation_stages=None,
 ):
     """Compare SAFE with a training-only stage-conditioned elapsed baseline."""
     training = validate_subtask_catalog(training_catalog_records)
@@ -340,7 +485,9 @@ def subtask_fixed_prefix_selection(
         training_rows, lambda record: int(record["num_inferences"])
     )
     safe_metrics = fixed_prefix_subtask_metrics(
-        validation_score_records, prefixes=prefixes
+        validation_score_records,
+        prefixes=prefixes,
+        evaluation_stages=evaluation_stages,
     )
     time_records = []
     for record in validation_score_records:
@@ -360,7 +507,11 @@ def subtask_fixed_prefix_selection(
                 "score_source": "training_elapsed_subtask_hazard",
             }
         )
-    time_metrics = fixed_prefix_subtask_metrics(time_records, prefixes=prefixes)
+    time_metrics = fixed_prefix_subtask_metrics(
+        time_records,
+        prefixes=prefixes,
+        evaluation_stages=evaluation_stages,
+    )
     deltas = {}
     for prefix in prefixes:
         key = str(prefix)
