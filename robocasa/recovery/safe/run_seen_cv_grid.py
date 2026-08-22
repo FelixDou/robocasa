@@ -16,6 +16,21 @@ import sys
 import numpy as np
 
 try:
+    from .subtask_safe_evaluation import (
+        parent_aggregated_early_metrics,
+        parent_failed,
+        parent_group_id,
+        parent_task_name,
+    )
+except ImportError:
+    from subtask_safe_evaluation import (
+        parent_aggregated_early_metrics,
+        parent_failed,
+        parent_group_id,
+        parent_task_name,
+    )
+
+try:
     from .online_safe import (
         ONLINE_SAFE_MODES,
         OnlineSafeConfig,
@@ -108,6 +123,7 @@ except ImportError:
 SELECTORS = ("0.0", "1.0", "concat-2")
 LEARNING_RATES = (1e-5, 3e-5, 1e-4, 3e-4, 1e-3)
 REGULARIZATION = (1e-3, 1e-2, 1e-1)
+SELECTION_UNITS = ("rollout", "parent_early")
 
 
 def parse_selector(value):
@@ -164,6 +180,14 @@ def generate_cv_runs(
     ]
 
 
+def grouped_record_id(record, group_field):
+    return (
+        parent_group_id(record)
+        if group_field == "parent_or_rollout_id"
+        else str(record.get(group_field, ""))
+    )
+
+
 def make_inner_folds(
     outer_train,
     identity,
@@ -177,13 +201,10 @@ def make_inner_folds(
         parent_groups = {}
         for rollout in outer_train:
             env = identity[id(rollout)][1]
-            group_id = str(env.get(group_field, ""))
+            group_id = grouped_record_id(env, group_field)
             if not group_id:
                 raise ValueError(f"Environment record is missing {group_field!r}")
-            stratum = (
-                str(env.get("parent_task_name", env.get("task_name", ""))),
-                int(bool(env.get("parent_rollout_failed", False))),
-            )
+            stratum = (parent_task_name(env), int(parent_failed(env)))
             group = parent_groups.setdefault(
                 group_id,
                 {"stratum": stratum, "rollouts": []},
@@ -262,10 +283,12 @@ def make_inner_folds(
                         )
         else:
             training_groups = {
-                str(identity[id(rollout)][1][group_field]) for rollout in training
+                grouped_record_id(identity[id(rollout)][1], group_field)
+                for rollout in training
             }
             validation_groups = {
-                str(identity[id(rollout)][1][group_field]) for rollout in validation
+                grouped_record_id(identity[id(rollout)][1], group_field)
+                for rollout in validation
             }
             if training_groups & validation_groups:
                 raise AssertionError(f"Fold {fold} leaks {group_field} groups")
@@ -357,10 +380,14 @@ def run_cv_grid(args):
         else (fixed_split_ids["path"] if fixed_split_ids is not None else None)
     )
     inner_group_field = (
-        "parent_rollout_id"
-        if fixed_split_ids is not None
-        and fixed_split_ids.get("split_unit") == "parent_rollout"
-        else None
+        "parent_or_rollout_id"
+        if args.selection_unit == "parent_early"
+        else (
+            "parent_rollout_id"
+            if fixed_split_ids is not None
+            and fixed_split_ids.get("split_unit") == "parent_rollout"
+            else None
+        )
     )
     causal_requested = bool(
         args.causal_prefix_mode != "none"
@@ -381,6 +408,10 @@ def run_cv_grid(args):
     if causal_requested and online_requested:
         raise ValueError(
             "Original online SAFE and causal Subtask-SAFE modes are mutually exclusive"
+        )
+    if args.selection_unit == "parent_early" and (causal_requested or online_requested):
+        raise ValueError(
+            "Parent-early selection cannot be combined with prefix-transformed SAFE modes"
         )
     if causal_requested and inner_group_field != "parent_rollout_id":
         raise ValueError(
@@ -472,13 +503,24 @@ def run_cv_grid(args):
         "inner_group_field": inner_group_field,
         "outer_split_manifest": (fixed_outer_split_path),
         "selection_metric": (
-            f"mean causal prefix-{args.causal_selection_prefix} ROC-AUC across folds"
-            if causal_requested
+            "mean task-macro parent ROC-AUC at landmarks "
+            + ", ".join(str(value) for value in args.parent_selection_landmarks)
+            if args.selection_unit == "parent_early"
             else (
-                "mean online-prefix falert_early_roc_auc/model_inner_val across folds"
-                if online_requested
-                else "mean falert_early_roc_auc/model_inner_val across folds"
+                f"mean causal prefix-{args.causal_selection_prefix} ROC-AUC across folds"
+                if causal_requested
+                else (
+                    "mean online-prefix falert_early_roc_auc/model_inner_val across folds"
+                    if online_requested
+                    else "mean falert_early_roc_auc/model_inner_val across folds"
+                )
             )
+        ),
+        "selection_unit": args.selection_unit,
+        "parent_selection_landmarks": (
+            list(args.parent_selection_landmarks)
+            if args.selection_unit == "parent_early"
+            else None
         ),
         "online_safe": (
             online_config_dict(online_config) if online_requested else None
@@ -720,7 +762,17 @@ def run_cv_grid(args):
                         plot_auc_curves=False,
                         plot_score_curves=False,
                     )
-                    if causal_requested:
+                    parent_selection = None
+                    if args.selection_unit == "parent_early":
+                        parent_selection = parent_aggregated_early_metrics(
+                            inner_val,
+                            scores["inner_val"],
+                            run_identity,
+                            landmarks=args.parent_selection_landmarks,
+                        )
+                        value = parent_selection["selection_value"]
+                        selection_metric = parent_selection["selection_metric"]
+                    elif causal_requested:
                         value = causal_prefix_roc_auc(
                             inner_val,
                             scores["inner_val"],
@@ -790,6 +842,7 @@ def run_cv_grid(args):
                     },
                     "outer_test_scored": False,
                     "inner_group_field": inner_group_field,
+                    "parent_aggregated_selection": parent_selection,
                     "task_min_steps_from_outer_train": task_cutoffs,
                     "causal_subtask_safe": (
                         {
@@ -818,7 +871,9 @@ def run_cv_grid(args):
                     "inner_train_parent_ids": (
                         sorted(
                             {
-                                run_identity[id(item)][1][inner_group_field]
+                                grouped_record_id(
+                                    run_identity[id(item)][1], inner_group_field
+                                )
                                 for item in inner_train
                             }
                         )
@@ -828,7 +883,9 @@ def run_cv_grid(args):
                     "inner_val_parent_ids": (
                         sorted(
                             {
-                                run_identity[id(item)][1][inner_group_field]
+                                grouped_record_id(
+                                    run_identity[id(item)][1], inner_group_field
+                                )
                                 for item in inner_val
                             }
                         )
@@ -911,6 +968,21 @@ def build_parser():
         "--regularization", nargs="+", type=float, default=list(REGULARIZATION)
     )
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--selection-unit",
+        choices=SELECTION_UNITS,
+        default="rollout",
+        help=(
+            "Select by official pseudo-rollout ROC-AUC or by scores stitched and "
+            "evaluated at original parent-trajectory landmarks"
+        ),
+    )
+    parser.add_argument(
+        "--parent-selection-landmarks",
+        nargs="+",
+        type=float,
+        default=[0.25, 0.5],
+    )
     parser.add_argument(
         "--online-safe-mode",
         choices=ONLINE_SAFE_MODES,
