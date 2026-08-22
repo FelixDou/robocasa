@@ -111,6 +111,7 @@ CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 WANDB_MODE=disabled \
   --env-interface gym \
   --task-set atomic_seen \
   --envs CloseBlenderLid \
+  --split pretrain \
   --modes env_to_last_good \
   --recovery-level atomic \
   --num-rollouts 1 \
@@ -159,7 +160,85 @@ Freeze task/seed allocation before scaling. Run matched recovery attempts for:
 The primary outcome is atomic recovery success under the same recovery mode,
 horizon, initial-state seed, ordinary-inference seed schedule, and
 candidate-seed schedule. Keep `sampling_seed_base` and `safe_candidate_seed`
-identical for the K=4 random and lowest-SAFE arms so they evaluate the same
-high-level trajectory and candidate chunks. Also report how often candidate
-actions are identical, SAFE score spread, server errors, and runtime. Do not
-claim recovery utility from retrospective SAFE separation alone.
+identical for the K=4 random and lowest-SAFE arms. This makes the high-level
+trajectory and first recovery candidate set identical. After the arms select
+different actions, their states and later candidate chunks can diverge; treat
+the full recovery outcomes as matched by task and initial seed, not as fully
+paired candidate decisions. Also report how often candidate actions are
+identical, SAFE score spread, server errors, and runtime. Do not claim recovery
+utility from retrospective SAFE separation alone.
+
+## Ten-rollout-per-task screening run
+
+Start with the two K=4 arms below over exactly the 38 tasks represented in the
+frozen runtime bundle. This is 380 high-level rollouts per arm. Run the arms
+sequentially against one server; simultaneous clients require separate Xiaomi
+servers, GPUs, ports, logs, and output files.
+
+```bash
+mapfile -t XR1_FROZEN_TASKS < <(
+  "$XR1_CLIENT_ENV/bin/python" - "$XR1_RUNTIME_BUNDLE" <<'PY'
+import json
+import sys
+
+bundle = json.load(open(sys.argv[1]))
+task_sets = [
+    set(bundle["task_normalizations"][str(seed)])
+    for seed in bundle["model_seeds"]
+]
+if any(task_set != task_sets[0] for task_set in task_sets[1:]):
+    raise SystemExit("Frozen ensemble seeds disagree on task coverage")
+tasks = sorted(task_sets[0])
+if len(tasks) != 38:
+    raise SystemExit(f"Expected 38 frozen tasks, found {len(tasks)}")
+print("\n".join(tasks))
+PY
+)
+printf 'frozen_tasks=%s\n' "${#XR1_FROZEN_TASKS[@]}"
+printf '%s\n' "${XR1_FROZEN_TASKS[@]}"
+
+export SCREEN_TAG=xr1_safe_bok_10pertask_$(date +%Y%m%d_%H%M%S)
+export ARM=random  # Run random first; then set ARM=lowest_safe and repeat.
+export ARM_OUTPUT="$STORAGE_BS/robocasa_rollouts/recovery/${SCREEN_TAG}_${ARM}.json"
+export ARM_LOG="$STORAGE_BS/robocasa_logs/eval/${SCREEN_TAG}_${ARM}.log"
+
+test "$ARM" = random || test "$ARM" = lowest_safe
+test ! -e "$ARM_OUTPUT"
+cd "$ROBOCASA_REPO"
+
+CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 WANDB_MODE=disabled \
+nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
+  robocasa.recovery.evaluate_recovery_benchmark \
+  --output "$ARM_OUTPUT" \
+  --policy-module robocasa.recovery.xiaomi_robotics_1_policy:make_policy \
+  --policy-arg model_path="$XR1_SAFE_CHECKPOINT" \
+  --policy-arg host=127.0.0.1 \
+  --policy-arg port="$XR1_SAFE_PORT" \
+  --policy-arg replan_steps=16 \
+  --policy-arg safe_best_of_k=4 \
+  --policy-arg safe_candidate_strategy="$ARM" \
+  --policy-arg safe_candidate_seed=7000 \
+  --policy-arg sampling_seed_base=1000 \
+  --policy-arg safe_runtime_bundle="$XR1_RUNTIME_BUNDLE" \
+  --policy-arg safe_repo="$SAFE_REPO" \
+  --policy-arg safe_device=cpu \
+  --env-interface gym \
+  --envs "${XR1_FROZEN_TASKS[@]}" \
+  --split pretrain \
+  --modes env_to_last_good \
+  --recovery-level atomic \
+  --num-rollouts 10 \
+  --seed 7 \
+  --include-trace \
+  > "$ARM_LOG" 2>&1 &
+
+echo "pid=$!"
+echo "output=$ARM_OUTPUT"
+echo "log=$ARM_LOG"
+```
+
+Before launching the second arm, require the first output to have
+`partial=false`, 380 rollout records, zero errors, and a nonzero number of
+recovery selection records. Ten rollouts per task is a screening sample:
+analyze the aggregate task-seed-matched recovery difference and uncertainty,
+but do not interpret individual task rates as stable estimates.
