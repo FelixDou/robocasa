@@ -2,6 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 import numpy as np
@@ -13,12 +14,53 @@ install_lightweight_robocasa_packages()
 
 from robocasa.recovery.safe.xr1_best_of_k import (  # noqa: E402
     FrozenXr1SafeEnsemble,
+    MODEL_LOADER_PROTOCOL,
+    _official_indep_layer_spec,
     normalize_seed_scores,
     select_candidate_features,
 )
 
 
 class TestXr1BestOfKScoring(unittest.TestCase):
+    @staticmethod
+    def _cfg(**overrides):
+        values = {
+            "n_history_steps": 1,
+            "hidden_dim": 16,
+            "n_layers": 3,
+            "final_act_layer": "none",
+            "cumsum": False,
+            "rmean": False,
+        }
+        values.update(overrides)
+        return SimpleNamespace(model=SimpleNamespace(**values))
+
+    def test_official_indep_layer_spec_matches_pinned_projector_layout(self):
+        self.assertEqual(
+            _official_indep_layer_spec(self._cfg(), 1024),
+            (
+                ("linear", 1024, 16),
+                ("relu",),
+                ("linear", 16, 16),
+                ("relu",),
+                ("linear", 16, 1),
+            ),
+        )
+        self.assertEqual(
+            _official_indep_layer_spec(
+                self._cfg(n_layers=1, final_act_layer="sigmoid"), 8
+            ),
+            (("linear", 8, 1), ("sigmoid",)),
+        )
+
+    def test_official_indep_compat_loader_rejects_history_or_activation_drift(self):
+        with self.assertRaisesRegex(ValueError, "n_history_steps=1"):
+            _official_indep_layer_spec(self._cfg(n_history_steps=2), 1024)
+        with self.assertRaisesRegex(ValueError, "final activation"):
+            _official_indep_layer_spec(
+                self._cfg(final_act_layer="unsupported"), 1024
+            )
+
     def test_feature_selection_uses_last_horizon_and_diffusion_tokens(self):
         features = np.arange(3 * 2 * 4 * 5, dtype=np.float32).reshape(3, 2, 4, 5)
         selected = select_candidate_features(features)
@@ -144,6 +186,10 @@ class TestXr1BestOfKScoring(unittest.TestCase):
             np.testing.assert_allclose(result["scores"], [2.0, 5.0])
             self.assertEqual(
                 result["provenance"]["safe_repository_commit"], "test-commit"
+            )
+            self.assertEqual(
+                result["provenance"]["model_loader_protocol"],
+                MODEL_LOADER_PROTOCOL,
             )
 
             (root / "runtime" / "seed0" / "model_final.ckpt").write_bytes(b"bad")

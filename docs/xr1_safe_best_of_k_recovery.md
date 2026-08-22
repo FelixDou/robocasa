@@ -17,6 +17,17 @@ enables it only to match stochastic chunks across experimental arms. Once
 6. commits only the candidate selected by `lowest_safe`, `random`, or
    `highest_safe`.
 
+The simulator client uses Python 3.11, while pinned official SAFE's training
+configuration dataclasses cannot be imported there because they use mutable
+dataclass defaults. Recovery scoring therefore constructs only the official
+independent model's inference projector locally. Its `projector` name, layer
+order, activations, accumulation behavior, and state-dict keys match pinned
+SAFE, and every frozen checkpoint is still loaded with `strict=True`. The
+runtime rejects configurations with anything other than
+`n_history_steps=1`, verifies the official SAFE commit, and preserves all
+existing artifact hashes. Provenance records
+`model_loader_protocol=official_safe_indep_inference_compat_v1`.
+
 The candidate score is the normalized single-inference contribution. For the
 independent model, the executed prefix is an additive constant shared by all
 candidates before the prospective detector's running-maximum operation. The

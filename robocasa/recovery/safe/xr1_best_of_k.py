@@ -11,12 +11,12 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 
 
 SCORING_PROTOCOL = "xr1_safe_single_inference_normalized_ensemble_v1"
+MODEL_LOADER_PROTOCOL = "official_safe_indep_inference_compat_v1"
 
 
 def sha256_file(path):
@@ -63,6 +63,98 @@ def normalize_seed_scores(raw_scores, *, task_name, seed, task_normalizations):
     if scores.ndim != 1 or not np.all(np.isfinite(scores)):
         raise ValueError("SAFE model returned invalid candidate scores")
     return (scores - location) / scale
+
+
+def _official_indep_layer_spec(cfg, input_dim):
+    """Return the layer layout used by pinned SAFE's ``IndepModel``.
+
+    The official SAFE package imports its training configuration dataclasses
+    from ``failure_prob.model``. Those dataclasses use mutable defaults that
+    Python 3.11 rejects during import. XR-1's simulator environment is Python
+    3.11, so recovery-time inference constructs only the pinned independent
+    model's projector here. The module name ``projector`` and Sequential layer
+    order are preserved, so strict loading still validates the official
+    checkpoint's state-dict keys and tensor shapes.
+    """
+    model_cfg = cfg.model
+    history_steps = int(model_cfg.n_history_steps)
+    if history_steps != 1:
+        raise ValueError(
+            "Frozen single-inference SAFE ranking requires n_history_steps=1, "
+            f"got {history_steps}"
+        )
+    input_dim = int(input_dim)
+    hidden_dim = int(model_cfg.hidden_dim)
+    n_layers = int(model_cfg.n_layers)
+    if input_dim < 1 or hidden_dim < 1 or n_layers < 1:
+        raise ValueError(
+            "Invalid frozen SAFE independent-model dimensions: "
+            f"input_dim={input_dim}, hidden_dim={hidden_dim}, n_layers={n_layers}"
+        )
+
+    spec = []
+    if n_layers == 1:
+        spec.append(("linear", input_dim, 1))
+    else:
+        spec.extend((("linear", input_dim, hidden_dim), ("relu",)))
+        for _ in range(n_layers - 2):
+            spec.extend((("linear", hidden_dim, hidden_dim), ("relu",)))
+        spec.append(("linear", hidden_dim, 1))
+
+    final_activation = str(model_cfg.final_act_layer)
+    if final_activation == "sigmoid":
+        spec.append(("sigmoid",))
+    elif final_activation == "relu":
+        spec.append(("relu",))
+    elif final_activation != "none":
+        raise ValueError(
+            f"Unknown frozen SAFE final activation: {final_activation!r}"
+        )
+    return tuple(spec)
+
+
+def _make_official_indep_inference_model(torch, cfg, input_dim):
+    """Construct the inference-relevant portion of official SAFE IndepModel."""
+    layer_spec = _official_indep_layer_spec(cfg, input_dim)
+
+    class OfficialSafeIndepInferenceModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            layers = []
+            for item in layer_spec:
+                if item[0] == "linear":
+                    layers.append(torch.nn.Linear(item[1], item[2]))
+                elif item[0] == "relu":
+                    layers.append(torch.nn.ReLU())
+                elif item[0] == "sigmoid":
+                    layers.append(torch.nn.Sigmoid())
+                else:  # pragma: no cover - layer spec is validated above
+                    raise AssertionError(f"Unsupported layer spec: {item}")
+            self.projector = torch.nn.Sequential(*layers)
+            self.cumsum = bool(cfg.model.cumsum)
+            self.rmean = bool(cfg.model.rmean)
+
+        def forward(self, batch):
+            features = batch["features"]
+            if features.ndim != 3 or features.shape[-1] != int(input_dim):
+                raise ValueError(
+                    "Official SAFE independent model expected features with "
+                    f"shape (batch, sequence, {int(input_dim)}), got "
+                    f"{tuple(features.shape)}"
+                )
+            scores = self.projector(features)
+            if self.cumsum or self.rmean:
+                scores = torch.cumsum(scores, dim=-2)
+                if self.rmean:
+                    divisor = torch.arange(
+                        1,
+                        scores.shape[1] + 1,
+                        device=scores.device,
+                    ).view(1, -1, 1)
+                    scores = scores / divisor
+            return scores
+
+    return OfficialSafeIndepInferenceModel()
 
 
 class FrozenXr1SafeEnsemble:
@@ -145,20 +237,9 @@ class FrozenXr1SafeEnsemble:
 
         verify_safe_repo(self.safe_repo)
         self.safe_commit = OFFICIAL_SAFE_COMMIT
-        if str(self.safe_repo) not in sys.path:
-            sys.path.insert(0, str(self.safe_repo))
 
         import torch
         from omegaconf import OmegaConf
-        import failure_prob.model as safe_model
-
-        model_module_path = Path(safe_model.__file__).resolve()
-        if self.safe_repo not in model_module_path.parents:
-            raise ValueError(
-                "Imported failure_prob.model from the wrong SAFE checkout: "
-                f"{model_module_path}"
-            )
-        get_model = safe_model.get_model
 
         if self.device.startswith("cuda") and not torch.cuda.is_available():
             raise ValueError(f"Requested {self.device}, but CUDA is unavailable")
@@ -173,7 +254,11 @@ class FrozenXr1SafeEnsemble:
                 )
             self._selector(cfg, "horizon_idx_rel")
             self._selector(cfg, "diff_idx_rel")
-            model = get_model(cfg, int(input_dim))
+            model = _make_official_indep_inference_model(
+                torch,
+                cfg,
+                int(input_dim),
+            )
             try:
                 state = torch.load(
                     checkpoint_path, map_location=self.device, weights_only=True
@@ -231,6 +316,7 @@ class FrozenXr1SafeEnsemble:
                 "safe_repository": str(self.safe_repo),
                 "safe_repository_commit": self.safe_commit,
                 "model": "indep",
+                "model_loader_protocol": MODEL_LOADER_PROTOCOL,
                 "horizon_selector": 1.0,
                 "diffusion_selector": 1.0,
                 "checkpoint_sha256_by_seed": {
