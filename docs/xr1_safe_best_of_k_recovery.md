@@ -13,7 +13,9 @@ enables it only to match stochastic chunks across experimental arms. Once
 3. extracts the frozen horizon `1.0`, diffusion `1.0` SAFE feature token;
 4. scores every candidate with the frozen independent-MLP checkpoints for
    seeds 0, 1, and 2;
-5. applies each seed's frozen training-task normalization and averages them;
+5. applies each seed's frozen training-task normalization with the
+   mathematically equivalent saturation-safe centered sigmoid transform and
+   averages them;
 6. commits only the candidate selected by `lowest_safe`, `random`, or
    `highest_safe`.
 
@@ -28,8 +30,19 @@ runtime rejects configurations with anything other than
 existing artifact hashes. Provenance records
 `model_loader_protocol=official_safe_indep_inference_compat_v1`.
 
-The candidate score is the normalized single-inference contribution. For the
-independent model, the executed prefix is an additive constant shared by all
+The candidate score is the normalized single-inference contribution. Frozen
+checkpoints use a sigmoid output, and recovery candidates can drive that
+float32 probability to exactly `1.0`. Direct probability-space ranking then
+collapses distinct candidates into numerical ties. Protocol
+`xr1_safe_single_inference_stable_centered_sigmoid_ensemble_v2` instead uses
+the pre-sigmoid logit `z` and computes `-sigmoid(-z) / scale` in float64 for
+each seed. This removes only `(1 - location) / scale`, which is constant across
+the K candidates, so it preserves the frozen normalized detector's exact
+candidate ordering in real arithmetic without changing checkpoints or fitting
+new parameters. Official float32 probabilities, logits, legacy normalized
+probabilities, and stable centered contributions are all retained in traces.
+
+For the independent model, the executed prefix is an additive constant shared by all
 candidates before the prospective detector's running-maximum operation. The
 pilot intentionally does not reconstruct that alarm history, which can flatten
 candidate differences after an earlier peak. This is therefore a within-state
@@ -42,8 +55,9 @@ so that term is identical and has no ranking information.
 
 Every genuine recovery inference writes a compact selection record into
 `subtask.safe_best_of_k.records`, including candidate scores, sampling seeds,
-per-seed raw and normalized scores, selected index, score spread, pairwise
-action diversity, and frozen bundle/checkpoint provenance. The selected
+per-seed raw probabilities, pre-sigmoid logits, legacy normalized probability
+scores, stable centered scores, selected index, score spread, pairwise action
+diversity, and frozen bundle/checkpoint provenance. The selected
 candidate's full feature tensor remains available through the normal Xiaomi
 inference-record interface.
 
@@ -73,11 +87,13 @@ for seed in 0 1 2; do
 done
 grep -n "sampling_seed" "$XR1_SAFE_REPO/deploy/server.py"
 
-PYTHONPATH="$SAFE_REPO:$ROBOCASA_REPO" "$XR1_CLIENT_ENV/bin/python" - <<'PY'
-import torch
-from omegaconf import OmegaConf
-from failure_prob.model import get_model
-print("SAFE client imports: OK", torch.__version__)
+PYTHONPATH="$ROBOCASA_REPO" "$XR1_CLIENT_ENV/bin/python" - <<'PY'
+from robocasa.recovery.safe.xr1_best_of_k import (
+    MODEL_LOADER_PROTOCOL,
+    SCORING_PROTOCOL,
+)
+print("SAFE client compatibility loader:", MODEL_LOADER_PROTOCOL)
+print("SAFE recovery scoring protocol:", SCORING_PROTOCOL)
 PY
 ```
 

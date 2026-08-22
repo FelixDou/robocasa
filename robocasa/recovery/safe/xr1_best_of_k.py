@@ -15,7 +15,9 @@ from pathlib import Path
 import numpy as np
 
 
-SCORING_PROTOCOL = "xr1_safe_single_inference_normalized_ensemble_v1"
+SCORING_PROTOCOL = (
+    "xr1_safe_single_inference_stable_centered_sigmoid_ensemble_v2"
+)
 MODEL_LOADER_PROTOCOL = "official_safe_indep_inference_compat_v1"
 
 
@@ -63,6 +65,41 @@ def normalize_seed_scores(raw_scores, *, task_name, seed, task_normalizations):
     if scores.ndim != 1 or not np.all(np.isfinite(scores)):
         raise ValueError("SAFE model returned invalid candidate scores")
     return (scores - location) / scale
+
+
+def stable_centered_sigmoid_scores(
+    logits, *, task_name, seed, task_normalizations
+):
+    """Preserve normalized sigmoid ranking without probability saturation.
+
+    For a frozen sigmoid output ``p = sigmoid(z)``, per-seed normalization is
+    ``(p - location) / scale``. Across candidates from the same state,
+    ``(1 - location) / scale`` is constant, so ranking is exactly preserved by
+    the centered term ``-sigmoid(-z) / scale``. Computing that term in float64
+    avoids rounding large positive logits to probability 1.0 in float32.
+    """
+    seed_stats = task_normalizations.get(str(seed))
+    if not isinstance(seed_stats, dict) or task_name not in seed_stats:
+        raise ValueError(
+            f"Runtime bundle lacks normalization for seed {seed}, task {task_name!r}"
+        )
+    scale = float(seed_stats[task_name]["scale"])
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError(
+            f"Invalid normalization scale for seed {seed}, task {task_name!r}: "
+            f"scale={scale}"
+        )
+    values = np.asarray(logits, dtype=np.float64)
+    if values.ndim != 1 or not np.all(np.isfinite(values)):
+        raise ValueError("SAFE model returned invalid pre-sigmoid logits")
+
+    survival = np.empty_like(values)
+    nonnegative = values >= 0
+    exp_negative = np.exp(-values[nonnegative])
+    survival[nonnegative] = exp_negative / (1.0 + exp_negative)
+    exp_positive = np.exp(values[~nonnegative])
+    survival[~nonnegative] = 1.0 / (1.0 + exp_positive)
+    return -survival / scale
 
 
 def _official_indep_layer_spec(cfg, input_dim):
@@ -134,15 +171,7 @@ def _make_official_indep_inference_model(torch, cfg, input_dim):
             self.cumsum = bool(cfg.model.cumsum)
             self.rmean = bool(cfg.model.rmean)
 
-        def forward(self, batch):
-            features = batch["features"]
-            if features.ndim != 3 or features.shape[-1] != int(input_dim):
-                raise ValueError(
-                    "Official SAFE independent model expected features with "
-                    f"shape (batch, sequence, {int(input_dim)}), got "
-                    f"{tuple(features.shape)}"
-                )
-            scores = self.projector(features)
+        def _accumulate(self, scores):
             if self.cumsum or self.rmean:
                 scores = torch.cumsum(scores, dim=-2)
                 if self.rmean:
@@ -153,6 +182,35 @@ def _make_official_indep_inference_model(torch, cfg, input_dim):
                     ).view(1, -1, 1)
                     scores = scores / divisor
             return scores
+
+        def _validate_features(self, batch):
+            features = batch["features"]
+            if features.ndim != 3 or features.shape[-1] != int(input_dim):
+                raise ValueError(
+                    "Official SAFE independent model expected features with "
+                    f"shape (batch, sequence, {int(input_dim)}), got "
+                    f"{tuple(features.shape)}"
+                )
+            return features
+
+        def forward(self, batch):
+            return self._accumulate(self.projector(self._validate_features(batch)))
+
+        def forward_pre_activation(self, batch):
+            features = self._validate_features(batch)
+            if features.shape[1] != 1:
+                raise ValueError(
+                    "Stable recovery ranking requires one inference contribution"
+                )
+            layers = list(self.projector.children())
+            if not layers or not isinstance(layers[-1], torch.nn.Sigmoid):
+                raise ValueError(
+                    "Stable recovery ranking requires a sigmoid final activation"
+                )
+            logits = features
+            for layer in layers[:-1]:
+                logits = layer(logits)
+            return self._accumulate(logits)
 
     return OfficialSafeIndepInferenceModel()
 
@@ -252,6 +310,11 @@ class FrozenXr1SafeEnsemble:
                 raise ValueError(
                     f"Seed {seed} config uses {cfg.model.name!r}, expected 'indep'"
                 )
+            if str(cfg.model.final_act_layer) != "sigmoid":
+                raise ValueError(
+                    "Stable frozen SAFE ranking requires final_act_layer='sigmoid', "
+                    f"got {cfg.model.final_act_layer!r} for seed {seed}"
+                )
             self._selector(cfg, "horizon_idx_rel")
             self._selector(cfg, "diff_idx_rel")
             model = _make_official_indep_inference_model(
@@ -281,25 +344,48 @@ class FrozenXr1SafeEnsemble:
 
         tensor = self._torch.as_tensor(selected, device=self.device).unsqueeze(1)
         normalized_by_seed = []
+        probability_normalized_by_seed = []
         raw_by_seed = []
+        logits_by_seed = []
         with self._torch.no_grad():
             for seed, model in zip(self.seeds, self._models):
                 output = model({"features": tensor})
+                pre_activation = model.forward_pre_activation({"features": tensor})
                 scores = output.detach().cpu().numpy().reshape(len(selected), -1)
+                logits = (
+                    pre_activation.detach()
+                    .cpu()
+                    .numpy()
+                    .reshape(len(selected), -1)
+                )
                 if scores.shape[1] != 1:
                     raise RuntimeError(
                         "Frozen SAFE model did not return one score per candidate: "
                         f"{scores.shape}"
                     )
+                if logits.shape[1] != 1:
+                    raise RuntimeError(
+                        "Frozen SAFE model did not return one logit per candidate: "
+                        f"{logits.shape}"
+                    )
                 raw_scores = scores[:, 0].astype(np.float64, copy=False)
-                normalized = normalize_seed_scores(
+                raw_logits = logits[:, 0].astype(np.float64, copy=False)
+                probability_normalized = normalize_seed_scores(
                     raw_scores,
                     task_name=task_name,
                     seed=seed,
                     task_normalizations=self.task_normalizations,
                 )
+                normalized = stable_centered_sigmoid_scores(
+                    raw_logits,
+                    task_name=task_name,
+                    seed=seed,
+                    task_normalizations=self.task_normalizations,
+                )
                 raw_by_seed.append(raw_scores)
+                logits_by_seed.append(raw_logits)
                 normalized_by_seed.append(normalized)
+                probability_normalized_by_seed.append(probability_normalized)
         ensemble = np.mean(np.stack(normalized_by_seed, axis=0), axis=0)
         if not np.all(np.isfinite(ensemble)):
             raise RuntimeError("Frozen SAFE ensemble returned invalid candidate scores")
@@ -308,7 +394,11 @@ class FrozenXr1SafeEnsemble:
             "scores": ensemble.tolist(),
             "seeds": list(self.seeds),
             "raw_scores_by_seed": np.stack(raw_by_seed).tolist(),
+            "pre_sigmoid_logits_by_seed": np.stack(logits_by_seed).tolist(),
             "normalized_scores_by_seed": np.stack(normalized_by_seed).tolist(),
+            "probability_normalized_scores_by_seed": np.stack(
+                probability_normalized_by_seed
+            ).tolist(),
             "task_name": str(task_name),
             "provenance": {
                 "runtime_bundle": str(self.runtime_bundle_path),
@@ -319,6 +409,9 @@ class FrozenXr1SafeEnsemble:
                 "model_loader_protocol": MODEL_LOADER_PROTOCOL,
                 "horizon_selector": 1.0,
                 "diffusion_selector": 1.0,
+                "ranking_transform": "negative_sigmoid_negative_logit_div_scale",
+                "candidate_invariant_normalization_offset_removed": True,
+                "ranking_compute_dtype": "float64",
                 "checkpoint_sha256_by_seed": {
                     str(seed): self.bundle["checkpoint_bundle"][str(seed)][
                         "model_final.ckpt"

@@ -547,7 +547,13 @@ class XiaomiRobotics1Policy:
             "scoring_protocol": score_result.get("protocol"),
             "ensemble_seeds": score_result.get("seeds"),
             "raw_scores_by_seed": score_result.get("raw_scores_by_seed"),
+            "pre_sigmoid_logits_by_seed": score_result.get(
+                "pre_sigmoid_logits_by_seed"
+            ),
             "normalized_scores_by_seed": score_result.get("normalized_scores_by_seed"),
+            "probability_normalized_scores_by_seed": score_result.get(
+                "probability_normalized_scores_by_seed"
+            ),
             "scorer_provenance": score_result.get("provenance"),
             "action_diversity": self._action_diversity(
                 candidate_actions, self.replan_steps

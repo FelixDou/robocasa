@@ -18,6 +18,7 @@ from robocasa.recovery.safe.xr1_best_of_k import (  # noqa: E402
     _official_indep_layer_spec,
     normalize_seed_scores,
     select_candidate_features,
+    stable_centered_sigmoid_scores,
 )
 
 
@@ -84,6 +85,44 @@ class TestXr1BestOfKScoring(unittest.TestCase):
                 seed=0,
                 task_normalizations={},
             )
+
+    def test_stable_centered_sigmoid_scores_avoid_probability_saturation(self):
+        logits = np.array([20.0, 21.0, 1000.0])
+        centered = stable_centered_sigmoid_scores(
+            logits,
+            task_name="CloseBlenderLid",
+            seed=0,
+            task_normalizations={
+                "0": {"CloseBlenderLid": {"location": 0.25, "scale": 2.0}}
+            },
+        )
+        self.assertTrue(np.all(np.isfinite(centered)))
+        self.assertLess(centered[0], centered[1])
+        self.assertLess(centered[1], centered[2])
+        self.assertLess(centered[0], 0.0)
+        self.assertEqual(centered[2], 0.0)
+
+    def test_stable_centering_preserves_normalized_probability_differences(self):
+        logits = np.array([-3.0, 0.0, 3.0])
+        probabilities = 1.0 / (1.0 + np.exp(-logits))
+        normalizations = {
+            "0": {"CloseBlenderLid": {"location": 0.25, "scale": 2.0}}
+        }
+        probability_scores = normalize_seed_scores(
+            probabilities,
+            task_name="CloseBlenderLid",
+            seed=0,
+            task_normalizations=normalizations,
+        )
+        centered_scores = stable_centered_sigmoid_scores(
+            logits,
+            task_name="CloseBlenderLid",
+            seed=0,
+            task_normalizations=normalizations,
+        )
+        np.testing.assert_allclose(
+            np.diff(centered_scores), np.diff(probability_scores), atol=1e-15
+        )
 
     def test_artifacts_use_local_runtime_fallback_and_verify_hash(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -173,8 +212,12 @@ class TestXr1BestOfKScoring(unittest.TestCase):
                 def __init__(self, multiplier):
                     self.multiplier = multiplier
 
-                def __call__(self, batch):
+                def forward_pre_activation(self, batch):
                     return batch["features"][..., :1] * self.multiplier
+
+                def __call__(self, batch):
+                    logits = self.forward_pre_activation(batch).value
+                    return FakeTensor(1.0 / (1.0 + np.exp(-logits)))
 
             scorer._torch = FakeTorch()
             scorer._models = (FakeModel(1.0), FakeModel(2.0))
@@ -183,7 +226,18 @@ class TestXr1BestOfKScoring(unittest.TestCase):
                 np.array([[[[2.0, 0.0]]], [[[5.0, 0.0]]]], dtype=np.float32),
                 task_name="CloseBlenderLid",
             )
-            np.testing.assert_allclose(result["scores"], [2.0, 5.0])
+            expected_seed0 = -1.0 / (1.0 + np.exp(np.array([2.0, 5.0])))
+            expected_seed1 = (
+                -1.0 / (1.0 + np.exp(np.array([4.0, 10.0]))) / 2.0
+            )
+            np.testing.assert_allclose(
+                result["scores"], (expected_seed0 + expected_seed1) / 2.0
+            )
+            np.testing.assert_allclose(
+                result["pre_sigmoid_logits_by_seed"],
+                [[2.0, 5.0], [4.0, 10.0]],
+            )
+            self.assertLess(result["scores"][0], result["scores"][1])
             self.assertEqual(
                 result["provenance"]["safe_repository_commit"], "test-commit"
             )
