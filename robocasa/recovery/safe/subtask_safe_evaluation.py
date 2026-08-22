@@ -39,6 +39,350 @@ def parent_failed(record):
     return not bool(record["episode_success"])
 
 
+def subtask_failed(record):
+    """Return the active semantic-subtask outcome label."""
+    if record.get("episode_success") is None:
+        raise ValueError("Subtask-SAFE environment record has no subtask outcome")
+    return not bool(record["episode_success"])
+
+
+def subtask_stage_name(record):
+    """Return the globally unique semantic-stage identity."""
+    task_name = str(record.get("task_name") or "")
+    parent_task = parent_task_name(record)
+    subtask = str(record.get("subtask_id") or "")
+    if "::" in task_name:
+        return task_name
+    if not subtask:
+        raise ValueError("Subtask-SAFE environment record has no subtask identity")
+    return f"{parent_task}::{subtask}"
+
+
+def subtask_score_length(record):
+    """Return the number of genuine policy inferences in one stage."""
+    segment = record.get("subtask_safe_segment") or {}
+    length = segment.get("num_policy_inferences", record.get("model_infer_times"))
+    if length is None:
+        steps = record.get("inference_environment_steps") or []
+        length = len(steps)
+    length = int(length)
+    if length <= 0:
+        raise ValueError("Subtask-SAFE stage has no policy inferences")
+    return length
+
+
+def validate_subtask_catalog(records):
+    """Validate semantic-stage labels used as the evaluation ground truth."""
+    output = []
+    seen = set()
+    for value in records:
+        record = value[1] if isinstance(value, tuple) else value
+        rollout_id = str(record.get("rollout_id") or "")
+        if not rollout_id or rollout_id in seen:
+            raise ValueError("Subtask evaluation catalog has missing or duplicate IDs")
+        seen.add(rollout_id)
+        if not record.get("subtask_safe_segment"):
+            raise ValueError(f"Catalog record {rollout_id} has no semantic segment")
+        parent_group_id(record)
+        parent_task_name(record)
+        subtask_stage_name(record)
+        subtask_failed(record)
+        subtask_score_length(record)
+        output.append(record)
+    if not output:
+        raise ValueError("Subtask evaluation catalog is empty")
+    return output
+
+
+def semantic_subtask_score_records(
+    rollouts,
+    scores,
+    identity,
+    catalog_records,
+):
+    """Align either terminal or segmented SAFE scores to semantic stages.
+
+    A terminal model produces one score trajectory per parent, which is sliced
+    using the independently collected semantic-stage catalog. A Subtask-SAFE
+    model already produces one score trajectory per segment and is aligned by
+    segment ID. In both cases, the returned target is the active subtask label.
+    """
+    if len(rollouts) != len(scores):
+        raise ValueError("Subtask evaluation received misaligned rollouts and scores")
+    catalog = validate_subtask_catalog(catalog_records)
+    source = []
+    for rollout, raw_score in zip(rollouts, scores):
+        record = identity[id(rollout)][1]
+        score = np.asarray(raw_score, dtype=np.float64).reshape(-1)
+        if not len(score) or not np.all(np.isfinite(score)):
+            raise ValueError("Subtask evaluation requires finite non-empty scores")
+        source.append((record, score))
+    segmented_flags = [bool(record.get("subtask_safe_segment")) for record, _ in source]
+    if len(set(segmented_flags)) != 1:
+        raise ValueError("SAFE score source mixes terminal and segmented records")
+    segmented = segmented_flags[0]
+    source_parent_ids = {parent_group_id(record) for record, _ in source}
+    selected_catalog = [
+        record for record in catalog if parent_group_id(record) in source_parent_ids
+    ]
+    catalog_parent_ids = {parent_group_id(record) for record in selected_catalog}
+    if catalog_parent_ids != source_parent_ids:
+        missing = sorted(source_parent_ids - catalog_parent_ids)
+        raise ValueError(
+            "Semantic-stage catalog is missing SAFE source parents: "
+            + ", ".join(missing[:5])
+        )
+
+    if segmented:
+        score_by_segment = {
+            str(record["rollout_id"]): score for record, score in source
+        }
+        if len(score_by_segment) != len(source):
+            raise ValueError("Segmented SAFE source has duplicate segment IDs")
+    else:
+        score_by_parent = {parent_group_id(record): score for record, score in source}
+        if len(score_by_parent) != len(source):
+            raise ValueError("Terminal SAFE source has duplicate parent IDs")
+
+    rows = []
+    for record in selected_catalog:
+        segment_id = str(record["rollout_id"])
+        expected_length = subtask_score_length(record)
+        if segmented:
+            if segment_id not in score_by_segment:
+                raise ValueError(
+                    f"Segmented SAFE scores are missing catalog segment {segment_id}"
+                )
+            score = score_by_segment[segment_id]
+        else:
+            parent = parent_group_id(record)
+            parent_score = score_by_parent[parent]
+            segment = record["subtask_safe_segment"]
+            start = int(segment["inference_start_index"])
+            end = int(segment["inference_end_index_exclusive"])
+            if start < 0 or end <= start or end > len(parent_score):
+                raise ValueError(
+                    f"Catalog segment {segment_id} has invalid parent score slice "
+                    f"[{start}, {end}) for length {len(parent_score)}"
+                )
+            score = parent_score[start:end]
+        if len(score) != expected_length:
+            raise ValueError(
+                f"Catalog segment {segment_id} expects {expected_length} scores, "
+                f"received {len(score)}"
+            )
+        rows.append(
+            {
+                "rollout_id": segment_id,
+                "parent_rollout_id": parent_group_id(record),
+                "parent_task_name": parent_task_name(record),
+                "task_name": subtask_stage_name(record),
+                "subtask_id": record.get("subtask_id"),
+                "failed": subtask_failed(record),
+                "scores": np.asarray(score, dtype=np.float64),
+                "inference_environment_steps": list(
+                    record.get("inference_environment_steps") or []
+                ),
+                "subtask_safe_segment": dict(record["subtask_safe_segment"]),
+                "score_source": "segmented" if segmented else "terminal_sliced",
+            }
+        )
+    return rows
+
+
+def _fixed_prefix_risk(record, prefix):
+    values = np.asarray(record["scores"], dtype=np.float64).reshape(-1)
+    if not len(values) or not np.all(np.isfinite(values)):
+        raise ValueError("Fixed-prefix evaluation requires finite non-empty scores")
+    observed = min(int(prefix), len(values))
+    return float(np.max(values[:observed])), observed
+
+
+def fixed_prefix_subtask_metrics(records, *, prefixes=(1, 2, 4, 8)):
+    """Evaluate active-subtask labels at causal inference-count prefixes.
+
+    Short stages are retained at later prefixes using their maximum available
+    pre-completion risk. Stage-specific AUC excludes one-sided stages, while
+    those stages remain in pooled support and later operating-point analyses.
+    """
+    from sklearn.metrics import average_precision_score, roc_auc_score
+
+    prefixes = tuple(int(value) for value in prefixes)
+    if not prefixes or any(value <= 0 for value in prefixes):
+        raise ValueError("Subtask selection prefixes must be positive integers")
+    if len(set(prefixes)) != len(prefixes):
+        raise ValueError("Subtask selection prefixes must be unique")
+    if not records:
+        raise ValueError("Fixed-prefix subtask evaluation has no records")
+
+    per_prefix = {}
+    for prefix in prefixes:
+        risks = []
+        observed = []
+        labels = []
+        for record in records:
+            risk, count = _fixed_prefix_risk(record, prefix)
+            risks.append(risk)
+            observed.append(count)
+            labels.append(int(bool(record["failed"])))
+        labels_array = np.asarray(labels, dtype=np.int64)
+        risks_array = np.asarray(risks, dtype=np.float64)
+        pooled_auc = (
+            float(roc_auc_score(labels_array, risks_array))
+            if set(labels) == {0, 1}
+            else None
+        )
+        pooled_ap = (
+            float(average_precision_score(labels_array, risks_array))
+            if set(labels) == {0, 1}
+            else None
+        )
+        stage_groups = defaultdict(list)
+        for index, record in enumerate(records):
+            stage_groups[str(record["task_name"])].append(index)
+        per_stage = {}
+        task_stage_aucs = defaultdict(list)
+        for stage, indices in sorted(stage_groups.items()):
+            stage_labels = labels_array[indices]
+            estimable = set(stage_labels.tolist()) == {0, 1}
+            auc = (
+                float(roc_auc_score(stage_labels, risks_array[indices]))
+                if estimable
+                else None
+            )
+            parent_task = str(records[indices[0]]["parent_task_name"])
+            per_stage[stage] = {
+                "parent_task_name": parent_task,
+                "roc_auc": auc,
+                "segments": len(indices),
+                "successes": int(len(indices) - stage_labels.sum()),
+                "failures": int(stage_labels.sum()),
+            }
+            if auc is not None:
+                task_stage_aucs[parent_task].append(auc)
+        per_task = {
+            task: {
+                "stage_macro_roc_auc": float(np.mean(values)),
+                "estimable_stages": len(values),
+            }
+            for task, values in sorted(task_stage_aucs.items())
+        }
+        estimable_stage_aucs = [
+            row["roc_auc"] for row in per_stage.values() if row["roc_auc"] is not None
+        ]
+        hierarchical = (
+            float(np.mean([row["stage_macro_roc_auc"] for row in per_task.values()]))
+            if per_task
+            else None
+        )
+        per_prefix[str(prefix)] = {
+            "pooled_roc_auc": pooled_auc,
+            "pooled_average_precision": pooled_ap,
+            "stage_macro_roc_auc": (
+                float(np.mean(estimable_stage_aucs)) if estimable_stage_aucs else None
+            ),
+            "task_stage_macro_roc_auc": hierarchical,
+            "segments": len(records),
+            "successes": labels.count(0),
+            "failures": labels.count(1),
+            "parents": len({record["parent_rollout_id"] for record in records}),
+            "estimable_stages": len(estimable_stage_aucs),
+            "total_stages": len(per_stage),
+            "tasks_with_estimable_stage": len(per_task),
+            "completed_before_prefix_retained": sum(
+                count < prefix for count in observed
+            ),
+            "per_stage": per_stage,
+            "per_task": per_task,
+        }
+    values = [
+        per_prefix[str(prefix)]["task_stage_macro_roc_auc"] for prefix in prefixes
+    ]
+    if any(value is None for value in values):
+        raise ValueError(
+            "Every fixed prefix needs at least one stage with both subtask outcomes"
+        )
+    return {
+        "protocol": (
+            "active semantic-subtask outcome at fixed causal inference counts; "
+            "short completed stages retain maximum available pre-completion risk"
+        ),
+        "prefixes": list(prefixes),
+        "selection_metric": (
+            "mean hierarchical task/stage-macro subtask ROC-AUC across fixed prefixes"
+        ),
+        "selection_value": float(np.mean(values)),
+        "per_prefix": per_prefix,
+    }
+
+
+def subtask_fixed_prefix_selection(
+    training_catalog_records,
+    validation_score_records,
+    *,
+    prefixes=(1, 2, 4, 8),
+):
+    """Compare SAFE with a training-only stage-conditioned elapsed baseline."""
+    training = validate_subtask_catalog(training_catalog_records)
+    training_rows = [
+        {
+            "rollout_id": str(record["rollout_id"]),
+            "parent_rollout_id": parent_group_id(record),
+            "parent_task_name": parent_task_name(record),
+            "task_name": subtask_stage_name(record),
+            "failed": subtask_failed(record),
+            "split": "train",
+            "num_inferences": subtask_score_length(record),
+        }
+        for record in training
+    ]
+    elapsed_model = fit_elapsed_hazard(
+        training_rows, lambda record: int(record["num_inferences"])
+    )
+    safe_metrics = fixed_prefix_subtask_metrics(
+        validation_score_records, prefixes=prefixes
+    )
+    time_records = []
+    for record in validation_score_records:
+        length = len(np.asarray(record["scores"]).reshape(-1))
+        baseline_record = {
+            **record,
+            "num_inferences": length,
+        }
+        time_records.append(
+            {
+                **record,
+                "scores": elapsed_hazard_scores(
+                    baseline_record,
+                    elapsed_model,
+                    lambda value: int(value["num_inferences"]),
+                ),
+                "score_source": "training_elapsed_subtask_hazard",
+            }
+        )
+    time_metrics = fixed_prefix_subtask_metrics(time_records, prefixes=prefixes)
+    deltas = {}
+    for prefix in prefixes:
+        key = str(prefix)
+        safe_value = safe_metrics["per_prefix"][key]["task_stage_macro_roc_auc"]
+        time_value = time_metrics["per_prefix"][key]["task_stage_macro_roc_auc"]
+        deltas[key] = float(safe_value - time_value)
+    return {
+        "protocol": safe_metrics["protocol"],
+        "selection_metric": safe_metrics["selection_metric"],
+        "selection_value": safe_metrics["selection_value"],
+        "safe": safe_metrics,
+        "time_only": time_metrics,
+        "safe_minus_time_by_prefix": deltas,
+        "mean_safe_minus_time": float(np.mean(list(deltas.values()))),
+        "time_model": elapsed_model,
+        "training_catalog_segments": len(training_rows),
+        "training_catalog_parents": len(
+            {record["parent_rollout_id"] for record in training_rows}
+        ),
+    }
+
+
 def _source_inference_contract(record, score_length):
     metadata = record.get("robocasa_manifest_record") or {}
     total = int(metadata.get("valid_sequence_length") or score_length)
@@ -127,7 +471,9 @@ def parent_aggregated_early_metrics(
         observed = {}
         for landmark in landmarks:
             inference_count = max(1, min(total, int(math.ceil(total * landmark))))
-            prefix = [value for index, value in values.items() if index < inference_count]
+            prefix = [
+                value for index, value in values.items() if index < inference_count
+            ]
             risks[str(landmark)] = (
                 float(max(prefix)) if prefix else float(missing_score_risk)
             )
@@ -186,9 +532,7 @@ def parent_aggregated_early_metrics(
             "per_task": per_task,
         }
     selection_value = float(
-        np.mean(
-            [per_landmark[str(value)]["task_macro_roc_auc"] for value in landmarks]
-        )
+        np.mean([per_landmark[str(value)]["task_macro_roc_auc"] for value in landmarks])
     )
     return {
         "protocol": "source-index-stitched parent early-risk selection",
@@ -225,7 +569,9 @@ def validate_parent_groups(records):
             for value in values
         }
         if len(parent_outcomes) != 1:
-            raise ValueError(f"Parent rollout {key} has inconsistent outcome provenance")
+            raise ValueError(
+                f"Parent rollout {key} has inconsistent outcome provenance"
+            )
     return grouped
 
 
@@ -261,7 +607,9 @@ def _stratified_parent_sample(parents, fraction, seed):
             "evaluation_parents": len(keys) - len(chosen),
         }
     if len(selected) < 2:
-        raise ValueError("Parent-grouped calibration needs at least two parent rollouts")
+        raise ValueError(
+            "Parent-grouped calibration needs at least two parent rollouts"
+        )
     return sorted(selected), per_stratum
 
 
@@ -306,9 +654,7 @@ def parent_grouped_calibration_split(
 
     train_records = [value for key in train_parents for value in train_parents[key]]
     calibration_records = [
-        value
-        for key in calibration_parents
-        for value in test_parents[key]
+        value for key in calibration_parents for value in test_parents[key]
     ]
     evaluation_records = [
         value for key in evaluation_parents for value in test_parents[key]
@@ -332,8 +678,12 @@ def parent_grouped_calibration_split(
     per_task = {}
     for task in tasks:
         task_train = [value for value in train_records if value["task_name"] == task]
-        task_cal = [value for value in calibration_records if value["task_name"] == task]
-        task_eval = [value for value in evaluation_records if value["task_name"] == task]
+        task_cal = [
+            value for value in calibration_records if value["task_name"] == task
+        ]
+        task_eval = [
+            value for value in evaluation_records if value["task_name"] == task
+        ]
         per_task[task] = {
             "train_successes": sum(not value["failed"] for value in task_train),
             "train_failures": sum(value["failed"] for value in task_train),
@@ -341,12 +691,12 @@ def parent_grouped_calibration_split(
             "calibration_failures_excluded": sum(value["failed"] for value in task_cal),
             "evaluation_successes": sum(not value["failed"] for value in task_eval),
             "evaluation_failures": sum(value["failed"] for value in task_eval),
-            "calibration_parent_ids": sorted(
-                {parent_id(value) for value in task_cal}
-            ),
+            "calibration_parent_ids": sorted({parent_id(value) for value in task_cal}),
         }
 
-    calibration_successes = [value for value in calibration_records if not value["failed"]]
+    calibration_successes = [
+        value for value in calibration_records if not value["failed"]
+    ]
     calibration_failures = [value for value in calibration_records if value["failed"]]
     train_ids = sorted(value["rollout_id"] for value in train_records)
     calibration_success_ids = sorted(
@@ -378,7 +728,9 @@ def parent_grouped_calibration_split(
             "calibration_nonconformity_successes": len(conformal_successes),
             "evaluation_parents": len(evaluation_parents),
             "evaluation": len(evaluation_records),
-            "evaluation_successes": sum(not value["failed"] for value in evaluation_records),
+            "evaluation_successes": sum(
+                not value["failed"] for value in evaluation_records
+            ),
             "evaluation_failures": sum(value["failed"] for value in evaluation_records),
         },
         "per_parent_stratum": per_stratum,

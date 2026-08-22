@@ -21,6 +21,9 @@ try:
         parent_failed,
         parent_group_id,
         parent_task_name,
+        semantic_subtask_score_records,
+        subtask_fixed_prefix_selection,
+        validate_subtask_catalog,
     )
 except ImportError:
     from subtask_safe_evaluation import (
@@ -28,6 +31,9 @@ except ImportError:
         parent_failed,
         parent_group_id,
         parent_task_name,
+        semantic_subtask_score_records,
+        subtask_fixed_prefix_selection,
+        validate_subtask_catalog,
     )
 
 try:
@@ -123,7 +129,7 @@ except ImportError:
 SELECTORS = ("0.0", "1.0", "concat-2")
 LEARNING_RATES = (1e-5, 3e-5, 1e-4, 3e-4, 1e-3)
 REGULARIZATION = (1e-3, 1e-2, 1e-1)
-SELECTION_UNITS = ("rollout", "parent_early")
+SELECTION_UNITS = ("rollout", "parent_early", "subtask_fixed_prefix")
 
 
 def parse_selector(value):
@@ -360,9 +366,9 @@ def run_cv_grid(args):
     )
     selected_task_names = None
     if args.selection_manifest is not None:
-        selected_task_names = set(
-            fixed_split_ids["manifest"].get("included_tasks", [])
-        ) or None
+        selected_task_names = (
+            set(fixed_split_ids["manifest"].get("included_tasks", [])) or None
+        )
     task_selection = resolve_task_type_selection(
         args.export_dir,
         args.task_type,
@@ -381,7 +387,7 @@ def run_cv_grid(args):
     )
     inner_group_field = (
         "parent_or_rollout_id"
-        if args.selection_unit == "parent_early"
+        if args.selection_unit in {"parent_early", "subtask_fixed_prefix"}
         else (
             "parent_rollout_id"
             if fixed_split_ids is not None
@@ -413,6 +419,29 @@ def run_cv_grid(args):
         raise ValueError(
             "Parent-early selection cannot be combined with prefix-transformed SAFE modes"
         )
+    if args.selection_unit == "subtask_fixed_prefix" and (
+        causal_requested or online_requested
+    ):
+        raise ValueError(
+            "Subtask-label fixed-prefix selection cannot be combined with "
+            "prefix-transformed SAFE modes"
+        )
+    if (
+        args.selection_unit == "subtask_fixed_prefix"
+        and args.subtask_evaluation_export_dir is None
+    ):
+        raise ValueError(
+            "--subtask-evaluation-export-dir is required for subtask-label selection"
+        )
+    if args.selection_unit == "subtask_fixed_prefix":
+        prefixes = [int(value) for value in args.subtask_selection_prefixes]
+        if not prefixes or any(value <= 0 for value in prefixes):
+            raise ValueError(
+                "--subtask-selection-prefixes must contain positive integers"
+            )
+        if len(prefixes) != len(set(prefixes)):
+            raise ValueError("--subtask-selection-prefixes must be unique")
+        args.subtask_selection_prefixes = prefixes
     if causal_requested and inner_group_field != "parent_rollout_id":
         raise ValueError(
             "Causal Subtask-SAFE CV requires a parent_rollout selection manifest"
@@ -432,6 +461,11 @@ def run_cv_grid(args):
     if causal_requested and args.causal_selection_prefix not in causal_config.horizons:
         raise ValueError(
             "--causal-selection-prefix must be included in " "--causal-prefix-horizons"
+        )
+    subtask_catalog = None
+    if args.selection_unit == "subtask_fixed_prefix":
+        subtask_catalog = validate_subtask_catalog(
+            load_env_records(args.subtask_evaluation_export_dir)
         )
     if (
         fixed_split_ids is not None
@@ -507,12 +541,16 @@ def run_cv_grid(args):
             + ", ".join(str(value) for value in args.parent_selection_landmarks)
             if args.selection_unit == "parent_early"
             else (
-                f"mean causal prefix-{args.causal_selection_prefix} ROC-AUC across folds"
-                if causal_requested
+                "mean hierarchical task/stage-macro subtask ROC-AUC at fixed "
+                "inference prefixes "
+                + ", ".join(str(value) for value in args.subtask_selection_prefixes)
+                if args.selection_unit == "subtask_fixed_prefix"
                 else (
-                    "mean online-prefix falert_early_roc_auc/model_inner_val across folds"
-                    if online_requested
+                    f"mean causal prefix-{args.causal_selection_prefix} ROC-AUC across folds"
+                    if causal_requested
                     else "mean falert_early_roc_auc/model_inner_val across folds"
+                    if not online_requested
+                    else "mean online-prefix falert_early_roc_auc/model_inner_val across folds"
                 )
             )
         ),
@@ -521,6 +559,19 @@ def run_cv_grid(args):
             list(args.parent_selection_landmarks)
             if args.selection_unit == "parent_early"
             else None
+        ),
+        "subtask_evaluation_export_dir": (
+            str(Path(args.subtask_evaluation_export_dir).resolve())
+            if args.selection_unit == "subtask_fixed_prefix"
+            else None
+        ),
+        "subtask_selection_prefixes": (
+            list(args.subtask_selection_prefixes)
+            if args.selection_unit == "subtask_fixed_prefix"
+            else None
+        ),
+        "subtask_evaluation_catalog_segments": (
+            len(subtask_catalog) if subtask_catalog is not None else None
         ),
         "online_safe": (
             online_config_dict(online_config) if online_requested else None
@@ -763,6 +814,7 @@ def run_cv_grid(args):
                         plot_score_curves=False,
                     )
                     parent_selection = None
+                    subtask_selection = None
                     if args.selection_unit == "parent_early":
                         parent_selection = parent_aggregated_early_metrics(
                             inner_val,
@@ -772,6 +824,42 @@ def run_cv_grid(args):
                         )
                         value = parent_selection["selection_value"]
                         selection_metric = parent_selection["selection_metric"]
+                    elif args.selection_unit == "subtask_fixed_prefix":
+                        inner_train_parents = {
+                            parent_group_id(run_identity[id(item)][1])
+                            for item in inner_train_source
+                        }
+                        inner_val_parents = {
+                            parent_group_id(run_identity[id(item)][1])
+                            for item in inner_val_source
+                        }
+                        if inner_train_parents & inner_val_parents:
+                            raise AssertionError(
+                                "Subtask-label selection leaked inner-fold parents"
+                            )
+                        training_catalog = [
+                            record
+                            for record in subtask_catalog
+                            if parent_group_id(record) in inner_train_parents
+                        ]
+                        validation_catalog = [
+                            record
+                            for record in subtask_catalog
+                            if parent_group_id(record) in inner_val_parents
+                        ]
+                        validation_score_records = semantic_subtask_score_records(
+                            inner_val,
+                            scores["inner_val"],
+                            run_identity,
+                            validation_catalog,
+                        )
+                        subtask_selection = subtask_fixed_prefix_selection(
+                            training_catalog,
+                            validation_score_records,
+                            prefixes=args.subtask_selection_prefixes,
+                        )
+                        value = subtask_selection["selection_value"]
+                        selection_metric = subtask_selection["selection_metric"]
                     elif causal_requested:
                         value = causal_prefix_roc_auc(
                             inner_val,
@@ -843,6 +931,7 @@ def run_cv_grid(args):
                     "outer_test_scored": False,
                     "inner_group_field": inner_group_field,
                     "parent_aggregated_selection": parent_selection,
+                    "subtask_fixed_prefix_selection": subtask_selection,
                     "task_min_steps_from_outer_train": task_cutoffs,
                     "causal_subtask_safe": (
                         {
@@ -973,8 +1062,9 @@ def build_parser():
         choices=SELECTION_UNITS,
         default="rollout",
         help=(
-            "Select by official pseudo-rollout ROC-AUC or by scores stitched and "
-            "evaluated at original parent-trajectory landmarks"
+            "Select by official pseudo-rollout ROC-AUC, by scores stitched at "
+            "parent-trajectory landmarks, or by active-subtask labels at fixed "
+            "causal inference counts"
         ),
     )
     parser.add_argument(
@@ -982,6 +1072,20 @@ def build_parser():
         nargs="+",
         type=float,
         default=[0.25, 0.5],
+    )
+    parser.add_argument(
+        "--subtask-evaluation-export-dir",
+        help=(
+            "Official Subtask-SAFE export supplying semantic-stage boundaries and "
+            "active-subtask labels for fixed-prefix selection"
+        ),
+    )
+    parser.add_argument(
+        "--subtask-selection-prefixes",
+        nargs="+",
+        type=int,
+        default=[1, 2, 4, 8],
+        help="Causal inference counts since semantic-stage entry",
     )
     parser.add_argument(
         "--online-safe-mode",

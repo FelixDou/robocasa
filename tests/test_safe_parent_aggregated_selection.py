@@ -4,8 +4,11 @@ import unittest
 
 from robocasa.recovery.safe.run_seen_cv_grid import make_inner_folds
 from robocasa.recovery.safe.subtask_safe_evaluation import (
+    fixed_prefix_subtask_metrics,
     parent_aggregated_early_metrics,
     parent_group_id,
+    semantic_subtask_score_records,
+    subtask_fixed_prefix_selection,
 )
 
 
@@ -34,9 +37,7 @@ class TestParentAggregatedSelection(unittest.TestCase):
                 rollouts.append(rollout)
                 identity[id(rollout)] = value
                 scores.append(
-                    [0.8, 0.9, 0.95, 0.99]
-                    if failed
-                    else [0.05, 0.1, 0.15, 0.2]
+                    [0.8, 0.9, 0.95, 0.99] if failed else [0.05, 0.1, 0.15, 0.2]
                 )
 
         result = parent_aggregated_early_metrics(
@@ -45,12 +46,8 @@ class TestParentAggregatedSelection(unittest.TestCase):
 
         self.assertEqual(result["parents"], 4)
         self.assertEqual(result["selection_value"], 1.0)
-        self.assertEqual(
-            result["per_landmark"]["0.25"]["task_macro_roc_auc"], 1.0
-        )
-        self.assertEqual(
-            result["per_landmark"]["0.5"]["parents_without_score"], 0
-        )
+        self.assertEqual(result["per_landmark"]["0.25"]["task_macro_roc_auc"], 1.0)
+        self.assertEqual(result["per_landmark"]["0.5"]["parents_without_score"], 0)
 
     def test_segment_scores_are_stitched_at_source_inference_indices(self):
         rollouts = []
@@ -82,9 +79,7 @@ class TestParentAggregatedSelection(unittest.TestCase):
                     )
                     rollouts.append(rollout)
                     identity[id(rollout)] = value
-                    scores.append(
-                        [0.8, 0.9] if failed else [0.05, 0.1]
-                    )
+                    scores.append([0.8, 0.9] if failed else [0.05, 0.1])
 
         result = parent_aggregated_early_metrics(
             rollouts, scores, identity, landmarks=(0.25, 0.5)
@@ -126,15 +121,9 @@ class TestParentAggregatedSelection(unittest.TestCase):
             rollouts, scores, identity, landmarks=(0.25, 1.0)
         )
 
-        self.assertEqual(
-            result["per_landmark"]["0.25"]["parents_without_score"], 4
-        )
-        self.assertEqual(
-            result["per_landmark"]["0.25"]["task_macro_roc_auc"], 0.5
-        )
-        self.assertEqual(
-            result["per_landmark"]["1.0"]["task_macro_roc_auc"], 1.0
-        )
+        self.assertEqual(result["per_landmark"]["0.25"]["parents_without_score"], 4)
+        self.assertEqual(result["per_landmark"]["0.25"]["task_macro_roc_auc"], 0.5)
+        self.assertEqual(result["per_landmark"]["1.0"]["task_macro_roc_auc"], 1.0)
 
     def test_terminal_and_segmented_data_receive_identical_parent_folds(self):
         terminal = []
@@ -164,9 +153,7 @@ class TestParentAggregatedSelection(unittest.TestCase):
                             "parent_rollout_id": parent,
                             "parent_task_name": task,
                             "parent_rollout_failed": failed,
-                            "episode_success": int(
-                                segment_index == 0 or not failed
-                            ),
+                            "episode_success": int(segment_index == 0 or not failed),
                         }
                         segment, segment_value = rollout_identity(
                             segment_record,
@@ -201,6 +188,178 @@ class TestParentAggregatedSelection(unittest.TestCase):
                 for item in segmented_fold[1]
             }
             self.assertEqual(terminal_validation, segmented_validation)
+
+
+class TestSubtaskLabelFixedPrefixSelection(unittest.TestCase):
+    @staticmethod
+    def catalog_record(parent, task, stage, failed, start, end):
+        return {
+            "rollout_id": f"{parent}:{stage}",
+            "parent_rollout_id": parent,
+            "parent_task_name": task,
+            "task_name": f"{task}::{stage}",
+            "subtask_id": stage,
+            "episode_success": int(not failed),
+            "model_infer_times": end - start,
+            "inference_environment_steps": list(range(start, end)),
+            "subtask_safe_segment": {
+                "inference_start_index": start,
+                "inference_end_index_exclusive": end,
+                "num_policy_inferences": end - start,
+                "entry_environment_step": start,
+                "end_environment_step": end,
+            },
+        }
+
+    def test_terminal_scores_are_sliced_and_use_subtask_not_parent_labels(self):
+        rollouts = []
+        scores = []
+        identity = {}
+        catalog = []
+        for parent, parent_failed in (("parent-S", False), ("parent-F", True)):
+            record = {
+                "rollout_id": parent,
+                "task_name": "Composite",
+                "episode_success": int(not parent_failed),
+            }
+            rollout, value = rollout_identity(record, success=int(not parent_failed))
+            rollouts.append(rollout)
+            identity[id(rollout)] = value
+            scores.append(
+                [0.05, 0.10, 0.80, 0.90] if parent_failed else [0.04, 0.08, 0.15, 0.20]
+            )
+            # The first subtask succeeds even in the failed parent. Only the
+            # second subtask inherits the failed active-stage label.
+            catalog.extend(
+                (
+                    self.catalog_record(parent, "Composite", "StageA", False, 0, 2),
+                    self.catalog_record(
+                        parent,
+                        "Composite",
+                        "StageB",
+                        parent_failed,
+                        2,
+                        4,
+                    ),
+                )
+            )
+
+        rows = semantic_subtask_score_records(rollouts, scores, identity, catalog)
+
+        self.assertEqual(len(rows), 4)
+        self.assertFalse(
+            next(
+                row
+                for row in rows
+                if row["parent_rollout_id"] == "parent-F"
+                and row["subtask_id"] == "StageA"
+            )["failed"]
+        )
+        stage_b_failure = next(
+            row
+            for row in rows
+            if row["parent_rollout_id"] == "parent-F" and row["subtask_id"] == "StageB"
+        )
+        self.assertEqual(stage_b_failure["scores"].tolist(), [0.8, 0.9])
+        self.assertEqual(stage_b_failure["score_source"], "terminal_sliced")
+
+    def test_segmented_scores_align_by_segment_id(self):
+        catalog = [
+            self.catalog_record("parent-S", "Composite", "Stage", False, 0, 2),
+            self.catalog_record("parent-F", "Composite", "Stage", True, 0, 2),
+        ]
+        rollouts = []
+        scores = []
+        identity = {}
+        for record, score in zip(catalog, ([0.1, 0.2], [0.7, 0.8])):
+            rollout, value = rollout_identity(record, success=record["episode_success"])
+            rollouts.append(rollout)
+            scores.append(score)
+            identity[id(rollout)] = value
+
+        rows = semantic_subtask_score_records(
+            rollouts, scores, identity, reversed(catalog)
+        )
+
+        self.assertEqual({row["score_source"] for row in rows}, {"segmented"})
+        self.assertEqual(
+            {row["rollout_id"]: row["scores"].tolist() for row in rows},
+            {
+                "parent-S:Stage": [0.1, 0.2],
+                "parent-F:Stage": [0.7, 0.8],
+            },
+        )
+
+    def test_fixed_prefix_keeps_short_completed_segments_and_sparse_stages(self):
+        rows = [
+            {
+                "rollout_id": "success",
+                "parent_rollout_id": "parent-success",
+                "parent_task_name": "Composite",
+                "task_name": "Composite::Estimable",
+                "failed": False,
+                "scores": [0.1],
+            },
+            {
+                "rollout_id": "failure",
+                "parent_rollout_id": "parent-failure",
+                "parent_task_name": "Composite",
+                "task_name": "Composite::Estimable",
+                "failed": True,
+                "scores": [0.8, 0.9, 0.95],
+            },
+            {
+                "rollout_id": "sparse-success",
+                "parent_rollout_id": "parent-sparse",
+                "parent_task_name": "Composite",
+                "task_name": "Composite::OneSided",
+                "failed": False,
+                "scores": [0.2, 0.3],
+            },
+        ]
+
+        result = fixed_prefix_subtask_metrics(rows, prefixes=(1, 4))
+
+        self.assertEqual(result["selection_value"], 1.0)
+        later = result["per_prefix"]["4"]
+        self.assertEqual(later["segments"], 3)
+        self.assertEqual(later["completed_before_prefix_retained"], 3)
+        self.assertEqual(later["estimable_stages"], 1)
+        self.assertIsNone(later["per_stage"]["Composite::OneSided"]["roc_auc"])
+
+    def test_elapsed_baseline_is_fitted_from_training_catalog_only(self):
+        training = [
+            self.catalog_record("train-S", "Composite", "Stage", False, 0, 1),
+            self.catalog_record("train-F", "Composite", "Stage", True, 0, 3),
+        ]
+        validation = [
+            {
+                "rollout_id": "val-S",
+                "parent_rollout_id": "val-S-parent",
+                "parent_task_name": "Composite",
+                "task_name": "Composite::Stage",
+                "failed": False,
+                "scores": [0.1],
+            },
+            {
+                "rollout_id": "val-F",
+                "parent_rollout_id": "val-F-parent",
+                "parent_task_name": "Composite",
+                "task_name": "Composite::Stage",
+                "failed": True,
+                "scores": [0.9, 0.95, 0.99],
+            },
+        ]
+
+        result = subtask_fixed_prefix_selection(training, validation, prefixes=(1, 2))
+
+        self.assertEqual(result["training_catalog_segments"], 2)
+        self.assertEqual(result["safe"]["selection_value"], 1.0)
+        self.assertIn("1", result["safe_minus_time_by_prefix"])
+        self.assertEqual(
+            result["time_model"]["Composite::Stage"]["source"],
+            "training segments only",
+        )
 
 
 if __name__ == "__main__":
