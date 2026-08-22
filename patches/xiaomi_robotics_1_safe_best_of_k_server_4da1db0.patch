@@ -1,0 +1,43 @@
+--- a/deploy/server.py
++++ b/deploy/server.py
+@@ -59,13 +59,28 @@
+                             request_safe_features = bool(
+                                 input_data.pop("request_safe_features", False)
+                             )
++                            sampling_seed = input_data.pop("sampling_seed", None)
++                            if sampling_seed is not None:
++                                sampling_seed = int(sampling_seed)
+                             robot_type = input_data["task_id"]
+                             data = {key: (value.to(device=self.model.device, dtype=self.model.dtype) if isinstance(value, torch.Tensor) and value.is_floating_point() else value.to(device=self.model.device) if isinstance(value, torch.Tensor) else value) for key, value in input_data.items()}
+
+-                            outputs = self.model(
+-                                **data,
+-                                return_safe_features=request_safe_features,
+-                            )
++                            rng_devices = (
++                                [self.model.device.index]
++                                if self.model.device.type == "cuda"
++                                else []
++                            )
++                            with torch.random.fork_rng(
++                                devices=rng_devices,
++                                enabled=sampling_seed is not None,
++                            ):
++                                if sampling_seed is not None:
++                                    torch.manual_seed(sampling_seed)
++                                    torch.cuda.manual_seed_all(sampling_seed)
++                                outputs = self.model(
++                                    **data,
++                                    return_safe_features=request_safe_features,
++                                )
+
+                             response_data = outputs.actions.cpu()
+                             if request_safe_features:
+@@ -93,6 +109,7 @@
+                                         "action_horizon": int(features.shape[2]),
+                                         "flow_steps": int(features.shape[1]),
+                                         "aggregation": "raw",
++                                        "sampling_seed": sampling_seed,
+                                     },
+                                 }
+                             response = pickle.dumps(response_data)

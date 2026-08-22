@@ -1,0 +1,155 @@
+import hashlib
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+import numpy as np
+
+from tests.safe_import_helper import install_lightweight_robocasa_packages
+
+
+install_lightweight_robocasa_packages()
+
+from robocasa.recovery.safe.xr1_best_of_k import (  # noqa: E402
+    FrozenXr1SafeEnsemble,
+    normalize_seed_scores,
+    select_candidate_features,
+)
+
+
+class TestXr1BestOfKScoring(unittest.TestCase):
+    def test_feature_selection_uses_last_horizon_and_diffusion_tokens(self):
+        features = np.arange(3 * 2 * 4 * 5, dtype=np.float32).reshape(3, 2, 4, 5)
+        selected = select_candidate_features(features)
+        np.testing.assert_array_equal(selected, features[:, -1, -1, :])
+        self.assertEqual(selected.dtype, np.float32)
+
+    def test_per_task_seed_normalization_is_frozen(self):
+        normalized = normalize_seed_scores(
+            np.array([8.0, 12.0]),
+            task_name="CloseBlenderLid",
+            seed=0,
+            task_normalizations={
+                "0": {"CloseBlenderLid": {"location": 10.0, "scale": 2.0}}
+            },
+        )
+        np.testing.assert_allclose(normalized, [-1.0, 1.0])
+        with self.assertRaisesRegex(ValueError, "lacks normalization"):
+            normalize_seed_scores(
+                np.array([1.0]),
+                task_name="UnknownTask",
+                seed=0,
+                task_normalizations={},
+            )
+
+    def test_artifacts_use_local_runtime_fallback_and_verify_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            checkpoint_bundle = {}
+            normalizations = {}
+            for seed in (0, 1):
+                seed_dir = root / "runtime" / f"seed{seed}"
+                seed_dir.mkdir(parents=True)
+                checkpoint_bundle[str(seed)] = {}
+                for name in ("config.yaml", "model_final.ckpt"):
+                    payload = f"seed={seed},name={name}".encode()
+                    path = seed_dir / name
+                    path.write_bytes(payload)
+                    checkpoint_bundle[str(seed)][name] = {
+                        "path": f"/missing/cluster/seed{seed}/{name}",
+                        "sha256": hashlib.sha256(payload).hexdigest(),
+                    }
+                normalizations[str(seed)] = {
+                    "CloseBlenderLid": {
+                        "location": 0.0,
+                        "scale": float(seed + 1),
+                    }
+                }
+            bundle_path = root / "runtime_bundle.json"
+            bundle_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "model": "indep",
+                        "model_seeds": [0, 1],
+                        "binary_final_rollout_labels_only": True,
+                        "subtask_safe": False,
+                        "checkpoint_bundle": checkpoint_bundle,
+                        "task_normalizations": normalizations,
+                    }
+                )
+            )
+            scorer = FrozenXr1SafeEnsemble(
+                runtime_bundle=bundle_path,
+                safe_repo=root,
+            )
+            self.assertEqual(
+                scorer._resolve_artifact(0, "model_final.ckpt"),
+                (root / "runtime" / "seed0" / "model_final.ckpt").resolve(),
+            )
+
+            class FakeTensor:
+                def __init__(self, value):
+                    self.value = np.asarray(value)
+
+                def __getitem__(self, item):
+                    return FakeTensor(self.value[item])
+
+                def __mul__(self, multiplier):
+                    return FakeTensor(self.value * multiplier)
+
+                def unsqueeze(self, axis):
+                    return FakeTensor(np.expand_dims(self.value, axis))
+
+                def detach(self):
+                    return self
+
+                def cpu(self):
+                    return self
+
+                def numpy(self):
+                    return self.value
+
+            class NoGrad:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc_value, traceback):
+                    return False
+
+            class FakeTorch:
+                @staticmethod
+                def as_tensor(value, device=None):
+                    return FakeTensor(value)
+
+                @staticmethod
+                def no_grad():
+                    return NoGrad()
+
+            class FakeModel:
+                def __init__(self, multiplier):
+                    self.multiplier = multiplier
+
+                def __call__(self, batch):
+                    return batch["features"][..., :1] * self.multiplier
+
+            scorer._torch = FakeTorch()
+            scorer._models = (FakeModel(1.0), FakeModel(2.0))
+            scorer.safe_commit = "test-commit"
+            result = scorer.score_candidates(
+                np.array([[[[2.0, 0.0]]], [[[5.0, 0.0]]]], dtype=np.float32),
+                task_name="CloseBlenderLid",
+            )
+            np.testing.assert_allclose(result["scores"], [2.0, 5.0])
+            self.assertEqual(
+                result["provenance"]["safe_repository_commit"], "test-commit"
+            )
+
+            (root / "runtime" / "seed0" / "model_final.ckpt").write_bytes(b"bad")
+            with self.assertRaisesRegex(ValueError, "hash mismatch"):
+                scorer._resolve_artifact(0, "model_final.ckpt")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -62,10 +62,10 @@ def observation(instruction="close the blender lid"):
     }
 
 
-def safe_response(shape=(5, 30, 8)):
+def safe_response(shape=(5, 30, 8), action_value=0.0):
     features = np.arange(np.prod(shape), dtype=np.float32).reshape((1, *shape))
     return {
-        "actions": np.zeros((1, shape[1], 60), dtype=np.float32),
+        "actions": np.full((1, shape[1], 60), action_value, dtype=np.float32),
         "safe_features": features,
         "safe_feature_metadata": {
             "schema_version": 1,
@@ -80,6 +80,20 @@ def safe_response(shape=(5, 30, 8)):
             "aggregation": "raw",
         },
     }
+
+
+class FakeScorer:
+    def __init__(self, scores):
+        self.scores = list(scores)
+        self.calls = []
+
+    def score_candidates(self, features, *, task_name):
+        self.calls.append((np.asarray(features).copy(), task_name))
+        return {
+            "protocol": "test_single_inference",
+            "scores": self.scores,
+            "seeds": [0, 1, 2],
+        }
 
 
 class TestSafeXiaomiPolicy(unittest.TestCase):
@@ -136,6 +150,29 @@ class TestSafeXiaomiPolicy(unittest.TestCase):
         self.assertEqual(second["inference_index"], 1)
         self.assertEqual(len(policy.client.requests), 2)
 
+    def test_optional_sampling_seed_is_deterministic_per_inference(self):
+        actions = np.zeros((1, 30, 60), dtype=np.float32)
+        policy = self.make_policy(
+            [actions, actions],
+            sampling_seed_base=100,
+        )
+        policy(observation())
+        policy(observation())
+        policy(observation())
+        self.assertEqual(
+            [request["sampling_seed"] for request in policy.client.requests],
+            [100, 101],
+        )
+
+    def test_disabled_best_of_k_recovery_hook_preserves_default_plan(self):
+        actions = np.zeros((1, 30, 60), dtype=np.float32)
+        policy = self.make_policy([actions])
+        policy(observation())
+        self.assertEqual(len(policy.action_plan), 1)
+        activation = policy.begin_recovery(task_name="CloseBlenderLid")
+        self.assertFalse(activation["enabled"])
+        self.assertEqual(len(policy.action_plan), 1)
+
     def test_invalid_or_missing_features_raise(self):
         actions = np.zeros((1, 30, 60), dtype=np.float32)
         policy = self.make_policy([actions], collect_safe_features=True)
@@ -164,6 +201,86 @@ class TestSafeXiaomiPolicy(unittest.TestCase):
         self.assertFalse(policy.state_queue)
         self.assertIsNone(policy.pop_inference_record())
         self.assertFalse(policy.client.closed)
+
+    def test_best_of_k_is_recovery_only_and_selects_lowest_safe(self):
+        scorer = FakeScorer([0.7, -0.4, 0.2])
+        action_only = np.zeros((1, 30, 60), dtype=np.float32)
+        policy = self.make_policy(
+            [
+                action_only,
+                safe_response(action_value=1.0),
+                safe_response(action_value=2.0),
+                safe_response(action_value=3.0),
+            ],
+            safe_best_of_k=3,
+            safe_candidate_seed=40,
+            candidate_scorer=scorer,
+        )
+
+        policy(observation())
+        self.assertEqual(len(policy.client.requests), 1)
+        self.assertNotIn("request_safe_features", policy.client.requests[0])
+        self.assertIsNone(policy.pop_candidate_selection_record())
+
+        activation = policy.begin_recovery(
+            task_name="CloseBlenderLid",
+            target_subtask="close_lid",
+            instruction="close the blender lid",
+        )
+        action = policy(observation())
+        self.assertTrue(activation["enabled"])
+        self.assertEqual(len(policy.client.requests), 4)
+        recovery_requests = policy.client.requests[1:]
+        self.assertEqual(
+            [request["sampling_seed"] for request in recovery_requests], [40, 41, 42]
+        )
+        self.assertTrue(
+            all(request["request_safe_features"] for request in recovery_requests)
+        )
+        self.assertEqual(float(action["action.end_effector_position"][0]), 2.0)
+        self.assertEqual(scorer.calls[0][0].shape, (3, 5, 30, 8))
+        self.assertEqual(scorer.calls[0][1], "CloseBlenderLid")
+
+        selection = policy.pop_candidate_selection_record()
+        self.assertEqual(selection["selected_index"], 1)
+        self.assertEqual(selection["scores"], [0.7, -0.4, 0.2])
+        self.assertEqual(selection["candidate_count"], 3)
+        self.assertFalse(selection["action_diversity"]["all_identical"])
+        chosen = policy.pop_inference_record()
+        self.assertEqual(float(chosen["actions"][0, 0]), 2.0)
+
+    def test_highest_safe_control_selects_largest_score(self):
+        scorer = FakeScorer([0.1, 0.9])
+        policy = self.make_policy(
+            [safe_response(action_value=1.0), safe_response(action_value=4.0)],
+            safe_best_of_k=2,
+            safe_candidate_strategy="highest_safe",
+            candidate_scorer=scorer,
+        )
+        policy.begin_recovery(task_name="CloseBlenderLid")
+        action = policy(observation())
+        self.assertEqual(float(action["action.end_effector_position"][0]), 4.0)
+        self.assertEqual(policy.pop_candidate_selection_record()["selected_index"], 1)
+
+    def test_random_control_is_deterministic(self):
+        scorer = FakeScorer([0.1, 0.2, 0.3])
+        policy = self.make_policy(
+            [
+                safe_response(action_value=1.0),
+                safe_response(action_value=2.0),
+                safe_response(action_value=3.0),
+            ],
+            safe_best_of_k=3,
+            safe_candidate_strategy="random",
+            safe_candidate_seed=17,
+            candidate_scorer=scorer,
+        )
+        policy.begin_recovery(task_name="CloseBlenderLid")
+        policy(observation())
+        expected = int(np.random.default_rng(17).integers(3))
+        self.assertEqual(
+            policy.pop_candidate_selection_record()["selected_index"], expected
+        )
 
 
 if __name__ == "__main__":

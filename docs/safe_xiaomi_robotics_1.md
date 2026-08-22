@@ -74,6 +74,7 @@ export XR1_CHECKPOINT="$STORAGE_BS/robocasa_checkpoints/xiaomi_robotics_1/Xiaomi
 export XR1_SAFE_CHECKPOINT="$STORAGE_BS/robocasa_checkpoints/xiaomi_robotics_1/Xiaomi-Robotics-1-RoboCasa365-safe"
 
 export XR1_SERVER_PATCH="$ROBOCASA_REPO/patches/xiaomi_robotics_1_safe_server_4da1db0.patch"
+export XR1_BEST_OF_K_SERVER_PATCH="$ROBOCASA_REPO/patches/xiaomi_robotics_1_safe_best_of_k_server_4da1db0.patch"
 export XR1_MODEL_PATCH="$ROBOCASA_REPO/patches/xiaomi_robotics_1_safe_model_0d1aa76.patch"
 
 test "$(git -C "$XR1_REPO" rev-parse HEAD)" = "$XR1_COMMIT"
@@ -81,6 +82,7 @@ test -x "$XR1_SERVER_ENV/bin/python"
 test -x "$XR1_CLIENT_ENV/bin/python"
 test -f "$XR1_CHECKPOINT/modeling_mibot.py"
 test -f "$XR1_SERVER_PATCH"
+test -f "$XR1_BEST_OF_K_SERVER_PATCH"
 test -f "$XR1_MODEL_PATCH"
 ```
 
@@ -93,11 +95,22 @@ else
   git -C "$XR1_REPO" worktree add --detach "$XR1_SAFE_REPO" "$XR1_COMMIT"
 fi
 
-if git -C "$XR1_SAFE_REPO" apply --reverse --check "$XR1_SERVER_PATCH" 2>/dev/null; then
+if grep -q 'input_data.pop("request_safe_features"' \
+    "$XR1_SAFE_REPO/deploy/server.py"; then
   echo "XR-1 SAFE server patch is already applied"
 else
   git -C "$XR1_SAFE_REPO" apply --check "$XR1_SERVER_PATCH"
   git -C "$XR1_SAFE_REPO" apply "$XR1_SERVER_PATCH"
+fi
+
+# Apply after the base SAFE server patch. This is separately idempotent, so an
+# existing SAFE worktree can be upgraded without recreating it.
+if grep -q 'input_data.pop("sampling_seed"' \
+    "$XR1_SAFE_REPO/deploy/server.py"; then
+  echo "XR-1 SAFE best-of-K server patch is already applied"
+else
+  git -C "$XR1_SAFE_REPO" apply --check "$XR1_BEST_OF_K_SERVER_PATCH"
+  git -C "$XR1_SAFE_REPO" apply "$XR1_BEST_OF_K_SERVER_PATCH"
 fi
 ```
 
@@ -125,6 +138,7 @@ fi
 test -f "$XR1_SAFE_CHECKPOINT/model-00001-of-00003.safetensors"
 grep -n "safe_feature_steps" "$XR1_SAFE_CHECKPOINT/modeling_mibot.py"
 grep -n "request_safe_features" "$XR1_SAFE_REPO/deploy/server.py"
+grep -n "sampling_seed" "$XR1_SAFE_REPO/deploy/server.py"
 ```
 
 `cp -al` is safe here only because the patched Python file is immediately

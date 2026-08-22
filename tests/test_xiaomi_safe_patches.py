@@ -8,6 +8,9 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATCH = ROOT / "patches/xiaomi_robotics_1_safe_model_0d1aa76.patch"
 SERVER_PATCH = ROOT / "patches/xiaomi_robotics_1_safe_server_4da1db0.patch"
+BEST_OF_K_SERVER_PATCH = (
+    ROOT / "patches/xiaomi_robotics_1_safe_best_of_k_server_4da1db0.patch"
+)
 
 
 class TestXiaomiSafePatches(unittest.TestCase):
@@ -64,6 +67,19 @@ class TestXiaomiSafePatches(unittest.TestCase):
             '+                                input_data.pop("request_safe_features", False)\n',
             patch,
         )
+        best_of_k_patch = BEST_OF_K_SERVER_PATCH.read_text()
+        self.assertIn(
+            '+                            sampling_seed = input_data.pop("sampling_seed", None)\n',
+            best_of_k_patch,
+        )
+        self.assertIn(
+            "+                            with torch.random.fork_rng(\n",
+            best_of_k_patch,
+        )
+        self.assertIn(
+            "+                                    torch.manual_seed(sampling_seed)\n",
+            best_of_k_patch,
+        )
         self.assertIn(
             "+                            response_data = outputs.actions.cpu()\n",
             patch,
@@ -73,6 +89,59 @@ class TestXiaomiSafePatches(unittest.TestCase):
             '+                                        "model_family": "xiaomi_robotics_1",\n',
             patch,
         )
+        self.assertIn(
+            '+                                        "sampling_seed": sampling_seed,\n',
+            best_of_k_patch,
+        )
+
+    @unittest.skipUnless(shutil.which("patch"), "patch executable is required")
+    def test_best_of_k_server_patch_applies_after_safe_server_patch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "deploy" / "server.py"
+            source.parent.mkdir()
+            source.write_text(
+                """                            request_safe_features = bool(
+                                input_data.pop("request_safe_features", False)
+                            )
+                            robot_type = input_data["task_id"]
+                            data = {key: (value.to(device=self.model.device, dtype=self.model.dtype) if isinstance(value, torch.Tensor) and value.is_floating_point() else value.to(device=self.model.device) if isinstance(value, torch.Tensor) else value) for key, value in input_data.items()}
+
+                            outputs = self.model(
+                                **data,
+                                return_safe_features=request_safe_features,
+                            )
+
+                            response_data = outputs.actions.cpu()
+                            if request_safe_features:
+                                features = outputs.safe_features.cpu()
+                                if features.ndim != 4:
+                                    raise RuntimeError("shape")
+                                response_data = {
+                                    "safe_feature_metadata": {
+                                        "action_horizon": int(features.shape[2]),
+                                        "flow_steps": int(features.shape[1]),
+                                        "aggregation": "raw",
+                                    },
+                                }
+                            response = pickle.dumps(response_data)
+"""
+            )
+            result = subprocess.run(
+                ["patch", "--batch", "--forward", "-p1"],
+                cwd=tmp,
+                input=BEST_OF_K_SERVER_PATCH.read_bytes(),
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                (result.stdout + result.stderr).decode(errors="replace"),
+            )
+            patched = source.read_text()
+            self.assertIn('input_data.pop("sampling_seed", None)', patched)
+            self.assertIn("torch.random.fork_rng", patched)
+            self.assertIn('"sampling_seed": sampling_seed', patched)
 
 
 if __name__ == "__main__":

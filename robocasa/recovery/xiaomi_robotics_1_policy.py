@@ -1,4 +1,4 @@
-"""Xiaomi-Robotics-1 RoboCasa365 policy adapter with opt-in SAFE capture."""
+"""Xiaomi-Robotics-1 adapter with SAFE capture and recovery reranking."""
 
 from __future__ import annotations
 
@@ -147,10 +147,18 @@ class XiaomiRobotics1Policy:
         action_dim=DEFAULT_ACTION_DIM,
         collect_safe_features=False,
         safe_feature_shape=None,
+        safe_best_of_k=1,
+        safe_candidate_strategy="lowest_safe",
+        safe_candidate_seed=0,
+        sampling_seed_base=None,
+        safe_runtime_bundle=None,
+        safe_repo=None,
+        safe_device="cpu",
         policy_name=None,
         policy_checkpoint=None,
         client=None,
         processor=None,
+        candidate_scorer=None,
     ):
         if processor is None:
             from transformers import AutoProcessor
@@ -181,6 +189,35 @@ class XiaomiRobotics1Policy:
             if safe_feature_shape is not None
             else None
         )
+        self.safe_best_of_k = int(safe_best_of_k)
+        self.safe_candidate_strategy = str(safe_candidate_strategy)
+        self.safe_candidate_seed = int(safe_candidate_seed)
+        self.sampling_seed_base = (
+            None if sampling_seed_base is None else int(sampling_seed_base)
+        )
+        if self.safe_best_of_k < 1:
+            raise ValueError("safe_best_of_k must be positive")
+        if self.safe_candidate_strategy not in {
+            "lowest_safe",
+            "highest_safe",
+            "random",
+        }:
+            raise ValueError(
+                "safe_candidate_strategy must be lowest_safe, highest_safe, or random"
+            )
+        if self.safe_best_of_k > 1 and candidate_scorer is None:
+            if safe_runtime_bundle is None or safe_repo is None:
+                raise ValueError(
+                    "safe_best_of_k > 1 requires safe_runtime_bundle and safe_repo"
+                )
+            from robocasa.recovery.safe.xr1_best_of_k import FrozenXr1SafeEnsemble
+
+            candidate_scorer = FrozenXr1SafeEnsemble(
+                runtime_bundle=safe_runtime_bundle,
+                safe_repo=safe_repo,
+                device=safe_device,
+            )
+        self.candidate_scorer = candidate_scorer
         self.policy_name = policy_name
         self.policy_checkpoint = policy_checkpoint
         if not 0 < self.crop_ratio <= 1:
@@ -254,7 +291,9 @@ class XiaomiRobotics1Policy:
             )
         self.state_queue.append(observation_to_state(observation))
 
-    def _make_request(self, instruction):
+    def _make_request(
+        self, instruction, *, request_safe_features=None, sampling_seed=None
+    ):
         state_history = sample_history(
             self.state_queue,
             self.observation_history,
@@ -281,8 +320,12 @@ class XiaomiRobotics1Policy:
         )
         request = dict(inputs)
         request["task_id"] = self.robot_type
-        if self.collect_safe_features:
+        if request_safe_features is None:
+            request_safe_features = self.collect_safe_features
+        if request_safe_features:
             request["request_safe_features"] = True
+        if sampling_seed is not None:
+            request["sampling_seed"] = int(sampling_seed)
         return request
 
     def _decode_actions(self, raw_actions):
@@ -304,7 +347,7 @@ class XiaomiRobotics1Policy:
             raise RuntimeError("XR-1 actions contain NaN or infinite values")
         return actions
 
-    def _record_safe_features(self, response, actions):
+    def _parse_safe_features(self, response, actions):
         if not isinstance(response, dict) or "safe_features" not in response:
             raise RuntimeError(
                 "SAFE feature collection was requested, but the XR-1 server did "
@@ -391,6 +434,10 @@ class XiaomiRobotics1Policy:
                 "XR-1 SAFE metadata disagrees with payload for: "
                 + ", ".join(failed_checks)
             )
+        return np.ascontiguousarray(features), metadata
+
+    def _record_safe_features(self, response, actions):
+        features, metadata = self._parse_safe_features(response, actions)
         record = {
             "env_step": self._env_step,
             "environment_step": self._env_step,
@@ -403,14 +450,57 @@ class XiaomiRobotics1Policy:
         self._pending_inference_record = record
         self._latest_inference_record = record
 
-    def __call__(self, observation, instruction=None):
-        instruction = instruction or observation["annotation.human.task_description"]
-        if self.last_instruction is not None and instruction != self.last_instruction:
-            self.reset()
-        self.last_instruction = instruction
-        self._append_observation(observation)
-        if not self.action_plan:
-            response = self.client.infer(self._make_request(instruction))
+    @staticmethod
+    def _action_diversity(candidate_actions, replan_steps):
+        flattened = [
+            np.asarray(actions[:replan_steps], dtype=np.float64).reshape(-1)
+            for actions in candidate_actions
+        ]
+        distances = [
+            float(np.linalg.norm(flattened[left] - flattened[right]))
+            for left in range(len(flattened))
+            for right in range(left + 1, len(flattened))
+        ]
+        return {
+            "pairwise_l2_min": min(distances) if distances else 0.0,
+            "pairwise_l2_mean": float(np.mean(distances)) if distances else 0.0,
+            "all_identical": bool(not distances or max(distances) == 0.0),
+        }
+
+    def _select_candidate(self, scores):
+        scores = np.asarray(scores, dtype=np.float64)
+        if scores.shape != (self.safe_best_of_k,) or not np.all(np.isfinite(scores)):
+            raise RuntimeError(
+                "SAFE scorer must return one finite score per candidate, got "
+                f"{scores.shape}"
+            )
+        if self.safe_candidate_strategy == "lowest_safe":
+            return int(np.argmin(scores))
+        if self.safe_candidate_strategy == "highest_safe":
+            return int(np.argmax(scores))
+        rng = np.random.default_rng(
+            self.safe_candidate_seed + self._candidate_selection_index
+        )
+        return int(rng.integers(self.safe_best_of_k))
+
+    def _infer_best_of_k(self, instruction):
+        candidate_actions = []
+        candidate_features = []
+        candidate_metadata = []
+        sampling_seeds = []
+        for candidate_index in range(self.safe_best_of_k):
+            sampling_seed = (
+                self.safe_candidate_seed
+                + self._candidate_selection_index * self.safe_best_of_k
+                + candidate_index
+            )
+            response = self.client.infer(
+                self._make_request(
+                    instruction,
+                    request_safe_features=True,
+                    sampling_seed=sampling_seed,
+                )
+            )
             raw_actions = (
                 response.get("actions") if isinstance(response, dict) else response
             )
@@ -422,8 +512,86 @@ class XiaomiRobotics1Policy:
                     f"XR-1 returned {len(actions)} actions, but replan_steps is "
                     f"{self.replan_steps}"
                 )
-            if self.collect_safe_features:
-                self._record_safe_features(response, actions)
+            features, metadata = self._parse_safe_features(response, actions)
+            candidate_actions.append(actions)
+            candidate_features.append(features)
+            candidate_metadata.append(metadata)
+            sampling_seeds.append(sampling_seed)
+
+        score_result = self.candidate_scorer.score_candidates(
+            np.stack(candidate_features), task_name=self._recovery_task_name
+        )
+        scores = score_result.get("scores")
+        selected_index = self._select_candidate(scores)
+        selected_actions = candidate_actions[selected_index]
+        selected_response = {
+            "safe_features": candidate_features[selected_index],
+            "safe_feature_metadata": candidate_metadata[selected_index],
+        }
+        self._record_safe_features(selected_response, selected_actions)
+        score_array = np.asarray(scores, dtype=np.float64)
+        record = {
+            "schema_version": 1,
+            "environment_step": self._env_step,
+            "inference_index": self._inference_index - 1,
+            "selection_index": self._candidate_selection_index,
+            "task_name": self._recovery_task_name,
+            "target_subtask": self._recovery_target_subtask,
+            "strategy": self.safe_candidate_strategy,
+            "candidate_count": self.safe_best_of_k,
+            "sampling_seeds": sampling_seeds,
+            "scores": score_array.tolist(),
+            "selected_index": selected_index,
+            "selected_score": float(score_array[selected_index]),
+            "score_spread": float(np.ptp(score_array)),
+            "scoring_protocol": score_result.get("protocol"),
+            "ensemble_seeds": score_result.get("seeds"),
+            "raw_scores_by_seed": score_result.get("raw_scores_by_seed"),
+            "normalized_scores_by_seed": score_result.get("normalized_scores_by_seed"),
+            "scorer_provenance": score_result.get("provenance"),
+            "action_diversity": self._action_diversity(
+                candidate_actions, self.replan_steps
+            ),
+        }
+        self._candidate_selection_index += 1
+        self._pending_candidate_selection_record = record
+        self._latest_candidate_selection_record = record
+        return selected_actions
+
+    def _infer_one(self, instruction):
+        sampling_seed = None
+        if self.sampling_seed_base is not None:
+            sampling_seed = self.sampling_seed_base + self._ordinary_inference_index
+        response = self.client.infer(
+            self._make_request(instruction, sampling_seed=sampling_seed)
+        )
+        self._ordinary_inference_index += 1
+        raw_actions = (
+            response.get("actions") if isinstance(response, dict) else response
+        )
+        if raw_actions is None:
+            raise RuntimeError("XR-1 response is missing actions")
+        actions = self._decode_actions(raw_actions)
+        if len(actions) < self.replan_steps:
+            raise RuntimeError(
+                f"XR-1 returned {len(actions)} actions, but replan_steps is "
+                f"{self.replan_steps}"
+            )
+        if self.collect_safe_features:
+            self._record_safe_features(response, actions)
+        return actions
+
+    def __call__(self, observation, instruction=None):
+        instruction = instruction or observation["annotation.human.task_description"]
+        if self.last_instruction is not None and instruction != self.last_instruction:
+            self.reset()
+        self.last_instruction = instruction
+        self._append_observation(observation)
+        if not self.action_plan:
+            if self._recovery_reranking_active and self.safe_best_of_k > 1:
+                actions = self._infer_best_of_k(instruction)
+            else:
+                actions = self._infer_one(instruction)
             self.action_plan.extend(actions[: self.replan_steps])
         action = _convert_action(self.action_plan.popleft())
         self._env_step += 1
@@ -434,9 +602,48 @@ class XiaomiRobotics1Policy:
         self._pending_inference_record = None
         return record
 
+    def pop_candidate_selection_record(self):
+        record = self._pending_candidate_selection_record
+        self._pending_candidate_selection_record = None
+        return record
+
+    def begin_recovery(self, *, task_name, target_subtask=None, instruction=None):
+        """Enable best-of-K only for the bounded recovery attempt."""
+        if self.safe_best_of_k <= 1:
+            return {
+                "enabled": False,
+                "candidate_count": 1,
+                "reason": "safe_best_of_k_is_one",
+            }
+        if not task_name:
+            raise ValueError("SAFE recovery reranking requires task_name")
+        self.reset()
+        self._recovery_reranking_active = True
+        self._recovery_task_name = str(task_name)
+        self._recovery_target_subtask = (
+            None if target_subtask is None else str(target_subtask)
+        )
+        self.last_instruction = None
+        return {
+            "enabled": True,
+            "candidate_count": self.safe_best_of_k,
+            "strategy": self.safe_candidate_strategy,
+            "task_name": self._recovery_task_name,
+            "target_subtask": self._recovery_target_subtask,
+            "instruction": instruction,
+        }
+
+    def end_recovery(self):
+        self._recovery_reranking_active = False
+        self.action_plan.clear()
+
     @property
     def latest_inference_record(self):
         return self._latest_inference_record
+
+    @property
+    def latest_candidate_selection_record(self):
+        return self._latest_candidate_selection_record
 
     def reset(self):
         self.action_plan = collections.deque()
@@ -449,6 +656,13 @@ class XiaomiRobotics1Policy:
         self._inference_index = 0
         self._pending_inference_record = None
         self._latest_inference_record = None
+        self._recovery_reranking_active = False
+        self._recovery_task_name = None
+        self._recovery_target_subtask = None
+        self._candidate_selection_index = 0
+        self._ordinary_inference_index = 0
+        self._pending_candidate_selection_record = None
+        self._latest_candidate_selection_record = None
 
     def close(self):
         self.client.close()
@@ -467,6 +681,13 @@ def make_policy(
     replan_steps=16,
     collect_safe_features=False,
     safe_feature_shape=None,
+    safe_best_of_k=1,
+    safe_candidate_strategy="lowest_safe",
+    safe_candidate_seed=0,
+    sampling_seed_base=None,
+    safe_runtime_bundle=None,
+    safe_repo=None,
+    safe_device="cpu",
     policy_name=None,
     policy_checkpoint=None,
 ):
@@ -486,6 +707,13 @@ def make_policy(
         replan_steps=replan_steps,
         collect_safe_features=collect_safe_features,
         safe_feature_shape=safe_feature_shape,
+        safe_best_of_k=safe_best_of_k,
+        safe_candidate_strategy=safe_candidate_strategy,
+        safe_candidate_seed=safe_candidate_seed,
+        sampling_seed_base=sampling_seed_base,
+        safe_runtime_bundle=safe_runtime_bundle,
+        safe_repo=safe_repo,
+        safe_device=safe_device,
         policy_name=policy_name,
         policy_checkpoint=policy_checkpoint,
     )

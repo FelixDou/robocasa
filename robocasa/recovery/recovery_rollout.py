@@ -6,6 +6,8 @@ restore the last good state, restore only the robot state, or continue from the
 failure state, then retry only the currently failed subtask.
 """
 
+from __future__ import annotations
+
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
@@ -102,6 +104,28 @@ def call_policy(policy, obs, instruction=None):
     raise TypeError(
         "policy must be callable or expose predict/select_action/get_action"
     )
+
+
+def begin_policy_recovery(policy, *, task_name, target_subtask, instruction):
+    method = getattr(policy, "begin_recovery", None)
+    if not callable(method):
+        return None
+    return method(
+        task_name=task_name,
+        target_subtask=target_subtask,
+        instruction=instruction,
+    )
+
+
+def pop_policy_candidate_selection(policy):
+    method = getattr(policy, "pop_candidate_selection_record", None)
+    return method() if callable(method) else None
+
+
+def end_policy_recovery(policy):
+    method = getattr(policy, "end_recovery", None)
+    if callable(method):
+        method()
 
 
 def set_observation_instruction(obs, instruction):
@@ -1445,36 +1469,51 @@ def run_recovery_after_failed_rollout(
     recovery_meta["recovery_atomic_task_name"] = recovery_atomic_task_name
     recovery_meta["resolved_recovery_horizon"] = retry_horizon
     recovery_meta["recovery_horizon_source"] = retry_horizon_source
-    for step_i in range(retry_horizon):
-        if retry_success:
-            break
-        retry_steps = step_i + 1
-        action = call_policy(policy, obs, instruction=instruction)
-        obs, reward, done, info = _step_env(env, action)
-        _refresh_sim_visuals(env)
-        video_frame = _append_video_frame_from_env(
-            env,
-            recovery_writer,
-            camera_name=video_camera_name,
-            height=video_height,
-            width=video_width,
-            obs=obs,
-            previous_frame=last_recovery_video_frame,
-            prefer_env_render=not video_direct_sim_render,
-            reuse_corrupt_previous=False,
-            render_attempts=3,
-            render_source=video_render_source,
-        )
-        if video_frame is not None:
-            last_recovery_video_frame = video_frame
-        obs = set_observation_instruction(obs, instruction)
-        current_eval = info.get("subtask_eval") if info else None
-        if current_eval is None:
-            current_eval = get_subtask_eval(env)
-        retry_evals.append(current_eval)
-        retry_success = _subtask_is_complete(current_eval, subtask_name)
-        if done:
-            break
+    policy_recovery = begin_policy_recovery(
+        policy,
+        task_name=config.evaluated_task_name,
+        target_subtask=subtask_name,
+        instruction=instruction,
+    )
+    if policy_recovery is not None:
+        recovery_meta["policy_recovery"] = policy_recovery
+    candidate_selection_records = []
+    try:
+        for step_i in range(retry_horizon):
+            if retry_success:
+                break
+            retry_steps = step_i + 1
+            action = call_policy(policy, obs, instruction=instruction)
+            selection_record = pop_policy_candidate_selection(policy)
+            if selection_record is not None:
+                candidate_selection_records.append(selection_record)
+            obs, reward, done, info = _step_env(env, action)
+            _refresh_sim_visuals(env)
+            video_frame = _append_video_frame_from_env(
+                env,
+                recovery_writer,
+                camera_name=video_camera_name,
+                height=video_height,
+                width=video_width,
+                obs=obs,
+                previous_frame=last_recovery_video_frame,
+                prefer_env_render=not video_direct_sim_render,
+                reuse_corrupt_previous=False,
+                render_attempts=3,
+                render_source=video_render_source,
+            )
+            if video_frame is not None:
+                last_recovery_video_frame = video_frame
+            obs = set_observation_instruction(obs, instruction)
+            current_eval = info.get("subtask_eval") if info else None
+            if current_eval is None:
+                current_eval = get_subtask_eval(env)
+            retry_evals.append(current_eval)
+            retry_success = _subtask_is_complete(current_eval, subtask_name)
+            if done:
+                break
+    finally:
+        end_policy_recovery(policy)
 
     retry_summary = summarize_subtask_rollout(
         retry_evals,
@@ -1488,6 +1527,10 @@ def run_recovery_after_failed_rollout(
     retry_summary["atomic_task_name"] = recovery_atomic_task_name
     retry_summary["target_subtask"] = subtask_name
     retry_summary["target_instruction"] = instruction
+    retry_summary["safe_best_of_k"] = {
+        "num_selections": len(candidate_selection_records),
+        "records": candidate_selection_records,
+    }
 
     result.update(
         {
