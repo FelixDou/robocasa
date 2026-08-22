@@ -304,6 +304,87 @@ def semantic_subtask_score_records(
     return rows
 
 
+def semantic_subtask_scores_from_saved_records(score_records, catalog_records):
+    """Align saved final-refit score trajectories to active-subtask labels."""
+    records = list(score_records)
+    if not records:
+        raise ValueError("Saved SAFE score records are empty")
+    catalog = validate_subtask_catalog(catalog_records)
+    segmented_flags = [bool(record.get("subtask_safe_segment")) for record in records]
+    if len(set(segmented_flags)) != 1:
+        raise ValueError("Saved SAFE scores mix terminal and segmented records")
+    segmented = segmented_flags[0]
+    source_parents = {parent_group_id(record) for record in records}
+    selected_catalog = [
+        record for record in catalog if parent_group_id(record) in source_parents
+    ]
+    if {parent_group_id(record) for record in selected_catalog} != source_parents:
+        raise ValueError("Saved SAFE scores contain parents absent from the catalog")
+
+    if segmented:
+        source_scores = {
+            str(record["rollout_id"]): np.asarray(
+                record["scores"], dtype=np.float64
+            ).reshape(-1)
+            for record in records
+        }
+        if len(source_scores) != len(records):
+            raise ValueError("Saved segmented SAFE scores have duplicate IDs")
+    else:
+        source_scores = {
+            parent_group_id(record): np.asarray(
+                record["scores"], dtype=np.float64
+            ).reshape(-1)
+            for record in records
+        }
+        if len(source_scores) != len(records):
+            raise ValueError("Saved terminal SAFE scores have duplicate parent IDs")
+
+    output = []
+    for catalog_record in selected_catalog:
+        segment_id = str(catalog_record["rollout_id"])
+        if segmented:
+            if segment_id not in source_scores:
+                raise ValueError(
+                    f"Saved Subtask-SAFE scores are missing segment {segment_id}"
+                )
+            values = source_scores[segment_id]
+        else:
+            parent = parent_group_id(catalog_record)
+            parent_values = source_scores[parent]
+            segment = catalog_record["subtask_safe_segment"]
+            start = int(segment["inference_start_index"])
+            end = int(segment["inference_end_index_exclusive"])
+            if start < 0 or end <= start or end > len(parent_values):
+                raise ValueError(
+                    f"Catalog segment {segment_id} has invalid saved-score slice "
+                    f"[{start}, {end}) for parent length {len(parent_values)}"
+                )
+            values = parent_values[start:end]
+        expected = subtask_score_length(catalog_record)
+        if len(values) != expected or not np.all(np.isfinite(values)):
+            raise ValueError(
+                f"Saved SAFE scores violate segment {segment_id} length/finite contract"
+            )
+        output.append(
+            {
+                "rollout_id": segment_id,
+                "parent_rollout_id": parent_group_id(catalog_record),
+                "parent_task_name": parent_task_name(catalog_record),
+                "task_name": subtask_stage_name(catalog_record),
+                "subtask_id": catalog_record.get("subtask_id"),
+                "failed": subtask_failed(catalog_record),
+                "scores": values,
+                "inference_environment_steps": list(
+                    catalog_record.get("inference_environment_steps") or []
+                ),
+                "subtask_safe_segment": dict(catalog_record["subtask_safe_segment"]),
+                "score_source": "segmented" if segmented else "terminal_sliced",
+            }
+        )
+    return output
+
+
 def _fixed_prefix_risk(record, prefix):
     values = np.asarray(record["scores"], dtype=np.float64).reshape(-1)
     if not len(values) or not np.all(np.isfinite(values)):

@@ -9,6 +9,7 @@ from robocasa.recovery.safe.subtask_safe_evaluation import (
     parent_aggregated_early_metrics,
     parent_group_id,
     semantic_subtask_score_records,
+    semantic_subtask_scores_from_saved_records,
     subtask_fixed_prefix_selection,
 )
 
@@ -291,6 +292,33 @@ class TestSubtaskLabelFixedPrefixSelection(unittest.TestCase):
                 "parent-F:Stage": [0.7, 0.8],
             },
         )
+
+    def test_saved_terminal_scores_are_sliced_to_catalog_stages(self):
+        catalog = [
+            self.catalog_record("parent-S", "Composite", "Stage", False, 1, 3),
+            self.catalog_record("parent-F", "Composite", "Stage", True, 1, 3),
+        ]
+        saved = [
+            {
+                "rollout_id": "parent-S",
+                "scores": [0.0, 0.1, 0.2, 0.3],
+            },
+            {
+                "rollout_id": "parent-F",
+                "scores": [0.0, 0.8, 0.9, 1.0],
+            },
+        ]
+
+        rows = semantic_subtask_scores_from_saved_records(saved, catalog)
+
+        self.assertEqual(
+            {row["rollout_id"]: row["scores"].tolist() for row in rows},
+            {
+                "parent-S:Stage": [0.1, 0.2],
+                "parent-F:Stage": [0.8, 0.9],
+            },
+        )
+        self.assertEqual({row["score_source"] for row in rows}, {"terminal_sliced"})
 
     def test_fixed_prefix_keeps_short_completed_segments_and_sparse_stages(self):
         rows = [
