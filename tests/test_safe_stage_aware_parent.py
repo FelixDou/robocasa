@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -11,6 +13,7 @@ from tests.safe_import_helper import install_lightweight_robocasa_packages
 install_lightweight_robocasa_packages()
 
 from robocasa.recovery.safe.run_stage_aware_parent_safe import (  # noqa: E402
+    _load_model_runtime,
     build_parser,
     load_external_fixed_prefix_scores,
     primary_per_task_values,
@@ -97,6 +100,29 @@ def parent(
 
 
 class TestStageAwareParentSafe(unittest.TestCase):
+    def test_runtime_loader_explicitly_loads_trusted_numpy_metadata(self):
+        fake_torch = mock.Mock()
+        fake_torch.load.return_value = {
+            "model_config": {},
+            "state_dicts": [],
+            "scaler": {"mean": np.asarray([0.0])},
+        }
+        with mock.patch.object(
+            sys.modules[_load_model_runtime.__module__],
+            "_torch",
+            return_value=fake_torch,
+        ):
+            models, payload = _load_model_runtime(
+                Path("/trusted/runtime"), "runtime_stage.pt", "cpu"
+            )
+        self.assertEqual(models, [])
+        self.assertIn("scaler", payload)
+        fake_torch.load.assert_called_once_with(
+            Path("/trusted/runtime/runtime_stage.pt"),
+            map_location="cpu",
+            weights_only=False,
+        )
+
     def test_development_allocation_is_parent_disjoint_and_stratified(self):
         parents = []
         for task in ("TaskA", "TaskB"):

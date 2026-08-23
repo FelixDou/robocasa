@@ -947,7 +947,19 @@ def develop(args):
 
 def _load_model_runtime(bundle_root, relative_path, device):
     torch = _torch()
-    payload = torch.load(bundle_root / relative_path, map_location=device)
+    runtime_path = bundle_root / relative_path
+    # These runtime files are produced locally by ``develop`` and contain
+    # NumPy-backed scaler metadata in addition to tensor state dictionaries.
+    # PyTorch >= 2.6 defaults to ``weights_only=True``, which rejects that
+    # trusted metadata. Never use this loader for an untrusted checkpoint.
+    try:
+        payload = torch.load(
+            runtime_path,
+            map_location=device,
+            weights_only=False,
+        )
+    except TypeError:  # PyTorch releases predating the weights_only argument.
+        payload = torch.load(runtime_path, map_location=device)
     models = []
     for state in payload["state_dicts"]:
         model = instantiate_from_config(payload["model_config"]).to(device)
