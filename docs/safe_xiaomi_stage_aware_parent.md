@@ -85,8 +85,9 @@ contain the newly added observation/state channel, so `context` is deliberately
 omitted. This run must not be presented as a new outer-test result.
 
 ```bash
-export XR1_EXISTING_RAW="$STORAGE_BS/robocasa_rollouts/safe/xr1_dense_subtask_live_5tasks_50each_20260817_195216"
-export XR1_EXISTING_SPLIT="$XR1_EXISTING_RAW/subtask_training/parent_rollout_split.json"
+export XR1_EXISTING_COLLECTION="$STORAGE_BS/robocasa_rollouts/safe/xr1_dense_subtask_live_5tasks_50each_20260817_195216"
+export XR1_EXISTING_RAW="$XR1_EXISTING_COLLECTION/subtask_training/merged_5tasks_50each"
+export XR1_EXISTING_SPLIT="$XR1_EXISTING_COLLECTION/subtask_training/parent_rollout_split.json"
 
 test -f "$XR1_EXISTING_RAW/manifest.jsonl"
 test -f "$XR1_EXISTING_SPLIT"
@@ -210,6 +211,21 @@ export XR1_STAGE_LOCKED_OUTER="$STORAGE_BS/robocasa_checkpoints/safe/xr1_stage_a
 
 test -f "$XR1_STAGE_RUNTIME"
 test ! -e "$XR1_STAGE_LOCKED_OUTER"
+
+# The runtime bundle is authoritative. Deriving this path prevents accidentally
+# passing the parent collection directory, which has no top-level manifest.
+export XR1_EXISTING_RAW="$("$SAFE_PY" - "$XR1_STAGE_RUNTIME" <<'PY'
+import json
+import pathlib
+import sys
+print(json.loads(pathlib.Path(sys.argv[1]).read_text())["source_dataset"])
+PY
+)"
+
+test -f "$XR1_EXISTING_RAW/manifest.jsonl" || {
+  echo "STOP: frozen source manifest is missing: $XR1_EXISTING_RAW/manifest.jsonl"
+  exit 1
+}
 
 cd "$ROBOCASA_REPO"
 CUDA_VISIBLE_DEVICES=0 "$SAFE_PY" -u -m \
