@@ -136,6 +136,17 @@ class TestSafeXiaomiPolicy(unittest.TestCase):
         self.assertEqual(first["inference_index"], 0)
         self.assertEqual(first["features"].shape, (5, 30, 8))
         self.assertEqual(first["actions"].shape, (30, 12))
+        self.assertEqual(
+            first["auxiliary_features"]["observation_state_history"].shape,
+            (4 * 60,),
+        )
+        self.assertTrue(
+            np.all(
+                np.isfinite(
+                    first["auxiliary_features"]["observation_state_history"]
+                )
+            )
+        )
         self.assertEqual(first["metadata"]["model_family"], "xiaomi_robotics_1")
         self.assertTrue(policy.client.requests[0]["request_safe_features"])
         self.assertEqual(policy.client.requests[0]["state"].shape, (1, 4, 60))

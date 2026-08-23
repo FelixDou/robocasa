@@ -24,6 +24,7 @@ def save_rollout(
     metadata: SafeRolloutMetadata,
     features: np.ndarray,
     policy_action_chunks: np.ndarray | None = None,
+    auxiliary_features: dict[str, np.ndarray] | None = None,
 ) -> Path:
     output_dir = Path(output_dir)
     tensor_dir = output_dir / "rollouts"
@@ -46,6 +47,26 @@ def save_rollout(
             raise ValueError("policy_action_chunks must be (inferences, horizon, action_dim)")
         if policy_action_chunks.shape[:2] != (features.shape[0], features.shape[2]):
             raise ValueError("policy action chunks disagree with SAFE inference/horizon axes")
+    auxiliary_payload = {}
+    auxiliary_metadata = {}
+    for name, values in sorted((auxiliary_features or {}).items()):
+        if not name or not name.replace("_", "").isalnum():
+            raise ValueError(f"Invalid auxiliary feature name {name!r}")
+        values = np.asarray(values, dtype=np.float32)
+        if values.ndim < 2 or values.shape[0] != features.shape[0]:
+            raise ValueError(
+                f"Auxiliary feature {name!r} must start with inference axis "
+                f"{features.shape[0]}, got {values.shape}"
+            )
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"Auxiliary feature {name!r} contains NaN or infinity")
+        auxiliary_payload[f"auxiliary__{name}"] = values
+        auxiliary_metadata[name] = {
+            "shape": list(values.shape),
+            "dtype": str(values.dtype),
+            "inference_aligned": True,
+            "causal": True,
+        }
     feature_metadata = {
         "schema_version": metadata.feature_schema_version,
         "model_family": metadata.model_family,
@@ -72,6 +93,11 @@ def save_rollout(
     }
     if policy_action_chunks is not None:
         payload["policy_action_chunks"] = policy_action_chunks
+    if auxiliary_payload:
+        payload.update(auxiliary_payload)
+        payload["auxiliary_feature_metadata_json"] = np.asarray(
+            json.dumps(auxiliary_metadata, sort_keys=True)
+        )
     np.savez_compressed(temp_path, **payload)
     os.replace(temp_path, tensor_path)
     manifest_path = output_dir / MANIFEST_NAME

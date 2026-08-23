@@ -970,6 +970,7 @@ def run_collection(args, runtime=None):
                     metadata,
                     rollout["features"],
                     rollout["policy_action_chunks"],
+                    auxiliary_features=rollout.get("auxiliary_features"),
                 )
                 records.append(metadata)
                 record_by_id[rollout_id] = metadata

@@ -301,6 +301,13 @@ class XiaomiRobotics1Policy:
         )
         state = np.zeros((1, state_history.shape[0], self.state_dim), dtype=np.float32)
         state[0, :, : state_history.shape[-1]] = state_history
+        # This small causal state-history channel is stored only when SAFE
+        # features are requested.  It is a deployable observation/state
+        # ablation; it does not depend on future observations or simulator
+        # privileged state.
+        self._latest_observation_state_history = np.ascontiguousarray(
+            state[0].reshape(-1), dtype=np.float32
+        )
         image_history = {
             key: sample_history(
                 queue,
@@ -445,6 +452,11 @@ class XiaomiRobotics1Policy:
             "features": np.ascontiguousarray(features),
             "actions": np.ascontiguousarray(actions),
             "metadata": metadata,
+            "auxiliary_features": {
+                "observation_state_history": np.ascontiguousarray(
+                    self._latest_observation_state_history, dtype=np.float32
+                )
+            },
         }
         self._inference_index += 1
         self._pending_inference_record = record
@@ -669,6 +681,7 @@ class XiaomiRobotics1Policy:
         self._ordinary_inference_index = 0
         self._pending_candidate_selection_record = None
         self._latest_candidate_selection_record = None
+        self._latest_observation_state_history = None
 
     def close(self):
         self.client.close()

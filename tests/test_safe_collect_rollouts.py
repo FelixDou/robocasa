@@ -95,6 +95,11 @@ class FakePolicy:
                 "inference_index": self.inference_index,
                 "features": np.full((2, 4, 8), value, dtype=np.float32),
                 "actions": np.full((4, 12), value, dtype=np.float32),
+                "auxiliary_features": {
+                    "observation_state_history": np.full(
+                        (16,), value, dtype=np.float32
+                    )
+                },
                 "metadata": {
                     "schema_version": 1,
                     "action_horizon": 4,
@@ -122,6 +127,10 @@ class TestSafeCollection(unittest.TestCase):
         self.assertEqual(result["inference_env_steps"], [0, 2])
         self.assertEqual(result["features"].shape, (2, 2, 4, 8))
         self.assertEqual(result["policy_action_chunks"].shape, (2, 4, 12))
+        self.assertEqual(
+            result["auxiliary_features"]["observation_state_history"].shape,
+            (2, 16),
+        )
         self.assertFalse(np.array_equal(result["features"][0], result["features"][1]))
 
     def test_video_frame_stride_matches_official_subsampling(self):

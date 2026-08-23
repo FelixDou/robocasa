@@ -144,6 +144,21 @@ def collect_single_rollout(
         if records and all("actions" in record for record in records)
         else None
     )
+    auxiliary_features = None
+    if records and any("auxiliary_features" in record for record in records):
+        if not all(isinstance(record.get("auxiliary_features"), dict) for record in records):
+            raise RuntimeError(
+                "Auxiliary SAFE features must be present at every policy inference"
+            )
+        keys = set(records[0]["auxiliary_features"])
+        if any(set(record["auxiliary_features"]) != keys for record in records[1:]):
+            raise RuntimeError("Auxiliary SAFE feature keys changed within rollout")
+        auxiliary_features = {
+            key: np.stack(
+                [np.asarray(record["auxiliary_features"][key]) for record in records]
+            ).astype(np.float32)
+            for key in sorted(keys)
+        }
     subtask_safe_record = (
         build_subtask_safe_record(
             subtask_evals,
@@ -163,6 +178,7 @@ def collect_single_rollout(
         "inference_env_steps": inference_steps,
         "feature_metadata": metadata,
         "policy_action_chunks": policy_action_chunks,
+        "auxiliary_features": auxiliary_features,
         "actions": actions,
         "num_video_frames": num_video_frames,
         "subtask_safe_record": subtask_safe_record,

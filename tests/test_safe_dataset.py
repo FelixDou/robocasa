@@ -62,6 +62,44 @@ class TestSafeDataset(unittest.TestCase):
             with np.load(Path(tmp) / record.tensor_path, allow_pickle=False) as payload:
                 self.assertEqual(int(payload["schema_version"]), 1)
 
+    def test_inference_aligned_auxiliary_features_are_persisted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            features = np.ones((3, 2, 4, 8), dtype=np.float32)
+            state_history = np.arange(3 * 12, dtype=np.float32).reshape(3, 12)
+            save_rollout(
+                tmp,
+                metadata("r-context"),
+                features,
+                auxiliary_features={"observation_state_history": state_history},
+            )
+            record = load_manifest(tmp)[0]
+            with np.load(Path(tmp) / record.tensor_path, allow_pickle=False) as payload:
+                np.testing.assert_array_equal(
+                    payload["auxiliary__observation_state_history"], state_history
+                )
+                auxiliary = json.loads(
+                    str(payload["auxiliary_feature_metadata_json"].item())
+                )
+            self.assertEqual(
+                auxiliary["observation_state_history"]["shape"], [3, 12]
+            )
+            self.assertTrue(
+                auxiliary["observation_state_history"]["inference_aligned"]
+            )
+
+    def test_auxiliary_features_must_match_inference_axis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            features = np.ones((3, 2, 4, 8), dtype=np.float32)
+            with self.assertRaisesRegex(ValueError, "inference axis"):
+                save_rollout(
+                    tmp,
+                    metadata("r-bad-context"),
+                    features,
+                    auxiliary_features={
+                        "observation_state_history": np.ones((2, 12), dtype=np.float32)
+                    },
+                )
+
     def test_schema_rejects_inference_mismatch(self):
         record = metadata("r0")
         record.inference_env_steps = [0, 2]
