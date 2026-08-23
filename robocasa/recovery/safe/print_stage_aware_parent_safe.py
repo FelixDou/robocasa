@@ -42,13 +42,46 @@ def print_development(root, analysis):
 
 
 def print_prospective(root, analysis):
-    print("FULL-PARENT STAGE-AWARE SAFE PROSPECTIVE TEST: COMPLETE")
+    if analysis.get("prospective_claim", True):
+        print("FULL-PARENT STAGE-AWARE SAFE PROSPECTIVE TEST: COMPLETE")
+    else:
+        print("FULL-PARENT STAGE-AWARE SAFE RETROSPECTIVE OUTER CHECK: COMPLETE")
+    print("evaluation scope:", analysis.get("evaluation_scope", "prospective"))
+    print("prospective claim:", analysis.get("prospective_claim", True))
     print("parents:", analysis["parents"])
     print("tasks:", len(analysis["tasks"]))
     print("stage events:", analysis["stage_events"])
     print("thresholds updated on test:", analysis["thresholds_updated_on_test"])
     print("development IDs disjoint:", analysis["development_ids_disjoint"])
     print("primary detector:", analysis["primary_detector"])
+    ranking = analysis.get("ranking_confirmation")
+    if ranking is not None:
+        print("\nFIXED-PREFIX TASK-STAGE MACRO ROC-AUC")
+        print("primary prefixes:", ranking["primary_prefixes"])
+        for detector, value in sorted(ranking["primary_values"].items()):
+            print(f"{detector:16s} {_number(value)}")
+        print(
+            "primary minus terminal:",
+            _number(ranking.get("primary_minus_terminal")),
+        )
+        print(
+            "primary minus time_only:",
+            _number(ranking.get("primary_minus_time_only")),
+        )
+        print("tasks primary beats terminal:", ranking["tasks_primary_beats_terminal"])
+        print("tasks primary beats time_only:", ranking["tasks_primary_beats_time_only"])
+        print("\nPAIRED FIXED-PREFIX PRIMARY MINUS BASELINE")
+        for baseline, result in sorted(
+            ranking.get("paired_task_parent_bootstrap", {}).items()
+        ):
+            print(
+                f"{baseline:16s} delta={result['point']:+.4f} "
+                f"95%CI=[{result['ci95'][0]:+.4f}, {result['ci95'][1]:+.4f}] "
+                f"estimable={result['replicates_estimable']}"
+            )
+        print("\nRANKING CONFIRMATION CRITERIA")
+        for key, value in ranking["criteria"].items():
+            print(f"{key}: {value}")
     print("\nMATCHED-FPR PARENT RESULTS")
     for detector, metrics in sorted(analysis["detectors"].items()):
         parent = metrics["parent_level"]
@@ -78,7 +111,10 @@ def main(argv=None):
     root = Path(args.run_dir).resolve()
     analysis = json.loads((root / "analysis.json").read_text())
     protocol = analysis.get("protocol")
-    if protocol == "prospective_full_parent_stage_aware_safe":
+    if protocol in (
+        "prospective_full_parent_stage_aware_safe",
+        "retrospective_locked_outer_full_parent_stage_aware_safe",
+    ):
         print_prospective(root, analysis)
     elif (root / "runtime_bundle.json").is_file():
         print_development(root, analysis)

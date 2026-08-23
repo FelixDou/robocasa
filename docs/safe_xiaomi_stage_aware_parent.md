@@ -46,12 +46,14 @@ export PROJECT_FS=/gs/fs/tga-shinoda/felid
 export STORAGE_BS=/gs/bs/tga-shinoda/felid
 export ROBOCASA_REPO="$PROJECT_FS/robocasa"
 export XR1_SAFE_REPO="$PROJECT_FS/robocasa_benchmark_repos/Xiaomi-Robotics-1-safe"
+export SAFE_REPO="$PROJECT_FS/SAFE"
 export XR1_SERVER_ENV="$STORAGE_BS/envs/xiaomi_robotics_1_server"
 export XR1_CLIENT_ENV="$STORAGE_BS/envs/xiaomi_robotics_1_robocasa365"
 export SAFE_ENV="$STORAGE_BS/envs/vla_safe"
 export XR1_PY="$XR1_CLIENT_ENV/bin/python"
 export SAFE_PY="$SAFE_ENV/bin/python"
 export XR1_SAFE_CHECKPOINT="$STORAGE_BS/robocasa_checkpoints/xiaomi_robotics_1/Xiaomi-Robotics-1-RoboCasa365-safe"
+export XR1_SAFE38_FINAL="$STORAGE_BS/robocasa_checkpoints/safe/xr1_pooled_39tasks_final_refits_20260814_231508"
 export XR1_LOG_ROOT="$STORAGE_BS/robocasa_logs/eval"
 
 mkdir -p "$XR1_LOG_ROOT" /tmp/ut06746
@@ -61,6 +63,8 @@ git pull --ff-only origin codex/safe-xiaomi-robotics-1
 test -x "$XR1_PY"
 test -x "$SAFE_PY"
 test -f "$XR1_SAFE_CHECKPOINT/config.json"
+test -d "$SAFE_REPO/.git"
+test -f "$XR1_SAFE38_FINAL/indep_seed0/model_final.ckpt"
 test -f robocasa/recovery/safe/stage_aware_parent_safe.py
 test -f robocasa/recovery/safe/run_stage_aware_parent_safe.py
 "$SAFE_PY" -c 'import numpy, torch; print("torch", torch.__version__, "cuda", torch.cuda.is_available())'
@@ -189,6 +193,41 @@ source "$STORAGE_BS/robocasa_checkpoints/safe/xr1_stage_aware_parent_latest.env"
 "$SAFE_PY" -m robocasa.recovery.safe.print_stage_aware_parent_safe \
   --run-dir "$XR1_STAGE_ROOT"
 ```
+
+### 2.1 One-time retrospective check on the locked 80 parents
+
+After the runtime bundle is frozen, score the exact locked outer IDs once.
+These parents were not loaded by the stage-aware fit, selection, or calibration
+phases, so this is a useful held-out sanity check. Their outcomes were already
+examined in earlier terminal-versus-subtask experiments, however, so this run
+is explicitly retrospective and cannot replace the new prospective collection.
+Do not refit, change stages, change normalization, update thresholds, or decide
+whether to run the prospective test from this result.
+
+```bash
+export XR1_STAGE_RUNTIME="$XR1_STAGE_ROOT/runtime_bundle.json"
+export XR1_STAGE_LOCKED_OUTER="$STORAGE_BS/robocasa_checkpoints/safe/xr1_stage_aware_locked_outer_$(date +%Y%m%d_%H%M%S)"
+
+test -f "$XR1_STAGE_RUNTIME"
+test ! -e "$XR1_STAGE_LOCKED_OUTER"
+
+cd "$ROBOCASA_REPO"
+CUDA_VISIBLE_DEVICES=0 "$SAFE_PY" -u -m \
+  robocasa.recovery.safe.run_stage_aware_parent_safe evaluate \
+  --dataset-dir "$XR1_EXISTING_RAW" \
+  --runtime-bundle "$XR1_STAGE_RUNTIME" \
+  --output-dir "$XR1_STAGE_LOCKED_OUTER" \
+  --opened-outer \
+  --bootstrap-replicates 2000 --bootstrap-seed 0 \
+  --device cuda
+
+"$SAFE_PY" -m robocasa.recovery.safe.print_stage_aware_parent_safe \
+  --run-dir "$XR1_STAGE_LOCKED_OUTER"
+```
+
+Require `evaluation_scope=retrospective_locked_opened_outer`,
+`prospective_claim=false`, exactly 80 parents, and
+`thresholds_updated_on_test=false`.
 
 ## 3. Fresh context-enabled training collection
 
@@ -358,6 +397,72 @@ export XR1_CONTEXT_SPLIT="$XR1_CONTEXT_SPLIT_ROOT/parent_rollout_split.json"
 The expected split is 250 total parents, approximately 170 development and 80
 locked holdout. Exact counts can differ slightly because each task/outcome
 stratum is rounded independently.
+
+### 3.1 Mandatory frozen confirmation, including the SAFE38 baseline
+
+Do this before fitting the context arm. The new trace-enabled collection is a
+valid prospective test for the already frozen five-task stage-aware bundle.
+The older SAFE38 rollouts cannot provide stage ground truth because they were
+recorded without semantic traces. They can nevertheless be used cleanly by
+applying the already frozen 38-task MLP to this new five-task export. That
+external detector is a secondary fixed-prefix comparator: it is never refit,
+normalized, or thresholded on the prospective parents.
+
+The current development thresholds had only 18 successful calibration parents,
+so matched-FPR event results remain descriptive. The primary confirmation is
+the prefix-1/2 task-stage macro ROC-AUC and its predeclared ranking gates.
+
+```bash
+export XR1_FROZEN_STAGE_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/xr1_stage_aware_parent_5tasks_20260823_162943"
+export XR1_FROZEN_STAGE_RUNTIME="$XR1_FROZEN_STAGE_ROOT/runtime_bundle.json"
+export XR1_CONTEXT_EXPORT="$XR1_CONTEXT_RAW/official_safe_all_retained"
+export XR1_SAFE38_SCORE_ROOT="$XR1_CONTEXT_RAW/frozen_safe38_indep_scores"
+export XR1_FROZEN_CONFIRM="$STORAGE_BS/robocasa_checkpoints/safe/xr1_stage_aware_frozen_confirmation_$(date +%Y%m%d_%H%M%S)"
+
+test -f "$XR1_FROZEN_STAGE_RUNTIME"
+test -f "$XR1_CONTEXT_MERGED/manifest.jsonl"
+test ! -e "$XR1_CONTEXT_EXPORT"
+test ! -e "$XR1_FROZEN_CONFIRM"
+
+cd "$ROBOCASA_REPO"
+"$XR1_PY" -m robocasa.recovery.safe.export_to_official_safe \
+  --dataset-dir "$XR1_CONTEXT_MERGED" \
+  --output-dir "$XR1_CONTEXT_EXPORT"
+
+mkdir -p "$XR1_SAFE38_SCORE_ROOT"
+for seed in 0 1 2; do
+  CUDA_VISIBLE_DEVICES=0 "$SAFE_PY" -u -m \
+    robocasa.recovery.safe.score_seen_checkpoint_external \
+    --export-dir "$XR1_CONTEXT_EXPORT" \
+    --safe-repo "$SAFE_REPO" \
+    --training-run-dir "$XR1_SAFE38_FINAL/indep_seed$seed" \
+    --output-dir "$XR1_SAFE38_SCORE_ROOT/seed$seed" \
+    --group prospective_test \
+    --allow-task-subset \
+    --device cuda
+done
+
+CUDA_VISIBLE_DEVICES=0 "$SAFE_PY" -u -m \
+  robocasa.recovery.safe.run_stage_aware_parent_safe evaluate \
+  --dataset-dir "$XR1_CONTEXT_MERGED" \
+  --runtime-bundle "$XR1_FROZEN_STAGE_RUNTIME" \
+  --output-dir "$XR1_FROZEN_CONFIRM" \
+  --external-scores \
+    "safe38_indep=$XR1_SAFE38_SCORE_ROOT/seed0,$XR1_SAFE38_SCORE_ROOT/seed1,$XR1_SAFE38_SCORE_ROOT/seed2" \
+  --bootstrap-replicates 2000 --bootstrap-seed 0 \
+  --device cuda
+
+"$SAFE_PY" -m robocasa.recovery.safe.print_stage_aware_parent_safe \
+  --run-dir "$XR1_FROZEN_CONFIRM"
+```
+
+The evaluator requires exact rollout-ID agreement across all three SAFE38
+score files, checks seed/reset identity disjointness from development, averages
+the frozen seed scores inference-by-inference, and labels them explicitly as
+fixed-prefix-only external scores. The four primary gates remain conditioned
+ROC at least 0.60, conditioned-minus-terminal at least +0.05, and conditioned
+beating terminal and time-only on at least four of five tasks. SAFE38 is
+reported alongside those gates but does not replace either comparator.
 
 Run the same dry-run and smoke gates as Section 2, now using
 `$XR1_CONTEXT_MERGED`, `$XR1_CONTEXT_SPLIT`, and all six arms. Then launch the

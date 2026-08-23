@@ -1,0 +1,7 @@
+detector,calibration_parents,successful_parent_units,target_fpr,finite_sample_rank,empirical_parent_fpr,failed_stage_tpr,balanced_accuracy
+conditioned,37,18,0.05,19,0.0000,0.1579,0.5789
+multihorizon,37,18,0.05,19,0.0000,0.0526,0.5263
+prototype,37,18,0.05,19,0.0000,0.1053,0.5526
+stage,37,18,0.05,19,0.0000,0.1053,0.5526
+terminal,37,18,0.05,19,0.0000,0.1053,0.5526
+time_only,37,18,0.05,19,0.0000,0.5263,0.7632

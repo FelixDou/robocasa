@@ -47,6 +47,7 @@ from .stage_aware_parent_safe import (
     load_parent_split,
     make_parent_holdout_split,
     model_rows,
+    paired_fixed_prefix_bootstrap,
     paired_parent_bootstrap,
     parent_event_metrics,
     parent_identity,
@@ -900,6 +901,8 @@ def develop(args):
         "feature_aggregation": args.feature_aggregation,
         "context_key": args.context_key,
         "failure_horizons": list(args.failure_horizons),
+        "prefixes": list(args.prefixes),
+        "primary_prefixes": list(args.primary_prefixes),
         "temporal_window": int(args.temporal_window),
         "horizons": refit_horizons,
         "model_runtime_files": runtime_models,
@@ -954,6 +957,102 @@ def _load_model_runtime(bundle_root, relative_path, device):
     return models, payload
 
 
+def _read_external_score_file(path):
+    path = Path(path).resolve()
+    if path.is_dir():
+        path = path / "scores.jsonl"
+    if not path.is_file():
+        raise ValueError(f"External score file is missing: {path}")
+    records = {}
+    with path.open() as stream:
+        for line_number, line in enumerate(stream, start=1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            rollout_id = str(row["rollout_id"])
+            if rollout_id in records:
+                raise ValueError(
+                    f"Duplicate rollout ID {rollout_id} in {path}:{line_number}"
+                )
+            values = np.asarray(row["scores"], dtype=np.float64)
+            if values.ndim != 1 or not len(values) or not np.all(np.isfinite(values)):
+                raise ValueError(f"Invalid external score trajectory for {rollout_id}")
+            records[rollout_id] = values
+    return path, records
+
+
+def load_external_fixed_prefix_scores(specifications, stage_rows, parent_ids):
+    """Load one or more frozen external detector ensembles.
+
+    Each specification is ``NAME=PATH[,PATH...]``.  Multiple paths are
+    averaged inference-by-inference and therefore represent a frozen seed
+    ensemble.  Every file must score exactly the prospective parent set.
+    """
+    outputs, provenance = {}, {}
+    expected_ids = {str(value) for value in parent_ids}
+    for specification in specifications or ():
+        if "=" not in specification:
+            raise ValueError(
+                "External score specification must be NAME=PATH[,PATH...]"
+            )
+        name, raw_paths = specification.split("=", 1)
+        name = name.strip()
+        paths = [value.strip() for value in raw_paths.split(",") if value.strip()]
+        if not name or not paths:
+            raise ValueError(f"Invalid external score specification: {specification}")
+        if name in outputs:
+            raise ValueError(f"Duplicate external detector name: {name}")
+        members = []
+        resolved_paths = []
+        for raw_path in paths:
+            path, records = _read_external_score_file(raw_path)
+            actual_ids = set(records)
+            if actual_ids != expected_ids:
+                raise ValueError(
+                    f"External scores for {name} do not match prospective parents: "
+                    f"missing={sorted(expected_ids - actual_ids)[:5]}, "
+                    f"unexpected={sorted(actual_ids - expected_ids)[:5]}"
+                )
+            members.append(records)
+            resolved_paths.append(str(path))
+        aligned = []
+        for row in stage_rows:
+            rollout_id = str(row["parent_rollout_id"])
+            inference_index = int(row["inference_index"])
+            values = []
+            for records in members:
+                trajectory = records[rollout_id]
+                if inference_index >= len(trajectory):
+                    raise ValueError(
+                        f"External detector {name} has only {len(trajectory)} scores "
+                        f"for {rollout_id}, but inference {inference_index} is required"
+                    )
+                values.append(float(trajectory[inference_index]))
+            aligned.append(float(np.mean(values)))
+        outputs[name] = np.asarray(aligned, dtype=np.float64)
+        provenance[name] = {
+            "members": len(members),
+            "score_files": resolved_paths,
+            "aggregation": "inference-wise arithmetic mean",
+            "threshold_fitted": False,
+            "use": "fixed-prefix ranking only",
+        }
+    return outputs, provenance
+
+
+def primary_per_task_values(metrics, primary_prefixes):
+    values = defaultdict(list)
+    for prefix in primary_prefixes:
+        row = metrics.get(str(int(prefix)), {})
+        for task, value in row.get("per_task", {}).items():
+            values[task].append(float(value))
+    return {
+        task: float(np.mean(task_values))
+        for task, task_values in sorted(values.items())
+        if task_values
+    }
+
+
 def evaluate(args):
     output = Path(args.output_dir).resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -963,32 +1062,51 @@ def evaluate(args):
     bundle = json.loads(bundle_path.read_text())
     if bundle.get("status") != "frozen":
         raise ValueError("Runtime bundle is not frozen")
+    locked_outer_ids = set(bundle["locked_opened_outer_parent_ids"])
+    opened_outer_mode = bool(args.opened_outer)
     loaded = load_parent_sequences(
         args.dataset_dir,
+        parent_ids=locked_outer_ids if opened_outer_mode else None,
         tasks=bundle["tasks"],
         aggregation=bundle["feature_aggregation"],
         context_key=bundle.get("context_key"),
         require_context="context" in bundle["model_runtime_files"],
     )
     parents = loaded["parents"]
-    source_ids = set(bundle["source_parent_ids"]) | set(
-        bundle["locked_opened_outer_parent_ids"]
-    )
     test_ids = {parent["rollout_id"] for parent in parents}
-    overlap = sorted(source_ids & test_ids)
-    if overlap:
-        raise ValueError(
-            "Prospective rollout IDs overlap development/opened outer IDs: "
-            + ", ".join(overlap[:5])
-        )
-    source_identities = {tuple(value) for value in bundle["source_parent_identities"]}
-    test_identities = {parent_identity(parent) for parent in parents}
-    identity_overlap = source_identities & test_identities
-    if identity_overlap:
-        raise ValueError(
-            "Prospective task/seed/reset identities overlap development: "
-            + repr(sorted(identity_overlap)[:3])
-        )
+    if opened_outer_mode:
+        if test_ids != locked_outer_ids:
+            raise ValueError(
+                "Opened-outer evaluation must load exactly the frozen locked IDs: "
+                f"missing={sorted(locked_outer_ids - test_ids)[:5]}, "
+                f"unexpected={sorted(test_ids - locked_outer_ids)[:5]}"
+            )
+        development_ids_disjoint = False
+        identity_disjoint = False
+        evaluation_scope = "retrospective_locked_opened_outer"
+        prospective_claim = False
+    else:
+        source_ids = set(bundle["source_parent_ids"]) | locked_outer_ids
+        overlap = sorted(source_ids & test_ids)
+        if overlap:
+            raise ValueError(
+                "Prospective rollout IDs overlap development/opened outer IDs: "
+                + ", ".join(overlap[:5])
+            )
+        source_identities = {
+            tuple(value) for value in bundle["source_parent_identities"]
+        }
+        test_identities = {parent_identity(parent) for parent in parents}
+        identity_overlap = source_identities & test_identities
+        if identity_overlap:
+            raise ValueError(
+                "Prospective task/seed/reset identities overlap development: "
+                + repr(sorted(identity_overlap)[:3])
+            )
+        development_ids_disjoint = True
+        identity_disjoint = True
+        evaluation_scope = "prospective_identity_disjoint"
+        prospective_claim = True
     rows = build_inference_rows(
         parents,
         selected_stages=bundle["selected_stages"],
@@ -1036,6 +1154,28 @@ def evaluate(args):
         detector_scores["prototype"] = prototype_scores(
             stage_rows, scaler, bundle["horizons"], prototype_runtime
         )
+    external_scores, external_provenance = load_external_fixed_prefix_scores(
+        args.external_scores,
+        stage_rows,
+        {parent["rollout_id"] for parent in parents},
+    )
+    detector_scores.update(external_scores)
+    prefixes = bundle.get("prefixes", list(DEFAULT_PREFIXES))
+    primary_prefixes = bundle.get(
+        "primary_prefixes", list(DEFAULT_PRIMARY_PREFIXES)
+    )
+    fixed_prefix = {
+        detector: fixed_prefix_metrics(stage_rows, scores, prefixes=prefixes)
+        for detector, scores in sorted(detector_scores.items())
+    }
+    primary_prefix_values = {
+        detector: primary_prefix_score(metrics, primary_prefixes)
+        for detector, metrics in fixed_prefix.items()
+    }
+    primary_per_task = {
+        detector: primary_per_task_values(metrics, primary_prefixes)
+        for detector, metrics in fixed_prefix.items()
+    }
     events = group_score_trajectories(stage_rows, detector_scores)
     analyses = {}
     predictions_by_detector = {}
@@ -1092,20 +1232,91 @@ def evaluate(args):
         ),
     }
     criteria["all_pass"] = all(criteria.values())
+    terminal_value = primary_prefix_values.get("terminal")
+    time_value = primary_prefix_values.get("time_only")
+    primary_value = primary_prefix_values[primary]
+    task_primary = primary_per_task[primary]
+    task_terminal = primary_per_task.get("terminal", {})
+    task_time = primary_per_task.get("time_only", {})
+    common_terminal = sorted(set(task_primary) & set(task_terminal))
+    common_time = sorted(set(task_primary) & set(task_time))
+    primary_over_terminal = [
+        task for task in common_terminal if task_primary[task] > task_terminal[task]
+    ]
+    primary_over_time = [
+        task for task in common_time if task_primary[task] > task_time[task]
+    ]
+    ranking_bootstrap = {}
+    ranking_baselines = ["terminal", "time_only", *sorted(external_scores)]
+    for baseline in ranking_baselines:
+        if baseline == primary or baseline not in detector_scores:
+            continue
+        ranking_bootstrap[baseline] = paired_fixed_prefix_bootstrap(
+            stage_rows,
+            detector_scores,
+            primary,
+            baseline=baseline,
+            prefixes=prefixes,
+            primary_prefixes=primary_prefixes,
+            replicates=args.bootstrap_replicates,
+            seed=args.bootstrap_seed,
+        )
+    ranking_criteria = {
+        "primary_prefix_task_stage_macro_roc_auc_at_least_0p60": (
+            primary_value >= 0.60
+        ),
+        "primary_minus_terminal_at_least_0p05": (
+            terminal_value is not None and primary_value - terminal_value >= 0.05
+        ),
+        "primary_beats_terminal_on_at_least_4_of_5_tasks": (
+            len(common_terminal) >= 5 and len(primary_over_terminal) >= 4
+        ),
+        "primary_beats_time_on_at_least_4_of_5_tasks": (
+            len(common_time) >= 5 and len(primary_over_time) >= 4
+        ),
+    }
+    ranking_criteria["all_pass"] = all(ranking_criteria.values())
+    ranking_confirmation = {
+        "primary_detector": primary,
+        "prefixes": list(prefixes),
+        "primary_prefixes": list(primary_prefixes),
+        "primary_values": primary_prefix_values,
+        "primary_per_task": primary_per_task,
+        "paired_task_parent_bootstrap": ranking_bootstrap,
+        "primary_minus_terminal": (
+            None if terminal_value is None else primary_value - terminal_value
+        ),
+        "primary_minus_time_only": (
+            None if time_value is None else primary_value - time_value
+        ),
+        "tasks_primary_beats_terminal": primary_over_terminal,
+        "tasks_primary_beats_time_only": primary_over_time,
+        "criteria": ranking_criteria,
+    }
     analysis = {
         "schema_version": SCHEMA_VERSION,
         "status": "complete",
-        "protocol": "prospective_full_parent_stage_aware_safe",
+        "protocol": (
+            "retrospective_locked_outer_full_parent_stage_aware_safe"
+            if opened_outer_mode
+            else "prospective_full_parent_stage_aware_safe"
+        ),
+        "evaluation_scope": evaluation_scope,
+        "prospective_claim": prospective_claim,
         "runtime_bundle": str(bundle_path),
         "prospective_dataset": str(Path(args.dataset_dir).resolve()),
         "parents": len(parents),
         "tasks": sorted({parent["task_name"] for parent in parents}),
         "stage_events": len(events),
-        "development_ids_disjoint": True,
-        "development_seed_reset_identities_disjoint": True,
+        "development_ids_disjoint": development_ids_disjoint,
+        "development_seed_reset_identities_disjoint": identity_disjoint,
+        "locked_opened_outer_exact": opened_outer_mode,
         "thresholds_updated_on_test": False,
         "primary_detector": primary,
         "detectors": analyses,
+        "fixed_prefix_metrics": fixed_prefix,
+        "ranking_confirmation": ranking_confirmation,
+        "external_fixed_prefix_detectors": external_provenance,
         "paired_bootstrap": bootstrap,
         "preregistered_success_criteria": criteria,
     }
@@ -1124,6 +1335,7 @@ def evaluate(args):
         "stage_events": len(events),
         "primary_detector": primary,
         "all_success_criteria_passed": criteria["all_pass"],
+        "all_ranking_confirmation_criteria_passed": ranking_criteria["all_pass"],
         "thresholds_updated_on_test": False,
         "updated_at": utc_now(),
     }
@@ -1184,6 +1396,24 @@ def build_parser():
     evaluate_parser.add_argument("--runtime-bundle", required=True)
     evaluate_parser.add_argument("--bootstrap-replicates", type=int, default=2000)
     evaluate_parser.add_argument("--bootstrap-seed", type=int, default=0)
+    evaluate_parser.add_argument(
+        "--opened-outer",
+        action="store_true",
+        help=(
+            "Score exactly the bundle's previously opened locked outer IDs. "
+            "This is explicitly retrospective and never a prospective claim."
+        ),
+    )
+    evaluate_parser.add_argument(
+        "--external-scores",
+        nargs="*",
+        default=[],
+        metavar="NAME=PATH[,PATH...]",
+        help=(
+            "Frozen external score trajectories used only for fixed-prefix "
+            "ranking. Multiple paths are averaged as a seed ensemble."
+        ),
+    )
     return parser
 
 

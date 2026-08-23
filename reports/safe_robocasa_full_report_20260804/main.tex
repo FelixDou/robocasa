@@ -57,8 +57,8 @@
 {\large Policy-internal failure prediction with $\pi_0$, RLDX-1, Xiaomi-Robotics-1, and semantic Subtask-SAFE}\\[16mm]
 {\color{navy}\rule{\textwidth}{1.4pt}}\\[18mm]
 \begin{tabular}{rl}
-Period: & 13 July--15 August 2026\\
-Report date: & 15 August 2026\\
+Period: & 13 July--23 August 2026\\
+Report date: & 23 August 2026\\
 Primary benchmark: & RoboCasa atomic and composite tasks\\
 Primary detector families: & independent MLP and temporal LSTM\\
 Evidence base: & checksum-verified archive plus frozen-holdout follow-ups\\
@@ -66,7 +66,7 @@ Evidence base: & checksum-verified archive plus frozen-holdout follow-ups\\
 \vfill
 \begin{minipage}{0.86\textwidth}
 \small
-This report records the complete experimental chain: feature instrumentation, collection and export validation, $\pi_0$ pilots, RLDX scaling, natural-prevalence and loss-weighting controls, atomic/composite ablation, semantic Subtask-SAFE, causal within-horizon objectives, targeted collection, the frozen parent-disjoint evaluation, and the Xiaomi-Robotics-1 original-SAFE study over 39 tasks. Negative results are retained because they determine the next research direction.
+This report records the complete experimental chain: feature instrumentation, collection and export validation, $\pi_0$ pilots, RLDX scaling, natural-prevalence and loss-weighting controls, atomic/composite ablation, semantic Subtask-SAFE, causal within-horizon objectives, targeted collection, the frozen parent-disjoint evaluation, the Xiaomi-Robotics-1 original-SAFE study over 39 tasks through its disjoint prospective matched-FPR shadow test, the five-composite-task terminal-versus-subtask-label experiment, and its full-parent stage-aware developmental follow-up. Negative results are retained because they determine the next research direction.
 \end{minipage}
 \vfill
 {\small Felix Doublet --- Shinoda Laboratory}
@@ -85,11 +85,28 @@ The integration and experimental protocol are valid, and RLDX-1 action features 
 
 Semantic Subtask-SAFE fixed the label mismatch for composites and achieved raw held-out segment ROC-AUC \metric{0.734 $\pm$ 0.002}. However, this result did not survive the controls required for an online claim. A causal V2 pilot, a within-horizon target, temporal feature summaries, and 320 additional targeted parents were subsequently tested. The final experiment trained with 280 parents and preserved a frozen 20-parent calibration plus 80-parent evaluation allocation. At causal prefix 32, raw features achieved ROC-AUC \metric{0.512 $\pm$ 0.003}; temporal features achieved \metric{0.566 $\pm$ 0.004}. The parent-bootstrap intervals included chance, and neither detector passed the continuation gates.
 
-The Xiaomi-Robotics-1 extension collected 1,950 new rollouts across 39 official mid-success tasks and pooled them with 692 earlier rollouts. A deterministic 1,950-rollout training export retained 38 trainable tasks after excluding one task with only one failure. The selected MLP and LSTM completed all 810 inner-CV fits and six final refits. Training-only task normalization raised MLP outer-test ROC-AUC from \metric{0.532 $\pm$ 0.016} to \metric{0.692 $\pm$ 0.013}. In causal replay, MLP SAFE showed early within-task signal, but its 13.2\% FPR was not matched to time-only's 5.3\% FPR. The next confirmatory experiment is therefore a frozen, prospective 5\%-FPR shadow evaluation on disjoint calibration and test collections.
+The Xiaomi-Robotics-1 extension collected 1,950 new rollouts across 39 official mid-success tasks and pooled them with 692 earlier rollouts. A deterministic 1,950-rollout training export retained 38 trainable tasks after excluding one task with only one failure. The selected MLP and LSTM completed all 810 inner-CV fits and six final refits. Training-only task normalization raised MLP outer-test ROC-AUC from \metric{0.532 $\pm$ 0.016} to \metric{0.692 $\pm$ 0.013}. A 454-rollout independent calibration froze the matched-FPR bundle, which was then applied unchanged to a disjoint 760-rollout balanced prospective shadow cohort. Staged SAFE plus time achieved ROC-AUC \metric{0.9545}, TPR \metric{0.6684}, FPR \metric{0.0500}, and balanced accuracy \metric{0.8092}, versus \metric{0.9522}, \metric{0.6316}, \metric{0.0474}, and \metric{0.7921} for time-only. However, its miss-adjusted alarm was only 0.0259 task horizons earlier, its 95\% bootstrap interval included zero, and recall by the 25\% landmark was only 2.9\%. The preregistered early-warning claim therefore failed.
+
+A follow-up collected 250 fresh Xiaomi parents across five composite tasks with semantic progress recorded online. The parent split was frozen at 170 development and 80 outer-test parents, and terminal-label and subtask-label treatments used identical parent folds. Across 1,620 inner-CV fits and 12 final refits, models were selected on hierarchical task/stage ROC-AUC at the first one and two genuine inferences of the active stage. On the untouched outer parents, the terminal-label MLP achieved \metric{0.653 $\pm$ 0.005}, compared with a stage-conditioned elapsed-time ROC of 0.5. The subtask-label MLP and LSTM achieved only \metric{0.491 $\pm$ 0.004} and \metric{0.494 $\pm$ 0.023}. Thus the current segmented subtask-label training realization did not generalize; only the terminal-label MLP retained early ranking signal.
+
+The subsequent full-parent development run did not fragment semantic stages.
+It used only the 170 development parents, allocated as 96 fit, 37 selection,
+and 37 calibration parents, while the previously opened 80-parent outer set
+remained unscored. A causal MLP with task/stage embeddings, stage-anchor
+feature change, progress variables, an active-stage head, and 4/8/16-inference
+near-failure heads reached prefix-1/2 task/stage-macro ROC-AUC
+\metric{0.696} on selection, versus \metric{0.592} for terminal-label SAFE
+and \metric{0.500} for time-only. It beat terminal SAFE on all five tasks and
+time-only on four. This is selection-set evidence, not held-out validation.
+Only 18 successful calibration parents were available, making a nominal 5\%
+strict-crossing conformal threshold maximally conservative and too coarse for
+an operating claim.
+
+The later RLDX rollout-level expansion filtered a 35-task natural collection to the 20 tasks with enough support for a fixed calibration/evaluation protocol. It used 1,000 rollouts, an untouched outer split during selection, official inverse-frequency weighting, 810 inner-CV fits, and six final refits. On the balanced 200-rollout evaluation set, the task-normalized LSTM achieved ROC-AUC \metric{0.613}, AP \metric{0.608}, and balanced accuracy \metric{0.578} at the preselected $\alpha=0.15$, compared with \metric{0.500} for the elapsed-time hazard. The gain was concentrated in atomic tasks (0.610); composite performance remained at chance (0.506).
 
 \begin{center}
 \fcolorbox{navy}{lightblue}{\begin{minipage}{0.91\textwidth}
-\textbf{Decision.} RLDX Subtask-SAFE is useful as a retrospective diagnostic but is not yet a deployable early-warning signal. Xiaomi original SAFE is more promising: its normalized MLP contains early causal ranking signal, yet no matched-FPR prospective claim exists. Freeze the Xiaomi checkpoints, normalization, time baseline, stage windows, and 5\%-FPR thresholds on a new calibration collection, then run a disjoint shadow test before any recovery intervention.
+\textbf{Decision.} RLDX Subtask-SAFE is useful as a retrospective diagnostic but is not yet a deployable early-warning signal. Xiaomi original SAFE improves prospective classification modestly at matched FPR, but does not provide the required early-warning advantage overall. The five-task follow-up shows that simply cutting parents into independently trained semantic-stage sequences is not a solution. Preserving full-parent causal context and stage conditioning is now the strongest composite-task development direction, but its 0.696 selection ROC must be confirmed on new identities before adding observation/state context or opening a recovery trial.
 \end{minipage}}
 \end{center}
 
@@ -99,6 +116,7 @@ The Xiaomi-Robotics-1 extension collected 1,950 new rollouts across 39 official 
 \item \good\ Leakage-free inner cross-validation, fixed held-out evaluation, train-only normalization, and parent-grouped splitting are operational.
 \item \good\ RLDX independent MLP features rank failures within tasks; additional data improved stability.
 \item \good\ The normal RLDX alpha sweep reproduces the SAFE paper's balanced-accuracy--detection-time evaluation geometry, with misses counted at normalized time 1.
+\item \good\ The 20-task natural RLDX expansion found a modest task-normalized LSTM advantage over elapsed time at $\alpha=0.15$, driven by atomic tasks.
 \item \bad\ The LSTM was consistently weaker than the independent MLP at these sample sizes.
 \item \bad\ Natural prevalence and official inverse-frequency weighting changed results only marginally.
 \item \bad\ Separate atomic/composite models did not beat the mixed model.
@@ -108,6 +126,14 @@ The Xiaomi-Robotics-1 extension collected 1,950 new rollouts across 39 official 
 \item \good\ Xiaomi original SAFE completed a 39-task collection and a leakage-controlled 810-fit search; task normalization materially improved MLP ranking.
 \item \good\ Xiaomi MLP SAFE showed task-macro causal ROC-AUC 0.671 at 10\% and 0.626 at 25\% of task horizon, above the within-task time-only value of 0.5.
 \item \bad\ The opened Xiaomi replay did not compare SAFE and time at the same false-positive budget; its promising early alarms therefore remain post-hoc.
+\item \good\ Independent Xiaomi calibration matched all detectors at 4.39\% FPR; staged SAFE plus time improved TPR by 0.070 and miss-adjusted detection time by 0.051 task horizons versus time-only.
+\item \good\ The frozen prospective Xiaomi test preserved disjoint identities, applied no test-time threshold updates, and achieved staged TPR 0.668 at FPR 0.050 versus time-only TPR 0.632 at FPR 0.047.
+\item \bad\ The prospective staged timing gain was only 0.0259 horizons with a bootstrap interval crossing zero; recall by 25\% was 2.9\%, so the preregistered early-warning criteria failed.
+\item \good\ In the secondary atomic stratum, SAFE-only reached TPR 0.800 and alarmed 0.300 horizons earlier than time-only; the corresponding composite advantage disappeared.
+\item \good\ In the frozen five-task follow-up, terminal-label MLP SAFE achieved active-subtask prefix-1/2 ROC-AUC 0.653 on 80 untouched parents, versus 0.5 for stage-conditioned elapsed time.
+\item \bad\ The current segmented subtask-label MLP and LSTM failed to generalize, with outer prefix-1/2 ROC-AUC 0.491 and 0.494 despite stronger inner-CV selection values.
+\item \good\ Full-parent stage-aware conditioning improved developmental prefix-1/2 ROC-AUC from 0.592 for terminal SAFE to 0.696 and beat terminal SAFE on all five tasks.
+\item \bad\ The stage-aware result has not been tested on new held-out parents; its 18-success calibration set cannot resolve a useful 5\% successful-parent FPR threshold.
 \end{enumerate}
 
 \section{Scope, labels, and experimental rules}
@@ -118,12 +144,30 @@ The Xiaomi-Robotics-1 extension collected 1,950 new rollouts across 39 official 
 One feature record is stored per genuine policy inference. Cached actions from a predicted chunk do not create duplicate feature records. This prevents action-reuse frequency from becoming an accidental sampling weight.
 
 \subsection{Models and selectors}
-The official SAFE detector families were retained:
+The rollout-level experiments retained the official SAFE detector families:
 \begin{itemize}
 \item \code{indep}: an independent MLP detector;
 \item \code{lstm}: a temporal LSTM detector.
 \end{itemize}
 Hyperparameters include horizon selector, diffusion selector, learning rate, and regularization. Unless explicitly noted, the search used three inner folds and model seeds 0, 1, and 2.
+
+Later causal experiments introduce explicitly named models rather than
+silently changing official SAFE. Segmented Subtask-SAFE applies the same
+official MLP/LSTM families to independent semantic-stage sequences. The
+full-parent stage-aware model is a report-specific causal MLP whose optional
+components are active-stage and near-failure targets, task/stage embeddings,
+causal progress, stage-anchor feature change, and observation/state context.
+Non-neural controls are success-prototype distance and task/stage-conditioned
+elapsed-time hazard. These families are not interchangeable.
+
+Every result section was audited against the same reporting template:
+prediction unit and target; causal inputs and forbidden future information;
+parent/task split unit; fit, selection, calibration, and test roles; primary
+selection metric; elapsed-time or duration control; uncertainty unit; and
+whether the reported identities influenced model selection. Shared official
+SAFE settings are defined here, while each $\pi_0$, RLDX, Subtask-SAFE, Xiaomi
+broad, prospective, segmented five-task, and full-parent stage-aware section
+restates its experiment-specific departures.
 
 \subsection{Evaluation contract}
 \begin{itemize}
@@ -184,6 +228,8 @@ An ABot-M0.5 adapter was implemented with the same explicit request/response con
 \section{Dataset chronology and audits}
 
 \begin{longtable}{p{0.22\textwidth}p{0.18\textwidth}p{0.49\textwidth}}
+\caption{Chronology, validation status, and retained support of the datasets used in this report.}
+\label{tab:dataset-chronology}\\
 \toprule
 Dataset/phase & Outcome & Evidence and interpretation\\
 \midrule
@@ -208,20 +254,30 @@ V2 augmented training & 280 parents & Original training parents plus 180 previou
 Xiaomi ten-task pool & 692 rollouts & 419 successes and 273 failures; deterministic 25/25-per-task export contained 500 rollouts.\\
 Xiaomi official mid-success collection & 1,950 rollouts & Exactly 50 rollouts for each of 39 tasks; 1,106 successes and 844 failures; all artifacts and official loading validated.\\
 Xiaomi pooled training export & 1,950 rollouts & Selected from a 2,642-rollout source pool; 1,105 successes and 845 failures; 38 tasks used for training after one sparse-failure exclusion.\\
+Xiaomi five-task semantic collection & 250 parents & Exactly 50 fresh parents for each of five composite tasks; online subtask traces; 17 trainable stage identities; parent split fixed at 170 development and 80 outer test.\\
 \bottomrule
 \end{longtable}
 
-The report bundle itself contains 20,857 archive entries and passed SHA-256 verification. Incomplete and quarantined artifacts are retained as provenance rather than silently deleted.
+Table~\ref{tab:dataset-chronology} distinguishes validated scientific inputs
+from incomplete or invalid engineering runs. The report bundle itself contains
+20,857 archive entries and passed SHA-256 verification. Incomplete and
+quarantined artifacts are retained as provenance rather than silently deleted.
 
 \section{\texorpdfstring{$\pi_0$}{pi0} experiments}
 
 \subsection{Training and evaluator smokes}
 Independent and LSTM two-epoch evaluator smokes first established that the official SAFE loader, detector checkpoints, and offline evaluator agreed. A two-configuration 1,000-epoch grid pilot then confirmed that the apparently short wall time was expected: with roughly 100 rollouts and batch size 512, one epoch is only a small full-batch update. These runs were engineering gates, not performance claims.
 
+The termination-time duration-only control reached ROC-AUC 0.969 on training
+and 1.000 on both seen and unseen validation. Successful episodes often ended
+early while failures ran to the horizon, so full-trajectory termination-time
+evaluation was duration-confounded. Later causal or matched-earliest results
+are reported separately and are the relevant early-warning controls.
+
 An initial six-run all-five-seen fit, before leakage-free hyperparameter selection, produced MLP ROC $0.506\pm0.009$ and PRC $0.541\pm0.019$, versus LSTM ROC $0.702\pm0.031$ and PRC $0.675\pm0.025$. It motivated the full inner-CV experiment but was superseded by the fixed-split result below.
 
 \subsection{Official 810-fit grid}
-All 810 runs completed (270 configurations, three seeds). The selected MLP achieved seen validation ROC \metric{0.799 $\pm$ 0.081}, while its unseen value was \metric{0.453 $\pm$ 0.037}. The LSTM achieved seen \metric{0.792 $\pm$ 0.069} and unseen \metric{0.581 $\pm$ 0.080}. These are validation results from a small 100-rollout dataset, not a final held-out estimate.
+All 810 runs completed (270 configurations, three seeds). The selected MLP achieved seen validation ROC \metric{0.799 $\pm$ 0.081}, while its unseen value was \metric{0.453 $\pm$ 0.037}. The LSTM achieved seen \metric{0.792 $\pm$ 0.069} and unseen \metric{0.581 $\pm$ 0.080}. Figure~\ref{fig:pi0grid} visualizes this seen--unseen gap. These are validation results from a small 100-rollout dataset, not a final held-out estimate.
 
 \begin{figure}[H]
 \centering
@@ -238,6 +294,7 @@ The outer split used 70 training rollouts and 30 held-out rollouts, balanced wit
 \begin{table}[H]
 \centering
 \caption{$\pi_0$ leakage-free final results (three model seeds).}
+\label{tab:pi0-leakage-free}
 \begin{tabular}{lcc}
 \toprule
 Model & Test ROC-AUC & Test PRC-AUC\\
@@ -259,16 +316,25 @@ LSTM & 0.599 $\pm$ 0.039 & 0.637 $\pm$ 0.031\\
 \caption{Inner-CV to test gap.}
 \end{subfigure}
 \caption{Leakage-free $\pi_0$ evaluation. Stronger inner validation did not transfer to the small held-out set.}
+\label{fig:pi0-leakage-free}
 \end{figure}
+
+Table~\ref{tab:pi0-leakage-free} reports the final discrimination values,
+while Figure~\ref{fig:pi0-leakage-free} makes the inner-CV-to-test drop
+explicit. The nearly identical test ROC values do not support an architecture
+advantage on this small outer split.
 
 \section{RLDX rollout-level experiments}
 
 \subsection{Scaling from 10/10 to 25/25 per task}
-Ten tasks were used: five atomic and five composite. Increasing from 20 to 50 rollouts per task improved the independent MLP's within-task ranking and reduced variance.
+Ten tasks were used: five atomic and five composite. Increasing from 20 to 50
+rollouts per task improved the independent MLP's within-task ranking and
+reduced variance (Table~\ref{tab:rldx-scaling}).
 
 \begin{table}[H]
 \centering
 \caption{RLDX held-out discrimination as data increased.}
+\label{tab:rldx-scaling}
 \begin{tabular}{llcc}
 \toprule
 Dataset & Model & Raw pooled ROC & Train-only task-z ROC\\
@@ -285,9 +351,14 @@ Dataset & Model & Raw pooled ROC & Train-only task-z ROC\\
 \centering
 \includegraphics[width=0.78\textwidth]{rldx25_test_auc.pdf}
 \caption{RLDX 25/25 final held-out metrics. The MLP is stable across seeds; the LSTM remains weaker.}
+\label{fig:rldx-final}
 \end{figure}
 
-The large raw-to-task-z gap means a global score is not directly comparable across tasks. Task normalization is reasonable as an analysis and calibration tool when task identity is known, but it is not evidence that the raw detector is globally calibrated.
+The large raw-to-task-z gap in Table~\ref{tab:rldx-scaling} means a global
+score is not directly comparable across tasks; Figure~\ref{fig:rldx-final}
+also shows the seed stability of the selected MLP. Task normalization is
+reasonable as an analysis and calibration tool when task identity is known,
+but it is not evidence that the raw detector is globally calibrated.
 
 \subsection{Rollout-level conformal calibration}
 The 500-rollout dataset was divided into 340 training rollouts, 30 calibration successes, and 130 evaluation rollouts. At $\alpha=0.15$, the MLP achieved TPR 0.196, FPR 0.040, and balanced accuracy 0.578. The originally archived detection-time value 0.716 was conditional on a failure being detected. Under the paper definition, an undetected failed rollout has normalized detection time 1, giving a paper-equivalent average of approximately 0.944. Recall therefore remained too low for reliable recovery.
@@ -317,7 +388,14 @@ Composite & 0.50 & $0.554\pm0.044$ & $0.590\pm0.032$ & 0.433 & 0.253\\
 \label{tab:rldx-alpha}
 \end{table}
 
-At $\alpha=0.20$, the combined ten-task detector had TPR 0.337, FPR 0.080, and balanced accuracy 0.629. Atomic $\alpha=0.35$ is the best point under the paper's two plotted objectives, but its 40\% false-positive rate is unsuitable for routine intervention. Composite $\alpha=0.50$ attains the same balanced accuracy as $\alpha=0.20$ with nearly five times the FPR. The practical shared operating point remains $\alpha=0.20$; the extended curve is a post-hoc sensitivity analysis, not a new confirmatory selection.
+Table~\ref{tab:rldx-alpha} shows that atomic $\alpha=0.35$ is the best point
+under the paper's two plotted objectives, but its 40\% false-positive rate is
+unsuitable for routine intervention. Composite $\alpha=0.50$ attains the same
+balanced accuracy as $\alpha=0.20$ with nearly five times the FPR. At the
+shared $\alpha=0.20$, the combined ten-task detector had TPR 0.337, FPR 0.080,
+and balanced accuracy 0.629. The practical shared operating point therefore
+remains $\alpha=0.20$; the extended curve is a post-hoc sensitivity analysis,
+not a new confirmatory selection.
 
 The SAFE paper defines $T_{\mathrm{det}}$ as the first threshold-crossing timestep divided by the failed rollout duration, assigns $T_{\mathrm{det}}=1$ to misses, and averages over ground-truth failed rollouts~\cite{gu2026safe}. Figure~\ref{fig:rldx-paper-tradeoff} reconstructs that metric from the archived confusion counts and conditional detection times. It reproduces the paper's evaluation geometry, not its complete benchmark: no human failure-onset annotations or competing baselines are available here.
 
@@ -357,7 +435,14 @@ RLDX-1 + RoboCasa, seen raw pooled & 0.575 & 0.554\\
 \label{fig:safe-paper-roc}
 \end{figure}
 
-The RLDX MLP task-z ROC 0.713 is numerically close to the paper's $\pi_0$+LIBERO unseen MLP ROC 0.733, but the similarity must not be interpreted as reproduced generalization. Raw RLDX pooling is materially weaker, the LSTM does not transfer, and the conformal composite-task curve lies near $T_{\mathrm{det}}=1$. Relative to the paper, the principal deficit is therefore not only retrospective ranking but the conversion of scores into timely, task-robust failure alarms.
+Table~\ref{tab:safe-paper-compare} and Figure~\ref{fig:safe-paper-roc} show
+that the RLDX MLP task-z ROC 0.713 is numerically close to the paper's
+$\pi_0$+LIBERO unseen MLP ROC 0.733, but the similarity must not be interpreted
+as reproduced generalization. Raw RLDX pooling is materially weaker, the LSTM
+does not transfer, and Figure~\ref{fig:rldx-paper-tradeoff} places the
+conformal composite-task curve near $T_{\mathrm{det}}=1$. Relative to the
+paper, the principal deficit is therefore not only retrospective ranking but
+the conversion of scores into timely, task-robust failure alarms.
 
 \subsection{Atomic versus composite ablation}
 The mixed MLP was stronger on atomic tasks (task-z ROC 0.827) than composites (0.667). Separate models did not improve matched evaluation:
@@ -365,6 +450,7 @@ The mixed MLP was stronger on atomic tasks (task-z ROC 0.827) than composites (0
 \begin{table}[H]
 \centering
 \caption{Matched mixed-versus-type-specific MLPs at $\alpha=0.15$.}
+\label{tab:rldx-type-ablation}
 \begin{tabular}{llccccc}
 \toprule
 Type & Model & Task-z ROC & Task-z PRC & TPR & FPR & Bal. acc.\\
@@ -377,7 +463,9 @@ Composite & Split & 0.668 & 0.777 & 0.192 & 0.107 & 0.543\\
 \end{tabular}
 \end{table}
 
-This rejects the hypothesis that mixing short- and long-horizon tasks is the main source of confusion. It instead motivates finer temporal labels for composites.
+The matched comparison in Table~\ref{tab:rldx-type-ablation} rejects the
+hypothesis that mixing short- and long-horizon tasks is the main source of
+confusion. It instead motivates finer temporal labels for composites.
 
 \section{Natural prevalence and paper-style weighting}
 
@@ -386,6 +474,7 @@ The natural-rate study compared matched balanced weighting, natural unweighted t
 \begin{table}[H]
 \centering
 \caption{Natural-prevalence study. AP denotes average precision.}
+\label{tab:rldx-natural-prevalence}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{llcccccc}
 \toprule
@@ -405,15 +494,87 @@ LSTM & Natural weighted & 0.532 & 0.529 & 0.554 & 0.569 & 0.531 & 0.645\\
 \centering
 \includegraphics[width=0.93\textwidth]{natural_rate_aggregation.pdf}
 \caption{Aggregation view and sampling regime. Natural prevalence and weighting effects are small compared with the difference between raw and task-aware aggregation.}
+\label{fig:rldx-natural-aggregation}
 \end{figure}
 
-For the MLP, natural minus matched was $+0.008\pm0.012$ in task-z ROC and $+0.021\pm0.013$ in macro task ROC. Official weighting minus unweighted natural training was $-0.001\pm0.007$ and $+0.001\pm0.013$. The finite pool is only mildly imbalanced globally, so this does not contradict the paper's weighting choice; it shows that balancing was not the limiting factor here.
+Table~\ref{tab:rldx-natural-prevalence} and
+Figure~\ref{fig:rldx-natural-aggregation} show that sampling and weighting
+effects were smaller than aggregation effects. For the MLP, natural minus
+matched was $+0.008\pm0.012$ in task-z ROC and $+0.021\pm0.013$ in macro task
+ROC. Official weighting minus unweighted natural training was
+$-0.001\pm0.007$ and $+0.001\pm0.013$. The finite pool is only mildly
+imbalanced globally, so this does not contradict the paper's weighting choice;
+it shows that balancing was not the limiting factor here.
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\textwidth]{natural_rate_per_task_mlp.pdf}
 \caption{Per-task MLP ROC under the three sampling/weighting regimes. Effects differ by task but do not yield a consistent global advantage.}
+\label{fig:rldx-natural-per-task}
 \end{figure}
+
+The heterogeneous, non-systematic task changes in
+Figure~\ref{fig:rldx-natural-per-task} reinforce that conclusion.
+
+\subsection{Supported-20 natural RLDX expansion}
+\label{sec:rldx-safe20}
+
+To test normal rollout-level SAFE beyond the original ten tasks, a natural 50-rollout-per-task RLDX collection was screened by a predeclared support gate. Tasks required at least 13 observed successes and 10 observed failures; 20 of 35 tasks passed. This is therefore a \emph{support-filtered SAFE20 benchmark}, not a complete SAFE35 result and not Subtask-SAFE. Its official export contains 1,000 rollouts (562 successes and 438 failures) and 87,373 policy records.
+
+The fixed protocol used 740 training rollouts (402 successes, 338 failures) and 260 held-out rollouts. Hyperparameters were selected by three-fold inner cross-validation with official inverse-frequency loss weighting; the held-out identities were not used for selection. The grid completed 405 fits for each model family. The final held-out pool was then partitioned into 60 calibration successes (three per task) and a balanced 200-rollout evaluation set (five successes and five failures per task). Training, calibration, and evaluation identities were disjoint.
+
+\begin{table}[H]
+\centering
+\caption{SAFE20 model selection and discrimination. Raw metrics use all 260 held-out rollouts, whereas task-normalized metrics use the final 200-rollout evaluation partition; changes between the two columns are therefore descriptive rather than a strictly paired normalization effect.}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+Model & Selected configuration & Inner-CV ROC & Raw held-out ROC/AP & Normalized eval. ROC/AP & $\alpha=.15$ bal. acc.\\
+\midrule
+MLP & $h=$concat-2, $d=$concat-2, lr $10^{-3}$, $\lambda=10^{-3}$ & $0.649\pm0.047$ & $0.506/0.390$ & $0.532/0.547$ & 0.500\\
+LSTM & $h=0.0$, $d=1.0$, lr $3\times10^{-5}$, $\lambda=10^{-2}$ & $0.722\pm0.015$ & $0.570/0.411$ & $\mathbf{0.613}/\mathbf{0.608}$ & $\mathbf{0.578}$\\
+\bottomrule
+\end{tabular}}
+\label{tab:rldx-safe20-summary}
+\end{table}
+
+Task normalization was fitted from training data only: for each known task, the early-maximum SAFE score was centered and scaled with that task's training mean and standard deviation before conformal calibration and cross-task pooling. At the preselected $\alpha=0.15$, the LSTM achieved TPR 0.273, FPR 0.117, and balanced accuracy 0.578 (Table~\ref{tab:rldx-safe20-summary}). The task-conditioned elapsed-time hazard on the same evaluation identities achieved TPR 0.200, FPR 0.200, and balanced accuracy 0.500. Thus normalized SAFE improved balanced accuracy by 7.8 percentage points while both detecting more failures and producing fewer false alarms. The SAFE normalized detection time was 0.453 among the archived operating-point outputs; normal rollout SAFE lacks semantic subtask boundaries, so a subtask-normalized lead metric is not defined.
+
+Figure~\ref{fig:rldx-safe20-tradeoff} places the preselected point in the full
+$\alpha$ sensitivity curve; higher-recall points require materially more
+false alarms and are not new confirmatory selections.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{rldx_safe20_normalized_conformal_tradeoff.png}
+\caption{Task-normalized SAFE20 LSTM conformal sweep. Increasing $\alpha$ trades more true detections for more false alarms. Balanced accuracy peaks only modestly above the task-conditioned elapsed-time baseline; $\alpha=0.15$ is the preselected operating point, while higher-$\alpha$ points are sensitivity analysis. Shading shows variation across the three model seeds evaluated on one fixed identity set.}
+\label{fig:rldx-safe20-tradeoff}
+\end{figure}
+
+The task-type split in Figure~\ref{fig:rldx-safe20-per-task} makes the
+limitation clear. At $\alpha=0.15$, atomic tasks achieved ROC-AUC 0.636, AP
+0.714, TPR 0.371, FPR 0.152, and balanced accuracy 0.610. Composite tasks
+achieved ROC-AUC 0.467, AP 0.544, TPR 0.044, FPR 0.033, and balanced accuracy
+0.506. Because every task contributes exactly five successes and five failures
+to evaluation, ordinary and balanced accuracy coincide within these aggregate
+task-type groups.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{rldx_safe20_per_task_alpha015.png}
+\caption{Per-task balanced accuracy at $\alpha=0.15$ for the task-normalized SAFE20 LSTM and elapsed-time hazard. The source plot's blue legend says ``Subtask-SAFE''; this is a plotting-label error. The blue bars are \emph{normal rollout-level SAFE}, with no subtask labels or segmentation. Error bars summarize the three model seeds on the same fixed ten-rollout-per-task evaluation identities.}
+\label{fig:rldx-safe20-per-task}
+\end{figure}
+
+Figure~\ref{fig:rldx-safe20-per-task} identifies \code{OpenCabinet} and
+\code{TurnOnMicrowave} as the strongest atomic tasks, with balanced accuracy
+about 0.77, and \code{PickPlaceCounterToCabinet} at about 0.73. Most composite
+tasks were at or near chance. The experiment therefore supports a narrow
+conclusion: broader natural-data training plus task-normalized LSTM scoring
+provides modest signal beyond elapsed time for several atomic tasks, but does
+not solve rollout-level composite failure prediction. It reinforces the
+motivation for semantically aligned subtask targets rather than showing that a
+single normal-SAFE detector is sufficient for long-horizon tasks.
 
 \section{Semantic Subtask-SAFE}
 
@@ -428,6 +589,7 @@ Five composite tasks yielded 150 parents and 426 usable segments across 18 task/
 \begin{table}[H]
 \centering
 \caption{Subtask-SAFE data and outer split.}
+\label{tab:subtask-split}
 \begin{tabular}{lrrrr}
 \toprule
 Split & Parents & Segments & Success segments & Failure segments\\
@@ -443,9 +605,21 @@ Total & 150 & 426 & 341 & 85\\
 \centering
 \includegraphics[width=0.96\textwidth]{subtask_per_stage_support.pdf}
 \caption{Support by semantic task/subtask identity. Early successful-prefix stages dominate; several stages have little or no failure support.}
+\label{fig:subtask-support}
 \end{figure}
 
+Table~\ref{tab:subtask-split} gives the grouped split totals, and
+Figure~\ref{fig:subtask-support} shows why aggregate segment counts overstate
+the amount of usable failure support at many individual stages.
+
 \subsection{Inner CV and retrospective final result}
+The compared learned models were the official independent MLP and temporal
+LSTM, both trained on the same stage-segment tensors and parent-grouped folds.
+The horizon/diffusion selectors, learning rate, and regularization were chosen
+only by inner validation ROC; the 50-parent held-out test was not used for
+selection. Parent-aware fixed-prefix and elapsed-time controls below determine
+whether retrospective segment discrimination transfers to online use.
+
 All 810 inner-CV fits completed. MLP selection was horizon \code{concat-2}, diffusion \code{concat-2}, learning rate $10^{-3}$, regularization $10^{-3}$, with inner ROC $0.749\pm0.037$. LSTM inner ROC was $0.722\pm0.009$.
 
 All six final refits completed with official inverse-frequency class weights $[5.1228,1.2321]$.
@@ -454,25 +628,37 @@ All six final refits completed with official inverse-frequency class weights $[5
 \centering
 \includegraphics[width=0.76\textwidth]{subtask_test_auc.pdf}
 \caption{Retrospective held-out segment discrimination. MLP raw ROC is 0.734, but this uses the full active segment and pools heterogeneous stages.}
+\label{fig:subtask-test-auc}
 \end{figure}
 
-The final retrospective results were MLP ROC $0.734\pm0.002$, PRC $0.433\pm0.012$; LSTM ROC $0.601\pm0.041$, PRC $0.328\pm0.056$. These values motivated, but do not replace, causal evaluation.
+Figure~\ref{fig:subtask-test-auc} reports final retrospective MLP ROC
+$0.734\pm0.002$, PRC $0.433\pm0.012$, and LSTM ROC $0.601\pm0.041$, PRC
+$0.328\pm0.056$. These values motivated, but do not replace, causal
+evaluation.
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.98\textwidth]{subtask_score_trajectories.pdf}
 \caption{Example retrospective score trajectories. The detector often separates classes only after substantial within-stage evidence has accumulated.}
+\label{fig:subtask-trajectories}
 \end{figure}
+
+The delayed separation visible in Figure~\ref{fig:subtask-trajectories}
+motivated the parent-aware fixed-prefix tests below.
 
 \section{Parent-aware causal analysis}
 
 \subsection{Normalization and hierarchical uncertainty}
-Raw pooled MLP ROC was 0.734. Training-only task/subtask-z pooling reduced it to $0.561\pm0.025$. A parent-rollout bootstrap gave mean 0.558, 95\% CI [0.428, 0.676]. The elapsed-time baseline achieved mean 0.740, 95\% CI [0.646, 0.827].
+Raw pooled MLP ROC was 0.734. Training-only task/subtask-z pooling reduced it
+to $0.561\pm0.025$. Figure~\ref{fig:subtask-parent-bootstrap} shows that a
+parent-rollout bootstrap gave mean 0.558, 95\% CI [0.428, 0.676], while the
+elapsed-time baseline achieved mean 0.740, 95\% CI [0.646, 0.827].
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.88\textwidth]{subtask_parent_bootstrap.pdf}
 \caption{Hierarchical parent-rollout bootstrap. SAFE uncertainty overlaps chance, while elapsed time remains consistently stronger.}
+\label{fig:subtask-parent-bootstrap}
 \end{figure}
 
 \subsection{Causal prefix test}
@@ -481,6 +667,7 @@ Scores were recomputed using only the first $k$ true policy inferences of each a
 \begin{table}[H]
 \centering
 \caption{Causal-prefix ROC. Counts decrease because shorter segments are ineligible at longer prefixes.}
+\label{tab:subtask-causal-prefix}
 \begin{tabular}{rrrrr}
 \toprule
 $k$ & Active segments & MLP SAFE & LSTM SAFE & Elapsed time\\
@@ -499,18 +686,31 @@ $k$ & Active segments & MLP SAFE & LSTM SAFE & Elapsed time\\
 \centering
 \includegraphics[width=0.94\textwidth]{subtask_causal_prefix_roc.pdf}
 \caption{Causal-prefix analysis. Current SAFE scores are below chance at early prefixes; elapsed time is the dominant baseline at every supported prefix.}
+\label{fig:subtask-causal-prefix}
 \end{figure}
 
+Across every supported prefix in Table~\ref{tab:subtask-causal-prefix} and
+Figure~\ref{fig:subtask-causal-prefix}, elapsed time outranks both SAFE
+architectures; support also falls from 134 segments at one inference to 25 at
+32 inferences.
+
 \subsection{Parent-disjoint conformal operation}
-Calibration used 15 parents and evaluation used 35 disjoint parents. Reference and nonconformity calibration parents were disjoint. At $\alpha=0.15$, SAFE achieved TPR 0.121, FPR 0.119, balanced accuracy 0.501. Elapsed time achieved TPR 0.500, FPR 0.149, balanced accuracy 0.675.
+Calibration used 15 parents and evaluation used 35 disjoint parents. Reference
+and nonconformity calibration parents were disjoint. At $\alpha=0.15$, SAFE
+achieved TPR 0.121, FPR 0.119, balanced accuracy 0.501. Elapsed time achieved
+TPR 0.500, FPR 0.149, balanced accuracy 0.675
+(Figure~\ref{fig:subtask-conformal}).
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.92\textwidth]{subtask_conformal_tradeoff.png}
 \caption{Parent-disjoint conformal trade-off. SAFE remains near chance across $\alpha$; elapsed time yields materially better balanced accuracy.}
+\label{fig:subtask-conformal}
 \end{figure}
 
-The reported SAFE lead of 1,661 environment steps at $\alpha=0.15$ applies only to the 12.1\% of failures detected. Lead time without detection coverage would be misleading.
+The reported SAFE lead of 1,661 environment steps at $\alpha=0.15$ applies
+only to the 12.1\% of failures detected in Figure~\ref{fig:subtask-conformal}.
+Lead time without detection coverage would be misleading.
 
 \section{Subtask-SAFE V2: causal objective and frozen evaluation}
 
@@ -548,7 +748,14 @@ Raw + delta, official SAFE & 0.798 & 0.087\\
 \label{tab:v2-screen}
 \end{table}
 
-The corresponding small final pilot appeared promising: raw features reached ROC 0.819 and temporal summaries 0.956 at prefix 32. However, stage support was only 1/1, 4/0, 3/5, and 7/0 success/failure examples. Each seed also had only five calibration successes, giving nominal conformal resolution $1/(5+1)=0.167$. At target FPRs up to 0.30 the temporal detector produced zero TPR; relaxing the target to 0.40 yielded realized FPR 0.111 and TPR 0.833. The high ROC was therefore treated as a collection pilot, not as a result.
+The screen in Table~\ref{tab:v2-screen} led to a small final pilot that
+appeared promising: raw features reached ROC 0.819 and temporal summaries
+0.956 at prefix 32. However, stage support was only 1/1, 4/0, 3/5, and 7/0
+success/failure examples. Each seed also had only five calibration successes,
+giving nominal conformal resolution $1/(5+1)=0.167$. At target FPRs up to 0.30
+the temporal detector produced zero TPR; relaxing the target to 0.40 yielded
+realized FPR 0.111 and TPR 0.833. The high ROC was therefore treated as a
+collection pilot, not as a result.
 
 \subsection{Target-aware collection and immutable allocation}
 Targeted collection added 400 new-seed parent rollouts. The initial 80-parent batch exposed that the chosen intermediate stages did not consistently accumulate failures. The viable target set was consequently fixed to:
@@ -592,7 +799,15 @@ Lettuce rinsed & $0.467\pm0.009$ & $\mathbf{0.527\pm0.012}$\\
 \label{tab:v2-frozen}
 \end{table}
 
-All-prefix segment ROC was 0.733 for raw features and 0.738 for temporal summaries, but those values pool 675 prefix examples from multiple times and are not the early-warning endpoint. At prefix 32, raw operation gave TPR 0.217, FPR 0.083, and normalized lead 0.755; temporal operation gave TPR 0.133, FPR 0.142, and lead 0.779. Parent-bootstrap confidence intervals for SAFE ROC included chance, and SAFE-minus-duration intervals included zero. Both treatments therefore failed the continuation gates.
+Table~\ref{tab:v2-frozen} quantifies the frozen prefix-32 reversal shown in
+Figure~\ref{fig:v2-frozen-prefix}. All-prefix segment ROC was 0.733 for raw
+features and 0.738 for temporal summaries, but those values pool 675 prefix
+examples from multiple times and are not the early-warning endpoint. At prefix
+32, raw operation gave TPR 0.217, FPR 0.083, and normalized lead 0.755;
+temporal operation gave TPR 0.133, FPR 0.142, and lead 0.779.
+Parent-bootstrap confidence intervals for SAFE ROC included chance, and
+SAFE-minus-duration intervals included zero. Both treatments therefore failed
+the continuation gates.
 
 This is the most important negative result in the report: additional target-aware data greatly improved class support but did not produce task-robust early discrimination. The large pilot-to-frozen gap shows why target identities and allocation must be frozen before representation selection.
 
@@ -619,6 +834,7 @@ A deterministic seed-0 selection yielded an official-loader-compatible
 \begin{table}[H]
 \centering
 \caption{Initial Xiaomi 10-task selection and final held-out results. Hyperparameters were selected without using the 160-rollout outer test.}
+\label{tab:xr1-initial-ten-task}
 \begin{tabular}{lccccc}
 \toprule
 Model & Selected $(h,d,\mathrm{lr},\lambda)$ & Inner ROC & Test ROC & Test AP & Duration ROC\\
@@ -629,7 +845,8 @@ LSTM & $(\mathrm{c2},1,10^{-3},10^{-2})$ & $0.595\pm0.029$ & $0.550\pm0.024$ & -
 \end{tabular}
 \end{table}
 
-At fixed conformal $\alpha=0.15$, normalized MLP and LSTM balanced accuracy was
+Table~\ref{tab:xr1-initial-ten-task} shows that neither architecture separated
+the initial outer test well. At fixed conformal $\alpha=0.15$, normalized MLP and LSTM balanced accuracy was
 $0.499\pm0.014$ and $0.522\pm0.038$, respectively. Matched-success-length and
 fixed-25\%-landmark controls removed most duration discrimination but did not
 produce a strong detector: their best outer ROC values were 0.546 for MLP and
@@ -646,7 +863,8 @@ base seed 100007. All successes, failures, quota overshoot, and historical
 errors were preserved.
 
 \begin{longtable}{p{0.32\textwidth}p{0.14\textwidth}rrr}
-\caption{Official Xiaomi success count and the new 50-rollout collection.}\\
+\caption{Official Xiaomi success count and the new 50-rollout collection.}
+\label{tab:xr1-official-collection}\\
 \toprule
 Task & Type & Official & Fresh success & Fresh failure\\
 \midrule
@@ -699,7 +917,8 @@ PickPlaceCounterToStove & atomic & 45 & 44 & 6\\
 \bottomrule
 \end{longtable}
 
-Deep validation found 1,950 unique rollout IDs and task/seed/reset identities,
+Table~\ref{tab:xr1-official-collection} records all 39 selected tasks and their
+fresh outcome support. Deep validation found 1,950 unique rollout IDs and task/seed/reset identities,
 no missing required artifacts, and no loader incompatibility. Twelve historical
 error records document recovered attempts. The two shards occupied about
 36 GiB.
@@ -714,6 +933,7 @@ model development, leaving 38 tasks.
 \begin{table}[H]
 \centering
 \caption{Frozen broad Xiaomi split and hyperparameter search.}
+\label{tab:xr1-broad-split}
 \begin{tabular}{lr}
 \toprule
 Property & Value\\
@@ -728,7 +948,8 @@ Completed fits & 810/810; zero failures\\
 \end{tabular}
 \end{table}
 
-The MLP selected $(h=1,d=1,\mathrm{lr}=10^{-4},\lambda=10^{-3})$ with inner
+Under the leakage-free search summarized in Table~\ref{tab:xr1-broad-split},
+the MLP selected $(h=1,d=1,\mathrm{lr}=10^{-4},\lambda=10^{-3})$ with inner
 ROC $0.654\pm0.025$. The LSTM selected
 $(h=\mathrm{concat\mbox{-}2},d=\mathrm{concat\mbox{-}2},
 \mathrm{lr}=3\times10^{-4},\lambda=0.1)$ with inner ROC
@@ -737,6 +958,7 @@ $0.742\pm0.012$. All six final refits completed on identical identities.
 \begin{table}[H]
 \centering
 \caption{Broad Xiaomi final refits and training-only task normalization.}
+\label{tab:xr1-final-normalization}
 \begin{tabular}{lccccc}
 \toprule
 Model & Raw ROC & Task-z ROC & Raw AP & Task-z AP & Macro task ROC\\
@@ -747,9 +969,11 @@ LSTM & $0.628\pm0.008$ & $0.646\pm0.017$ & 0.640 & 0.663 & 0.640\\
 \end{tabular}
 \end{table}
 
-Completed-duration ROC was 0.804. Normalization reversed the raw architecture
+Table~\ref{tab:xr1-final-normalization} shows that normalization reversed the raw architecture
 ordering: the MLP has the best within-task ranking, whereas the LSTM benefits
-more from between-task score offsets.
+more from between-task score offsets. Completed-duration ROC was 0.804, which
+is why the causal online analyses below retain elapsed time as an explicit
+baseline rather than treating it only as a confound.
 
 \subsection{Atomic/composite and causal online replay}
 The 38-task set contains ten atomic and 28 composite tasks. Because each task
@@ -758,6 +982,7 @@ has only one held-out example per class, the task-type estimates are imprecise.
 \begin{table}[H]
 \centering
 \caption{Atomic versus composite outer-test results.}
+\label{tab:xr1-task-type}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lllccccc}
 \toprule
@@ -771,18 +996,61 @@ LSTM & Composite & 28 & $0.660\pm0.027$ & $0.651\pm0.021$ & $0.647\pm0.019$ & $0
 \end{tabular}}
 \end{table}
 
-The MLP macro atomic-minus-composite difference was -0.120, with task-bootstrap
+In Table~\ref{tab:xr1-task-type}, the MLP macro atomic-minus-composite difference was -0.120, with task-bootstrap
 95\% interval $[-0.416,0.166]$; the LSTM difference was -0.010 with interval
 $[-0.264,0.245]$. No reliable task-type difference is established.
 
-Causal replay used only the current prefix, task identity, training-derived
-horizon, and active status. It split the 1,824 training rollouts into 1,748
-meta-fit and 76 threshold-validation rollouts; the opened 76-rollout outer test
-was unchanged.
+Causal replay asked a deployment-oriented question: if a detector had observed
+only the policy inferences available up to the current instant, would it have
+raised an alarm on a rollout that eventually failed? This was a \emph{post-hoc
+shadow replay}, not a policy intervention: no alarm stopped or changed the
+Xiaomi policy. The original 1,824-rollout training split was divided into 1,748
+meta-fit rollouts and 76 threshold-validation rollouts. The already opened,
+fixed outer test remained 76 rollouts---one success and one failure for each of
+38 tasks---and was not used to fit detector parameters or thresholds.
+
+All three detectors were causal: they used the current prefix, current
+inference index, known task identity, a horizon estimated from training data,
+and whether the rollout was still active. They never used the completed
+rollout duration, future observations, Subtask-SAFE labels, or a failure-onset
+annotation. The \emph{Model} column in Table~\ref{tab:xr1-causal-online-replay}
+identifies the SAFE source architecture:
+\begin{description}
+\item[Time only] A task-conditioned, monotone estimate of
+$P(\mathrm{failure}\mid\mathrm{still\ active\ at\ }t,\mathrm{task})$, fitted on
+the meta-fit rollouts. It has no SAFE feature input and is identical for the
+MLP and LSTM comparisons.
+\item[SAFE only] The running maximum of the current SAFE score, standardized
+with task-specific location and scale estimated from the meta-fit rollouts.
+It uses no elapsed-time risk as a predictor.
+\item[SAFE+time+task] A validation-fitted logistic head combining the current
+normalized SAFE score, task-conditioned time risk, normalized causal progress,
+their prespecified interactions, and known task identity. The task identifier
+is available to the controller; it is not an inferred future label.
+\end{description}
+
+Each detector selected its own threshold by validation balanced accuracy, with
+ties resolved toward lower FPR and then higher TPR. Therefore the operating
+points in Table~\ref{tab:xr1-causal-online-replay} are \emph{not} matched at a
+common false-positive budget. ``Event ROC'' ranks rollouts using the maximum
+causal score reached anywhere along the full trajectory; it measures
+retrospective event discrimination, not how early the alarm occurs. TPR and
+FPR are failure recall and successful-rollout false-alarm rate at the selected
+threshold, and balanced accuracy is their equal-class summary. ``Detection''
+is the mean first-alarm fraction of the task horizon among \emph{detected}
+failures only, so lower is earlier but misses disappear from the average.
+``Adjusted'' is the stricter timeliness metric: it averages over every failed
+rollout and assigns a fraction of 1.0 to a missed failure. Learned-detector
+entries are mean $\pm$ population SD over three seeds; the deterministic
+time-only row has no seed variation.
 
 \begin{table}[H]
 \centering
-\caption{Causal online event replay. Detection is fraction of task horizon; adjusted assigns missed failures 1.0.}
+\caption{Post-hoc causal online event replay on the fixed 76-rollout Xiaomi
+outer test. Thresholds were selected independently on the 76-rollout
+validation split, so FPR is not matched across rows. Lower detection fractions
+are earlier; adjusted detection assigns missed failures 1.0.}
+\label{tab:xr1-causal-online-replay}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{lllcccccc}
 \toprule
@@ -797,15 +1065,58 @@ LSTM & SAFE+time+task & $0.863\pm0.019$ & $0.781\pm0.090$ & $0.272\pm0.045$ & $0
 \end{tabular}}
 \end{table}
 
-At fixed causal landmarks, MLP SAFE task-macro ROC was 0.671 at 10\% and
-0.626 at 25\%; LSTM values were 0.667 and 0.616. Task-conditioned time-only is
-exactly 0.5 within task at a fixed landmark. This is evidence of early internal
-signal, but not yet of a better operating policy: MLP SAFE obtains earlier
-detection by accepting five false alarms among 38 successes, versus two for
-time-only.
+Table~\ref{tab:xr1-causal-online-replay} separates ranking, thresholded
+classification, and timing. MLP SAFE-only appears earlier than time-only on
+the miss-adjusted metric (0.668 versus 0.820) and has higher recall (0.983
+versus 0.842), but pays for that gain with an FPR of 0.132 rather than 0.053.
+The MLP hybrid matches the observed time-only FPR and improves recall to 0.965,
+yet its adjusted alarm fraction is later (0.848 versus 0.820). The LSTM rows
+have still higher FPR and weaker event ranking. Thus this table supports the
+presence of a SAFE signal, but does not establish a better recovery operating
+policy than time-only.
 
-\subsection{Frozen prospective matched-FPR experiment}
-The confirmatory next step is a two-phase shadow protocol. It preserves all
+To isolate genuinely early information from the full-trajectory maximum,
+Table~\ref{tab:xr1-causal-landmarks} recomputes ROC-AUC at fixed fractions of
+the task horizon, using only rollouts still active at that landmark. ``Pooled''
+ranks all eligible rollouts together and can therefore include cross-task score
+offsets. ``Task-macro'' first computes ROC within each task that retains both
+outcomes and then gives each supported task equal weight. The 10\% and 25\%
+columns have 37 and 33 supported tasks, respectively; later landmarks are
+omitted because support becomes sparse.
+
+\begin{table}[H]
+\centering
+\caption{Causal at-risk ROC-AUC at early fixed landmarks in the Xiaomi outer
+test. Scores use only the prefix available at the landmark. Task-macro ROC
+removes between-task score offsets; time-only is exactly 0.5 within a task at a
+fixed landmark because active rollouts from that task receive the same time
+risk.}
+\label{tab:xr1-causal-landmarks}
+\begin{tabular}{llcccc}
+\toprule
+Model & Detector & \multicolumn{2}{c}{10\% landmark} & \multicolumn{2}{c}{25\% landmark}\\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+& & Pooled & Task-macro & Pooled & Task-macro\\
+\midrule
+MLP & SAFE only & 0.502 & 0.671 & 0.552 & 0.626\\
+MLP & SAFE+time+task & 0.519 & 0.536 & 0.502 & 0.505\\
+LSTM & SAFE only & 0.574 & 0.667 & 0.585 & 0.616\\
+LSTM & SAFE+time+task & 0.627 & 0.667 & 0.591 & 0.616\\
+--- & Time only & 0.513 & 0.500 & 0.494 & 0.500\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The task-macro SAFE-only values in Table~\ref{tab:xr1-causal-landmarks}
+(MLP 0.671/0.626 and LSTM 0.667/0.616 at 10/25\%) are evidence that the hidden
+features contain early within-task outcome information. They are not operating
+points: ROC does not specify how many false alarms an intervention would
+produce. This distinction, together with the unmatched FPRs in
+Table~\ref{tab:xr1-causal-online-replay}, motivated the subsequent frozen
+matched-FPR calibration.
+
+\subsection{Frozen matched-FPR calibration and prospective protocol}
+The confirmatory experiment is a two-phase shadow protocol. It preserves all
 three selected MLP seeds, fits per-seed normalization from the original 1,824
 training rollouts, takes each seed's running maximum, and averages the three
 normalized trajectories. A new calibration batch targets three successes and
@@ -817,57 +1128,543 @@ start through 25\%, suppresses alarms from 25--50\%, and enables the frozen
 task-conditioned time fallback from 50\% onward. Its two thresholds are searched
 jointly under the same rollout-level FPR cap.
 
-After the runtime bundle is frozen, a disjoint shadow test targets ten
-successes and ten failures per task (760 primary outcome-quota rollouts, plus
-retained overshoot). Frozen thresholds are replayed causally at every recorded
-inference, but never stop, retry, recover, or change the Xiaomi policy. Primary
-endpoints are Wilson-interval TPR/FPR,
-miss-adjusted detection fraction, recall by 10/25/50\%, paired
-earlier/same/later/missed counts, task-macro landmark ROC, task/rollout
-bootstrap intervals, FPR drift, and atomic/composite strata.
+\subsubsection{Completed frozen calibration}
+Calibration completed on 16 August 2026 without refitting SAFE or using
+Subtask-SAFE supervision. Collection used the RoboCasa pretrain split, the
+official Xiaomi seed protocol with base seed 500007, two H100 workers, two SAFE
+servers on ports 10106 and 10107, a maximum of 250 attempts per task, and
+outcome quotas of three successes and three failures for each of 38 tasks.
+Experiment code was pinned at \code{5f23b2ef}; official SAFE was pinned at
+\code{b6036abe}. The frozen MLP used horizon selector 1.0, diffusion selector
+1.0, learning rate $10^{-4}$, regularization 0.001, and seeds 0/1/2. Clients
+used \code{replan\_steps=16} and recorded raw SAFE features, actions, and
+$256\times384$ videos at stride 2, without subtask traces.
+Every attempt was retained. The all-retained stream contained 454 valid
+rollouts (254 successes, 200 failures), zero errors, unique rollout IDs, and
+38,403 policy records in an official-loader-compatible export. The primary
+threshold-fitting cohort was exactly balanced: 114 successes and 114 failures.
+All three frozen MLP seeds scored all 454 rollouts before the checksummed
+runtime bundle was written.
 
-The staged detector passes only if FPR remains compatible with 5\%, TPR is no
-more than 0.05 below time-only, adjusted detection is at least 0.10 earlier,
-at least 25\% of failures are detected by 25\%, and the paired bootstrap favors
-earlier detection without material excess false alarms. Recovery is a separate
-randomized intervention experiment and is not estimated from shadow data.
+Figure~\ref{fig:xr1-calibration-support} shows why the all-retained class ratio
+must not be read as deployment prevalence: per-task collection stopped only
+after both outcome quotas were met, so easy or difficult tasks accumulated
+different amounts of overshoot.
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.90\textwidth,height=0.80\textheight,keepaspectratio]{xr1_matched_fpr_collection_support.pdf}
+\caption{All-retained Xiaomi calibration support by task. The balanced primary
+cohort takes the first three successes and first three failures per task; the
+remaining rollouts quantify the collection cost of reaching those quotas.}
+\label{fig:xr1-calibration-support}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{Frozen Xiaomi matched-FPR calibration. All detectors made five false
+alarms among 114 successes. Detection is miss-adjusted task-horizon fraction;
+lower is earlier.}
+\label{tab:xr1-matched-fpr-calibration}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccc}
+\toprule
+Detector & Frozen threshold(s) & TP/114 & FP/114 & TPR & FPR & Adjusted detection\\
+\midrule
+SAFE only & SAFE 0.647629 & 64 & 5 & 0.5614 & 0.0439 & \textbf{0.8090}\\
+Staged SAFE+time & SAFE 0.026111; time 0.972222 & \textbf{80} & 5 & \textbf{0.7018} & 0.0439 & 0.8281\\
+Time only & time 0.972222 & 72 & 5 & 0.6316 & 0.0439 & 0.8796\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{figure}[p]
+\centering
+\begin{subfigure}[t]{0.49\textwidth}
+\centering
+\includegraphics[width=\textwidth]{xr1_matched_fpr_operating_points.pdf}
+\caption{Frozen operating points at a common false-positive budget.}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.49\textwidth}
+\centering
+\includegraphics[width=\textwidth]{xr1_matched_fpr_threshold_tradeoff.pdf}
+\caption{Full and low-FPR threshold trade-offs; stars are frozen selections.}
+\end{subfigure}
+\caption{Matched-FPR calibration separates recall from alarm timing. Staged
+SAFE plus time has the highest failure recall, while SAFE only has the earliest
+miss-adjusted alarm fraction. Both comparisons are threshold-fitting evidence,
+not prospective-test performance.}
+\label{fig:xr1-matched-fpr-operating-points}
+\end{figure}
+
+At the same 4.39\% empirical FPR in
+Table~\ref{tab:xr1-matched-fpr-calibration} and
+Figure~\ref{fig:xr1-matched-fpr-operating-points}, staged SAFE plus time detected eight more
+failures than time-only and reduced miss-adjusted detection by 0.0515 task
+horizons. SAFE only was 0.0705 horizons earlier than time-only but detected
+eight fewer failures. Staging is therefore the best calibration trade-off, not
+a confirmed winner: its timing gain is only about half of the preregistered
+0.10 margin, and the thresholds were selected on this cohort. The correct
+conclusion is to preserve the frozen runtime bundle and proceed unchanged to
+the disjoint prospective test.
+
+\begin{figure}[p]
+\centering
+\begin{subfigure}[t]{0.49\textwidth}
+\centering
+\includegraphics[width=\textwidth]{xr1_matched_fpr_recall_by_landmark.pdf}
+\caption{Cumulative recall by 10, 25, and 50\% of the task horizon.}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.49\textwidth}
+\centering
+\includegraphics[width=\textwidth]{xr1_matched_fpr_alarm_time_ecdf.pdf}
+\caption{Failure first-alarm ECDF, assigning misses to fraction 1.}
+\end{subfigure}
+\caption{Calibration timing diagnostics. Early SAFE contributes recall before
+the 25\% cutoff; the staged detector then suppresses alarms until the frozen
+time fallback becomes eligible at 50\%.}
+\label{fig:xr1-calibration-timing}
+\end{figure}
+
+Figure~\ref{fig:xr1-calibration-timing} shows when that recall is acquired:
+the staged detector can use SAFE only through 25\%, deliberately remains silent
+from 25--50\%, and then admits the time fallback. The ECDF assigns misses to
+fraction 1, preventing an apparently early detector from looking favorable by
+ignoring undetected failures.
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=0.96\textwidth,height=0.82\textheight,keepaspectratio]{xr1_matched_fpr_score_trajectories.pdf}
+\caption{Representative causal score-minus-threshold trajectories linked to
+six calibration rollouts: two staged-earlier failures, one time-earlier
+failure, one near tie, one staged false positive, and one all-detector true
+negative. Positive margin denotes a threshold crossing. The companion bundle
+retains each raw rollout and adds a synchronized 1280$\times$720 annotated MP4
+with the raw normalized SAFE score, time risk, frozen thresholds, stage windows,
+moving inference cursor, and first-alarm source.}
+\label{fig:xr1-representative-trajectories}
+\end{figure}
+
+The six examples in Figure~\ref{fig:xr1-representative-trajectories} are
+illustrative rather than a performance sample. They make the causal mechanics
+auditable---including threshold crossings and alarm source---while the cohort
+statistics remain the evidence in Table~\ref{tab:xr1-matched-fpr-calibration}.
+
+\subsection{Disjoint prospective matched-FPR shadow test}
+
+The frozen runtime bundle was applied without threshold updates to a disjoint
+balanced cohort of 760 rollouts from 38 tasks (380 successes and 380 failures).
+Development and calibration rollout IDs were disjoint from the test, and
+calibration/test seed-reset identities were also disjoint. The complete
+manifest-backed sensitivity cohort retained 1,643 valid attempts (973
+successes and 670 failures); four interrupted temporary artifacts were
+quarantined without deleting the raw collection.
+
+\begin{table}[H]
+\centering
+\caption{Primary prospective matched-FPR results. Detection is miss-adjusted
+task-horizon fraction; lower is earlier.}
+\label{tab:xr1-prospective-primary}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Detector & TP/380 & FP/380 & ROC & AP & TPR & FPR & Bal. acc. & Adjusted detection\\
+\midrule
+SAFE only & 215 & 15 & 0.9128 & 0.9064 & 0.5658 & 0.0395 & 0.7632 & \textbf{0.8101}\\
+Staged SAFE+time & \textbf{254} & 19 & \textbf{0.9545} & 0.9275 & \textbf{0.6684} & 0.0500 & \textbf{0.8092} & 0.8536\\
+Time only & 240 & 18 & 0.9522 & \textbf{0.9321} & 0.6316 & 0.0474 & 0.7921 & 0.8796\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+Staging gained 14 true positives and one false positive over time-only, but was
+only 0.0259 task horizons earlier after misses were charged at the horizon.
+Across the 380 paired failures, staged SAFE+time alarmed earlier 14 times, at
+the same time 346 times, and later 20 times. The task/rollout bootstrap timing
+difference was $-0.0259$ with 95\% CI $[-0.0677,0.0037]$. Recall by the 25\%
+landmark was only 2.9\%, and by 50\% it was 6.3\%.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.98\textwidth]{xr1_prospective_task_scope.pdf}
+\caption{Frozen prospective performance overall and by task type. SAFE-only is
+strong on atomic tasks, while staged SAFE plus time provides essentially no
+timing advantage over time-only on composites. Lower miss-adjusted detection
+fraction is earlier.}
+\label{fig:xr1-prospective-task-scope}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{Secondary prospective atomic/composite strata.}
+\label{tab:xr1-prospective-strata}
+\begin{tabular}{llrrrr}
+\toprule
+Scope & Detector & TPR & FPR & Bal. acc. & Adjusted detection\\
+\midrule
+Atomic & SAFE only & \textbf{0.8000} & 0.0800 & \textbf{0.8600} & \textbf{0.6419}\\
+Atomic & Staged SAFE+time & 0.5400 & 0.0400 & 0.7500 & 0.8320\\
+Atomic & Time only & 0.4000 & \textbf{0.0200} & 0.6900 & 0.9422\\
+Composite & SAFE only & 0.4821 & \textbf{0.0250} & 0.7286 & 0.8701\\
+Composite & Staged SAFE+time & \textbf{0.7143} & 0.0536 & \textbf{0.8304} & 0.8613\\
+Composite & Time only & \textbf{0.7143} & 0.0571 & 0.8286 & \textbf{0.8572}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On the 10 atomic tasks, SAFE-only detected 80\% of failures and was 0.3003
+horizons earlier than time-only, at the cost of six additional false alarms per
+100 successful rollouts. On the 28 composites, staged SAFE+time and time-only
+detected exactly the same number of failures; staging removed one false alarm
+but was 0.0042 horizons later. This task-type interaction supports a label
+mismatch: terminal failure is a plausible target for an atomic attempt but
+marks correct early work as failure in a long composite rollout.
+
+Only the FPR-compatibility and TPR-noninferiority gates passed. The required
+0.10 timing gain, 25\% recall by quarter horizon, and bootstrap evidence for
+earlier detection all failed. The current detector is therefore not a recovery
+candidate. The all-retained cohort is a stopping-cost sensitivity analysis,
+not deployment prevalence; there, time-only ROC was 0.9869 versus 0.9723 for
+staged SAFE+time.
+
+\subsection{Five-task terminal-versus-subtask-label experiment}
+
+The first follow-up tested whether labels aligned to the active semantic
+subtask improve early failure ranking on composite tasks. Replay proved slower
+than fresh collection and exposed terminal-outcome mismatches, so the final
+dataset was collected again with semantic predicates recorded online. It
+contains exactly 50 fresh parent rollouts for each of ArrangeBreadBasket,
+ArrangeTea, BreadSelection, CuttingToolSelection, and GarnishPancake: 250
+parents total. Seventeen stage identities were available for training. Before
+model fitting, parent identities were frozen into 170 development and 80 outer
+test parents. Terminal-label and subtask-label treatments used the same parent
+folds and the outer set remained untouched during hyperparameter selection.
+
+The \emph{terminal} treatment trained original SAFE on each complete parent's
+terminal task outcome. The \emph{subtask} treatment exported each observed
+semantic stage as a sequence and trained on that stage's eventual outcome;
+completed stages were successes, and the active terminally failed stage was a
+failure. Both treatments retained all genuine within-segment inference samples,
+but the subtask export reset sequence context at stage boundaries. Hyperparameter
+selection evaluated both treatments against the same active-subtask labels.
+The primary score was the mean hierarchical task/stage ROC-AUC at fixed causal
+prefixes one and two. A stage was eligible only when both outcomes appeared in
+every deterministic parent-grouped inner fold, producing a fixed catalog of
+eight evaluation stages. No task/stage z-score was applied: ROC was computed
+within stage before hierarchical averaging, so any positive affine stage-wise
+normalization would leave these AUC values unchanged.
+
+Each treatment completed a $3h\times3d\times5$-learning-rate$\times3$-regularizer
+grid for MLP and LSTM over three parent-grouped folds. This gave 405 fits per
+architecture, 810 per treatment, and 1,620 total, with no failures and no outer
+test scoring during selection. Table~\ref{tab:xr1-subtask-label-selection}
+shows the selected configurations and the development-to-outer transfer after
+three final refits per treatment/architecture.
+
+\begin{table}[H]
+\centering
+\caption{Five-task terminal-versus-subtask-label selection and frozen outer
+evaluation. Inner and outer values are hierarchical task/stage ROC-AUC averaged
+over active-stage prefixes one and two. Uncertainty is population SD over three
+folds for inner selection and three refit seeds for outer evaluation.}
+\label{tab:xr1-subtask-label-selection}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llccccc}
+\toprule
+Training label & Model & $h$ & $d$ & $(\mathrm{lr},\lambda)$ & Inner selection & Outer prefix-1/2 ROC\\
+\midrule
+Terminal parent & MLP & 0.0 & 0.0 & $(3\times10^{-4},10^{-2})$ & $0.629\pm0.109$ & $\mathbf{0.653\pm0.005}$\\
+Terminal parent & LSTM & 1.0 & 0.0 & $(10^{-5},10^{-2})$ & $\mathbf{0.661\pm0.023}$ & $0.503\pm0.026$\\
+Active subtask & MLP & 1.0 & 1.0 & $(3\times10^{-4},10^{-1})$ & $0.627\pm0.036$ & $0.491\pm0.004$\\
+Active subtask & LSTM & concat-2 & concat-2 & $(10^{-3},10^{-2})$ & $0.581\pm0.088$ & $0.494\pm0.023$\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+All 12 final refits were evaluated once on the 80 frozen outer parents. No
+threshold was fitted. Table~\ref{tab:xr1-subtask-label-prefixes} reports the
+same task/stage-macro metric at each prefix. Stage-conditioned elapsed time is
+exactly chance at prefixes one and two because every active example within a
+stage is observed at the same fixed inference count. At longer prefixes, short
+completed stages retain their maximum available pre-completion evidence, so
+the prefix-four and prefix-eight rows are secondary sensitivity analyses.
+
+\begin{table}[H]
+\centering
+\caption{Frozen outer active-subtask ROC-AUC by causal inference prefix. SAFE
+entries are mean $\pm$ population SD over three refit seeds. Delta is SAFE minus
+the training-only stage-conditioned elapsed-time baseline.}
+\label{tab:xr1-subtask-label-prefixes}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llrrrrrrrr}
+\toprule
+Training label & Model & \multicolumn{2}{c}{Prefix 1} & \multicolumn{2}{c}{Prefix 2} & \multicolumn{2}{c}{Prefix 4} & \multicolumn{2}{c}{Prefix 8}\\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}\cmidrule(lr){9-10}
+& & SAFE & $\Delta$ & SAFE & $\Delta$ & SAFE & $\Delta$ & SAFE & $\Delta$\\
+\midrule
+Terminal parent & MLP & $0.661\pm0.002$ & $+0.161$ & $0.646\pm0.009$ & $+0.146$ & $0.562\pm0.003$ & $+0.062$ & $0.570\pm0.011$ & $+0.087$\\
+Terminal parent & LSTM & $0.493\pm0.030$ & $-0.007$ & $0.512\pm0.022$ & $+0.012$ & $0.549\pm0.017$ & $+0.049$ & $0.569\pm0.045$ & $+0.086$\\
+Active subtask & MLP & $0.483\pm0.004$ & $-0.018$ & $0.499\pm0.004$ & $-0.001$ & $0.479\pm0.011$ & $-0.021$ & $0.405\pm0.008$ & $-0.078$\\
+Active subtask & LSTM & $0.492\pm0.017$ & $-0.008$ & $0.497\pm0.030$ & $-0.004$ & $0.485\pm0.012$ & $-0.015$ & $0.507\pm0.029$ & $+0.024$\\
+\midrule
+\multicolumn{2}{l}{Elapsed time} & 0.500 & --- & 0.500 & --- & 0.500 & --- & 0.483 & ---\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+The terminal-label MLP is the only treatment that transferred materially above
+chance at the primary early prefixes. Its inner value of 0.629 transferred to
+0.653 on the outer parents, whereas the subtask-label MLP fell from 0.627 to
+0.491 and the inner-selected terminal LSTM fell from 0.661 to 0.503. This is a
+negative result for the current segmented subtask-label realization, not proof
+that active-subtask supervision is intrinsically unhelpful. Subtask failure
+support remains sparse, stage sequences discard preceding parent context, and
+the LSTM state is reset at every semantic boundary. Conversely, the terminal
+MLP may be learning a parent-level execution-quality signature that correlates
+with active-stage outcome; the current analysis does not establish its causal
+mechanism.
+
+The reported $\pm$ values quantify model-seed variation only, not uncertainty
+over parents, tasks, or stages. Per-stage scores and a parent-grouped
+task/stage bootstrap are therefore required before treating 0.653 as a stable
+five-task estimate. Because the outer set is now opened, it must not be used to
+tune the next architecture. The next implementation should retain the complete
+parent sequence, attach the active-stage outcome to each genuine inference,
+condition on stage identity and within-stage time, and balance loss by parent
+and stage rather than fragmenting each stage into an independent rollout.
+
+\subsection{Full-parent stage-aware development experiment}
+
+\subsubsection{Scientific question and data contract}
+The segmented result left two explanations confounded: active-stage labels may
+be unhelpful, or resetting the representation at every semantic boundary may
+discard useful parent-level evidence. The follow-up therefore retained each
+complete parent trajectory and constructed one causal row per genuine Xiaomi
+policy inference. For an attempted stage, the failure target is zero when the
+stage completes and one only for the terminal active stage of a failed parent.
+Future unattempted stages are censored and create no rows. The terminal parent
+outcome is retained only as an auxiliary or baseline target.
+
+Only the 170 development parents from the five-task collection were loaded.
+Task/outcome-stratified allocation occurred before constructing inference
+rows: 96 parents for fitting, 37 for model and regularization selection, and
+37 for calibration. The previously opened 80-parent outer set remained locked
+and unscored. Ten task/stage identities passed the fit-only gate of at least
+three successful and two failed stages.
+
+All learned arms used the same causal full-parent SAFE summary: a short-window
+trajectory summary and cumulative mean using only features observed through
+the current inference. The common neural architecture was a two-layer MLP with
+128 hidden units, layer normalization, GELU, dropout 0.1, learning rate
+$3\times10^{-4}$, parent/stage/outcome-balanced row weights, and seeds 0, 1,
+and 2. Regularization was selected from
+$\{10^{-5},10^{-4},10^{-3},10^{-2}\}$. Four neural arms, four regularizers,
+and three seeds produced 48 candidate fits and 12 selected refits. No LSTM was
+used in this experiment.
+
+\begin{table}[H]
+\centering
+\caption{Full-parent stage-aware detector definitions. Every learned feature
+is causal. The context arm is a planned extension and was unavailable because
+the existing raw tensors predate observation/state-history capture.}
+\label{tab:xr1-stage-aware-models}
+\small
+\begin{tabularx}{\textwidth}{p{0.18\textwidth}X}
+\toprule
+Arm & Input and supervised target\\
+\midrule
+Terminal & Full-parent SAFE summary; final parent failure target at every inference.\\
+Stage & Same SAFE summary; active-stage failure head plus auxiliary terminal head.\\
+Multihorizon & Stage and terminal heads plus failure-within-4/8/16-inference heads; score is a fixed probabilistic OR of stage and maximum near-failure risk.\\
+Conditioned & Multihorizon model plus SAFE change from stage onset, causal stage/task progress, and learned task and stage embeddings.\\
+Prototype & Non-neural distance from successful-stage prototypes fitted on successful fit-stage examples.\\
+Time only & Non-neural stage-conditioned elapsed-inference hazard; receives no SAFE feature.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Selection maximized task/stage-macro ROC-AUC averaged at exact active-stage
+prefixes one and two. ROC was calculated within each task/stage before equal
+task averaging. At an exact prefix, elapsed inference count is fixed, so the
+time-only control is necessarily 0.5. This metric asks whether policy features
+rank failure early; it is not a full-trajectory duration comparison.
+
+\subsubsection{Selection and per-task results}
+\begin{table}[H]
+\centering
+\caption{Full-parent stage-aware development selection. The same 37 parents
+selected regularization and supplied these ROC values; they are not held-out
+performance estimates.}
+\label{tab:xr1-stage-aware-selection}
+\begin{tabular}{lcc}
+\toprule
+Arm & Selected regularization & Prefix-1/2 task/stage ROC\\
+\midrule
+Conditioned & $10^{-3}$ & \textbf{0.6962}\\
+Stage & $10^{-5}$ & 0.6310\\
+Multihorizon & $10^{-3}$ & 0.6256\\
+Terminal & $10^{-5}$ & 0.5919\\
+Time only & --- & 0.5000\\
+Prototype & --- & 0.4075\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Per-task prefix-1/2 selection ROC-AUC. Values average the selected
+regularization over three seeds and the two primary prefixes.}
+\label{tab:xr1-stage-aware-per-task}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrrrrr}
+\toprule
+Task & Terminal & Stage & Multi. & Conditioned & Prototype & Time & Cond.-term.\\
+\midrule
+ArrangeBreadBasket & 0.5556 & 0.7222 & 0.5833 & \textbf{0.7778} & 0.5000 & 0.5000 & +0.2222\\
+ArrangeTea & 0.7981 & 0.7130 & 0.7870 & \textbf{0.8815} & 0.2556 & 0.5000 & +0.0833\\
+BreadSelection & 0.4005 & 0.3727 & 0.4375 & \textbf{0.5347} & 0.6597 & 0.5000 & +0.1343\\
+CuttingToolSelection & 0.3056 & 0.4306 & 0.3704 & 0.3704 & 0.4722 & \textbf{0.5000} & +0.0648\\
+GarnishPancake & 0.9000 & 0.9167 & \textbf{0.9500} & 0.9167 & 0.1500 & 0.5000 & +0.0167\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+Conditioning improved on terminal SAFE on all five tasks and on time-only on
+four. Mean conditioned-minus-terminal and conditioned-minus-time differences
+were +0.1043 and +0.1962. The gain is therefore not attributable to a single
+task, but it is not uniformly stable: conditioned population SD across seeds
+and prefixes was 0.2291 for ArrangeBreadBasket, versus 0.0637--0.0729 for four
+other tasks. CuttingToolSelection remained below chance for every learned arm
+and is the clearest diagnostic failure case.
+
+\subsubsection{Calibration limitation and evidentiary status}
+Threshold calibration treated a successful parent as the conformal unit: any
+alarm in any completed stage makes that parent a false positive. Only 18 of
+the 37 calibration parents were successful. At target FPR 0.05, the
+strict-crossing finite-sample rank is
+$\lceil(18+1)(1-0.05)\rceil=19$, exceeding the 18 available successful-parent
+scores. The implementation therefore placed every threshold above the maximum
+successful score and every detector obtained zero empirical calibration FPR.
+
+At that maximally conservative point, failed-stage TPR was 0.158 for
+conditioned, 0.105 for terminal, stage, and prototype, 0.053 for
+multihorizon, and 0.526 for time-only. These values do not reverse the early
+ranking result: they compare detectors at a coarse boundary forced by
+insufficient calibration support. The bounded conclusion is that full-parent
+stage-aware conditioning improves \emph{developmental early ranking}. It has
+not yet been validated on new parents, and a useful 5\% successful-parent FPR
+claim cannot be resolved from 18 calibration successes.
+
+Development root:
+\path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_stage_aware_parent_5tasks_20260823_162943}.
 
 \section{Interpretation across all experiments}
 
 \subsection{What the evidence supports}
 \begin{enumerate}
-\item The feature-capture and official-export engineering is valid for both $\pi_0$ and RLDX.
-\item RLDX MLP features contain useful within-task retrospective failure information.
-\item Atomic tasks are materially easier than composite tasks.
-\item Task and stage score offsets are large; task-aware normalization is reasonable when fitted without test leakage and when task identity is available.
-\item Semantic decomposition is necessary for valid subtask labels and grouped evaluation.
-\item Parent-aware causal-prefix testing is necessary before claiming early warning.
-\item A frozen, stage-balanced evaluation allocation prevents promising but support-limited pilot results from becoming final claims.
-\item Xiaomi's normalized MLP contains early within-task causal signal across a much broader task set, making it the current best candidate for a matched-FPR shadow test.
+\item The feature-capture and official-export engineering is valid for both
+$\pi_0$ and RLDX (Table~\ref{tab:dataset-chronology}).
+\item RLDX MLP features contain useful within-task retrospective failure
+information (Table~\ref{tab:rldx-scaling}).
+\item In RLDX, atomic tasks are materially easier than composite tasks
+(Table~\ref{tab:rldx-type-ablation} and
+Figure~\ref{fig:rldx-safe20-per-task}); the broad Xiaomi task-type interval is
+too wide to generalize this claim (Table~\ref{tab:xr1-task-type}).
+\item Task and stage score offsets are large; task-aware normalization is
+reasonable when fitted without test leakage and when task identity is
+available (Tables~\ref{tab:rldx-scaling} and
+\ref{tab:xr1-final-normalization}).
+\item Semantic decomposition is necessary for valid subtask labels and grouped
+evaluation (Table~\ref{tab:subtask-split} and
+Figure~\ref{fig:subtask-support}).
+\item Parent-aware causal-prefix testing is necessary before claiming early
+warning (Table~\ref{tab:subtask-causal-prefix}).
+\item A frozen, stage-balanced evaluation allocation prevents promising but
+support-limited pilot results from becoming final claims
+(Table~\ref{tab:v2-frozen} and Figure~\ref{fig:v2-frozen-prefix}).
+\item Xiaomi's normalized MLP contains causal ranking signal across a much
+broader task set, and the frozen prospective protocol validates a modest
+classification gain at matched FPR
+(Tables~\ref{tab:xr1-matched-fpr-calibration} and
+\ref{tab:xr1-prospective-primary}).
+\item The prospective secondary stratum identifies a concrete task-type
+interaction: SAFE-only is strong and early on atomic tasks, while its timing
+advantage disappears on composites
+(Table~\ref{tab:xr1-prospective-strata}).
+\item On five freshly traced composites, terminal-label MLP SAFE retains
+active-subtask ranking at the first one and two genuine inferences
+(Table~\ref{tab:xr1-subtask-label-selection}); this is evidence of an early
+feature signal, although its mechanism and parent-level uncertainty remain
+unresolved.
+\item Preserving full-parent causal summaries and adding active-stage,
+near-failure, progress, and task/stage conditioning improves selection ROC
+from 0.592 to 0.696 and beats terminal SAFE on all five tasks
+(Tables~\ref{tab:xr1-stage-aware-selection} and
+\ref{tab:xr1-stage-aware-per-task}).
 \end{enumerate}
 
 \subsection{What the evidence rejects}
 \begin{enumerate}
-\item More complex temporal modeling alone: the LSTM was not competitive.
-\item Mixed horizons alone as the cause: split atomic/composite models did not beat the mixed MLP.
-\item Balanced sampling alone as the cause: natural prevalence and paper-style weighting had negligible paired effects.
-\item Semantic decomposition alone as the solution: Subtask-SAFE raw ROC did not translate into early causal discrimination.
-\item Within-horizon relabeling, stage conditioning, and temporal summaries as sufficient fixes: all improved selected pilots, but failed to transfer to the immutable four-stage test.
-\item More of the same target-aware data as a guaranteed remedy: expanding to 280 training parents did not make prefix-32 ROC statistically distinguishable from chance.
-\item Raw pooled Xiaomi scores as the deployment variable: training-only task normalization is necessary for the MLP, and elapsed time remains a stronger raw retrospective predictor.
+\item More complex temporal modeling alone: the LSTM was not consistently
+competitive (Tables~\ref{tab:rldx-scaling} and
+\ref{tab:xr1-final-normalization}).
+\item Mixed horizons alone as the cause: split atomic/composite models did not
+beat the mixed MLP (Table~\ref{tab:rldx-type-ablation}).
+\item Balanced sampling alone as the cause: natural prevalence and paper-style
+weighting had negligible paired effects
+(Table~\ref{tab:rldx-natural-prevalence}).
+\item Semantic decomposition alone as the solution: Subtask-SAFE raw ROC did
+not translate into early causal discrimination
+(Figure~\ref{fig:subtask-test-auc} versus
+Table~\ref{tab:subtask-causal-prefix}).
+\item Within-horizon relabeling, stage conditioning, and temporal summaries as
+sufficient fixes: all improved selected pilots, but failed to transfer to the
+immutable four-stage test (Table~\ref{tab:v2-screen} versus
+Table~\ref{tab:v2-frozen}).
+\item More of the same target-aware data as a guaranteed remedy: expanding to
+280 training parents did not make prefix-32 ROC statistically distinguishable
+from chance (Figure~\ref{fig:v2-frozen-prefix}).
+\item Raw pooled Xiaomi scores as the deployment variable: training-only task
+normalization is necessary for the MLP
+(Table~\ref{tab:xr1-final-normalization}), and elapsed time remains a stronger
+raw retrospective predictor (Table~\ref{tab:xr1-task-type}).
+\item Current Xiaomi terminal-label SAFE as an overall early recovery trigger:
+the prospective staged detector missed the 0.10 timing margin, early-landmark
+recall target, and bootstrap gate (Table~\ref{tab:xr1-prospective-primary}).
+\item Independently segmented active-subtask labels as a sufficient fix: both
+subtask-label architectures fell to chance on the frozen 80-parent outer set
+despite above-chance inner selection
+(Table~\ref{tab:xr1-subtask-label-selection}).
+\item The current stage-aware result as a deployment operating point: only 18
+successful calibration parents were available, so the nominal 5\% conformal
+rank exceeded the available sample and forced zero empirical FPR for every
+detector.
 \end{enumerate}
 
 \subsection{Why normalization is reasonable, but insufficient}
-Training-only task or task/subtask normalization is scientifically reasonable because different tasks have different score scales and the deployed controller knows its commanded task. It is analogous to task-conditional calibration, not test-set tuning. However, normalization can only remove offsets; it cannot create within-stage ordering. The Subtask-SAFE drop from raw ROC 0.734 to parent-aware 0.558 exposes that limitation. Xiaomi is the complementary case: MLP task-z ROC rises from 0.532 to 0.692, indicating useful within-task ordering hidden by task offsets. Every policy family still requires its own training-derived calibration; thresholds and normalization are not transferable.
+Training-only task or task/subtask normalization is scientifically reasonable
+because different tasks have different score scales and the deployed
+controller knows its commanded task. It is analogous to task-conditional
+calibration, not test-set tuning. However, normalization can only remove
+offsets; it cannot create within-stage ordering. The Subtask-SAFE drop from raw
+ROC 0.734 in Figure~\ref{fig:subtask-test-auc} to parent-aware 0.558 in
+Figure~\ref{fig:subtask-parent-bootstrap} exposes that limitation. Xiaomi is
+the complementary case: Table~\ref{tab:xr1-final-normalization} shows MLP
+task-z ROC rising from 0.532 to 0.692, indicating useful within-task ordering
+hidden by task offsets. Every policy family still requires its own
+training-derived calibration; thresholds and normalization are not
+transferable.
 
 \section{Recommended next experiments}
 
 \begin{enumerate}
-\item \textbf{Run the Xiaomi prospective matched-FPR shadow test first.} Use the already selected three-seed MLP ensemble, a fresh 3/3-per-task calibration batch, a disjoint 10/10-per-task test, a jointly constrained 5\% FPR cascade, and no policy intervention.
-\item \textbf{Freeze before test collection.} Persist checkpoint and config checksums, training-only normalization, task horizons, time-risk curves, thresholds, stage windows, task list, and calibration identities. Never retune these values after test outcomes are visible.
-\item \textbf{Retain every attempt.} Outcome quotas define the primary balanced endpoint, while the complete overshoot stream supplies an all-retained sensitivity analysis and documents collection cost and errors. Because stopping depends on both class quotas, this stream is not an unbiased deployment-prevalence sample.
-\item \textbf{Keep paired timeliness primary.} Compare staged SAFE and time-only on identical failed rollouts with misses assigned fraction 1.0; report recall by 10/25/50\%, Wilson intervals, and task/rollout bootstrap differences.
-\item \textbf{Gate recovery on the frozen success criteria.} Only a prospective pass permits a separately powered randomized shadow-versus-recovery intervention study.
+\item \textbf{Confirm the selected stage-aware ranking before further model development.} Collect 50 new identity-disjoint parents for each of the same five composites, retain every rollout, and freeze the current runtime bundle, stage catalog, seed/reset family, and prefix-1/2 metric before inspecting outcomes. Do not refit on this confirmation cohort.
+\item \textbf{Use explicit continuation gates.} Require conditioned task/stage-macro ROC at least 0.60, conditioned-minus-terminal at least +0.05, and conditioned wins against terminal and time-only on at least four of five tasks. Report parent-grouped task/stage bootstrap intervals; CuttingToolSelection and ArrangeBreadBasket are mandatory diagnostics.
+\item \textbf{Develop observation/state context only after confirmation.} The new collection should record causal Xiaomi observation/state history, but that channel should remain unused for the frozen confirmation. If the current conditioned detector passes, use a separate development allocation to train the context arm, followed by another identity-disjoint test.
+\item \textbf{Separate ranking validation from operating-point calibration.} A final 5\% successful-parent FPR claim should use at least 100 successful calibration parents with task coverage. Thirty-nine successes are the mathematical minimum for a nontrivial strict-crossing threshold, but remain statistically unstable.
+\item \textbf{Require a causal stage tracker.} Measure stage-estimation error separately, then rerun detector evaluation using predicted rather than privileged stage identity. Oracle-stage results are an upper bound only.
+\item \textbf{Confirm atomic SAFE separately.} The atomic subgroup is promising but secondary. Freeze the current SAFE-only operating point and collect a new balanced atomic-only cohort before treating its 0.300-horizon timing advantage as operational evidence.
+\item \textbf{Use a new prospective seed family for confirmation.} The current test is opened and may be used for development, never for the final dense-model claim. Only after a new prospective pass should recovery be randomized against shadow operation.
 \item \textbf{Continue RLDX diagnosis separately.} Stage-specific heads, survival objectives, earlier feature layers, and complementary proprioceptive/contact signals remain appropriate RLDX follow-ups, but they must not be mixed with Xiaomi original-SAFE evidence.
 \end{enumerate}
 
@@ -885,7 +1682,34 @@ Training-only task or task/subtask normalization is scientifically reasonable be
 \item Conformal validity depends on exchangeability and can fail under task, policy, layout, or seed drift.
 \item The broad Xiaomi outer test has only one success and one failure per task; task-level and atomic/composite uncertainty is therefore wide.
 \item Xiaomi causal replay is post-hoc because the 76 outer-test trajectories were already opened by raw and normalized analyses.
-\item The prospective Xiaomi calibration and test described here were not yet run at report time; their sample counts are minimum targets, not completed evidence.
+\item The Xiaomi matched-FPR shadow test is prospective with respect to its
+frozen detector bundle, but it is observational replay on completed
+trajectories rather than a detector-triggered recovery intervention.
+\item The 228-rollout calibration cohort is outcome-balanced by quota. The 454-rollout all-retained stream documents collection cost and sensitivity, but quota stopping prevents treating its class ratio as deployment prevalence.
+\item The 760-rollout prospective primary cohort is also balanced by quota;
+the 1,643-rollout retained stream reflects task-specific stopping cost rather
+than deployment prevalence.
+\item The prospective atomic advantage is a secondary subgroup result and
+requires a new confirmatory allocation.
+\item The five-task active-subtask outer set contains only 80 parents and eight
+evaluation stages. Its three-seed SD does not quantify parent, task, or stage
+sampling uncertainty; hierarchical bootstrap results are still pending.
+\item The five-task outer set has now been opened. Its terminal-MLP advantage
+may guide diagnosis but cannot be used to tune and then confirm another model
+on the same identities.
+\item The tested subtask treatment split parent trajectories into independent
+semantic-stage sequences. It therefore evaluates one implementation of
+subtask supervision, not the proposed full-parent dense-label architecture.
+\item Dense subtask-outcome labels can be anticipatory: early samples in a
+stage that eventually fails may be observationally indistinguishable from
+success. A separate change-point target is needed to expose this noise.
+\item The full-parent stage-aware comparison uses only 37 selection parents
+and ten fit-supported task/stage identities. Its 0.696 ROC-AUC selected
+regularization and is not a new held-out or prospective estimate.
+\item Stage-aware calibration has only 18 successful-parent units. At target
+FPR 0.05, conformal rank 19 is unavailable, so all thresholds lie above the
+largest successful score and operating-point comparisons are too coarse for a
+deployment claim.
 \end{itemize}
 
 \appendix
@@ -903,6 +1727,8 @@ RLDX 25/25 CV & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/safe_rl
 RLDX 25/25 final & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/safe_rldx1_25x25_final_2gpu_20260730_104400}\\
 RLDX calibration & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/safe_rldx1_25x25_final_2gpu_20260730_104400_calibration_20260730_113807}\\
 RLDX expanded alpha sweep & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/safe_rldx1_25x25_final_2gpu_20260730_104400_alpha_sweep_005_to_050_20260806_142630}\\
+RLDX supported-20 source/export & \path{/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/rldx1_original_safe35_natural50_20260808_203158/official_safe_supported20_natural50}\\
+RLDX supported-20 training/final & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530}\\
 Task-type ablation & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/safe_rldx1_25x25_type_ablation_20260730_115819}\\
 Natural-rate study & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/safe_rldx1_natural_rate_screen_20260730_161528}\\
 Subtask source data & \path{/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/rldx1_composite_subtask_seed8_9_10_150_20260803_210535}\\
@@ -919,6 +1745,15 @@ Xiaomi 39-task collection & \path{/gs/bs/tga-shinoda/felid/robocasa_rollouts/saf
 Xiaomi 2,642-rollout pool & \path{/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_safe_pooled_39tasks_50each_seed0_20260812_221815/source_pool_all_2642}\\
 Xiaomi broad final refits & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_pooled_39tasks_final_refits_20260814_231508}\\
 Xiaomi causal replay & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_pooled_39tasks_final_refits_20260814_231508/causal_online_replay_20260815_003121}\\
+Xiaomi matched-FPR calibration data & \path{/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_prospective_matched_fpr_20260815_163700/calibration_collection}\\
+Xiaomi frozen runtime bundle & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_prospective_matched_fpr_20260815_163700_calibration/runtime_bundle.json}\\
+Xiaomi calibration visual bundle & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/report_bundles/xr1_matched_fpr_calibration_visuals_latest.zip}\\
+Xiaomi prospective collection & \path{/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_prospective_matched_fpr_20260815_163700/prospective_test_collection}\\
+Xiaomi prospective analysis & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_prospective_matched_fpr_20260815_163700_prospective_test}\\
+Xiaomi five-task semantic collection & \path{/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_dense_subtask_live_5tasks_50each_20260817_195216}\\
+Xiaomi 5-task CV pointer & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_subtask_label_full_grid_latest.env}\\
+Xiaomi 5-task refit pointer & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_subtask_label_final_refits_latest.env}\\
+Xiaomi full-parent stage-aware development & \path{/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_stage_aware_parent_5tasks_20260823_162943}\\
 \bottomrule
 \end{longtable}
 \normalsize
@@ -930,12 +1765,33 @@ The repository chronology is maintained in
 \item \code{collect\_atomic\_rollouts}, \code{collect\_mixed\_rollouts}, and
 \code{export\_official\_safe};
 \item \code{run\_seen\_cv\_grid} and \code{train\_seen\_tasks};
+\item \path{evaluate_subtask_label_final_refits} for the frozen five-task
+active-subtask-label comparison;
+\item \path{run_stage_aware_parent_safe} and
+\path{print_stage_aware_parent_safe} for full-parent stage-aware development,
+frozen bundles, and identity-disjoint evaluation;
 \item \path{score_seen_checkpoint_external} and
 \path{run_prospective_matched_fpr};
+\item \path{create_xr1_matched_fpr_visual_bundle} and
+\path{xr1_matched_fpr_video} for checksummed figures and synchronized MP4s;
 \item the parent-aware Subtask-SAFE analysis and calibration modules.
 \end{itemize}
 
-Most figures in this PDF are copied unchanged from the checksum-verified evidence bundle. The 6 August comparison and frozen-prefix figures are deterministic renderings of the report CSVs; their generator is \path{generate_update_figures.py}. \path{chart_map.md} records the source path and interpretation for every visual. Machine-readable supporting CSVs are in \path{tables/}. Videos remain in the evidence bundle; they are not embedded in PDF because their timing and score overlays are better inspected as MP4. The score-video tool now supports a full-rollout view and filenames that identify normalization, ground truth, and detector correctness.
+Most figures in this PDF are copied unchanged from checksum-verified evidence
+bundles. The 6 August comparison and frozen-prefix figures are deterministic
+renderings of the report CSVs; their generator is
+\path{generate_update_figures.py}. The Xiaomi calibration figures and
+representative trajectories are deterministic renderings of the frozen
+calibration bundle; the prospective task-scope figure is regenerated from
+\path{tables/xr1_prospective_matched_fpr_results.csv}.
+\path{chart_map.md} records the source path and
+interpretation for every visual. Machine-readable supporting CSVs are in
+\path{tables/}. Videos are not embedded in PDF: the Xiaomi visual bundle keeps
+the unmodified policy rollouts and synchronized annotated MP4s side by side,
+with filenames and a CSV index linking each video to its alarm trajectory.
+The stage-aware aggregate, per-task, and calibration-support values are also
+preserved in \path{tables/xr1_stage_aware_parent_selection.csv} and
+\path{tables/xr1_stage_aware_parent_calibration.csv}.
 
 \section{Metric-reading checklist}
 \begin{enumerate}

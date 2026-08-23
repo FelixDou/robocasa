@@ -36,6 +36,7 @@ def score_external_export(
     output_dir,
     group,
     device="cuda",
+    allow_task_subset=False,
 ):
     import sys
 
@@ -96,13 +97,15 @@ def score_external_export(
     actual_tasks = {
         catalog["task_names"][int(rollout.task_id)] for rollout in rollouts
     }
-    missing = sorted(expected_tasks - actual_tasks)
     unexpected = sorted(actual_tasks - expected_tasks)
-    if missing or unexpected:
+    missing = sorted(expected_tasks - actual_tasks)
+    if unexpected or (missing and not allow_task_subset):
         raise ValueError(
             f"External export task coverage differs from training: "
             f"missing={missing}, unexpected={unexpected}"
         )
+    if not actual_tasks:
+        raise ValueError("External export contains no scored tasks")
     cutoffs = training_metrics.get("task_min_steps", {})
     if set(cutoffs) != expected_tasks:
         raise ValueError("Frozen training metrics lack exact task cutoff coverage")
@@ -185,6 +188,8 @@ def score_external_export(
         "model": str(cfg.model.name),
         "seed": seed,
         "task_names": sorted(actual_tasks),
+        "training_task_names": sorted(expected_tasks),
+        "task_subset_allowed": bool(allow_task_subset),
         "rollouts": len(records),
         "successes": sum(not row["failed"] for row in records),
         "failures": sum(row["failed"] for row in records),
@@ -203,6 +208,14 @@ def build_parser():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--group", choices=("calibration", "prospective_test"), required=True)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--allow-task-subset",
+        action="store_true",
+        help=(
+            "Allow the external export to contain a strict subset of the "
+            "checkpoint's training tasks. Unexpected tasks remain forbidden."
+        ),
+    )
     return parser
 
 

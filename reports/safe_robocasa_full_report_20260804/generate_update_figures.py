@@ -1,4 +1,4 @@
-"""Generate figures added in the 6 August 2026 SAFE report update."""
+"""Generate figures added in the August 2026 SAFE report updates."""
 
 from __future__ import annotations
 
@@ -437,12 +437,122 @@ def plot_paper_roc_comparison():
     plt.close(fig)
 
 
+def plot_xr1_prospective_task_scope():
+    rows = [
+        row
+        for row in read_csv("xr1_prospective_matched_fpr_results.csv")
+        if row["cohort"] == "primary_balanced"
+    ]
+    scopes = ["Overall", "Atomic", "Composite"]
+    detectors = ["SAFE only", "Staged SAFE + time", "Time only"]
+    by_key = {(row["scope"], row["detector"]): row for row in rows}
+    x = np.arange(len(scopes))
+    width = 0.25
+    palette = {
+        "SAFE only": "#2563A6",
+        "Staged SAFE + time": "#D17A22",
+        "Time only": "#A7B0BA",
+    }
+    edges = {
+        "SAFE only": "#183B56",
+        "Staged SAFE + time": "#8A4D13",
+        "Time only": "#4C5661",
+    }
+    hatches = {
+        "SAFE only": None,
+        "Staged SAFE + time": "//",
+        "Time only": "..",
+    }
+    panels = [
+        ("tpr", "Failure recall (TPR)", (0.0, 1.0)),
+        ("fpr", "Successful-rollout FPR", (0.0, 0.105)),
+        (
+            "adjusted_detection_fraction",
+            "Miss-adjusted alarm fraction",
+            (0.0, 1.0),
+        ),
+    ]
+
+    fig, axes = plt.subplots(1, 3, figsize=(12.4, 4.7))
+    for ax, (field, title, ylim) in zip(axes, panels):
+        for detector_index, detector in enumerate(detectors):
+            values = np.asarray(
+                [float(by_key[(scope, detector)][field]) for scope in scopes]
+            )
+            bars = ax.bar(
+                x + (detector_index - 1) * width,
+                values,
+                width,
+                color=palette[detector],
+                edgecolor=edges[detector],
+                linewidth=0.8,
+                hatch=hatches[detector],
+                label=detector,
+            )
+            for bar, value in zip(bars, values):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    value + (0.018 if field != "fpr" else 0.0025),
+                    f"{value:.3f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7.3,
+                    rotation=90 if field == "fpr" else 0,
+                    color="#344054",
+                )
+        ax.set_xticks(x)
+        ax.set_xticklabels(scopes)
+        ax.set_ylim(*ylim)
+        ax.set_title(title)
+        ax.grid(axis="y", alpha=0.22)
+        if field == "adjusted_detection_fraction":
+            ax.text(
+                0.02,
+                0.97,
+                "Lower is earlier",
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                fontsize=8,
+                color="#4C5661",
+            )
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        frameon=False,
+        ncol=3,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.925),
+    )
+    fig.suptitle("Prospective matched-FPR results by task scope", y=0.995)
+    fig.text(
+        0.5,
+        0.015,
+        "Balanced primary cohort: 380 successes and 380 failures across 38 tasks; atomic n=200, composite n=560. "
+        "Frozen thresholds; no test-time retuning.",
+        ha="center",
+        fontsize=8.4,
+        color="#4C5661",
+    )
+    fig.tight_layout(rect=(0, 0.06, 1, 0.88), w_pad=1.5)
+    for suffix in ("png", "pdf"):
+        fig.savefig(
+            FIGURES / f"xr1_prospective_task_scope.{suffix}",
+            dpi=220 if suffix == "png" else None,
+            bbox_inches="tight",
+        )
+    plt.close(fig)
+
+
 def main():
     FIGURES.mkdir(parents=True, exist_ok=True)
     plot_frozen_prefix32()
     plot_updated_collection_support()
     plot_natural_composite_distribution_merged()
     plot_paper_roc_comparison()
+    plot_xr1_prospective_task_scope()
 
 
 if __name__ == "__main__":

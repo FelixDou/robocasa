@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+import tempfile
 import unittest
 
 import numpy as np
@@ -7,7 +10,14 @@ from tests.safe_import_helper import install_lightweight_robocasa_packages
 
 install_lightweight_robocasa_packages()
 
-from robocasa.recovery.safe.run_stage_aware_parent_safe import build_parser  # noqa: E402
+from robocasa.recovery.safe.run_stage_aware_parent_safe import (  # noqa: E402
+    build_parser,
+    load_external_fixed_prefix_scores,
+    primary_per_task_values,
+)
+from robocasa.recovery.safe.score_seen_checkpoint_external import (  # noqa: E402
+    build_parser as build_external_score_parser,
+)
 from robocasa.recovery.safe.stage_aware_parent_safe import (  # noqa: E402
     allocate_development_parents,
     apply_score_normalizer,
@@ -18,6 +28,7 @@ from robocasa.recovery.safe.stage_aware_parent_safe import (  # noqa: E402
     fit_success_scaler,
     group_score_trajectories,
     make_parent_holdout_split,
+    paired_fixed_prefix_bootstrap,
     paired_parent_bootstrap,
     parent_event_metrics,
     parent_stage_weights,
@@ -219,6 +230,51 @@ class TestStageAwareParentSafe(unittest.TestCase):
         self.assertEqual(metrics["2"]["task_stage_macro_roc_auc"], 1.0)
         self.assertEqual(metrics["1"]["at_risk_definition"], "stage remains active at the exact prefix")
 
+    def test_external_score_ensemble_aligns_by_parent_and_inference(self):
+        stage_rows = [
+            {
+                "parent_rollout_id": parent_id,
+                "inference_index": inference_index,
+            }
+            for parent_id in ("parent-a", "parent-b")
+            for inference_index in (0, 1)
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            paths = []
+            for member, offset in enumerate((0.0, 2.0)):
+                path = Path(directory) / f"member-{member}.jsonl"
+                with path.open("w") as stream:
+                    for parent_id in ("parent-a", "parent-b"):
+                        stream.write(
+                            json.dumps(
+                                {
+                                    "rollout_id": parent_id,
+                                    "scores": [offset + 1.0, offset + 3.0],
+                                }
+                            )
+                            + "\n"
+                        )
+                paths.append(str(path))
+            scores, provenance = load_external_fixed_prefix_scores(
+                [f"safe38={','.join(paths)}"],
+                stage_rows,
+                {"parent-a", "parent-b"},
+            )
+        np.testing.assert_allclose(scores["safe38"], [2.0, 4.0, 2.0, 4.0])
+        self.assertEqual(provenance["safe38"]["members"], 2)
+        self.assertFalse(provenance["safe38"]["threshold_fitted"])
+
+    def test_primary_per_task_values_average_requested_prefixes(self):
+        metrics = {
+            "1": {"per_task": {"A": 0.6, "B": 0.7}},
+            "2": {"per_task": {"A": 0.8, "B": 0.5}},
+            "4": {"per_task": {"A": 0.1, "B": 0.1}},
+        }
+        self.assertEqual(
+            primary_per_task_values(metrics, (1, 2)),
+            {"A": 0.7, "B": 0.6},
+        )
+
     def test_calibration_event_and_parent_metrics(self):
         rows = []
         scores = []
@@ -311,6 +367,42 @@ class TestStageAwareParentSafe(unittest.TestCase):
         self.assertAlmostEqual(result["ci95"][0], -0.5)
         self.assertAlmostEqual(result["ci95"][1], -0.5)
 
+    def test_fixed_prefix_bootstrap_keeps_task_parent_pairing(self):
+        rows, candidate, baseline = [], [], []
+        for task in ("A", "B"):
+            for failed in (False, True):
+                parent_id = f"{task}-{int(failed)}"
+                for prefix in (1, 2):
+                    rows.append(
+                        {
+                            "parent_rollout_id": parent_id,
+                            "task_name": task,
+                            "stage_name": f"{task}::stage",
+                            "stage_failed": failed,
+                            "terminal_failed": failed,
+                            "local_index": prefix,
+                        }
+                    )
+                    candidate.append(float(failed))
+                    baseline.append(0.5)
+        result = paired_fixed_prefix_bootstrap(
+            rows,
+            {
+                "candidate": np.asarray(candidate),
+                "terminal": np.asarray(baseline),
+            },
+            "candidate",
+            baseline="terminal",
+            prefixes=(1, 2),
+            primary_prefixes=(1, 2),
+            replicates=50,
+            seed=0,
+        )
+        self.assertAlmostEqual(result["point"], 0.5)
+        self.assertAlmostEqual(result["ci95"][0], 0.5)
+        self.assertAlmostEqual(result["ci95"][1], 0.5)
+        self.assertEqual(result["replicates_estimable"], 50)
+
     def test_cli_separates_development_and_frozen_evaluation(self):
         parser = build_parser()
         develop = parser.parse_args(
@@ -346,9 +438,35 @@ class TestStageAwareParentSafe(unittest.TestCase):
                 "/runtime.json",
                 "--output-dir",
                 "/eval",
+                "--external-scores",
+                "safe38=/scores/seed0,/scores/seed1",
+                "--opened-outer",
             ]
         )
         self.assertEqual(evaluate.phase, "evaluate")
+        self.assertTrue(evaluate.opened_outer)
+        self.assertEqual(
+            evaluate.external_scores,
+            ["safe38=/scores/seed0,/scores/seed1"],
+        )
+
+    def test_external_scorer_accepts_strict_training_task_subset(self):
+        args = build_external_score_parser().parse_args(
+            [
+                "--export-dir",
+                "/export",
+                "--safe-repo",
+                "/safe",
+                "--training-run-dir",
+                "/training",
+                "--output-dir",
+                "/scores",
+                "--group",
+                "prospective_test",
+                "--allow-task-subset",
+            ]
+        )
+        self.assertTrue(args.allow_task_subset)
 
 
 if __name__ == "__main__":

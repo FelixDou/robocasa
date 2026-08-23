@@ -773,6 +773,104 @@ def primary_prefix_score(metrics, primary_prefixes=DEFAULT_PRIMARY_PREFIXES):
     return float(np.mean(values))
 
 
+def paired_fixed_prefix_bootstrap(
+    rows,
+    score_by_detector,
+    candidate,
+    *,
+    baseline="terminal",
+    prefixes=DEFAULT_PREFIXES,
+    primary_prefixes=DEFAULT_PRIMARY_PREFIXES,
+    replicates=2000,
+    seed=0,
+):
+    """Hierarchical paired task/parent bootstrap of primary-prefix AUC delta.
+
+    Tasks are sampled with replacement. Within each task, parent rollouts are
+    sampled with replacement separately by terminal outcome; every inference
+    row for a sampled parent is retained. Candidate and baseline always use the
+    same sampled rows.
+    """
+    if candidate not in score_by_detector or baseline not in score_by_detector:
+        raise ValueError("Candidate and baseline scores are required")
+    if any(len(rows) != len(values) for values in score_by_detector.values()):
+        raise ValueError("Rows and detector scores are not aligned")
+    groups = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    for index, row in enumerate(rows):
+        groups[row["task_name"]][bool(row["terminal_failed"])][
+            row["parent_rollout_id"]
+        ].append(index)
+    tasks = sorted(groups)
+    invalid = [task for task in tasks if set(groups[task]) != {False, True}]
+    if invalid:
+        raise ValueError(f"Bootstrap tasks lack both parent outcomes: {invalid}")
+
+    def task_values(indices, detector):
+        selected_rows = [rows[index] for index in indices]
+        selected_scores = np.asarray(score_by_detector[detector])[indices]
+        metrics = fixed_prefix_metrics(
+            selected_rows, selected_scores, prefixes=prefixes
+        )
+        values = defaultdict(list)
+        for prefix in primary_prefixes:
+            for task, value in metrics[str(int(prefix))]["per_task"].items():
+                values[task].append(float(value))
+        return {
+            task: float(np.mean(task_scores))
+            for task, task_scores in values.items()
+            if task_scores
+        }
+
+    all_indices = list(range(len(rows)))
+    candidate_values = task_values(all_indices, candidate)
+    baseline_values = task_values(all_indices, baseline)
+    common = sorted(set(candidate_values) & set(baseline_values))
+    if not common:
+        raise ValueError("No estimable task is shared by candidate and baseline")
+    point = float(
+        np.mean([candidate_values[task] - baseline_values[task] for task in common])
+    )
+    rng = np.random.default_rng(int(seed))
+    draws = []
+    for _ in range(int(replicates)):
+        indices = []
+        for task in tasks:
+            for outcome in (False, True):
+                parents = sorted(groups[task][outcome])
+                sampled = rng.choice(parents, size=len(parents), replace=True)
+                for parent_id in sampled:
+                    indices.extend(groups[task][outcome][str(parent_id)])
+        candidate_sample = task_values(indices, candidate)
+        baseline_sample = task_values(indices, baseline)
+        estimable = sorted(set(candidate_sample) & set(baseline_sample))
+        if not estimable:
+            continue
+        sampled_tasks = rng.choice(estimable, size=len(estimable), replace=True)
+        draws.append(
+            float(
+                np.mean(
+                    [
+                        candidate_sample[str(task)] - baseline_sample[str(task)]
+                        for task in sampled_tasks
+                    ]
+                )
+            )
+        )
+    if not draws:
+        raise ValueError("No fixed-prefix bootstrap replicate was estimable")
+    lower, upper = np.quantile(np.asarray(draws), [0.025, 0.975])
+    return {
+        "candidate": candidate,
+        "baseline": baseline,
+        "point": point,
+        "ci95": [float(lower), float(upper)],
+        "replicates_requested": int(replicates),
+        "replicates_estimable": len(draws),
+        "resampling_unit": "tasks, then parents within task and terminal outcome",
+        "primary_prefixes": [int(value) for value in primary_prefixes],
+    }
+
+
 def fit_stage_time_curves(rows, selected_stages, *, prior=0.5):
     curves = {}
     for stage in selected_stages:
@@ -1263,6 +1361,7 @@ __all__ = [
     "load_parent_split",
     "make_parent_holdout_split",
     "model_rows",
+    "paired_fixed_prefix_bootstrap",
     "paired_parent_bootstrap",
     "parent_event_metrics",
     "parent_identity",
