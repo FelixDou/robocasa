@@ -31,7 +31,7 @@ from robocasa.recovery.full_snapshot import (
 )
 
 
-BRANCH_SCHEMA_VERSION = 5
+BRANCH_SCHEMA_VERSION = 6
 BRANCH_PROTOCOL = "robocasa_exact_snapshot_counterfactual_branch"
 
 
@@ -444,6 +444,18 @@ def analyze_phase2_replay(records, errors=None):
                     left.get("suffix_observation_sha256")
                     == right.get("suffix_observation_sha256")
                 ),
+                "action_sequence_exact": (
+                    left.get("suffix_action_sha256")
+                    == right.get("suffix_action_sha256")
+                ),
+                "causal_environment_sequence_exact": (
+                    left.get("suffix_environment_sha256")
+                    == right.get("suffix_environment_sha256")
+                ),
+                "diagnostic_environment_sequence_exact": (
+                    left.get("suffix_diagnostic_environment_sha256")
+                    == right.get("suffix_diagnostic_environment_sha256")
+                ),
                 "suffix_outcome_equal": (
                     left["task_success"] == right["task_success"]
                     and left["ordered_completed_subtasks"]
@@ -486,6 +498,10 @@ def analyze_phase2_replay(records, errors=None):
         and all(row["transition_exact"] for row in valid_pairs),
         "same_seed_observations_exact": bool(valid_pairs)
         and all(row["observation_exact"] for row in valid_pairs),
+        "same_seed_action_sequences_exact": bool(valid_pairs)
+        and all(row["action_sequence_exact"] for row in valid_pairs),
+        "same_seed_causal_environment_sequences_exact": bool(valid_pairs)
+        and all(row["causal_environment_sequence_exact"] for row in valid_pairs),
         "suffix_outcome_agreement_at_least_0p95": suffix_agreement >= 0.95,
         "candidate_diversity_at_least_0p90": diversity_rate >= 0.90,
         "record_alignment_exact": bool(primary)

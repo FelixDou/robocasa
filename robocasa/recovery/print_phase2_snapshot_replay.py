@@ -114,8 +114,10 @@ def print_report(run_dir):
             for key in (
                 "request_exact",
                 "action_exact",
+                "action_sequence_exact",
                 "transition_exact",
                 "observation_exact",
+                "causal_environment_sequence_exact",
                 "suffix_outcome_equal",
             )
         )

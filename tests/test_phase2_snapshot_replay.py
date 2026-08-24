@@ -446,6 +446,9 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         self.assertEqual(analysis["candidate_diversity_rate"], 1.0)
         for pair in analysis["repeat_pairs"]:
             self.assertTrue(pair["observation_exact"])
+            self.assertTrue(pair["action_sequence_exact"])
+            self.assertTrue(pair["causal_environment_sequence_exact"])
+            self.assertTrue(pair["diagnostic_environment_sequence_exact"])
             self.assertTrue(pair["diagnostic_transition_exact"])
             self.assertEqual(
                 pair["transition_components_exact"],
@@ -476,6 +479,19 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
             diagnostic_pair["diagnostic_transition_components_exact"][
                 "controller_state"
             ]
+        )
+
+        divergent_records = deepcopy(records)
+        divergent_repeat = next(
+            row
+            for row in divergent_records
+            if row["kind"] == "same_seed_repeat" and row["repeat_index"] == 1
+        )
+        divergent_repeat["suffix_environment_sha256"][-1] = "causal-divergence"
+        divergent_analysis = analyze_phase2_replay(divergent_records)
+        self.assertFalse(divergent_analysis["all_pass"])
+        self.assertFalse(
+            divergent_analysis["gates"]["same_seed_causal_environment_sequences_exact"]
         )
 
     def test_dry_run_plan_uses_frozen_training_horizons(self):
