@@ -182,6 +182,8 @@ class RoboCasaGymEnv(gym.Env):
         self.camera_widths = camera_widths
         self.camera_heights = camera_heights
         self.enable_render = enable_render
+        self.canonical_camera_observations = False
+        self.canonical_camera_render_repeats = 2
         self.render_obs_key = f"{camera_names[0]}_image"
         self.render_cache = None
         self.override_task_description = None
@@ -331,7 +333,45 @@ class RoboCasaGymEnv(gym.Env):
 
         obs["annotation.human.task_description"] = basic_obs["language"]
 
+        if self.canonical_camera_observations:
+            obs = self.get_canonical_camera_observation(obs)
+
         return obs
+
+    def set_canonical_camera_observations(self, enabled=True, render_repeats=2):
+        """Use synchronous per-camera rendering for exact replay experiments."""
+        render_repeats = int(render_repeats)
+        if render_repeats < 1:
+            raise ValueError("render_repeats must be positive")
+        self.canonical_camera_observations = bool(enabled)
+        self.canonical_camera_render_repeats = render_repeats
+
+    def get_canonical_camera_observation(self, observation):
+        """Replace cached observable images with direct simulator renders."""
+        if not self.enable_render:
+            raise RuntimeError("Canonical camera observations require rendering")
+        observation = dict(observation)
+        mapped_names, camera_names, _, _ = self.key_converter.get_camera_config()
+        for mapped_name, camera_name in zip(mapped_names, camera_names):
+            frame = None
+            for _ in range(self.canonical_camera_render_repeats):
+                frame = self.env.sim.render(
+                    camera_name=camera_name,
+                    height=self.camera_heights,
+                    width=self.camera_widths,
+                )
+                if isinstance(frame, tuple):
+                    frame = frame[0]
+            frame = np.asarray(frame)
+            if frame.shape[:2] != (self.camera_heights, self.camera_widths):
+                raise RuntimeError(
+                    f"Unexpected {camera_name} render shape: {frame.shape}"
+                )
+            observation[mapped_name] = np.ascontiguousarray(
+                frame[::-1, :, :3], dtype=np.uint8
+            )
+        self.render_cache = observation[mapped_names[0]]
+        return observation
 
     def _get_subtask_eval(self):
         if hasattr(self.env, "get_subtask_progress"):

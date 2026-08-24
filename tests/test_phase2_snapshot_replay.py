@@ -31,6 +31,7 @@ from robocasa.recovery.full_snapshot import (  # noqa: E402
     stable_digest,
 )
 from robocasa.recovery.run_phase2_snapshot_replay import (  # noqa: E402
+    _configure_phase2_environment,
     build_parser,
     build_plan,
     run,
@@ -262,6 +263,23 @@ class FakePolicy:
 
 
 class TestPhase2SnapshotReplay(unittest.TestCase):
+    def test_configures_canonical_camera_observations(self):
+        class Target:
+            def __init__(self):
+                self.configured = None
+
+            def set_canonical_camera_observations(self, enabled, render_repeats):
+                self.configured = (enabled, render_repeats)
+
+        target = Target()
+        env = SimpleNamespace(unwrapped=target)
+        args = SimpleNamespace(
+            canonical_camera_observations=True,
+            canonical_camera_render_repeats=3,
+        )
+        _configure_phase2_environment(env, args)
+        self.assertEqual(target.configured, (True, 3))
+
     def test_causal_fingerprint_excludes_only_declared_force_cache(self):
         full = {
             "simulator_state": {"qpos": np.asarray([1.0])},

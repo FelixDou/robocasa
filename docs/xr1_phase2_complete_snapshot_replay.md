@@ -74,6 +74,12 @@ The audit independently gates both the first request and the complete request
 sequence. This prevents a replay with a matching initial cached action chunk
 but a divergent later visual replan from passing request reproducibility.
 
+For exact visual replay, `--canonical-camera-observations` bypasses RoboSuite's
+cached multi-camera observable images. Each named camera is rendered directly
+and synchronously from the current simulator state; the final image from two
+consecutive readbacks is copied into the Xiaomi observation. The render mode
+and repeat count are frozen in the run plan and checked on resume.
+
 ## Fresh-session exports and preflight
 
 ```bash

@@ -236,6 +236,10 @@ def build_plan(args):
         raise ValueError("--candidate-count must be at least two")
     if args.suffix_steps < 1 or args.parent_horizon < 1:
         raise ValueError("horizons must be positive")
+    if args.canonical_camera_render_repeats < 1:
+        raise ValueError("--canonical-camera-render-repeats must be positive")
+    if args.canonical_camera_observations and args.env_interface != "gym":
+        raise ValueError("Canonical camera observations require --env-interface gym")
     if not 0 < args.landmark_fraction <= 1:
         raise ValueError("--landmark-fraction must be in (0, 1]")
     targets = parse_target_stages(args.target_stage)
@@ -339,6 +343,12 @@ def build_plan(args):
         "ordinary_sampling_seed_base": int(args.ordinary_sampling_seed_base),
         "split": args.split,
         "env_interface": args.env_interface,
+        "canonical_camera_observations": bool(
+            args.canonical_camera_observations
+        ),
+        "canonical_camera_render_repeats": int(
+            args.canonical_camera_render_repeats
+        ),
         "development_identity_overlap": len(identity_overlap),
         "candidate_parents": candidate_parents,
     }
@@ -388,6 +398,18 @@ def _reset_env(env, seed):
     if isinstance(result, tuple) and len(result) == 2:
         return result
     return result, {}
+
+
+def _configure_phase2_environment(env, args):
+    if not args.canonical_camera_observations:
+        return
+    target = getattr(env, "unwrapped", env)
+    setter = getattr(target, "set_canonical_camera_observations", None)
+    if not callable(setter):
+        raise TypeError(
+            "--canonical-camera-observations requires the RoboCasa gym wrapper"
+        )
+    setter(True, render_repeats=args.canonical_camera_render_repeats)
 
 
 def _execute_snapshot_branches(
@@ -451,6 +473,12 @@ def _validate_resume_plan(args, plan):
         "ordinary_sampling_seed_base": int(args.ordinary_sampling_seed_base),
         "split": args.split,
         "env_interface": args.env_interface,
+        "canonical_camera_observations": bool(
+            args.canonical_camera_observations
+        ),
+        "canonical_camera_render_repeats": int(
+            args.canonical_camera_render_repeats
+        ),
         "checkpoint": args.checkpoint,
         "checkpoint_revision": args.checkpoint_revision,
         "policy_module": args.policy_module,
@@ -512,6 +540,7 @@ def _resume_snapshot_parent(
         int(metadata["environment_seed"]),
         True,
     )
+    _configure_phase2_environment(env, args)
     local_policy_args = dict(policy_args)
     local_policy_args["sampling_seed_base"] = snapshots[0].policy_state[
         "sampling_config"
@@ -582,6 +611,7 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
         parent["environment_seed"],
         True,
     )
+    _configure_phase2_environment(env, args)
     local_policy_args = dict(policy_args)
     local_policy_args["sampling_seed_base"] = (
         args.ordinary_sampling_seed_base + snapshot_index * 10000
@@ -1025,6 +1055,12 @@ def build_parser():
     parser.add_argument("--seed", type=int, default=900000)
     parser.add_argument("--split", default="pretrain")
     parser.add_argument("--env-interface", choices=("gym", "robosuite"), default="gym")
+    parser.add_argument(
+        "--canonical-camera-observations",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument("--canonical-camera-render-repeats", type=int, default=2)
     parser.add_argument("--parent-horizon", type=int, default=3000)
     parser.add_argument("--snapshot-prefix", type=int, default=2)
     parser.add_argument("--landmark-fraction", type=float, default=0.25)
