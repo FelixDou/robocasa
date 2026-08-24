@@ -1,3 +1,4 @@
+from copy import deepcopy
 import unittest
 
 import numpy as np
@@ -142,9 +143,7 @@ class TestSafeXiaomiPolicy(unittest.TestCase):
         )
         self.assertTrue(
             np.all(
-                np.isfinite(
-                    first["auxiliary_features"]["observation_state_history"]
-                )
+                np.isfinite(first["auxiliary_features"]["observation_state_history"])
             )
         )
         self.assertEqual(first["metadata"]["model_family"], "xiaomi_robotics_1")
@@ -174,6 +173,53 @@ class TestSafeXiaomiPolicy(unittest.TestCase):
             [request["sampling_seed"] for request in policy.client.requests],
             [100, 101],
         )
+
+    def test_policy_state_round_trip_reproduces_request_and_action(self):
+        policy = self.make_policy(
+            [
+                safe_response(action_value=1.0),
+                safe_response(action_value=2.0),
+                safe_response(action_value=2.0),
+            ],
+            collect_safe_features=True,
+            sampling_seed_base=100,
+        )
+        policy(observation())
+        policy(observation())
+        policy.pop_request_records()
+        policy.pop_inference_record()
+        self.assertTrue(policy.at_inference_boundary)
+        state = policy.get_state()
+
+        policy.set_next_sampling_seed(777)
+        first_action = policy(observation())
+        first_request = policy.pop_request_records()[0]
+        policy.pop_inference_record()
+
+        policy.set_state(state)
+        policy.set_next_sampling_seed(777)
+        second_action = policy(observation())
+        second_request = policy.pop_request_records()[0]
+
+        self.assertEqual(first_request["sampling_seed"], 777)
+        self.assertEqual(
+            first_request["request_sha256"], second_request["request_sha256"]
+        )
+        for key in first_action:
+            np.testing.assert_array_equal(first_action[key], second_action[key])
+
+    def test_policy_state_rejects_structural_mismatch(self):
+        policy = self.make_policy([safe_response()], collect_safe_features=True)
+        state = deepcopy(policy.get_state())
+        state["structural_config"]["replan_steps"] += 1
+        with self.assertRaisesRegex(ValueError, "structural configuration"):
+            policy.set_state(state)
+
+    def test_explicit_sampling_seed_requires_inference_boundary(self):
+        policy = self.make_policy([safe_response()], collect_safe_features=True)
+        policy(observation())
+        with self.assertRaisesRegex(ValueError, "inference boundary"):
+            policy.set_next_sampling_seed(77)
 
     def test_disabled_best_of_k_recovery_hook_preserves_default_plan(self):
         actions = np.zeros((1, 30, 60), dtype=np.float32)

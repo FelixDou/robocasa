@@ -10,6 +10,7 @@ import struct
 
 import numpy as np
 
+from robocasa.recovery.full_snapshot import stable_digest
 from robocasa.recovery.openpi_websocket_policy import _convert_action
 
 
@@ -22,6 +23,7 @@ CAMERA_KEYS = (
     "video.robot0_agentview_right",
     "video.robot0_eye_in_hand",
 )
+XIAOMI_POLICY_STATE_SCHEMA_VERSION = 1
 
 
 def _to_numpy(value, *, dtype=None):
@@ -354,6 +356,23 @@ class XiaomiRobotics1Policy:
             raise RuntimeError("XR-1 actions contain NaN or infinite values")
         return actions
 
+    def _record_request(self, request, *, sampling_seed, candidate_index=None):
+        record = {
+            "schema_version": 1,
+            "environment_step": int(self._env_step),
+            "inference_index": int(self._inference_index),
+            "ordinary_inference_index": int(self._ordinary_inference_index),
+            "candidate_selection_index": int(self._candidate_selection_index),
+            "candidate_index": (
+                None if candidate_index is None else int(candidate_index)
+            ),
+            "sampling_seed": None if sampling_seed is None else int(sampling_seed),
+            "request_sha256": stable_digest(request),
+        }
+        self._pending_request_records.append(record)
+        self._latest_request_records = copy.deepcopy(self._pending_request_records)
+        return record
+
     def _parse_safe_features(self, response, actions):
         if not isinstance(response, dict) or "safe_features" not in response:
             raise RuntimeError(
@@ -443,12 +462,21 @@ class XiaomiRobotics1Policy:
             )
         return np.ascontiguousarray(features), metadata
 
-    def _record_safe_features(self, response, actions):
+    def _record_safe_features(
+        self,
+        response,
+        actions,
+        *,
+        sampling_seed=None,
+        request_sha256=None,
+    ):
         features, metadata = self._parse_safe_features(response, actions)
         record = {
             "env_step": self._env_step,
             "environment_step": self._env_step,
             "inference_index": self._inference_index,
+            "sampling_seed": (None if sampling_seed is None else int(sampling_seed)),
+            "request_sha256": request_sha256,
             "features": np.ascontiguousarray(features),
             "actions": np.ascontiguousarray(actions),
             "metadata": metadata,
@@ -499,6 +527,7 @@ class XiaomiRobotics1Policy:
         candidate_actions = []
         candidate_features = []
         candidate_metadata = []
+        candidate_request_records = []
         sampling_seeds = []
         for candidate_index in range(self.safe_best_of_k):
             sampling_seed = (
@@ -506,13 +535,17 @@ class XiaomiRobotics1Policy:
                 + self._candidate_selection_index * self.safe_best_of_k
                 + candidate_index
             )
-            response = self.client.infer(
-                self._make_request(
-                    instruction,
-                    request_safe_features=True,
-                    sampling_seed=sampling_seed,
-                )
+            request = self._make_request(
+                instruction,
+                request_safe_features=True,
+                sampling_seed=sampling_seed,
             )
+            request_record = self._record_request(
+                request,
+                sampling_seed=sampling_seed,
+                candidate_index=candidate_index,
+            )
+            response = self.client.infer(request)
             raw_actions = (
                 response.get("actions") if isinstance(response, dict) else response
             )
@@ -528,6 +561,7 @@ class XiaomiRobotics1Policy:
             candidate_actions.append(actions)
             candidate_features.append(features)
             candidate_metadata.append(metadata)
+            candidate_request_records.append(request_record)
             sampling_seeds.append(sampling_seed)
 
         score_result = self.candidate_scorer.score_candidates(
@@ -540,7 +574,13 @@ class XiaomiRobotics1Policy:
             "safe_features": candidate_features[selected_index],
             "safe_feature_metadata": candidate_metadata[selected_index],
         }
-        self._record_safe_features(selected_response, selected_actions)
+        selected_request = candidate_request_records[selected_index]
+        self._record_safe_features(
+            selected_response,
+            selected_actions,
+            sampling_seed=sampling_seeds[selected_index],
+            request_sha256=selected_request["request_sha256"],
+        )
         score_array = np.asarray(scores, dtype=np.float64)
         record = {
             "schema_version": 1,
@@ -577,12 +617,13 @@ class XiaomiRobotics1Policy:
         return selected_actions
 
     def _infer_one(self, instruction):
-        sampling_seed = None
-        if self.sampling_seed_base is not None:
+        sampling_seed = self._next_sampling_seed
+        self._next_sampling_seed = None
+        if sampling_seed is None and self.sampling_seed_base is not None:
             sampling_seed = self.sampling_seed_base + self._ordinary_inference_index
-        response = self.client.infer(
-            self._make_request(instruction, sampling_seed=sampling_seed)
-        )
+        request = self._make_request(instruction, sampling_seed=sampling_seed)
+        request_record = self._record_request(request, sampling_seed=sampling_seed)
+        response = self.client.infer(request)
         self._ordinary_inference_index += 1
         raw_actions = (
             response.get("actions") if isinstance(response, dict) else response
@@ -596,7 +637,12 @@ class XiaomiRobotics1Policy:
                 f"{self.replan_steps}"
             )
         if self.collect_safe_features:
-            self._record_safe_features(response, actions)
+            self._record_safe_features(
+                response,
+                actions,
+                sampling_seed=sampling_seed,
+                request_sha256=request_record["request_sha256"],
+            )
         return actions
 
     def __call__(self, observation, instruction=None):
@@ -624,6 +670,144 @@ class XiaomiRobotics1Policy:
         record = self._pending_candidate_selection_record
         self._pending_candidate_selection_record = None
         return record
+
+    def pop_request_records(self):
+        """Return transport request hashes emitted by the latest true inference."""
+        records = copy.deepcopy(self._pending_request_records)
+        self._pending_request_records = []
+        return records
+
+    def set_next_sampling_seed(self, sampling_seed):
+        """Override exactly one ordinary inference for a declared branch."""
+        if self.action_plan:
+            raise ValueError(
+                "Sampling seeds can only be overridden at an inference boundary"
+            )
+        self._next_sampling_seed = int(sampling_seed)
+
+    @property
+    def at_inference_boundary(self):
+        return not self.action_plan
+
+    @property
+    def next_ordinary_sampling_seed(self):
+        if self._next_sampling_seed is not None:
+            return int(self._next_sampling_seed)
+        if self.sampling_seed_base is None:
+            return None
+        return int(self.sampling_seed_base + self._ordinary_inference_index)
+
+    def get_state(self):
+        """Return every mutable field that can change a future policy request."""
+        return {
+            "schema_version": XIAOMI_POLICY_STATE_SCHEMA_VERSION,
+            "policy_class": self.__class__.__name__,
+            "structural_config": {
+                "model_path": self.model_path,
+                "robot_type": self.robot_type,
+                "crop_ratio": float(self.crop_ratio),
+                "queue_length": int(self.queue_length),
+                "observation_history": int(self.observation_history),
+                "observation_interval": int(self.observation_interval),
+                "replan_steps": int(self.replan_steps),
+                "state_dim": int(self.state_dim),
+                "action_dim": int(self.action_dim),
+                "safe_best_of_k": int(self.safe_best_of_k),
+                "collect_safe_features": bool(self.collect_safe_features),
+                "safe_feature_shape": self.safe_feature_shape,
+                "policy_name": self.policy_name,
+                "policy_checkpoint": self.policy_checkpoint,
+            },
+            "sampling_config": {
+                "safe_candidate_seed": int(self.safe_candidate_seed),
+                "sampling_seed_base": self.sampling_seed_base,
+                "safe_candidate_strategy": self.safe_candidate_strategy,
+            },
+            "action_plan": copy.deepcopy(list(self.action_plan)),
+            "image_queues": {
+                key: copy.deepcopy(list(queue))
+                for key, queue in self.image_queues.items()
+            },
+            "state_queue": copy.deepcopy(list(self.state_queue)),
+            "last_instruction": self.last_instruction,
+            "environment_step": int(self._env_step),
+            "inference_index": int(self._inference_index),
+            "ordinary_inference_index": int(self._ordinary_inference_index),
+            "candidate_selection_index": int(self._candidate_selection_index),
+            "next_sampling_seed": self._next_sampling_seed,
+            "recovery_reranking_active": bool(self._recovery_reranking_active),
+            "recovery_task_name": self._recovery_task_name,
+            "recovery_target_subtask": self._recovery_target_subtask,
+            "pending_inference_record": copy.deepcopy(self._pending_inference_record),
+            "latest_inference_record": copy.deepcopy(self._latest_inference_record),
+            "pending_candidate_selection_record": copy.deepcopy(
+                self._pending_candidate_selection_record
+            ),
+            "latest_candidate_selection_record": copy.deepcopy(
+                self._latest_candidate_selection_record
+            ),
+            "pending_request_records": copy.deepcopy(self._pending_request_records),
+            "latest_request_records": copy.deepcopy(self._latest_request_records),
+            "latest_observation_state_history": copy.deepcopy(
+                self._latest_observation_state_history
+            ),
+            "at_inference_boundary": bool(self.at_inference_boundary),
+        }
+
+    def set_state(self, state):
+        """Restore a state returned by :meth:`get_state` without server reset."""
+        state = copy.deepcopy(state)
+        if state.get("schema_version") != XIAOMI_POLICY_STATE_SCHEMA_VERSION:
+            raise ValueError("Unsupported Xiaomi policy-state schema")
+        expected = self.get_state()["structural_config"]
+        if state.get("structural_config") != expected:
+            raise ValueError(
+                "Xiaomi policy structural configuration differs from snapshot: "
+                f"snapshot={state.get('structural_config')} current={expected}"
+            )
+        if set(state.get("image_queues", {})) != set(CAMERA_KEYS):
+            raise ValueError("Xiaomi policy snapshot has incomplete camera queues")
+
+        sampling = state["sampling_config"]
+        self.safe_candidate_seed = int(sampling["safe_candidate_seed"])
+        self.sampling_seed_base = (
+            None
+            if sampling["sampling_seed_base"] is None
+            else int(sampling["sampling_seed_base"])
+        )
+        self.safe_candidate_strategy = str(sampling["safe_candidate_strategy"])
+        self.action_plan = collections.deque(state["action_plan"])
+        self.image_queues = {
+            key: collections.deque(values, maxlen=self.queue_length)
+            for key, values in state["image_queues"].items()
+        }
+        self.state_queue = collections.deque(
+            state["state_queue"], maxlen=self.queue_length
+        )
+        self.last_instruction = state["last_instruction"]
+        self._env_step = int(state["environment_step"])
+        self._inference_index = int(state["inference_index"])
+        self._ordinary_inference_index = int(state["ordinary_inference_index"])
+        self._candidate_selection_index = int(state["candidate_selection_index"])
+        self._next_sampling_seed = state["next_sampling_seed"]
+        self._recovery_reranking_active = bool(state["recovery_reranking_active"])
+        self._recovery_task_name = state["recovery_task_name"]
+        self._recovery_target_subtask = state["recovery_target_subtask"]
+        self._pending_inference_record = state["pending_inference_record"]
+        self._latest_inference_record = state["latest_inference_record"]
+        self._pending_candidate_selection_record = state[
+            "pending_candidate_selection_record"
+        ]
+        self._latest_candidate_selection_record = state[
+            "latest_candidate_selection_record"
+        ]
+        self._pending_request_records = state["pending_request_records"]
+        self._latest_request_records = state["latest_request_records"]
+        self._latest_observation_state_history = state[
+            "latest_observation_state_history"
+        ]
+        if bool(self.at_inference_boundary) != bool(state["at_inference_boundary"]):
+            raise ValueError("Restored Xiaomi inference-boundary state is inconsistent")
 
     def begin_recovery(self, *, task_name, target_subtask=None, instruction=None):
         """Enable best-of-K only for the bounded recovery attempt."""
@@ -679,8 +863,11 @@ class XiaomiRobotics1Policy:
         self._recovery_target_subtask = None
         self._candidate_selection_index = 0
         self._ordinary_inference_index = 0
+        self._next_sampling_seed = None
         self._pending_candidate_selection_record = None
         self._latest_candidate_selection_record = None
+        self._pending_request_records = []
+        self._latest_request_records = []
         self._latest_observation_state_history = None
 
     def close(self):

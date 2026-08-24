@@ -31,6 +31,20 @@ _EXPORTS = {
         "robocasa.recovery.create_recovery_failure_dataset",
         "run_dataset_creation",
     ),
+    "FullSnapshot": ("robocasa.recovery.full_snapshot", "FullSnapshot"),
+    "capture_full_snapshot": (
+        "robocasa.recovery.full_snapshot",
+        "capture_full_snapshot",
+    ),
+    "restore_full_snapshot": (
+        "robocasa.recovery.full_snapshot",
+        "restore_full_snapshot",
+    ),
+    "BranchSpec": ("robocasa.recovery.counterfactual_branch", "BranchSpec"),
+    "run_counterfactual_branch": (
+        "robocasa.recovery.counterfactual_branch",
+        "run_counterfactual_branch",
+    ),
 }
 
 __all__ = list(_EXPORTS)
