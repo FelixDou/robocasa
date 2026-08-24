@@ -333,6 +333,10 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
                     "ArrangeTea=PickPlaceCabinetToCounter_2_place",
                     "--target-stage",
                     "CuttingToolSelection=PickPlaceDrawerToCounter_2_place",
+                    "--trigger-stage",
+                    "ArrangeTea=mug_on_tray",
+                    "--trigger-stage",
+                    "CuttingToolSelection=correct_tool_on_cutting_board",
                     "--model-path",
                     str(model),
                     "--checkpoint",
@@ -347,6 +351,9 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         self.assertEqual(plan["expected_primary_branches"], 120)
         self.assertEqual(plan["expected_total_branches"], 140)
         self.assertEqual(plan["training_stage_horizons"]["CuttingToolSelection"], 20)
+        self.assertEqual(
+            plan["trigger_stages"]["ArrangeTea"], "ArrangeTea::mug_on_tray"
+        )
 
     def test_runner_executes_complete_fake_protocol(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -361,7 +368,7 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
                     {
                         "status": "frozen",
                         "primary_detector": "stage",
-                        "horizons": {"stage": {"ArrangeTea::target_stage": 8}},
+                        "horizons": {"stage": {"ArrangeTea::frozen_segment": 8}},
                     }
                 )
             )
@@ -374,6 +381,8 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
                     "--tasks",
                     "ArrangeTea",
                     "--target-stage",
+                    "ArrangeTea=frozen_segment",
+                    "--trigger-stage",
                     "ArrangeTea=target_stage",
                     "--num-parents-per-task",
                     "1",
@@ -412,6 +421,10 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
                 (root / "out" / "parent_records.jsonl").read_text().splitlines()[0]
             )
             self.assertTrue(parent_record["target_stage_reached"])
+            self.assertEqual(
+                parent_record["target_stage"], "ArrangeTea::frozen_segment"
+            )
+            self.assertEqual(parent_record["trigger_stage"], "ArrangeTea::target_stage")
             self.assertEqual(parent_record["observed_stage_sequence"], ["target_stage"])
             self.assertGreaterEqual(
                 parent_record["target_stage_max_consecutive_policy_inferences"],

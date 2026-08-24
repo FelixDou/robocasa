@@ -150,19 +150,25 @@ def checkpoint_provenance(model_path, *, include_shards):
     }
 
 
-def parse_target_stages(values):
+def parse_task_stages(values, option="--target-stage"):
     result = {}
     for value in values:
         if "=" not in value:
             raise ValueError(
-                "--target-stage entries must use TASK=TASK::STAGE or TASK=STAGE"
+                f"{option} entries must use TASK=TASK::STAGE or TASK=STAGE"
             )
         task, stage = value.split("=", 1)
         task, stage = task.strip(), stage.strip()
         if not task or not stage or task in result:
-            raise ValueError(f"Invalid or duplicate --target-stage: {value}")
+            raise ValueError(f"Invalid or duplicate {option}: {value}")
+        if "::" in stage and stage.split("::", 1)[0] != task:
+            raise ValueError(f"Task prefix differs in {option}: {value}")
         result[task] = stage if "::" in stage else f"{task}::{stage}"
     return result
+
+
+def parse_target_stages(values):
+    return parse_task_stages(values, "--target-stage")
 
 
 def load_horizons(runtime_bundle, target_stages):
@@ -233,10 +239,12 @@ def build_plan(args):
     if not 0 < args.landmark_fraction <= 1:
         raise ValueError("--landmark-fraction must be in (0, 1]")
     targets = parse_target_stages(args.target_stage)
-    if set(targets) != set(args.tasks):
+    triggers = parse_task_stages(args.trigger_stage, "--trigger-stage")
+    if set(targets) != set(args.tasks) or set(triggers) != set(args.tasks):
         raise ValueError(
-            "Tasks and target-stage mappings differ: "
-            f"tasks={sorted(args.tasks)} mappings={sorted(targets)}"
+            "Tasks, frozen target stages, and live trigger stages differ: "
+            f"tasks={sorted(args.tasks)} targets={sorted(targets)} "
+            f"triggers={sorted(triggers)}"
         )
     bundle, horizons = load_horizons(args.runtime_bundle, targets)
     candidate_parents = []
@@ -311,6 +319,7 @@ def build_plan(args):
         ),
         "tasks": list(args.tasks),
         "target_stages": targets,
+        "trigger_stages": triggers,
         "training_stage_horizons": horizons,
         "snapshot_prefix": int(args.snapshot_prefix),
         "landmark_fraction": float(args.landmark_fraction),
@@ -431,6 +440,7 @@ def _validate_resume_plan(args, plan):
     checks = {
         "tasks": list(args.tasks),
         "target_stages": parse_target_stages(args.target_stage),
+        "trigger_stages": parse_task_stages(args.trigger_stage, "--trigger-stage"),
         "num_parents_per_task": int(args.num_parents_per_task),
         "max_parent_attempts_per_task": int(args.max_parent_attempts_per_task),
         "snapshot_prefix": int(args.snapshot_prefix),
@@ -548,6 +558,7 @@ def _resume_snapshot_parent(
         "captured_count": 2,
         "branch_count": args.candidate_count * 2 + 6,
         "target_stage": metadata["target_stage"],
+        "trigger_stage": metadata["trigger_stage"],
         "landmark_cutoff": None,
         "valid": True,
         "resumed": True,
@@ -557,7 +568,8 @@ def _resume_snapshot_parent(
 def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_index):
     task_name = parent["task_name"]
     target_stage = plan["target_stages"][task_name]
-    raw_target_stage = target_stage.split("::", 1)[1]
+    trigger_stage = plan["trigger_stages"][task_name]
+    raw_target_stage = trigger_stage.split("::", 1)[1]
     stage_horizon = plan["training_stage_horizons"][task_name]
     landmark_cutoff = max(
         args.snapshot_prefix + 1,
@@ -645,6 +657,7 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
                     subtask_eval=subtask_evals[-1],
                     metadata={
                         "target_stage": target_stage,
+                        "trigger_stage": trigger_stage,
                         "local_inferences": local_inferences,
                         "training_stage_horizon": stage_horizon,
                         "robocasa_commit": plan["robocasa_commit"],
@@ -712,6 +725,7 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
             "stage_diagnostics": stage_diagnostics,
             "stage_unavailable_steps": stage_unavailable_steps,
             "target_stage_reached": bool(target_diagnostics["visits"]),
+            "trigger_stage": trigger_stage,
             "target_stage_environment_steps": target_diagnostics["environment_steps"],
             "target_stage_policy_inferences": target_diagnostics["policy_inferences"],
             "target_stage_max_consecutive_policy_inferences": target_diagnostics[
@@ -737,6 +751,7 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
                 "captured_count": len(captured),
                 "branch_count": 0,
                 "target_stage": target_stage,
+                "trigger_stage": trigger_stage,
                 "landmark_cutoff": landmark_cutoff,
                 "snapshot_index": snapshot_index,
                 "valid": False,
@@ -771,6 +786,7 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
             "captured_count": len(captured),
             "branch_count": len(branch_summaries),
             "target_stage": target_stage,
+            "trigger_stage": trigger_stage,
             "landmark_cutoff": landmark_cutoff,
             "snapshot_index": snapshot_index,
             "valid": len(captured) == 2,
@@ -1002,6 +1018,7 @@ def build_parser():
     parser.add_argument("--runtime-bundle", type=Path, required=True)
     parser.add_argument("--tasks", nargs="+", required=True)
     parser.add_argument("--target-stage", action="append", required=True)
+    parser.add_argument("--trigger-stage", action="append", required=True)
     parser.add_argument("--num-parents-per-task", type=int, default=5)
     parser.add_argument("--max-parent-attempts-per-task", type=int, default=15)
     parser.add_argument("--seed", type=int, default=900000)
