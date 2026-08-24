@@ -909,6 +909,7 @@ def run(args, runtime=None):
             if result["valid"]:
                 parents.append(result)
                 valid_by_task[task_name] += 1
+                completed_parent_ids.add(result["parent_id"])
                 append_jsonl(args.output_dir / "parent_records.jsonl", result)
             else:
                 ineligible_parents.append(result)

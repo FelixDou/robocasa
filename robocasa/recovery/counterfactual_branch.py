@@ -25,11 +25,12 @@ from robocasa.recovery.full_snapshot import (
     FullSnapshot,
     environment_fingerprint,
     restore_full_snapshot,
+    restore_simulator_integration_state,
     stable_digest,
 )
 
 
-BRANCH_SCHEMA_VERSION = 1
+BRANCH_SCHEMA_VERSION = 2
 BRANCH_PROTOCOL = "robocasa_exact_snapshot_counterfactual_branch"
 
 
@@ -72,6 +73,7 @@ def _environment_only_restore(snapshot, env):
     from robocasa.recovery.recovery_rollout import _reset_to_state
 
     _reset_to_state(env, deepcopy(snapshot.environment_state))
+    restore_simulator_integration_state(env, snapshot.simulator_integration_state)
     return {
         "snapshot_id": snapshot.snapshot_id,
         "valid": False,

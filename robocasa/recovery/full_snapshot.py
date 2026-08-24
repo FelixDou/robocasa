@@ -28,8 +28,37 @@ from typing import Any, Mapping
 import numpy as np
 
 
-FULL_SNAPSHOT_SCHEMA_VERSION = 1
+FULL_SNAPSHOT_SCHEMA_VERSION = 2
 FULL_SNAPSHOT_PROTOCOL = "robocasa_complete_simulator_policy_snapshot"
+
+# MuJoCo's generalized position and velocity are not a complete integration
+# state. In particular, the constraint solver warm-starts from the preceding
+# acceleration, and controls, applied forces, mocap bodies, actuator activation,
+# and simulation time can all affect the next mj_step. RoboCasa's reset_to()
+# path restores the flattened environment state but does not guarantee that
+# these data fields survive the reset/forward cycle.
+SIMULATOR_INTEGRATION_FIELDS = (
+    "time",
+    "qpos",
+    "qvel",
+    "act",
+    "mocap_pos",
+    "mocap_quat",
+    "userdata",
+    "eq_active",
+    "ctrl",
+    "qfrc_applied",
+    "xfrc_applied",
+    "qacc_warmstart",
+)
+
+# These fields must be installed before mj_forward so derived kinematics and
+# actuator forces correspond to the restored state. qacc_warmstart is restored
+# afterwards because it is solver history rather than a derived quantity.
+SIMULATOR_PRE_FORWARD_FIELDS = tuple(
+    name for name in SIMULATOR_INTEGRATION_FIELDS if name != "qacc_warmstart"
+)
+SIMULATOR_POST_FORWARD_FIELDS = ("qacc_warmstart",)
 
 # These values affect termination, observation construction, or task-language
 # state but are not part of MuJoCo's flattened qpos/qvel state.  They are
@@ -316,12 +345,77 @@ def _tracker_state(tracker):
     return deepcopy(getter())
 
 
+def _capture_simulator_integration_state(env) -> dict:
+    """Capture every available MuJoCo field that can affect the next step."""
+    from robocasa.recovery.recovery_rollout import _get_sim
+
+    sim = _get_sim(env)
+    data = getattr(sim, "data", None) if sim is not None else None
+    if data is None:
+        return {}
+    state = {}
+    for name in SIMULATOR_INTEGRATION_FIELDS:
+        try:
+            value = getattr(data, name)
+        except (AttributeError, RuntimeError):
+            continue
+        if callable(value):
+            continue
+        if isinstance(value, np.ndarray) or hasattr(value, "shape"):
+            state[name] = np.asarray(value).copy()
+        else:
+            state[name] = deepcopy(value)
+    return state
+
+
+def _assign_simulator_data_field(data, name: str, saved) -> None:
+    current = getattr(data, name)
+    saved_array = np.asarray(saved)
+    current_shape = getattr(current, "shape", None)
+    if current_shape is not None and tuple(current_shape) != ():
+        if tuple(current_shape) != tuple(saved_array.shape):
+            raise ValueError(
+                f"MuJoCo data field {name} changed shape: "
+                f"snapshot={saved_array.shape} current={current_shape}"
+            )
+        current[...] = saved_array
+        return
+    value = saved_array.item() if saved_array.shape == () else deepcopy(saved)
+    setattr(data, name, value)
+
+
+def restore_simulator_integration_state(env, state: Mapping[str, Any]) -> None:
+    """Restore MuJoCo step inputs around one forward-dynamics refresh."""
+    from robocasa.recovery.recovery_rollout import _get_sim
+
+    sim = _get_sim(env)
+    data = getattr(sim, "data", None) if sim is not None else None
+    if not state:
+        return
+    if data is None:
+        raise RuntimeError(
+            "Snapshot contains MuJoCo integration state but env has none"
+        )
+
+    available = set(state)
+    for name in SIMULATOR_PRE_FORWARD_FIELDS:
+        if name in available:
+            _assign_simulator_data_field(data, name, state[name])
+    sim.forward()
+    for name in SIMULATOR_POST_FORWARD_FIELDS:
+        if name in available:
+            _assign_simulator_data_field(data, name, state[name])
+
+
 def environment_fingerprint(env) -> dict:
     """Return the environment fields that must match across paired branches."""
     from robocasa.recovery.recovery_rollout import _capture_state
 
     return {
-        "simulator_state": deepcopy(_capture_state(env)),
+        "simulator_state": {
+            "environment_state": deepcopy(_capture_state(env)),
+            "integration_state": _capture_simulator_integration_state(env),
+        },
         "control_state": _capture_environment_control_state(env),
         "rng_state": _capture_environment_rng_state(env),
     }
@@ -338,6 +432,7 @@ class FullSnapshot:
     environment_step: int
     captured_at: str
     environment_state: Any
+    simulator_integration_state: Any
     policy_state: Any
     observation: Any
     subtask_eval: Any
@@ -417,6 +512,7 @@ def capture_full_snapshot(
         environment_step=int(environment_step),
         captured_at=utc_now(),
         environment_state=deepcopy(_capture_state(env)),
+        simulator_integration_state=_capture_simulator_integration_state(env),
         policy_state=policy_state,
         observation=deepcopy(observation),
         subtask_eval=deepcopy(subtask_eval),
@@ -571,6 +667,7 @@ def restore_full_snapshot(
     if not callable(setter):
         raise TypeError("Policy must expose set_state() for complete snapshots")
     _reset_to_state(env, deepcopy(snapshot.environment_state))
+    restore_simulator_integration_state(env, snapshot.simulator_integration_state)
     _restore_environment_control_state(env, snapshot.environment_control_state)
     setter(deepcopy(snapshot.policy_state))
     if snapshot.tracker_state is not None:
@@ -586,6 +683,7 @@ def restore_full_snapshot(
     _restore_global_rng_state(snapshot.global_rng_state)
 
     current_environment_state = _capture_state(env)
+    current_simulator_integration_state = _capture_simulator_integration_state(env)
     current_policy_state = policy.get_state()
     environment_mismatches = compare_structures(
         snapshot.environment_state,
@@ -593,6 +691,13 @@ def restore_full_snapshot(
         atol=atol,
         rtol=rtol,
         path="environment",
+    )
+    simulator_integration_mismatches = compare_structures(
+        snapshot.simulator_integration_state,
+        current_simulator_integration_state,
+        atol=0.0,
+        rtol=0.0,
+        path="simulator_integration",
     )
     policy_mismatches = compare_structures(
         snapshot.policy_state,
@@ -637,12 +742,14 @@ def restore_full_snapshot(
     return {
         "snapshot_id": snapshot.snapshot_id,
         "environment_exact": not environment_mismatches,
+        "simulator_integration_exact": not simulator_integration_mismatches,
         "policy_exact": not policy_mismatches,
         "observation_exact": not observation_mismatches,
         "environment_control_exact": not control_mismatches,
         "global_rng_exact": not global_rng_mismatches,
         "environment_rng_exact": not environment_rng_mismatches,
         "environment_mismatches": environment_mismatches,
+        "simulator_integration_mismatches": simulator_integration_mismatches,
         "policy_mismatches": policy_mismatches,
         "observation_mismatches": observation_mismatches,
         "environment_control_mismatches": control_mismatches,
@@ -650,6 +757,7 @@ def restore_full_snapshot(
         "environment_rng_mismatches": environment_rng_mismatches,
         "valid": not (
             environment_mismatches
+            or simulator_integration_mismatches
             or policy_mismatches
             or observation_mismatches
             or control_mismatches
@@ -701,6 +809,7 @@ __all__ = [
     "environment_fingerprint",
     "load_full_snapshot",
     "restore_full_snapshot",
+    "restore_simulator_integration_state",
     "save_full_snapshot",
     "stable_digest",
 ]

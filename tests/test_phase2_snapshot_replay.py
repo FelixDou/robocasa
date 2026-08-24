@@ -45,12 +45,42 @@ def subtask_eval():
     }
 
 
+class FakeSimData:
+    def __init__(self):
+        self.time = 0.0
+        self.qpos = np.zeros(1, dtype=np.float64)
+        self.qvel = np.zeros(1, dtype=np.float64)
+        self.act = np.zeros(1, dtype=np.float64)
+        self.mocap_pos = np.zeros((1, 3), dtype=np.float64)
+        self.mocap_quat = np.asarray([[1.0, 0.0, 0.0, 0.0]], dtype=np.float64)
+        self.userdata = np.zeros(1, dtype=np.float64)
+        self.ctrl = np.zeros(1, dtype=np.float64)
+        self.qfrc_applied = np.zeros(1, dtype=np.float64)
+        self.xfrc_applied = np.zeros((1, 6), dtype=np.float64)
+        self.qacc_warmstart = np.zeros(1, dtype=np.float64)
+
+
+class FakeSim:
+    def __init__(self):
+        self.data = FakeSimData()
+
+    def get_state(self):
+        return SimpleNamespace(
+            qpos=self.data.qpos.copy(),
+            qvel=self.data.qvel.copy(),
+        )
+
+    def forward(self):
+        return None
+
+
 class FakeEnvironment:
     def __init__(self):
         self.value = 0.0
         self.timestep = 0
         self._elapsed_steps = 0
         self.np_random = np.random.default_rng(123)
+        self.sim = FakeSim()
 
     def get_state(self):
         return {"states": np.asarray([self.value], dtype=np.float64)}
@@ -60,6 +90,7 @@ class FakeEnvironment:
         self.timestep = 0
         self._elapsed_steps = 0
         self.np_random = np.random.default_rng(seed)
+        self.sim = FakeSim()
         return self.get_current_observation(), {}
 
     def reset_to(self, state):
@@ -68,6 +99,12 @@ class FakeEnvironment:
         # snapshot layer must overwrite them after restoring MuJoCo state.
         self.timestep = 0
         self._elapsed_steps = 0
+        # reset_to() intentionally loses the solver history and applied inputs
+        # that a complete Phase 2 snapshot must restore separately.
+        self.sim.data.qpos[:] = self.value
+        self.sim.data.qvel[:] = 99.0
+        self.sim.data.qacc_warmstart[:] = -99.0
+        self.sim.data.ctrl[:] = -99.0
 
     def get_current_observation(self):
         return {"value": np.asarray([self.value], dtype=np.float64)}
@@ -76,7 +113,14 @@ class FakeEnvironment:
         return subtask_eval()
 
     def step(self, action):
-        self.value += float(np.asarray(action)[0])
+        command = float(np.asarray(action)[0])
+        acceleration = command + 0.1 * float(self.sim.data.qacc_warmstart[0])
+        self.sim.data.ctrl[:] = command
+        self.sim.data.qvel[:] += acceleration
+        self.sim.data.qpos[:] += self.sim.data.qvel
+        self.sim.data.qacc_warmstart[:] = acceleration
+        self.sim.data.time += 0.1
+        self.value = float(self.sim.data.qpos[0])
         self.timestep += 1
         self._elapsed_steps += 1
         return self.get_current_observation(), 0.0, False, {"success": False}
@@ -226,6 +270,10 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
     def make_snapshot(self):
         env = FakeEnvironment()
         env.value = 1.25
+        env.sim.data.qpos[:] = env.value
+        env.sim.data.qvel[:] = 0.125
+        env.sim.data.qacc_warmstart[:] = 0.75
+        env.sim.data.ctrl[:] = -0.25
         env.timestep = 17
         env._elapsed_steps = 17
         policy = FakePolicy()
@@ -261,6 +309,10 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         self.assertEqual(env.timestep, 17)
         self.assertEqual(env._elapsed_steps, 17)
         self.assertEqual(policy.counter, 0)
+        self.assertTrue(audit["simulator_integration_exact"], audit)
+        np.testing.assert_array_equal(env.sim.data.qvel, [0.125])
+        np.testing.assert_array_equal(env.sim.data.qacc_warmstart, [0.75])
+        np.testing.assert_array_equal(env.sim.data.ctrl, [-0.25])
 
     def test_same_seed_replay_and_candidate_diversity_pass_engineering_gates(self):
         env, policy, snapshot = self.make_snapshot()
@@ -424,6 +476,8 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
             self.assertTrue(analysis["all_pass"], analysis)
             self.assertEqual(analysis["completed_parents"], 1)
             self.assertEqual(analysis["completed_snapshots"], 2)
+            self.assertEqual(analysis["saved_snapshot_files"], 2)
+            self.assertEqual(analysis["orphan_snapshot_files"], 0)
             self.assertEqual(analysis["primary_records"], 8)
             self.assertEqual(analysis["records"], 10)
             parent_record = json.loads(
