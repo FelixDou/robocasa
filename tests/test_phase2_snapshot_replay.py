@@ -728,16 +728,22 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
                 ]
             )
             created_environments = []
+            created_policies = []
 
             def make_environment(*unused):
                 environment = FakeEnvironment()
                 created_environments.append(environment)
                 return environment
 
+            def make_policy(*unused):
+                policy = FakePolicy()
+                created_policies.append(policy)
+                return policy
+
             fake_runtime = {
                 "load_factory": lambda value: object(),
                 "parse_policy_args": lambda values: {},
-                "call_factory": lambda factory, env, policy_args: FakePolicy(),
+                "call_factory": make_policy,
                 "make_env": make_environment,
                 "success_fn": lambda **unused: False,
                 "step_fn": lambda env, action: env.step(action),
@@ -759,6 +765,10 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
             # the ten branches (two snapshots, five branches per snapshot).
             self.assertEqual(len(created_environments), 11)
             self.assertTrue(all(env.closed for env in created_environments))
+            # The Xiaomi server owns one persistent client connection. Branch
+            # environments are isolated, while the captured policy state is
+            # restored into the single nominal policy before every branch.
+            self.assertEqual(len(created_policies), 1)
             self.assertTrue(
                 json.loads((root / "out" / "plan.json").read_text())[
                     "fresh_branch_contexts"
@@ -768,6 +778,12 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
                 json.loads((root / "out" / "plan.json").read_text())[
                     "deterministic_environment_construction"
                 ]
+            )
+            self.assertEqual(
+                json.loads((root / "out" / "plan.json").read_text())[
+                    "branch_policy_connection_mode"
+                ],
+                "shared_restored",
             )
             parent_record = json.loads(
                 (root / "out" / "parent_records.jsonl").read_text().splitlines()[0]

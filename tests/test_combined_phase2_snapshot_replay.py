@@ -92,6 +92,7 @@ def make_source(root, task, *, status="complete"):
         "canonical_camera_observations": True,
         "canonical_camera_render_repeats": 2,
         "fresh_branch_contexts": True,
+        "branch_policy_connection_mode": "shared_restored",
         "deterministic_environment_construction": True,
         "replan_steps": 16,
         "split": "pretrain",

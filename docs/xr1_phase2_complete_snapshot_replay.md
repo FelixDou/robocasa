@@ -86,12 +86,17 @@ and synchronously from the current simulator state; the final image from two
 consecutive readbacks is copied into the Xiaomi observation. The render mode
 and repeat count are frozen in the run plan and checked on resume.
 
-Each branch also runs in a fresh environment, renderer, and Xiaomi policy
-wrapper by default (`--fresh-branch-contexts`). The complete causal snapshot is
-restored only after that context is initialized. This prevents sequential
-branches from sharing offscreen-renderer or observable-cache history. The mode
-is frozen in the plan and checked on resume. Disabling it is a diagnostic
-ablation only; it is not admissible for the Phase 2 validity claim.
+Each branch runs in a fresh environment and renderer by default
+(`--fresh-branch-contexts`). The complete causal snapshot is restored only
+after that context is initialized. This prevents sequential branches from
+sharing offscreen-renderer or observable-cache history. The Xiaomi server
+services one persistent client connection, so branches reuse the nominal
+policy wrapper rather than opening competing sockets. Its captured queues,
+action plan, instruction, counters, and sampling state are restored before
+every branch, preserving policy-state isolation without a second client. The
+environment-isolation mode and the `shared_restored` policy-connection mode are
+frozen in the plan and checked on resume. Disabling fresh environments is a
+diagnostic ablation only; it is not admissible for the Phase 2 validity claim.
 
 Environment construction and reset run under a temporary deterministic Python
 and NumPy seed derived from the frozen environment identity. This covers legacy
@@ -259,8 +264,9 @@ The output contains hashes and absolute paths for each immutable source, but no
 snapshot or branch payload copies. A stopped multi-task source is admissible
 only when the declared task itself has exactly the requested completed-parent,
 snapshot, and branch support and all referenced artifacts are present.
-Sources collected with and without fresh branch contexts are intentionally
-protocol-incompatible and cannot be combined.
+Sources collected with and without fresh branch contexts, or with different
+branch policy-connection modes, are intentionally protocol-incompatible and
+cannot be combined.
 
 ## Full bounded validation
 

@@ -300,7 +300,7 @@ def build_plan(args):
     if server_entrypoint is not None and not server_entrypoint.is_file():
         raise ValueError(f"Xiaomi server entrypoint is missing: {server_entrypoint}")
     plan = {
-        "schema_version": 3,
+        "schema_version": 4,
         "protocol": "phase2_complete_snapshot_replay",
         "created_at": utc_now(),
         "robocasa_commit": current_commit(),
@@ -353,6 +353,7 @@ def build_plan(args):
             args.canonical_camera_render_repeats
         ),
         "fresh_branch_contexts": bool(args.fresh_branch_contexts),
+        "branch_policy_connection_mode": "shared_restored",
         "deterministic_environment_construction": True,
         "development_identity_overlap": len(identity_overlap),
         "candidate_parents": candidate_parents,
@@ -436,13 +437,15 @@ def _configure_phase2_environment(env, args):
     setter(True, render_repeats=args.canonical_camera_render_repeats)
 
 
-def _make_fresh_branch_context(snapshot, args, runtime, factory, policy_args):
+def _make_fresh_branch_environment(snapshot, args, runtime):
     """Create an independently initialized renderer/environment per branch.
 
     Full snapshot restoration makes the causal environment and policy state
     identical.  Constructing a fresh wrapper here additionally prevents
     offscreen renderer and observable-cache history from one branch leaking
-    into a later branch's camera observations.
+    into a later branch's camera observations.  The Xiaomi policy connection
+    is deliberately not recreated: its server services one persistent client,
+    and its complete state is restored before every branch.
     """
     environment_seed = int(snapshot.metadata["environment_seed"])
     env = _call_with_deterministic_environment_seed(
@@ -454,41 +457,22 @@ def _make_fresh_branch_context(snapshot, args, runtime, factory, policy_args):
         environment_seed,
         True,
     )
-    policy = None
     try:
         _configure_phase2_environment(env, args)
-        local_policy_args = dict(policy_args)
-        local_policy_args["sampling_seed_base"] = snapshot.policy_state[
-            "sampling_config"
-        ]["sampling_seed_base"]
-        policy = runtime["call_factory"](factory, env, local_policy_args)
         _call_with_deterministic_environment_seed(
             environment_seed,
             _reset_env,
             env,
             environment_seed,
         )
-        reset_policy = getattr(policy, "reset", None)
-        if callable(reset_policy):
-            reset_policy()
-        return env, policy
+        return env
     except Exception:
-        close = getattr(policy, "close", None)
-        try:
-            if callable(close):
-                close()
-        finally:
-            env.close()
+        env.close()
         raise
 
 
-def _close_branch_context(env, policy):
-    close = getattr(policy, "close", None)
-    try:
-        if callable(close):
-            close()
-    finally:
-        env.close()
+def _close_branch_environment(env):
+    env.close()
 
 
 def _execute_snapshot_branches(
@@ -500,8 +484,6 @@ def _execute_snapshot_branches(
     policy,
     snapshot_index,
     *,
-    factory=None,
-    policy_args=None,
     completed_branch_ids=None,
 ):
     completed_branch_ids = set(completed_branch_ids or ())
@@ -514,16 +496,10 @@ def _execute_snapshot_branches(
         branch_policy = policy
         owns_branch_context = False
         if args.fresh_branch_contexts:
-            if factory is None or policy_args is None:
-                raise ValueError(
-                    "Fresh branch contexts require a policy factory and arguments"
-                )
-            branch_env, branch_policy = _make_fresh_branch_context(
+            branch_env = _make_fresh_branch_environment(
                 snapshot,
                 args,
                 runtime,
-                factory,
-                policy_args,
             )
             owns_branch_context = True
         try:
@@ -555,7 +531,7 @@ def _execute_snapshot_branches(
             summaries.append(save_branch_result(result, args.output_dir))
         finally:
             if owns_branch_context:
-                _close_branch_context(branch_env, branch_policy)
+                _close_branch_environment(branch_env)
     return summaries
 
 
@@ -581,6 +557,7 @@ def _validate_resume_plan(args, plan):
             args.canonical_camera_render_repeats
         ),
         "fresh_branch_contexts": bool(args.fresh_branch_contexts),
+        "branch_policy_connection_mode": "shared_restored",
         "deterministic_environment_construction": True,
         "checkpoint": args.checkpoint,
         "checkpoint_revision": args.checkpoint_revision,
@@ -676,8 +653,6 @@ def _resume_snapshot_parent(
                     env,
                     policy,
                     int(snapshot.metadata["snapshot_index"]),
-                    factory=factory,
-                    policy_args=local_policy_args,
                     completed_branch_ids=completed_branch_ids,
                 )
             )
@@ -926,8 +901,6 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
                     env,
                     policy,
                     assigned_snapshot_index,
-                    factory=factory,
-                    policy_args=local_policy_args,
                 )
             )
             snapshot_index = max(snapshot_index, assigned_snapshot_index + 1)
@@ -1189,8 +1162,9 @@ def build_parser():
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            "Construct a fresh environment, renderer, and policy wrapper for "
-            "every branch (default: enabled)."
+            "Construct a fresh environment and renderer for every branch while "
+            "reusing the single restored Xiaomi policy connection (default: "
+            "enabled)."
         ),
     )
     parser.add_argument("--parent-horizon", type=int, default=3000)
