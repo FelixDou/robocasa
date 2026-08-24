@@ -119,6 +119,7 @@ class FakeRobot:
 
 class FakeEnvironment:
     def __init__(self):
+        self.closed = False
         self.value = 0.0
         self.timestep = 0
         self._elapsed_steps = 0
@@ -181,7 +182,7 @@ class FakeEnvironment:
         return self.get_current_observation(), 0.0, False, {"success": False}
 
     def close(self):
-        return None
+        self.closed = True
 
 
 class FakePolicy:
@@ -677,11 +678,18 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
                     "Xiaomi/checkpoint",
                 ]
             )
+            created_environments = []
+
+            def make_environment(*unused):
+                environment = FakeEnvironment()
+                created_environments.append(environment)
+                return environment
+
             fake_runtime = {
                 "load_factory": lambda value: object(),
                 "parse_policy_args": lambda values: {},
                 "call_factory": lambda factory, env, policy_args: FakePolicy(),
-                "make_env": lambda *unused: FakeEnvironment(),
+                "make_env": make_environment,
                 "success_fn": lambda **unused: False,
                 "step_fn": lambda env, action: env.step(action),
                 "call_policy": call_policy,
@@ -698,6 +706,15 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
             self.assertEqual(analysis["orphan_snapshot_files"], 0)
             self.assertEqual(analysis["primary_records"], 8)
             self.assertEqual(analysis["records"], 10)
+            # One nominal parent context plus one isolated context for each of
+            # the ten branches (two snapshots, five branches per snapshot).
+            self.assertEqual(len(created_environments), 11)
+            self.assertTrue(all(env.closed for env in created_environments))
+            self.assertTrue(
+                json.loads((root / "out" / "plan.json").read_text())[
+                    "fresh_branch_contexts"
+                ]
+            )
             parent_record = json.loads(
                 (root / "out" / "parent_records.jsonl").read_text().splitlines()[0]
             )

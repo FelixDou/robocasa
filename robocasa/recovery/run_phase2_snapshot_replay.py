@@ -297,7 +297,7 @@ def build_plan(args):
     if server_entrypoint is not None and not server_entrypoint.is_file():
         raise ValueError(f"Xiaomi server entrypoint is missing: {server_entrypoint}")
     plan = {
-        "schema_version": 1,
+        "schema_version": 2,
         "protocol": "phase2_complete_snapshot_replay",
         "created_at": utc_now(),
         "robocasa_commit": current_commit(),
@@ -349,6 +349,7 @@ def build_plan(args):
         "canonical_camera_render_repeats": int(
             args.canonical_camera_render_repeats
         ),
+        "fresh_branch_contexts": bool(args.fresh_branch_contexts),
         "development_identity_overlap": len(identity_overlap),
         "candidate_parents": candidate_parents,
     }
@@ -412,6 +413,54 @@ def _configure_phase2_environment(env, args):
     setter(True, render_repeats=args.canonical_camera_render_repeats)
 
 
+def _make_fresh_branch_context(snapshot, args, runtime, factory, policy_args):
+    """Create an independently initialized renderer/environment per branch.
+
+    Full snapshot restoration makes the causal environment and policy state
+    identical.  Constructing a fresh wrapper here additionally prevents
+    offscreen renderer and observable-cache history from one branch leaking
+    into a later branch's camera observations.
+    """
+    environment_seed = int(snapshot.metadata["environment_seed"])
+    env = runtime["make_env"](
+        snapshot.task_name,
+        args.env_interface,
+        args.split,
+        environment_seed,
+        True,
+    )
+    policy = None
+    try:
+        _configure_phase2_environment(env, args)
+        local_policy_args = dict(policy_args)
+        local_policy_args["sampling_seed_base"] = snapshot.policy_state[
+            "sampling_config"
+        ]["sampling_seed_base"]
+        policy = runtime["call_factory"](factory, env, local_policy_args)
+        _reset_env(env, environment_seed)
+        reset_policy = getattr(policy, "reset", None)
+        if callable(reset_policy):
+            reset_policy()
+        return env, policy
+    except Exception:
+        close = getattr(policy, "close", None)
+        try:
+            if callable(close):
+                close()
+        finally:
+            env.close()
+        raise
+
+
+def _close_branch_context(env, policy):
+    close = getattr(policy, "close", None)
+    try:
+        if callable(close):
+            close()
+    finally:
+        env.close()
+
+
 def _execute_snapshot_branches(
     snapshot,
     nominal_seed,
@@ -421,6 +470,8 @@ def _execute_snapshot_branches(
     policy,
     snapshot_index,
     *,
+    factory=None,
+    policy_args=None,
     completed_branch_ids=None,
 ):
     completed_branch_ids = set(completed_branch_ids or ())
@@ -429,32 +480,52 @@ def _execute_snapshot_branches(
     for spec in specs:
         if spec.branch_id in completed_branch_ids:
             continue
-        if spec.kind == "environment_only":
-            # First advance the policy/cache so environment-only rewind is a
-            # meaningful negative control.
-            restore_full_snapshot(snapshot, env, policy)
-            mutation_action = runtime["call_policy"](
-                policy, deepcopy(snapshot.observation)
+        branch_env = env
+        branch_policy = policy
+        owns_branch_context = False
+        if args.fresh_branch_contexts:
+            if factory is None or policy_args is None:
+                raise ValueError(
+                    "Fresh branch contexts require a policy factory and arguments"
+                )
+            branch_env, branch_policy = _make_fresh_branch_context(
+                snapshot,
+                args,
+                runtime,
+                factory,
+                policy_args,
             )
-            runtime["step_fn"](env, mutation_action)
-            pop_requests = getattr(policy, "pop_request_records", None)
-            if callable(pop_requests):
-                pop_requests()
-            pop_inference = getattr(policy, "pop_inference_record", None)
-            if callable(pop_inference):
-                pop_inference()
-        result = run_counterfactual_branch(
-            snapshot,
-            env,
-            policy,
-            spec,
-            step_fn=runtime["step_fn"],
-            success_fn=runtime["success_fn"],
-            subtask_eval_fn=runtime["get_subtask_eval"],
-            restore_atol=args.restore_atol,
-            restore_rtol=args.restore_rtol,
-        )
-        summaries.append(save_branch_result(result, args.output_dir))
+            owns_branch_context = True
+        try:
+            if spec.kind == "environment_only":
+                # First advance the policy/cache so environment-only rewind is
+                # a meaningful negative control.
+                restore_full_snapshot(snapshot, branch_env, branch_policy)
+                mutation_action = runtime["call_policy"](
+                    branch_policy, deepcopy(snapshot.observation)
+                )
+                runtime["step_fn"](branch_env, mutation_action)
+                pop_requests = getattr(branch_policy, "pop_request_records", None)
+                if callable(pop_requests):
+                    pop_requests()
+                pop_inference = getattr(branch_policy, "pop_inference_record", None)
+                if callable(pop_inference):
+                    pop_inference()
+            result = run_counterfactual_branch(
+                snapshot,
+                branch_env,
+                branch_policy,
+                spec,
+                step_fn=runtime["step_fn"],
+                success_fn=runtime["success_fn"],
+                subtask_eval_fn=runtime["get_subtask_eval"],
+                restore_atol=args.restore_atol,
+                restore_rtol=args.restore_rtol,
+            )
+            summaries.append(save_branch_result(result, args.output_dir))
+        finally:
+            if owns_branch_context:
+                _close_branch_context(branch_env, branch_policy)
     return summaries
 
 
@@ -479,6 +550,7 @@ def _validate_resume_plan(args, plan):
         "canonical_camera_render_repeats": int(
             args.canonical_camera_render_repeats
         ),
+        "fresh_branch_contexts": bool(args.fresh_branch_contexts),
         "checkpoint": args.checkpoint,
         "checkpoint_revision": args.checkpoint_revision,
         "policy_module": args.policy_module,
@@ -565,6 +637,8 @@ def _resume_snapshot_parent(
                     env,
                     policy,
                     int(snapshot.metadata["snapshot_index"]),
+                    factory=factory,
+                    policy_args=local_policy_args,
                     completed_branch_ids=completed_branch_ids,
                 )
             )
@@ -805,6 +879,8 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
                     env,
                     policy,
                     assigned_snapshot_index,
+                    factory=factory,
+                    policy_args=local_policy_args,
                 )
             )
             snapshot_index = max(snapshot_index, assigned_snapshot_index + 1)
@@ -1061,6 +1137,15 @@ def build_parser():
         default=False,
     )
     parser.add_argument("--canonical-camera-render-repeats", type=int, default=2)
+    parser.add_argument(
+        "--fresh-branch-contexts",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Construct a fresh environment, renderer, and policy wrapper for "
+            "every branch (default: enabled)."
+        ),
+    )
     parser.add_argument("--parent-horizon", type=int, default=3000)
     parser.add_argument("--snapshot-prefix", type=int, default=2)
     parser.add_argument("--landmark-fraction", type=float, default=0.25)

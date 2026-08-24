@@ -80,6 +80,13 @@ and synchronously from the current simulator state; the final image from two
 consecutive readbacks is copied into the Xiaomi observation. The render mode
 and repeat count are frozen in the run plan and checked on resume.
 
+Each branch also runs in a fresh environment, renderer, and Xiaomi policy
+wrapper by default (`--fresh-branch-contexts`). The complete causal snapshot is
+restored only after that context is initialized. This prevents sequential
+branches from sharing offscreen-renderer or observable-cache history. The mode
+is frozen in the plan and checked on resume. Disabling it is a diagnostic
+ablation only; it is not admissible for the Phase 2 validity claim.
+
 ## Fresh-session exports and preflight
 
 ```bash
@@ -197,6 +204,8 @@ CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
   --checkpoint XiaomiRobotics/Xiaomi-Robotics-1-RoboCasa365 \
   --server-repository "$XR1_SAFE_REPO" \
   --host 127.0.0.1 --port "$XR1_PHASE2_PORT" \
+  --canonical-camera-observations \
+  --fresh-branch-contexts \
   --seed 910007 \
   --ordinary-sampling-seed-base 6000000 \
   --candidate-seed-base 7000000 \
@@ -237,6 +246,8 @@ The output contains hashes and absolute paths for each immutable source, but no
 snapshot or branch payload copies. A stopped multi-task source is admissible
 only when the declared task itself has exactly the requested completed-parent,
 snapshot, and branch support and all referenced artifacts are present.
+Sources collected with and without fresh branch contexts are intentionally
+protocol-incompatible and cannot be combined.
 
 ## Full bounded validation
 
@@ -261,6 +272,8 @@ nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
   --checkpoint XiaomiRobotics/Xiaomi-Robotics-1-RoboCasa365 \
   --server-repository "$XR1_SAFE_REPO" \
   --host 127.0.0.1 --port "$XR1_PHASE2_PORT" \
+  --canonical-camera-observations \
+  --fresh-branch-contexts \
   --seed 920007 \
   --ordinary-sampling-seed-base 6000000 \
   --candidate-seed-base 7000000 \
@@ -314,6 +327,8 @@ nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
   --checkpoint XiaomiRobotics/Xiaomi-Robotics-1-RoboCasa365 \
   --server-repository "$XR1_SAFE_REPO" \
   --host 127.0.0.1 --port "$XR1_PHASE2_PORT" \
+  --canonical-camera-observations \
+  --fresh-branch-contexts \
   --seed 920007 \
   --ordinary-sampling-seed-base 6000000 \
   --candidate-seed-base 7000000 \

@@ -38,6 +38,7 @@ COMPATIBILITY_KEYS = (
     "env_interface",
     "canonical_camera_observations",
     "canonical_camera_render_repeats",
+    "fresh_branch_contexts",
     "replan_steps",
     "split",
 )

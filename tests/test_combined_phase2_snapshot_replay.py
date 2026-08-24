@@ -91,6 +91,7 @@ def make_source(root, task, *, status="complete"):
         "env_interface": "gym",
         "canonical_camera_observations": True,
         "canonical_camera_render_repeats": 2,
+        "fresh_branch_contexts": True,
         "replan_steps": 16,
         "split": "pretrain",
         "target_stages": {task: f"{task}::frozen-stage"},
@@ -176,6 +177,30 @@ class TestCombinedPhase2SnapshotReplay(unittest.TestCase):
             (arrange / arrange_records[0]["payload_path"]).unlink()
 
             with self.assertRaisesRegex(FileNotFoundError, "Missing branch payload"):
+                audit_combined_runs(
+                    [
+                        ("ArrangeTea", arrange),
+                        ("CuttingToolSelection", cutting),
+                    ],
+                    root / "combined",
+                    parents_per_task=1,
+                )
+
+    def test_rejects_mixed_branch_context_isolation_protocols(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arrange = root / "arrange"
+            cutting = root / "cutting"
+            make_source(arrange, "ArrangeTea")
+            make_source(cutting, "CuttingToolSelection")
+            cutting_plan_path = cutting / "plan.json"
+            cutting_plan = json.loads(cutting_plan_path.read_text())
+            cutting_plan["fresh_branch_contexts"] = False
+            write_json(cutting_plan_path, cutting_plan)
+
+            with self.assertRaisesRegex(
+                ValueError, "Incompatible source protocols"
+            ):
                 audit_combined_runs(
                     [
                         ("ArrangeTea", arrange),
