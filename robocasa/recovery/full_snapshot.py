@@ -485,6 +485,25 @@ def _restore_controller_attribute(candidate, name: str, saved) -> None:
     current = getattr(candidate, name, None)
     if isinstance(current, np.ndarray) and isinstance(saved, np.ndarray):
         if current.shape != saved.shape or current.dtype != saved.dtype:
+            # RoboSuite buffers use a zero-dimensional object array containing
+            # None as their uninitialized sentinel. A fresh environment reset
+            # may initialize that same attribute to a numeric vector (or vice
+            # versa) before the captured controller state is restored. This is
+            # a state transition, not a controller-schema change, so rebind the
+            # attribute. Keep rejecting every other array schema mismatch.
+            nullable_saved = (
+                saved.shape == ()
+                and saved.dtype == np.dtype("O")
+                and saved.item() is None
+            )
+            nullable_current = (
+                current.shape == ()
+                and current.dtype == np.dtype("O")
+                and current.item() is None
+            )
+            if nullable_saved or nullable_current:
+                setattr(candidate, name, deepcopy(saved))
+                return
             raise ValueError(
                 f"Controller attribute {name} changed schema: "
                 f"snapshot={saved.shape}/{saved.dtype} "

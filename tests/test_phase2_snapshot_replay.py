@@ -23,6 +23,7 @@ from robocasa.recovery.counterfactual_branch import (  # noqa: E402
     run_counterfactual_branch,
 )
 from robocasa.recovery.full_snapshot import (  # noqa: E402
+    _restore_controller_attribute,
     causal_transition_fingerprint,
     capture_full_snapshot,
     load_full_snapshot,
@@ -264,6 +265,30 @@ class FakePolicy:
 
 
 class TestPhase2SnapshotReplay(unittest.TestCase):
+    def test_restores_nullable_controller_buffer_sentinel(self):
+        candidate = SimpleNamespace(last=np.arange(7, dtype=np.float64))
+        nullable = np.asarray(None, dtype=object)
+
+        _restore_controller_attribute(candidate, "last", nullable)
+
+        self.assertEqual(candidate.last.shape, ())
+        self.assertEqual(candidate.last.dtype, np.dtype("O"))
+        self.assertIsNone(candidate.last.item())
+
+        restored = np.arange(7, dtype=np.float64)
+        _restore_controller_attribute(candidate, "last", restored)
+        np.testing.assert_array_equal(candidate.last, restored)
+
+    def test_rejects_nonnullable_controller_array_schema_change(self):
+        candidate = SimpleNamespace(last=np.zeros(7, dtype=np.float64))
+
+        with self.assertRaisesRegex(ValueError, "changed schema"):
+            _restore_controller_attribute(
+                candidate,
+                "last",
+                np.zeros(6, dtype=np.float64),
+            )
+
     def test_configures_canonical_camera_observations(self):
         class Target:
             def __init__(self):
