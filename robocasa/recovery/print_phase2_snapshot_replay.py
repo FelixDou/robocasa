@@ -134,6 +134,12 @@ def print_report(run_dir):
             row.get("snapshot_id"),
             "components=" + (",".join(failed_components) or "unknown"),
         )
+        for mismatch in row.get("observation_component_mismatches", [])[:10]:
+            print(
+                "    observation step",
+                str(mismatch.get("step_index")) + ":",
+                ", ".join(mismatch.get("paths", [])),
+            )
     diagnostic_only = [
         row
         for row in analysis.get("repeat_pairs", [])

@@ -31,7 +31,7 @@ from robocasa.recovery.full_snapshot import (
 )
 
 
-BRANCH_SCHEMA_VERSION = 6
+BRANCH_SCHEMA_VERSION = 7
 BRANCH_PROTOCOL = "robocasa_exact_snapshot_counterfactual_branch"
 
 
@@ -83,6 +83,16 @@ def _environment_only_restore(snapshot, env):
         "observation_exact": False,
         "negative_control": True,
         "reason": "policy_state_intentionally_not_restored",
+    }
+
+
+def observation_component_sha256(observation):
+    """Hash each top-level observation field for bounded replay diagnostics."""
+    if not isinstance(observation, dict):
+        return {"<root>": stable_digest(observation)}
+    return {
+        str(key): stable_digest(value)
+        for key, value in sorted(observation.items(), key=lambda item: str(item[0]))
     }
 
 
@@ -164,6 +174,10 @@ def run_counterfactual_branch(
     action_payloads = []
     action_sha256 = []
     observation_sha256 = [stable_digest(obs)]
+    observation_component_digests = [observation_component_sha256(obs)]
+    repeat_observations = (
+        [deepcopy(obs)] if spec.kind == "same_seed_repeat" else None
+    )
     environment_sha256 = []
     diagnostic_environment_sha256 = []
     request_records = []
@@ -200,6 +214,9 @@ def run_counterfactual_branch(
         rewards.append(float(reward) if reward is not None else None)
         infos.append(deepcopy(info))
         observation_sha256.append(stable_digest(obs))
+        observation_component_digests.append(observation_component_sha256(obs))
+        if repeat_observations is not None:
+            repeat_observations.append(deepcopy(obs))
         transition_fingerprint = environment_fingerprint(env)
         causal_fingerprint = causal_transition_fingerprint(transition_fingerprint)
         transition_sha = stable_digest(causal_fingerprint)
@@ -300,6 +317,7 @@ def run_counterfactual_branch(
         },
         "suffix_action_sha256": action_sha256,
         "suffix_observation_sha256": observation_sha256,
+        "suffix_observation_component_sha256": observation_component_digests,
         "suffix_environment_sha256": environment_sha256,
         "suffix_diagnostic_environment_sha256": diagnostic_environment_sha256,
         "num_steps": len(action_payloads),
@@ -331,6 +349,8 @@ def run_counterfactual_branch(
         "first_transition_fingerprint": first_transition_fingerprint,
         "first_causal_transition_fingerprint": first_causal_transition_fingerprint,
     }
+    if repeat_observations is not None:
+        payload["observations"] = repeat_observations
     summary["payload_sha256"] = stable_digest(payload)
     return {"summary": summary, "payload": payload}
 
@@ -410,6 +430,35 @@ def analyze_phase2_replay(records, errors=None):
         right_diagnostic_components = (
             right.get("first_diagnostic_transition_component_sha256") or {}
         )
+        left_observation_components = left.get(
+            "suffix_observation_component_sha256", []
+        )
+        right_observation_components = right.get(
+            "suffix_observation_component_sha256", []
+        )
+        observation_component_mismatches = []
+        for step_index in range(
+            max(len(left_observation_components), len(right_observation_components))
+        ):
+            left_step = (
+                left_observation_components[step_index]
+                if step_index < len(left_observation_components)
+                else {}
+            )
+            right_step = (
+                right_observation_components[step_index]
+                if step_index < len(right_observation_components)
+                else {}
+            )
+            paths = sorted(
+                name
+                for name in set(left_step) | set(right_step)
+                if left_step.get(name) != right_step.get(name)
+            )
+            if paths:
+                observation_component_mismatches.append(
+                    {"step_index": step_index, "paths": paths}
+                )
         repeat_pairs.append(
             {
                 "snapshot_id": key[0],
@@ -443,6 +492,9 @@ def analyze_phase2_replay(records, errors=None):
                 "observation_exact": (
                     left.get("suffix_observation_sha256")
                     == right.get("suffix_observation_sha256")
+                ),
+                "observation_component_mismatches": (
+                    observation_component_mismatches
                 ),
                 "action_sequence_exact": (
                     left.get("suffix_action_sha256")

@@ -494,6 +494,53 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
             divergent_analysis["gates"]["same_seed_causal_environment_sequences_exact"]
         )
 
+        observation_records = deepcopy(records)
+        observation_repeat = next(
+            row
+            for row in observation_records
+            if row["kind"] == "same_seed_repeat" and row["repeat_index"] == 1
+        )
+        observation_repeat["suffix_observation_sha256"][1] = (
+            "observation-divergence"
+        )
+        observation_repeat["suffix_observation_component_sha256"][1][
+            "value"
+        ] = "value-divergence"
+        observation_analysis = analyze_phase2_replay(observation_records)
+        self.assertFalse(observation_analysis["all_pass"])
+        observation_pair = observation_analysis["repeat_pairs"][0]
+        self.assertFalse(observation_pair["observation_exact"])
+        self.assertEqual(
+            observation_pair["observation_component_mismatches"],
+            [{"step_index": 1, "paths": ["value"]}],
+        )
+
+        repeat_result = run_counterfactual_branch(
+            snapshot,
+            env,
+            policy,
+            BranchSpec(
+                branch_id="repeat-observations",
+                kind="same_seed_repeat",
+                sampling_seed=56,
+                suffix_steps=2,
+                repeat_index=0,
+            ),
+        )
+        candidate_result = run_counterfactual_branch(
+            snapshot,
+            env,
+            policy,
+            BranchSpec(
+                branch_id="candidate-no-observations",
+                kind="candidate",
+                sampling_seed=104,
+                suffix_steps=2,
+            ),
+        )
+        self.assertEqual(len(repeat_result["payload"]["observations"]), 3)
+        self.assertNotIn("observations", candidate_result["payload"])
+
     def test_dry_run_plan_uses_frozen_training_horizons(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
