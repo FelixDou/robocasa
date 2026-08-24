@@ -18,8 +18,11 @@ import json
 import math
 import os
 from pathlib import Path
+import random
 import subprocess
 import traceback
+
+import numpy as np
 
 from robocasa.recovery.counterfactual_branch import (
     BranchSpec,
@@ -297,7 +300,7 @@ def build_plan(args):
     if server_entrypoint is not None and not server_entrypoint.is_file():
         raise ValueError(f"Xiaomi server entrypoint is missing: {server_entrypoint}")
     plan = {
-        "schema_version": 2,
+        "schema_version": 3,
         "protocol": "phase2_complete_snapshot_replay",
         "created_at": utc_now(),
         "robocasa_commit": current_commit(),
@@ -350,6 +353,7 @@ def build_plan(args):
             args.canonical_camera_render_repeats
         ),
         "fresh_branch_contexts": bool(args.fresh_branch_contexts),
+        "deterministic_environment_construction": True,
         "development_identity_overlap": len(identity_overlap),
         "candidate_parents": candidate_parents,
     }
@@ -401,6 +405,25 @@ def _reset_env(env, seed):
     return result, {}
 
 
+def _call_with_deterministic_environment_seed(seed, function, *args, **kwargs):
+    """Call legacy environment setup under a temporary reproducible RNG seed.
+
+    Some RoboCasa fixture constructors still sample visual properties from the
+    module-level Python / NumPy RNGs rather than the environment RNG. Preserve
+    the caller's streams while ensuring a nominal parent and every fresh branch
+    compile byte-identical model XML for the same environment seed.
+    """
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    try:
+        random.seed(int(seed))
+        np.random.seed(int(seed) % (2**32))
+        return function(*args, **kwargs)
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+
+
 def _configure_phase2_environment(env, args):
     if not args.canonical_camera_observations:
         return
@@ -422,7 +445,9 @@ def _make_fresh_branch_context(snapshot, args, runtime, factory, policy_args):
     into a later branch's camera observations.
     """
     environment_seed = int(snapshot.metadata["environment_seed"])
-    env = runtime["make_env"](
+    env = _call_with_deterministic_environment_seed(
+        environment_seed,
+        runtime["make_env"],
         snapshot.task_name,
         args.env_interface,
         args.split,
@@ -437,7 +462,12 @@ def _make_fresh_branch_context(snapshot, args, runtime, factory, policy_args):
             "sampling_config"
         ]["sampling_seed_base"]
         policy = runtime["call_factory"](factory, env, local_policy_args)
-        _reset_env(env, environment_seed)
+        _call_with_deterministic_environment_seed(
+            environment_seed,
+            _reset_env,
+            env,
+            environment_seed,
+        )
         reset_policy = getattr(policy, "reset", None)
         if callable(reset_policy):
             reset_policy()
@@ -551,6 +581,7 @@ def _validate_resume_plan(args, plan):
             args.canonical_camera_render_repeats
         ),
         "fresh_branch_contexts": bool(args.fresh_branch_contexts),
+        "deterministic_environment_construction": True,
         "checkpoint": args.checkpoint,
         "checkpoint_revision": args.checkpoint_revision,
         "policy_module": args.policy_module,
@@ -605,11 +636,14 @@ def _resume_snapshot_parent(
     ):
         raise ValueError("Resume snapshot group mixes frozen plans")
     metadata = snapshots[0].metadata
-    env = runtime["make_env"](
+    environment_seed = int(metadata["environment_seed"])
+    env = _call_with_deterministic_environment_seed(
+        environment_seed,
+        runtime["make_env"],
         snapshots[0].task_name,
         args.env_interface,
         args.split,
-        int(metadata["environment_seed"]),
+        environment_seed,
         True,
     )
     _configure_phase2_environment(env, args)
@@ -621,7 +655,12 @@ def _resume_snapshot_parent(
     summaries = []
     try:
         policy = runtime["call_factory"](factory, env, local_policy_args)
-        _reset_env(env, int(metadata["environment_seed"]))
+        _call_with_deterministic_environment_seed(
+            environment_seed,
+            _reset_env,
+            env,
+            environment_seed,
+        )
         reset_policy = getattr(policy, "reset", None)
         if callable(reset_policy):
             reset_policy()
@@ -678,11 +717,14 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
         args.snapshot_prefix + 1,
         int(math.ceil(args.landmark_fraction * stage_horizon)),
     )
-    env = runtime["make_env"](
+    environment_seed = int(parent["environment_seed"])
+    env = _call_with_deterministic_environment_seed(
+        environment_seed,
+        runtime["make_env"],
         task_name,
         args.env_interface,
         args.split,
-        parent["environment_seed"],
+        environment_seed,
         True,
     )
     _configure_phase2_environment(env, args)
@@ -693,7 +735,12 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
     policy = None
     try:
         policy = runtime["call_factory"](factory, env, local_policy_args)
-        obs, _ = _reset_env(env, parent["environment_seed"])
+        obs, _ = _call_with_deterministic_environment_seed(
+            environment_seed,
+            _reset_env,
+            env,
+            environment_seed,
+        )
         reset_policy = getattr(policy, "reset", None)
         if callable(reset_policy):
             reset_policy()

@@ -39,6 +39,7 @@ COMPATIBILITY_KEYS = (
     "canonical_camera_observations",
     "canonical_camera_render_repeats",
     "fresh_branch_contexts",
+    "deterministic_environment_construction",
     "replan_steps",
     "split",
 )

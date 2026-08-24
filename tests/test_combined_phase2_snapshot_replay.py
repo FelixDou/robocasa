@@ -92,6 +92,7 @@ def make_source(root, task, *, status="complete"):
         "canonical_camera_observations": True,
         "canonical_camera_render_repeats": 2,
         "fresh_branch_contexts": True,
+        "deterministic_environment_construction": True,
         "replan_steps": 16,
         "split": "pretrain",
         "target_stages": {task: f"{task}::frozen-stage"},

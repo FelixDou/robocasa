@@ -93,6 +93,13 @@ branches from sharing offscreen-renderer or observable-cache history. The mode
 is frozen in the plan and checked on resume. Disabling it is a diagnostic
 ablation only; it is not admissible for the Phase 2 validity claim.
 
+Environment construction and reset run under a temporary deterministic Python
+and NumPy seed derived from the frozen environment identity. This covers legacy
+fixture code that samples visual properties, including counter collision-geom
+colors, from module-level RNGs instead of the environment RNG. The caller RNG
+streams are restored immediately afterward, and exact model-XML equality is
+still required by the restore gate.
+
 ## Fresh-session exports and preflight
 
 ```bash

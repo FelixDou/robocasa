@@ -32,6 +32,7 @@ from robocasa.recovery.full_snapshot import (  # noqa: E402
     stable_digest,
 )
 from robocasa.recovery.run_phase2_snapshot_replay import (  # noqa: E402
+    _call_with_deterministic_environment_seed,
     _configure_phase2_environment,
     build_parser,
     build_plan,
@@ -265,6 +266,29 @@ class FakePolicy:
 
 
 class TestPhase2SnapshotReplay(unittest.TestCase):
+    def test_environment_construction_seed_is_reproducible_and_scoped(self):
+        random.seed(41)
+        np.random.seed(41)
+        expected_python = random.random()
+        expected_numpy = np.random.random()
+
+        random.seed(41)
+        np.random.seed(41)
+
+        def sample_legacy_globals():
+            return random.random(), np.random.random()
+
+        first = _call_with_deterministic_environment_seed(
+            1234, sample_legacy_globals
+        )
+        second = _call_with_deterministic_environment_seed(
+            1234, sample_legacy_globals
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(random.random(), expected_python)
+        self.assertEqual(np.random.random(), expected_numpy)
+
     def test_restores_nullable_controller_buffer_sentinel(self):
         candidate = SimpleNamespace(last=np.arange(7, dtype=np.float64))
         nullable = np.asarray(None, dtype=object)
@@ -738,6 +762,11 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
             self.assertTrue(
                 json.loads((root / "out" / "plan.json").read_text())[
                     "fresh_branch_contexts"
+                ]
+            )
+            self.assertTrue(
+                json.loads((root / "out" / "plan.json").read_text())[
+                    "deterministic_environment_construction"
                 ]
             )
             parent_record = json.loads(
