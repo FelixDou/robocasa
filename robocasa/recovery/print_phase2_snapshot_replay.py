@@ -113,6 +113,7 @@ def print_report(run_dir):
             row.get(key, False)
             for key in (
                 "request_exact",
+                "request_sequence_exact",
                 "action_exact",
                 "action_sequence_exact",
                 "transition_exact",
@@ -134,6 +135,11 @@ def print_report(run_dir):
             row.get("snapshot_id"),
             "components=" + (",".join(failed_components) or "unknown"),
         )
+        if row.get("request_mismatch_indices"):
+            print(
+                "    request mismatch indices:",
+                row.get("request_mismatch_indices"),
+            )
         for mismatch in row.get("observation_component_mismatches", [])[:10]:
             print(
                 "    observation step",

@@ -63,12 +63,16 @@ outcome, and termination reason.
 Snapshot and branch payloads use pickle and must only be loaded from trusted
 experiment directories.
 
-Branch schema 7 records a digest for every top-level observation field at
+Branch schema 8 records a digest for every top-level observation field at
 every suffix step. Raw observation sequences are retained only for same-seed
 repeat branches, which keeps candidate storage bounded while allowing exact
 per-camera and per-state diagnosis if the strict observation gate fails. This
 instrumentation does not weaken the gate: full same-seed observation sequences
 must still match before a Phase 2 replay run is valid.
+
+The audit independently gates both the first request and the complete request
+sequence. This prevents a replay with a matching initial cached action chunk
+but a divergent later visual replan from passing request reproducibility.
 
 ## Fresh-session exports and preflight
 

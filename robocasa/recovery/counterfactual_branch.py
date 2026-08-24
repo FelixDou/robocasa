@@ -31,7 +31,7 @@ from robocasa.recovery.full_snapshot import (
 )
 
 
-BRANCH_SCHEMA_VERSION = 7
+BRANCH_SCHEMA_VERSION = 8
 BRANCH_PROTOCOL = "robocasa_exact_snapshot_counterfactual_branch"
 
 
@@ -303,6 +303,9 @@ def run_counterfactual_branch(
         "request_sampling_seeds": [
             record.get("sampling_seed") for record in request_records
         ],
+        "suffix_request_sha256": [
+            stable_digest(record) for record in request_records
+        ],
         "common_randomness_contract": {
             "identical_complete_state_before_first_request": (
                 spec.kind != "environment_only"
@@ -459,6 +462,15 @@ def analyze_phase2_replay(records, errors=None):
                 observation_component_mismatches.append(
                     {"step_index": step_index, "paths": paths}
                 )
+        left_requests = left.get("suffix_request_sha256", [])
+        right_requests = right.get("suffix_request_sha256", [])
+        request_mismatch_indices = [
+            request_index
+            for request_index in range(max(len(left_requests), len(right_requests)))
+            if request_index >= len(left_requests)
+            or request_index >= len(right_requests)
+            or left_requests[request_index] != right_requests[request_index]
+        ]
         repeat_pairs.append(
             {
                 "snapshot_id": key[0],
@@ -466,6 +478,8 @@ def analyze_phase2_replay(records, errors=None):
                 "valid": True,
                 "request_exact": left["first_request_sha256"]
                 == right["first_request_sha256"],
+                "request_sequence_exact": not request_mismatch_indices,
+                "request_mismatch_indices": request_mismatch_indices,
                 "action_exact": (
                     left["first_action_sha256"] == right["first_action_sha256"]
                     and left.get("first_inference_actions_sha256")
@@ -544,6 +558,8 @@ def analyze_phase2_replay(records, errors=None):
         and all(row["restore_valid"] for row in primary),
         "same_seed_requests_exact": bool(valid_pairs)
         and all(row["request_exact"] for row in valid_pairs),
+        "same_seed_request_sequences_exact": bool(valid_pairs)
+        and all(row["request_sequence_exact"] for row in valid_pairs),
         "same_seed_actions_exact": bool(valid_pairs)
         and all(row["action_exact"] for row in valid_pairs),
         "same_seed_first_transitions_exact": bool(valid_pairs)

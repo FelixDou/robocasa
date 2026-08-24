@@ -445,6 +445,7 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         self.assertEqual(analysis["same_seed_suffix_outcome_agreement"], 1.0)
         self.assertEqual(analysis["candidate_diversity_rate"], 1.0)
         for pair in analysis["repeat_pairs"]:
+            self.assertTrue(pair["request_sequence_exact"])
             self.assertTrue(pair["observation_exact"])
             self.assertTrue(pair["action_sequence_exact"])
             self.assertTrue(pair["causal_environment_sequence_exact"])
@@ -540,6 +541,23 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         )
         self.assertEqual(len(repeat_result["payload"]["observations"]), 3)
         self.assertNotIn("observations", candidate_result["payload"])
+
+        request_records = deepcopy(records)
+        request_repeat = next(
+            row
+            for row in request_records
+            if row["kind"] == "same_seed_repeat" and row["repeat_index"] == 1
+        )
+        request_repeat["suffix_request_sha256"][1] = "second-request-divergence"
+        request_analysis = analyze_phase2_replay(request_records)
+        self.assertFalse(request_analysis["all_pass"])
+        self.assertFalse(
+            request_analysis["gates"]["same_seed_request_sequences_exact"]
+        )
+        request_pair = request_analysis["repeat_pairs"][0]
+        self.assertTrue(request_pair["request_exact"])
+        self.assertFalse(request_pair["request_sequence_exact"])
+        self.assertEqual(request_pair["request_mismatch_indices"], [1])
 
     def test_dry_run_plan_uses_frozen_training_horizons(self):
         with tempfile.TemporaryDirectory() as directory:
