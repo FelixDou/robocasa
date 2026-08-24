@@ -80,9 +80,27 @@ def _update_digest(digest, value: Any) -> None:
         _update_digest(digest, str(value))
         return
 
-    # Torch is optional in simulator-independent tests.
+    # Torch is optional in simulator-independent tests.  Hash tensor metadata
+    # explicitly and then its exact storage bytes.  NumPy cannot represent
+    # every torch dtype (notably bfloat16), so unsupported dtypes are viewed as
+    # uint16 without numerically converting them.  This preserves every bit
+    # used by the policy request and keeps repeat comparisons exact.
     if value.__class__.__module__.startswith("torch") and hasattr(value, "detach"):
-        value = value.detach().cpu().numpy()
+        tensor = value.detach().cpu().contiguous()
+        dtype = str(tensor.dtype)
+        digest.update(b"torch_tensor:")
+        _update_digest(digest, dtype)
+        _update_digest(digest, tuple(tensor.shape))
+        try:
+            array = tensor.numpy()
+        except TypeError:
+            if dtype != "torch.bfloat16":
+                raise
+            import torch
+
+            array = tensor.view(torch.uint16).numpy()
+        digest.update(np.ascontiguousarray(array).tobytes(order="C"))
+        return
     if isinstance(value, np.ndarray):
         array = np.ascontiguousarray(value)
         digest.update(b"ndarray:")

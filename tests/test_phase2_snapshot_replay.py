@@ -3,8 +3,11 @@ import io
 import random
 from contextlib import redirect_stdout
 from pathlib import Path
+import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -161,6 +164,65 @@ class FakePolicy:
 
 
 class TestPhase2SnapshotReplay(unittest.TestCase):
+    def test_stable_digest_uses_raw_bfloat16_storage_without_numpy_conversion(self):
+        class FakeView:
+            def __init__(self, bits):
+                self.bits = bits
+
+            def numpy(self):
+                return np.asarray(self.bits, dtype=np.uint16)
+
+        class FakeBFloat16Tensor:
+            def __init__(self, bits):
+                self.bits = list(bits)
+                self.dtype = "torch.bfloat16"
+                self.shape = (len(self.bits),)
+
+            def detach(self):
+                return self
+
+            def cpu(self):
+                return self
+
+            def contiguous(self):
+                return self
+
+            def numpy(self):
+                raise TypeError("Got unsupported ScalarType BFloat16")
+
+            def view(self, dtype):
+                self.view_dtype = dtype
+                return FakeView(self.bits)
+
+        FakeBFloat16Tensor.__module__ = "torch"
+        fake_torch = SimpleNamespace(uint16=object())
+
+        with mock.patch.dict(sys.modules, {"torch": fake_torch}):
+            first = FakeBFloat16Tensor([0x3F80, 0xC020])
+            same = FakeBFloat16Tensor([0x3F80, 0xC020])
+            changed = FakeBFloat16Tensor([0x3F80, 0xC000])
+            self.assertEqual(stable_digest(first), stable_digest(same))
+            self.assertNotEqual(stable_digest(first), stable_digest(changed))
+            self.assertIs(first.view_dtype, fake_torch.uint16)
+
+    def test_stable_digest_hashes_bfloat16_tensor_exactly(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch is unavailable")
+
+        value = torch.tensor([1.0, -2.5, 3.25], dtype=torch.bfloat16)
+        same = value.clone()
+        changed = value.clone()
+        changed[1] = -2.0
+
+        self.assertEqual(stable_digest(value), stable_digest(same))
+        self.assertNotEqual(stable_digest(value), stable_digest(changed))
+        self.assertNotEqual(
+            stable_digest(value),
+            stable_digest(value.to(dtype=torch.float32)),
+        )
+
     def make_snapshot(self):
         env = FakeEnvironment()
         env.value = 1.25
