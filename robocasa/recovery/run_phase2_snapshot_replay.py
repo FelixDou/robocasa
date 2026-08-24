@@ -837,8 +837,6 @@ def run(args, runtime=None):
     parents = load_jsonl(args.output_dir / "parent_records.jsonl")
     ineligible_parents = load_jsonl(args.output_dir / "ineligible_parent_records.jsonl")
     errors = load_jsonl(args.output_dir / "errors.jsonl")
-    final_snapshot_paths = sorted((args.output_dir / "snapshots").glob("*.pkl.gz"))
-    final_snapshots = [load_full_snapshot(path) for path in final_snapshot_paths]
     branch_records = load_branch_records(args.output_dir / "branch_records.jsonl")
     completed_branch_ids = {row["branch_id"] for row in branch_records}
     valid_by_task = defaultdict(int)
@@ -943,6 +941,8 @@ def run(args, runtime=None):
             },
         )
 
+    final_snapshot_paths = sorted((args.output_dir / "snapshots").glob("*.pkl.gz"))
+    final_snapshots = [load_full_snapshot(path) for path in final_snapshot_paths]
     branch_records = load_branch_records(args.output_dir / "branch_records.jsonl")
     analysis = analyze_phase2_replay(branch_records, errors)
     analysis.update(

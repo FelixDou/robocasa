@@ -168,6 +168,8 @@ def run_counterfactual_branch(
     infos = []
     termination_reason = "suffix_horizon"
     first_transition_sha256 = None
+    first_transition_component_sha256 = None
+    first_transition_fingerprint = None
     first_action_sha256 = None
     first_action = None
 
@@ -191,10 +193,16 @@ def run_counterfactual_branch(
         rewards.append(float(reward) if reward is not None else None)
         infos.append(deepcopy(info))
         observation_sha256.append(stable_digest(obs))
-        transition_sha = stable_digest(environment_fingerprint(env))
+        transition_fingerprint = environment_fingerprint(env)
+        transition_sha = stable_digest(transition_fingerprint)
         environment_sha256.append(transition_sha)
         if first_transition_sha256 is None:
             first_transition_sha256 = transition_sha
+            first_transition_fingerprint = deepcopy(transition_fingerprint)
+            first_transition_component_sha256 = {
+                name: stable_digest(value)
+                for name, value in transition_fingerprint.items()
+            }
         subtask_evals.append(deepcopy(subtask_eval_fn(env)))
         if success_fn(info=info, reward=reward, env=env):
             termination_reason = "success"
@@ -255,6 +263,7 @@ def run_counterfactual_branch(
         "first_action_sha256": first_action_sha256,
         "first_inference_actions_sha256": first_inference_actions_sha256,
         "first_transition_sha256": first_transition_sha256,
+        "first_transition_component_sha256": first_transition_component_sha256,
         "request_sampling_seeds": [
             record.get("sampling_seed") for record in request_records
         ],
@@ -299,6 +308,7 @@ def run_counterfactual_branch(
         "subtask_trace": trace,
         "rewards": rewards,
         "infos": infos,
+        "first_transition_fingerprint": first_transition_fingerprint,
     }
     summary["payload_sha256"] = stable_digest(payload)
     return {"summary": summary, "payload": payload}
@@ -371,6 +381,8 @@ def analyze_phase2_replay(records, errors=None):
             )
             continue
         left, right = rows
+        left_components = left.get("first_transition_component_sha256") or {}
+        right_components = right.get("first_transition_component_sha256") or {}
         repeat_pairs.append(
             {
                 "snapshot_id": key[0],
@@ -385,6 +397,10 @@ def analyze_phase2_replay(records, errors=None):
                 ),
                 "transition_exact": left["first_transition_sha256"]
                 == right["first_transition_sha256"],
+                "transition_components_exact": {
+                    name: left_components.get(name) == right_components.get(name)
+                    for name in sorted(set(left_components) | set(right_components))
+                },
                 "suffix_outcome_equal": (
                     left["task_success"] == right["task_success"]
                     and left["ordered_completed_subtasks"]

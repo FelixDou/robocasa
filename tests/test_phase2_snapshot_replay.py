@@ -297,6 +297,15 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         self.assertTrue(analysis["all_pass"], analysis)
         self.assertEqual(analysis["same_seed_suffix_outcome_agreement"], 1.0)
         self.assertEqual(analysis["candidate_diversity_rate"], 1.0)
+        for pair in analysis["repeat_pairs"]:
+            self.assertEqual(
+                pair["transition_components_exact"],
+                {
+                    "control_state": True,
+                    "rng_state": True,
+                    "simulator_state": True,
+                },
+            )
 
     def test_dry_run_plan_uses_frozen_training_horizons(self):
         with tempfile.TemporaryDirectory() as directory:

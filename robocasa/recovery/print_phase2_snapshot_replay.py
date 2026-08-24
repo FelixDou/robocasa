@@ -120,6 +120,17 @@ def print_report(run_dir):
         )
     ]
     print("non-reproducing repeat pairs:", len(failed_pairs))
+    for row in failed_pairs:
+        failed_components = [
+            name
+            for name, exact in row.get("transition_components_exact", {}).items()
+            if not exact
+        ]
+        print(
+            "  transition mismatch:",
+            row.get("snapshot_id"),
+            "components=" + (",".join(failed_components) or "unknown"),
+        )
     print("\nPHASE 2 VALIDITY:", "PASS" if analysis.get("all_pass") else "FAIL")
     print("artifacts:", root)
 
