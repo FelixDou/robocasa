@@ -210,6 +210,34 @@ CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
 Require every gate to pass before the full run. A gate failure is a stop and
 diagnose result; do not immediately rerun or scale it away.
 
+## Combine task-specific validation roots
+
+If a predeclared live trigger is unreachable, preserve that run and declare a
+replacement task-stage protocol in a new output root. Do not edit or merge the
+source JSONL files. After both task-specific cohorts are complete, the combined
+auditor selects only the explicitly named task from each source, verifies every
+snapshot and branch payload, checks protocol compatibility and identifier
+uniqueness, and reruns all engineering gates without copying raw artifacts.
+
+```bash
+export XR1_PHASE2_COMBINED="$STORAGE_BS/robocasa_checkpoints/safe/xr1_phase2_combined_$(date +%Y%m%d_%H%M%S)"
+
+"$XR1_CLIENT_ENV/bin/python" -u -m \
+  robocasa.recovery.audit_combined_phase2_snapshot_replay \
+  --source "ArrangeTea=$XR1_PHASE2_ARRANGE_ROOT" \
+  --source "CuttingToolSelection=$XR1_PHASE2_CUTTING_ROOT" \
+  --parents-per-task 5 \
+  --output-dir "$XR1_PHASE2_COMBINED"
+
+"$XR1_CLIENT_ENV/bin/python" -m json.tool \
+  "$XR1_PHASE2_COMBINED/analysis.json"
+```
+
+The output contains hashes and absolute paths for each immutable source, but no
+snapshot or branch payload copies. A stopped multi-task source is admissible
+only when the declared task itself has exactly the requested completed-parent,
+snapshot, and branch support and all referenced artifacts are present.
+
 ## Full bounded validation
 
 ```bash
