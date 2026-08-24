@@ -9,6 +9,8 @@ The label contract is:
 
 - a completed semantic stage is a stage success (`failure=0`);
 - the terminal active stage of a failed parent is a stage failure (`failure=1`);
+- a terminal failed stage reached only after the final cached action chunk has
+  no causal policy inference and is reported as censored / non-estimable;
 - future stages that were never attempted are censored and create no rows;
 - the final parent outcome is retained only as an auxiliary/baseline target.
 

@@ -51,6 +51,10 @@ def print_prospective(root, analysis):
     print("parents:", analysis["parents"])
     print("tasks:", len(analysis["tasks"]))
     print("stage events:", analysis["stage_events"])
+    print(
+        "unobserved failed-stage parents:",
+        analysis.get("unobserved_failed_stage_parents", 0),
+    )
     print("thresholds updated on test:", analysis["thresholds_updated_on_test"])
     print("development IDs disjoint:", analysis["development_ids_disjoint"])
     print("primary detector:", analysis["primary_detector"])

@@ -1320,6 +1320,12 @@ def evaluate(args):
         "parents": len(parents),
         "tasks": sorted({parent["task_name"] for parent in parents}),
         "stage_events": len(events),
+        "unobserved_failed_stage_parents": len(
+            loaded["unobserved_failed_stage_parent_ids"]
+        ),
+        "unobserved_failed_stage_parent_ids": loaded[
+            "unobserved_failed_stage_parent_ids"
+        ],
         "development_ids_disjoint": development_ids_disjoint,
         "development_seed_reset_identities_disjoint": identity_disjoint,
         "locked_opened_outer_exact": opened_outer_mode,
@@ -1345,6 +1351,9 @@ def evaluate(args):
         "status": "complete",
         "parents": len(parents),
         "stage_events": len(events),
+        "unobserved_failed_stage_parents": len(
+            loaded["unobserved_failed_stage_parent_ids"]
+        ),
         "primary_detector": primary,
         "all_success_criteria_passed": criteria["all_pass"],
         "all_ranking_confirmation_criteria_passed": ranking_criteria["all_pass"],

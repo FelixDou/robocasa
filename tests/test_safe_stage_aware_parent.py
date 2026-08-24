@@ -22,6 +22,7 @@ from robocasa.recovery.safe.score_seen_checkpoint_external import (  # noqa: E40
     build_parser as build_external_score_parser,
 )
 from robocasa.recovery.safe.stage_aware_parent_safe import (  # noqa: E402
+    _failure_stage_observation,
     allocate_development_parents,
     apply_score_normalizer,
     build_inference_rows,
@@ -100,6 +101,39 @@ def parent(
 
 
 class TestStageAwareParentSafe(unittest.TestCase):
+    def test_failed_stage_without_policy_inference_is_censored(self):
+        failure_segment = {
+            "subtask_id": "stage_1",
+            "segment_index": 1,
+            "failure_label": 1,
+            "num_policy_inferences": 0,
+            "usable_for_safe": False,
+        }
+        result = _failure_stage_observation(
+            {"segments": [failure_segment]},
+            [{"failed": False}],
+            rollout_failed=True,
+            rollout_id="parent",
+        )
+        self.assertFalse(result["observed"])
+        self.assertIs(result["segment"], failure_segment)
+
+    def test_failed_stage_with_policy_inference_remains_observed(self):
+        failure_segment = {
+            "subtask_id": "stage_1",
+            "segment_index": 1,
+            "failure_label": 1,
+            "num_policy_inferences": 2,
+            "usable_for_safe": True,
+        }
+        result = _failure_stage_observation(
+            {"segments": [failure_segment]},
+            [{"failed": True}],
+            rollout_failed=True,
+            rollout_id="parent",
+        )
+        self.assertTrue(result["observed"])
+
     def test_runtime_loader_explicitly_loads_trusted_numpy_metadata(self):
         fake_torch = mock.Mock()
         fake_torch.load.return_value = {

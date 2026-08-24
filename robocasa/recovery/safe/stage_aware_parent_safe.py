@@ -146,6 +146,44 @@ def _stage_spans(record, task_name, sequence_length):
     return spans
 
 
+def _failure_stage_observation(record, spans, *, rollout_failed, rollout_id):
+    """Audit whether the terminal failed stage has a policy inference.
+
+    Semantic collection can validly label a terminal failed stage that became
+    active only after the final cached action chunk.  Such a stage has zero
+    policy inferences and is therefore censored for SAFE evaluation rather
+    than evidence that the parent was successful or malformed.
+    """
+    observed = [span for span in spans if span["failed"]]
+    serialized = [
+        segment
+        for segment in record.get("segments", [])
+        if segment.get("failure_label") == 1
+    ]
+    if not rollout_failed:
+        if observed or serialized:
+            raise ValueError(
+                f"Successful parent {rollout_id} contains a failed stage"
+            )
+        return {"observed": False, "segment": None}
+    if len(serialized) != 1:
+        raise ValueError(
+            f"Failed parent {rollout_id} must serialize one failed stage"
+        )
+    if len(observed) > 1:
+        raise ValueError(
+            f"Failed parent {rollout_id} has multiple observed failed stages"
+        )
+    segment = serialized[0]
+    if observed:
+        return {"observed": True, "segment": segment}
+    if segment.get("num_policy_inferences", 0) or segment.get("usable_for_safe"):
+        raise ValueError(
+            f"Failed parent {rollout_id} has an inconsistent unobserved failed stage"
+        )
+    return {"observed": False, "segment": segment}
+
+
 def load_parent_sequences(
     dataset_dir,
     *,
@@ -195,17 +233,14 @@ def load_parent_sequences(
         if context_key is not None and context is None:
             missing_context.append(metadata.rollout_id)
         spans = _stage_spans(trace, metadata.task_name, len(features))
-        if not spans:
+        failure_stage = _failure_stage_observation(
+            trace,
+            spans,
+            rollout_failed=metadata.failed,
+            rollout_id=metadata.rollout_id,
+        )
+        if not spans and not (metadata.failed and not failure_stage["observed"]):
             raise ValueError(f"Parent {metadata.rollout_id} has no usable stage spans")
-        failures = [span for span in spans if span["failed"]]
-        if metadata.failed and len(failures) != 1:
-            raise ValueError(
-                f"Failed parent {metadata.rollout_id} must have one failed stage"
-            )
-        if not metadata.failed and failures:
-            raise ValueError(
-                f"Successful parent {metadata.rollout_id} contains a failed stage"
-            )
         assignment = [None] * len(features)
         for span_index, span in enumerate(spans):
             for inference_index in range(span["start"], span["end"]):
@@ -223,6 +258,16 @@ def load_parent_sequences(
                 "features": features.astype(np.float32, copy=False),
                 "context": context,
                 "spans": spans,
+                "failed_stage_observed": failure_stage["observed"],
+                "unobserved_failed_stage": (
+                    None
+                    if failure_stage["observed"] or not metadata.failed
+                    else {
+                        "subtask_id": failure_stage["segment"]["subtask_id"],
+                        "segment_index": failure_stage["segment"]["segment_index"],
+                        "reason": "no_policy_inference_in_terminal_failed_stage",
+                    }
+                ),
                 "stage_assignment": assignment,
                 "tensor_path": str((dataset_dir / metadata.tensor_path).resolve()),
                 "trace_path": str(trace_path.resolve()),
@@ -242,6 +287,11 @@ def load_parent_sequences(
         "context_key": context_key,
         "context_available_for_all": not missing_context,
         "missing_context_parent_ids": missing_context,
+        "unobserved_failed_stage_parent_ids": [
+            parent["rollout_id"]
+            for parent in parents
+            if parent["failed"] and not parent["failed_stage_observed"]
+        ],
     }
 
 
