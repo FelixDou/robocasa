@@ -408,6 +408,21 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
             self.assertEqual(analysis["completed_snapshots"], 2)
             self.assertEqual(analysis["primary_records"], 8)
             self.assertEqual(analysis["records"], 10)
+            parent_record = json.loads(
+                (root / "out" / "parent_records.jsonl").read_text().splitlines()[0]
+            )
+            self.assertTrue(parent_record["target_stage_reached"])
+            self.assertEqual(parent_record["observed_stage_sequence"], ["target_stage"])
+            self.assertGreaterEqual(
+                parent_record["target_stage_max_consecutive_policy_inferences"],
+                3,
+            )
+            self.assertEqual(
+                parent_record["stage_diagnostics"]["target_stage"]["visits"], 1
+            )
+            self.assertEqual(
+                parent_record["termination_reason"], "snapshot_pair_captured"
+            )
             self.assertEqual(
                 json.loads((root / "out" / "status.json").read_text())["status"],
                 "complete",

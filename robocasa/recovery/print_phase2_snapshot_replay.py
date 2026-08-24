@@ -21,12 +21,21 @@ def _read_json(path, default=None):
         return default
 
 
+def _read_jsonl(path):
+    try:
+        with Path(path).open() as stream:
+            return [json.loads(line) for line in stream if line.strip()]
+    except FileNotFoundError:
+        return []
+
+
 def print_report(run_dir):
     root = Path(run_dir)
     plan = _read_json(root / "plan.json", {})
     status = _read_json(root / "status.json", {"status": "not_started"})
     analysis = _read_json(root / "analysis.json")
     records = load_branch_records(root / "branch_records.jsonl")
+    ineligible = _read_jsonl(root / "ineligible_parent_records.jsonl")
     kinds = Counter(row["kind"] for row in records)
 
     print("PHASE 2 COMPLETE-SNAPSHOT REPLAY")
@@ -52,6 +61,30 @@ def print_report(run_dir):
         dict(sorted(kinds.items())),
     )
     print("errors:", status.get("errors", 0))
+    if ineligible:
+        print("\nREACHABILITY")
+        print("ineligible parents:", len(ineligible))
+        print(
+            "target stage reached:",
+            sum(bool(row.get("target_stage_reached")) for row in ineligible),
+        )
+        print(
+            "captured prefix only:",
+            sum(row.get("captured_count") == 1 for row in ineligible),
+        )
+        print(
+            "captured nothing:",
+            sum(row.get("captured_count") == 0 for row in ineligible),
+        )
+        latest = ineligible[-1]
+        print(
+            "latest observed stages:",
+            " -> ".join(latest.get("observed_stage_sequence", [])) or "none",
+        )
+        print(
+            "latest target max consecutive inferences:",
+            latest.get("target_stage_max_consecutive_policy_inferences", 0),
+        )
 
     if analysis is None:
         print(

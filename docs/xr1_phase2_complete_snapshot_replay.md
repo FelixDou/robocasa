@@ -14,7 +14,7 @@ Read `docs/cluster_experiment_runbook.md` and
 
 - Tasks: `ArrangeTea` and `CuttingToolSelection`.
 - Target stages:
-  - `ArrangeTea::PickPlaceCabinetToCounter_2_place`
+  - `ArrangeTea::PickPlaceCounterToCounter_1_place`
   - `CuttingToolSelection::PickPlaceDrawerToCounter_2_place`
 - Eligible parents: five per task, using a new seed/reset family. Up to 15
   predeclared identities per task may be attempted because a nominal parent can
@@ -32,6 +32,17 @@ Read `docs/cluster_experiment_runbook.md` and
 
 The environment-only control is diagnostic and is excluded from the primary
 validity gates.
+
+The original ArrangeTea target was
+`PickPlaceCabinetToCounter_2_place`.  A new-identity reachability pilot stopped
+on 2026-08-24 after 11/11 parents reached neither predeclared boundary (zero
+errors and zero partially captured pairs).  Before any valid Phase 2 result was
+opened, the engineering target was therefore revised to the earlier frozen
+`PickPlaceCounterToCounter_1_place` stage (fit-only horizon 15).  The failed
+pilot remains negative evidence and is not pooled with the revised protocol.
+Every subsequent parent record stores its observed stage sequence, per-stage
+visits, environment steps, policy inferences, maximum consecutive inferences,
+terminal outcome, and termination reason.
 
 ## Implemented artifacts
 
@@ -130,7 +141,7 @@ cd "$ROBOCASA_REPO"
   --output-dir "$XR1_PHASE2_DRY" \
   --runtime-bundle "$XR1_STAGE_RUNTIME" \
   --tasks ArrangeTea CuttingToolSelection \
-  --target-stage ArrangeTea=PickPlaceCabinetToCounter_2_place \
+  --target-stage ArrangeTea=PickPlaceCounterToCounter_1_place \
   --target-stage CuttingToolSelection=PickPlaceDrawerToCounter_2_place \
   --model-path "$XR1_SAFE_CHECKPOINT" \
   --checkpoint XiaomiRobotics/Xiaomi-Robotics-1-RoboCasa365 \
@@ -157,7 +168,7 @@ CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
   --output-dir "$XR1_PHASE2_SMOKE" \
   --runtime-bundle "$XR1_STAGE_RUNTIME" \
   --tasks ArrangeTea \
-  --target-stage ArrangeTea=PickPlaceCabinetToCounter_2_place \
+  --target-stage ArrangeTea=PickPlaceCounterToCounter_1_place \
   --num-parents-per-task 1 \
   --model-path "$XR1_SAFE_CHECKPOINT" \
   --checkpoint XiaomiRobotics/Xiaomi-Robotics-1-RoboCasa365 \
@@ -189,7 +200,7 @@ nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
   --output-dir "$XR1_PHASE2_ROOT" \
   --runtime-bundle "$XR1_STAGE_RUNTIME" \
   --tasks ArrangeTea CuttingToolSelection \
-  --target-stage ArrangeTea=PickPlaceCabinetToCounter_2_place \
+  --target-stage ArrangeTea=PickPlaceCounterToCounter_1_place \
   --target-stage CuttingToolSelection=PickPlaceDrawerToCounter_2_place \
   --num-parents-per-task 5 \
   --max-parent-attempts-per-task 15 \
@@ -241,7 +252,7 @@ nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
   --output-dir "$XR1_PHASE2_ROOT" \
   --runtime-bundle "$XR1_STAGE_RUNTIME" \
   --tasks ArrangeTea CuttingToolSelection \
-  --target-stage ArrangeTea=PickPlaceCabinetToCounter_2_place \
+  --target-stage ArrangeTea=PickPlaceCounterToCounter_1_place \
   --target-stage CuttingToolSelection=PickPlaceDrawerToCounter_2_place \
   --num-parents-per-task 5 --max-parent-attempts-per-task 15 \
   --model-path "$XR1_SAFE_CHECKPOINT" \

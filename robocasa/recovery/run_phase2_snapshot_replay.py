@@ -584,6 +584,13 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
         subtask_evals = [runtime["get_subtask_eval"](env)]
         current_stage = None
         local_inferences = 0
+        current_stage_inferences = 0
+        observed_stage_sequence = []
+        stage_diagnostics = {}
+        stage_unavailable_steps = 0
+        environment_steps = 0
+        parent_task_success = False
+        parent_termination_reason = "parent_horizon"
         captured = {}
         captured_snapshots = []
         branch_summaries = []
@@ -594,6 +601,22 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
             if raw_stage != current_stage:
                 current_stage = raw_stage
                 local_inferences = 0
+                current_stage_inferences = 0
+                if raw_stage is not None:
+                    observed_stage_sequence.append(raw_stage)
+                    stage_diagnostics.setdefault(
+                        raw_stage,
+                        {
+                            "visits": 0,
+                            "environment_steps": 0,
+                            "policy_inferences": 0,
+                            "max_consecutive_policy_inferences": 0,
+                        },
+                    )["visits"] += 1
+            if raw_stage is None:
+                stage_unavailable_steps += 1
+            else:
+                stage_diagnostics[raw_stage]["environment_steps"] += 1
             at_boundary = bool(getattr(policy, "at_inference_boundary", False))
             trigger = None
             if raw_stage == raw_target_stage and at_boundary:
@@ -653,12 +676,51 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
                     raise RuntimeError("Nominal inference lacks a request record")
                 if raw_stage == raw_target_stage:
                     local_inferences += 1
+                if raw_stage is not None:
+                    current_stage_inferences += 1
+                    diagnostics = stage_diagnostics[raw_stage]
+                    diagnostics["policy_inferences"] += 1
+                    diagnostics["max_consecutive_policy_inferences"] = max(
+                        diagnostics["max_consecutive_policy_inferences"],
+                        current_stage_inferences,
+                    )
             obs, reward, done, info = runtime["step_fn"](env, action)
+            environment_steps = environment_step + 1
             subtask_evals.append(runtime["get_subtask_eval"](env))
-            if runtime["success_fn"](info=info, reward=reward, env=env) or done:
+            if runtime["success_fn"](info=info, reward=reward, env=env):
+                parent_task_success = True
+                parent_termination_reason = "success"
+                break
+            if done:
+                parent_termination_reason = "environment_done"
                 break
             if len(captured) == 2:
+                parent_termination_reason = "snapshot_pair_captured"
                 break
+
+        target_diagnostics = stage_diagnostics.get(
+            raw_target_stage,
+            {
+                "visits": 0,
+                "environment_steps": 0,
+                "policy_inferences": 0,
+                "max_consecutive_policy_inferences": 0,
+            },
+        )
+        reachability = {
+            "observed_stage_sequence": observed_stage_sequence,
+            "stage_diagnostics": stage_diagnostics,
+            "stage_unavailable_steps": stage_unavailable_steps,
+            "target_stage_reached": bool(target_diagnostics["visits"]),
+            "target_stage_environment_steps": target_diagnostics["environment_steps"],
+            "target_stage_policy_inferences": target_diagnostics["policy_inferences"],
+            "target_stage_max_consecutive_policy_inferences": target_diagnostics[
+                "max_consecutive_policy_inferences"
+            ],
+            "environment_steps": environment_steps,
+            "task_success": parent_task_success,
+            "termination_reason": parent_termination_reason,
+        }
 
         if len(captured_snapshots) != 2:
             for snapshot, _ in captured_snapshots:
@@ -679,6 +741,7 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
                 "snapshot_index": snapshot_index,
                 "valid": False,
                 "reason": "did_not_reach_both_predeclared_boundaries",
+                **reachability,
             }
 
         for snapshot, _ in captured_snapshots:
@@ -711,6 +774,7 @@ def _run_parent(parent, args, plan, runtime, factory, policy_args, snapshot_inde
             "landmark_cutoff": landmark_cutoff,
             "snapshot_index": snapshot_index,
             "valid": len(captured) == 2,
+            **reachability,
         }
     finally:
         close = getattr(policy, "close", None)
