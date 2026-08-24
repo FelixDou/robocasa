@@ -28,7 +28,7 @@ from typing import Any, Mapping
 import numpy as np
 
 
-FULL_SNAPSHOT_SCHEMA_VERSION = 2
+FULL_SNAPSHOT_SCHEMA_VERSION = 3
 FULL_SNAPSHOT_PROTOCOL = "robocasa_complete_simulator_policy_snapshot"
 
 # MuJoCo's generalized position and velocity are not a complete integration
@@ -59,6 +59,19 @@ SIMULATOR_PRE_FORWARD_FIELDS = tuple(
     name for name in SIMULATOR_INTEGRATION_FIELDS if name != "qacc_warmstart"
 )
 SIMULATOR_POST_FORWARD_FIELDS = ("qacc_warmstart",)
+
+CONTROLLER_CHILD_ATTRIBUTES = (
+    "controller",
+    "composite_controller",
+    "part_controllers",
+    "controllers",
+    "interpolator",
+    "interpolator_pos",
+    "interpolator_ori",
+    "position_interpolator",
+    "orientation_interpolator",
+)
+CONTROLLER_CHILD_CLASS_TOKENS = ("Controller", "Interpolator", "Buffer")
 
 # These values affect termination, observation construction, or task-language
 # state but are not part of MuJoCo's flattened qpos/qvel state.  They are
@@ -345,6 +358,150 @@ def _tracker_state(tracker):
     return deepcopy(getter())
 
 
+def _controller_root(env):
+    from robocasa.recovery.recovery_rollout import _sim_env
+
+    return _sim_env(env)
+
+
+def _is_controller_child(value) -> bool:
+    if value is None:
+        return False
+    class_name = value.__class__.__qualname__
+    module = value.__class__.__module__
+    return module.startswith("robosuite") and any(
+        token in class_name for token in CONTROLLER_CHILD_CLASS_TOKENS
+    )
+
+
+def _controller_child_items(candidate):
+    seen_attributes = set()
+    for attribute in CONTROLLER_CHILD_ATTRIBUTES:
+        try:
+            value = getattr(candidate, attribute)
+        except (AttributeError, RuntimeError):
+            continue
+        seen_attributes.add(attribute)
+        if isinstance(value, Mapping):
+            for key, child in sorted(
+                value.items(), key=lambda item: stable_digest(item[0])
+            ):
+                if child is not None:
+                    yield f"{attribute}[{key!r}]", child
+        elif isinstance(value, (list, tuple)):
+            for index, child in enumerate(value):
+                if child is not None:
+                    yield f"{attribute}[{index}]", child
+        elif value is not None:
+            yield attribute, value
+
+    # RoboSuite's DeltaBuffer / RingBuffer instances are robot attributes, not
+    # always reachable through a fixed controller attribute name. Traverse only
+    # objects whose RoboSuite class explicitly identifies stateful control
+    # machinery; simulator, model, renderer, and socket objects are excluded.
+    for attribute, value in vars(candidate).items():
+        if attribute in seen_attributes:
+            continue
+        if _is_controller_child(value):
+            yield attribute, value
+        elif isinstance(value, Mapping):
+            for key, child in sorted(
+                value.items(), key=lambda item: stable_digest(item[0])
+            ):
+                if _is_controller_child(child):
+                    yield f"{attribute}[{key!r}]", child
+
+
+def _controller_nodes(env):
+    root = _controller_root(env)
+    queue = [
+        (f"robots[{index}]", robot)
+        for index, robot in enumerate(getattr(root, "robots", ()))
+    ]
+    visited = set()
+    while queue:
+        path, candidate = queue.pop(0)
+        if candidate is None or id(candidate) in visited:
+            continue
+        visited.add(id(candidate))
+        yield path, candidate
+        for suffix, child in _controller_child_items(candidate):
+            if id(child) not in visited:
+                queue.append((f"{path}.{suffix}", child))
+
+
+def _safe_controller_value(value):
+    if value is None or isinstance(
+        value, (bool, int, float, str, bytes, np.generic, np.ndarray)
+    ):
+        return True
+    if isinstance(value, (list, tuple, deque)):
+        return all(_safe_controller_value(item) for item in value)
+    if isinstance(value, Mapping):
+        return all(
+            _safe_controller_value(key) and _safe_controller_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _capture_controller_state(env) -> list[dict]:
+    records = []
+    for path, candidate in _controller_nodes(env):
+        attributes = {}
+        for name, value in sorted(vars(candidate).items()):
+            if _safe_controller_value(value):
+                attributes[name] = deepcopy(value)
+        records.append(
+            {
+                "object_path": path,
+                "class": (
+                    f"{candidate.__class__.__module__}."
+                    f"{candidate.__class__.__qualname__}"
+                ),
+                "attributes": attributes,
+            }
+        )
+    return records
+
+
+def _restore_controller_attribute(candidate, name: str, saved) -> None:
+    current = getattr(candidate, name, None)
+    if isinstance(current, np.ndarray) and isinstance(saved, np.ndarray):
+        if current.shape != saved.shape or current.dtype != saved.dtype:
+            raise ValueError(
+                f"Controller attribute {name} changed schema: "
+                f"snapshot={saved.shape}/{saved.dtype} "
+                f"current={current.shape}/{current.dtype}"
+            )
+        current[...] = saved
+        return
+    setattr(candidate, name, deepcopy(saved))
+
+
+def _restore_controller_state(env, records) -> None:
+    current = {path: candidate for path, candidate in _controller_nodes(env)}
+    expected_paths = {record["object_path"] for record in records}
+    if set(current) != expected_paths:
+        raise ValueError(
+            "RoboSuite controller graph changed: "
+            f"missing={sorted(expected_paths - set(current))} "
+            f"extra={sorted(set(current) - expected_paths)}"
+        )
+    for record in records:
+        candidate = current[record["object_path"]]
+        class_name = (
+            f"{candidate.__class__.__module__}.{candidate.__class__.__qualname__}"
+        )
+        if class_name != record["class"]:
+            raise ValueError(
+                f"Controller class changed at {record['object_path']}: "
+                f"snapshot={record['class']} current={class_name}"
+            )
+        for name, saved in record["attributes"].items():
+            _restore_controller_attribute(candidate, name, saved)
+
+
 def _capture_simulator_integration_state(env) -> dict:
     """Capture every available MuJoCo field that can affect the next step."""
     from robocasa.recovery.recovery_rollout import _get_sim
@@ -417,6 +574,7 @@ def environment_fingerprint(env) -> dict:
             "integration_state": _capture_simulator_integration_state(env),
         },
         "control_state": _capture_environment_control_state(env),
+        "controller_state": _capture_controller_state(env),
         "rng_state": _capture_environment_rng_state(env),
     }
 
@@ -433,6 +591,7 @@ class FullSnapshot:
     captured_at: str
     environment_state: Any
     simulator_integration_state: Any
+    controller_state: Any
     policy_state: Any
     observation: Any
     subtask_eval: Any
@@ -513,6 +672,7 @@ def capture_full_snapshot(
         captured_at=utc_now(),
         environment_state=deepcopy(_capture_state(env)),
         simulator_integration_state=_capture_simulator_integration_state(env),
+        controller_state=_capture_controller_state(env),
         policy_state=policy_state,
         observation=deepcopy(observation),
         subtask_eval=deepcopy(subtask_eval),
@@ -668,6 +828,7 @@ def restore_full_snapshot(
         raise TypeError("Policy must expose set_state() for complete snapshots")
     _reset_to_state(env, deepcopy(snapshot.environment_state))
     restore_simulator_integration_state(env, snapshot.simulator_integration_state)
+    _restore_controller_state(env, snapshot.controller_state)
     _restore_environment_control_state(env, snapshot.environment_control_state)
     setter(deepcopy(snapshot.policy_state))
     if snapshot.tracker_state is not None:
@@ -684,6 +845,7 @@ def restore_full_snapshot(
 
     current_environment_state = _capture_state(env)
     current_simulator_integration_state = _capture_simulator_integration_state(env)
+    current_controller_state = _capture_controller_state(env)
     current_policy_state = policy.get_state()
     environment_mismatches = compare_structures(
         snapshot.environment_state,
@@ -698,6 +860,13 @@ def restore_full_snapshot(
         atol=0.0,
         rtol=0.0,
         path="simulator_integration",
+    )
+    controller_mismatches = compare_structures(
+        snapshot.controller_state,
+        current_controller_state,
+        atol=0.0,
+        rtol=0.0,
+        path="controller",
     )
     policy_mismatches = compare_structures(
         snapshot.policy_state,
@@ -743,6 +912,7 @@ def restore_full_snapshot(
         "snapshot_id": snapshot.snapshot_id,
         "environment_exact": not environment_mismatches,
         "simulator_integration_exact": not simulator_integration_mismatches,
+        "controller_exact": not controller_mismatches,
         "policy_exact": not policy_mismatches,
         "observation_exact": not observation_mismatches,
         "environment_control_exact": not control_mismatches,
@@ -750,6 +920,7 @@ def restore_full_snapshot(
         "environment_rng_exact": not environment_rng_mismatches,
         "environment_mismatches": environment_mismatches,
         "simulator_integration_mismatches": simulator_integration_mismatches,
+        "controller_mismatches": controller_mismatches,
         "policy_mismatches": policy_mismatches,
         "observation_mismatches": observation_mismatches,
         "environment_control_mismatches": control_mismatches,
@@ -758,6 +929,7 @@ def restore_full_snapshot(
         "valid": not (
             environment_mismatches
             or simulator_integration_mismatches
+            or controller_mismatches
             or policy_mismatches
             or observation_mismatches
             or control_mismatches

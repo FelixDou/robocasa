@@ -74,6 +74,30 @@ class FakeSim:
         return None
 
 
+class FakeInterpolator:
+    def __init__(self):
+        self.step = 3
+        self.start = np.asarray([0.125], dtype=np.float64)
+        self.goal = np.asarray([0.25], dtype=np.float64)
+
+
+class FakePartController:
+    def __init__(self):
+        self.goal = np.asarray([0.25], dtype=np.float64)
+        self.interpolator = FakeInterpolator()
+
+
+class FakeCompositeController:
+    def __init__(self):
+        self.part_controllers = {"arm": FakePartController()}
+
+
+class FakeRobot:
+    def __init__(self):
+        self.composite_controller = FakeCompositeController()
+        self.recent_torques = np.asarray([0.0], dtype=np.float64)
+
+
 class FakeEnvironment:
     def __init__(self):
         self.value = 0.0
@@ -81,6 +105,7 @@ class FakeEnvironment:
         self._elapsed_steps = 0
         self.np_random = np.random.default_rng(123)
         self.sim = FakeSim()
+        self.robots = [FakeRobot()]
 
     def get_state(self):
         return {"states": np.asarray([self.value], dtype=np.float64)}
@@ -91,6 +116,7 @@ class FakeEnvironment:
         self._elapsed_steps = 0
         self.np_random = np.random.default_rng(seed)
         self.sim = FakeSim()
+        self.robots = [FakeRobot()]
         return self.get_current_observation(), {}
 
     def reset_to(self, state):
@@ -113,7 +139,13 @@ class FakeEnvironment:
         return subtask_eval()
 
     def step(self, action):
-        command = float(np.asarray(action)[0])
+        controller = self.robots[0].composite_controller.part_controllers["arm"]
+        interpolator = controller.interpolator
+        command = float(np.asarray(action)[0]) + 0.01 * interpolator.step
+        controller.goal[:] = command
+        interpolator.start[:] = self.sim.data.ctrl
+        interpolator.goal[:] = command
+        interpolator.step += 1
         acceleration = command + 0.1 * float(self.sim.data.qacc_warmstart[0])
         self.sim.data.ctrl[:] = command
         self.sim.data.qvel[:] += acceleration
@@ -274,6 +306,12 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         env.sim.data.qvel[:] = 0.125
         env.sim.data.qacc_warmstart[:] = 0.75
         env.sim.data.ctrl[:] = -0.25
+        interpolator = (
+            env.robots[0].composite_controller.part_controllers["arm"].interpolator
+        )
+        interpolator.step = 7
+        interpolator.start[:] = -0.25
+        interpolator.goal[:] = 0.5
         env.timestep = 17
         env._elapsed_steps = 17
         policy = FakePolicy()
@@ -313,6 +351,12 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         np.testing.assert_array_equal(env.sim.data.qvel, [0.125])
         np.testing.assert_array_equal(env.sim.data.qacc_warmstart, [0.75])
         np.testing.assert_array_equal(env.sim.data.ctrl, [-0.25])
+        restored_interpolator = (
+            env.robots[0].composite_controller.part_controllers["arm"].interpolator
+        )
+        self.assertEqual(restored_interpolator.step, 7)
+        np.testing.assert_array_equal(restored_interpolator.start, [-0.25])
+        np.testing.assert_array_equal(restored_interpolator.goal, [0.5])
 
     def test_same_seed_replay_and_candidate_diversity_pass_engineering_gates(self):
         env, policy, snapshot = self.make_snapshot()
@@ -354,6 +398,7 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
                 pair["transition_components_exact"],
                 {
                     "control_state": True,
+                    "controller_state": True,
                     "rng_state": True,
                     "simulator_state": True,
                 },

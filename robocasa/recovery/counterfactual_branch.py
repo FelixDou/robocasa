@@ -30,7 +30,7 @@ from robocasa.recovery.full_snapshot import (
 )
 
 
-BRANCH_SCHEMA_VERSION = 2
+BRANCH_SCHEMA_VERSION = 3
 BRANCH_PROTOCOL = "robocasa_exact_snapshot_counterfactual_branch"
 
 
