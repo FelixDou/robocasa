@@ -92,9 +92,25 @@ class FakeCompositeController:
         self.part_controllers = {"arm": FakePartController()}
 
 
+class FakeGripper:
+    def __init__(self):
+        self.current_action = np.asarray([0.2], dtype=np.float64)
+        self.speed = 0.004
+
+    def format_action(self, action):
+        direction = np.sign(float(np.asarray(action)[0]))
+        self.current_action[:] = np.clip(
+            self.current_action + self.speed * direction,
+            -1.0,
+            1.0,
+        )
+        return self.current_action.copy()
+
+
 class FakeRobot:
     def __init__(self):
         self.composite_controller = FakeCompositeController()
+        self.gripper = {"arm": FakeGripper()}
         self.recent_torques = np.asarray([0.0], dtype=np.float64)
 
 
@@ -146,6 +162,10 @@ class FakeEnvironment:
         interpolator.start[:] = self.sim.data.ctrl
         interpolator.goal[:] = command
         interpolator.step += 1
+        gripper_command = float(
+            self.robots[0].gripper["arm"].format_action([command])[0]
+        )
+        command += gripper_command
         acceleration = command + 0.1 * float(self.sim.data.qacc_warmstart[0])
         self.sim.data.ctrl[:] = command
         self.sim.data.qvel[:] += acceleration
@@ -312,6 +332,7 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         interpolator.step = 7
         interpolator.start[:] = -0.25
         interpolator.goal[:] = 0.5
+        env.robots[0].gripper["arm"].current_action[:] = 0.35
         env.timestep = 17
         env._elapsed_steps = 17
         policy = FakePolicy()
@@ -357,6 +378,10 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         self.assertEqual(restored_interpolator.step, 7)
         np.testing.assert_array_equal(restored_interpolator.start, [-0.25])
         np.testing.assert_array_equal(restored_interpolator.goal, [0.5])
+        np.testing.assert_array_equal(
+            env.robots[0].gripper["arm"].current_action,
+            [0.35],
+        )
 
     def test_same_seed_replay_and_candidate_diversity_pass_engineering_gates(self):
         env, policy, snapshot = self.make_snapshot()

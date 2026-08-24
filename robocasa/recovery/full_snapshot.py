@@ -28,7 +28,7 @@ from typing import Any, Mapping
 import numpy as np
 
 
-FULL_SNAPSHOT_SCHEMA_VERSION = 3
+FULL_SNAPSHOT_SCHEMA_VERSION = 4
 FULL_SNAPSHOT_PROTOCOL = "robocasa_complete_simulator_policy_snapshot"
 
 # MuJoCo's generalized position and velocity are not a complete integration
@@ -70,8 +70,15 @@ CONTROLLER_CHILD_ATTRIBUTES = (
     "interpolator_ori",
     "position_interpolator",
     "orientation_interpolator",
+    "gripper",
+    "grippers",
 )
-CONTROLLER_CHILD_CLASS_TOKENS = ("Controller", "Interpolator", "Buffer")
+CONTROLLER_CHILD_CLASS_TOKENS = (
+    "Controller",
+    "Interpolator",
+    "Buffer",
+    "Gripper",
+)
 
 # These values affect termination, observation construction, or task-language
 # state but are not part of MuJoCo's flattened qpos/qvel state.  They are
@@ -395,10 +402,12 @@ def _controller_child_items(candidate):
         elif value is not None:
             yield attribute, value
 
-    # RoboSuite's DeltaBuffer / RingBuffer instances are robot attributes, not
-    # always reachable through a fixed controller attribute name. Traverse only
-    # objects whose RoboSuite class explicitly identifies stateful control
-    # machinery; simulator, model, renderer, and socket objects are excluded.
+    # RoboSuite's DeltaBuffer / RingBuffer and gripper model instances are robot
+    # attributes, not always reachable through a fixed controller attribute
+    # name. Gripper models are part of the control state: format_action()
+    # accumulates current_action across policy steps. Traverse only objects
+    # whose RoboSuite class explicitly identifies stateful control machinery;
+    # simulator, general model, renderer, and socket objects are excluded.
     for attribute, value in vars(candidate).items():
         if attribute in seen_attributes:
             continue
