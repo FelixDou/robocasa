@@ -15,8 +15,7 @@ Read `docs/cluster_experiment_runbook.md` and
 - Tasks: `ArrangeTea` and `CuttingToolSelection`.
 - Frozen segment / live semantic trigger mappings:
   - `ArrangeTea::PickPlaceCabinetToCounter_2_place` / `mug_on_tray`
-  - `CuttingToolSelection::PickPlaceDrawerToCounter_2_place` /
-    `correct_tool_on_cutting_board`
+  - `CuttingToolSelection::OpenDrawer_1` / `drawer_open`
 - Eligible parents: five per task, using a new seed/reset family. Up to 15
   predeclared identities per task may be attempted because a nominal parent can
   terminate before reaching both diagnostic boundaries; ineligible attempts
@@ -46,6 +45,13 @@ fit-only horizon and a live `--trigger-stage` for snapshot capture.  Every
 parent record also stores its observed stage sequence, per-stage visits,
 environment steps, policy inferences, maximum consecutive inferences, terminal
 outcome, and termination reason.
+
+The original CuttingToolSelection placement boundary
+(`PickPlaceDrawerToCounter_2_place` / `correct_tool_on_cutting_board`) reached
+zero eligible parents in 8 bounded attempts. It was therefore replaced, in a
+new protocol rather than by editing the failed run, with the earlier validated
+`OpenDrawer_1` / `drawer_open` boundary. The resulting claim is explicitly
+about this early stage and not the unreachable placement stage.
 
 ## Implemented artifacts
 
@@ -169,9 +175,9 @@ cd "$ROBOCASA_REPO"
   --runtime-bundle "$XR1_STAGE_RUNTIME" \
   --tasks ArrangeTea CuttingToolSelection \
   --target-stage ArrangeTea=PickPlaceCabinetToCounter_2_place \
-  --target-stage CuttingToolSelection=PickPlaceDrawerToCounter_2_place \
+  --target-stage CuttingToolSelection=OpenDrawer_1 \
   --trigger-stage ArrangeTea=mug_on_tray \
-  --trigger-stage CuttingToolSelection=correct_tool_on_cutting_board \
+  --trigger-stage CuttingToolSelection=drawer_open \
   --model-path "$XR1_SAFE_CHECKPOINT" \
   --checkpoint XiaomiRobotics/Xiaomi-Robotics-1-RoboCasa365 \
   --server-repository "$XR1_SAFE_REPO" \
@@ -263,9 +269,9 @@ nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
   --runtime-bundle "$XR1_STAGE_RUNTIME" \
   --tasks ArrangeTea CuttingToolSelection \
   --target-stage ArrangeTea=PickPlaceCabinetToCounter_2_place \
-  --target-stage CuttingToolSelection=PickPlaceDrawerToCounter_2_place \
+  --target-stage CuttingToolSelection=OpenDrawer_1 \
   --trigger-stage ArrangeTea=mug_on_tray \
-  --trigger-stage CuttingToolSelection=correct_tool_on_cutting_board \
+  --trigger-stage CuttingToolSelection=drawer_open \
   --num-parents-per-task 5 \
   --max-parent-attempts-per-task 15 \
   --model-path "$XR1_SAFE_CHECKPOINT" \
@@ -319,9 +325,9 @@ nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
   --runtime-bundle "$XR1_STAGE_RUNTIME" \
   --tasks ArrangeTea CuttingToolSelection \
   --target-stage ArrangeTea=PickPlaceCabinetToCounter_2_place \
-  --target-stage CuttingToolSelection=PickPlaceDrawerToCounter_2_place \
+  --target-stage CuttingToolSelection=OpenDrawer_1 \
   --trigger-stage ArrangeTea=mug_on_tray \
-  --trigger-stage CuttingToolSelection=correct_tool_on_cutting_board \
+  --trigger-stage CuttingToolSelection=drawer_open \
   --num-parents-per-task 5 --max-parent-attempts-per-task 15 \
   --model-path "$XR1_SAFE_CHECKPOINT" \
   --checkpoint XiaomiRobotics/Xiaomi-Robotics-1-RoboCasa365 \
