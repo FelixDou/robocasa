@@ -128,7 +128,7 @@ export WANDB_MODE=disabled
 export WANDB_DISABLED=true
 
 cd "$ROBOCASA_REPO"
-git pull --ff-only origin codex/safe-xiaomi-robotics-1
+git pull --ff-only origin main
 
 test -x "$XR1_SERVER_ENV/bin/python"
 test -x "$XR1_CLIENT_ENV/bin/python"
