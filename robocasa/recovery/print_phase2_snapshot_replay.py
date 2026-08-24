@@ -115,6 +115,7 @@ def print_report(run_dir):
                 "request_exact",
                 "action_exact",
                 "transition_exact",
+                "observation_exact",
                 "suffix_outcome_equal",
             )
         )
@@ -128,6 +129,26 @@ def print_report(run_dir):
         ]
         print(
             "  transition mismatch:",
+            row.get("snapshot_id"),
+            "components=" + (",".join(failed_components) or "unknown"),
+        )
+    diagnostic_only = [
+        row
+        for row in analysis.get("repeat_pairs", [])
+        if row.get("transition_exact")
+        and not row.get("diagnostic_transition_exact", True)
+    ]
+    print("diagnostic-cache-only differences:", len(diagnostic_only))
+    for row in diagnostic_only:
+        failed_components = [
+            name
+            for name, exact in row.get(
+                "diagnostic_transition_components_exact", {}
+            ).items()
+            if not exact
+        ]
+        print(
+            "  diagnostic mismatch:",
             row.get("snapshot_id"),
             "components=" + (",".join(failed_components) or "unknown"),
         )

@@ -23,6 +23,7 @@ import numpy as np
 
 from robocasa.recovery.full_snapshot import (
     FullSnapshot,
+    causal_transition_fingerprint,
     environment_fingerprint,
     restore_full_snapshot,
     restore_simulator_integration_state,
@@ -30,7 +31,7 @@ from robocasa.recovery.full_snapshot import (
 )
 
 
-BRANCH_SCHEMA_VERSION = 4
+BRANCH_SCHEMA_VERSION = 5
 BRANCH_PROTOCOL = "robocasa_exact_snapshot_counterfactual_branch"
 
 
@@ -164,14 +165,18 @@ def run_counterfactual_branch(
     action_sha256 = []
     observation_sha256 = [stable_digest(obs)]
     environment_sha256 = []
+    diagnostic_environment_sha256 = []
     request_records = []
     inference_records = []
     rewards = []
     infos = []
     termination_reason = "suffix_horizon"
     first_transition_sha256 = None
+    first_diagnostic_transition_sha256 = None
     first_transition_component_sha256 = None
+    first_diagnostic_transition_component_sha256 = None
     first_transition_fingerprint = None
+    first_causal_transition_fingerprint = None
     first_action_sha256 = None
     first_action = None
 
@@ -196,12 +201,20 @@ def run_counterfactual_branch(
         infos.append(deepcopy(info))
         observation_sha256.append(stable_digest(obs))
         transition_fingerprint = environment_fingerprint(env)
-        transition_sha = stable_digest(transition_fingerprint)
+        causal_fingerprint = causal_transition_fingerprint(transition_fingerprint)
+        transition_sha = stable_digest(causal_fingerprint)
+        diagnostic_transition_sha = stable_digest(transition_fingerprint)
         environment_sha256.append(transition_sha)
+        diagnostic_environment_sha256.append(diagnostic_transition_sha)
         if first_transition_sha256 is None:
             first_transition_sha256 = transition_sha
+            first_diagnostic_transition_sha256 = diagnostic_transition_sha
             first_transition_fingerprint = deepcopy(transition_fingerprint)
+            first_causal_transition_fingerprint = deepcopy(causal_fingerprint)
             first_transition_component_sha256 = {
+                name: stable_digest(value) for name, value in causal_fingerprint.items()
+            }
+            first_diagnostic_transition_component_sha256 = {
                 name: stable_digest(value)
                 for name, value in transition_fingerprint.items()
             }
@@ -265,7 +278,11 @@ def run_counterfactual_branch(
         "first_action_sha256": first_action_sha256,
         "first_inference_actions_sha256": first_inference_actions_sha256,
         "first_transition_sha256": first_transition_sha256,
+        "first_diagnostic_transition_sha256": first_diagnostic_transition_sha256,
         "first_transition_component_sha256": first_transition_component_sha256,
+        "first_diagnostic_transition_component_sha256": (
+            first_diagnostic_transition_component_sha256
+        ),
         "request_sampling_seeds": [
             record.get("sampling_seed") for record in request_records
         ],
@@ -284,6 +301,7 @@ def run_counterfactual_branch(
         "suffix_action_sha256": action_sha256,
         "suffix_observation_sha256": observation_sha256,
         "suffix_environment_sha256": environment_sha256,
+        "suffix_diagnostic_environment_sha256": diagnostic_environment_sha256,
         "num_steps": len(action_payloads),
         "num_policy_requests": len(request_records),
         "num_inference_records": len(inference_records),
@@ -311,6 +329,7 @@ def run_counterfactual_branch(
         "rewards": rewards,
         "infos": infos,
         "first_transition_fingerprint": first_transition_fingerprint,
+        "first_causal_transition_fingerprint": first_causal_transition_fingerprint,
     }
     summary["payload_sha256"] = stable_digest(payload)
     return {"summary": summary, "payload": payload}
@@ -385,6 +404,12 @@ def analyze_phase2_replay(records, errors=None):
         left, right = rows
         left_components = left.get("first_transition_component_sha256") or {}
         right_components = right.get("first_transition_component_sha256") or {}
+        left_diagnostic_components = (
+            left.get("first_diagnostic_transition_component_sha256") or {}
+        )
+        right_diagnostic_components = (
+            right.get("first_diagnostic_transition_component_sha256") or {}
+        )
         repeat_pairs.append(
             {
                 "snapshot_id": key[0],
@@ -399,10 +424,26 @@ def analyze_phase2_replay(records, errors=None):
                 ),
                 "transition_exact": left["first_transition_sha256"]
                 == right["first_transition_sha256"],
+                "diagnostic_transition_exact": (
+                    left.get("first_diagnostic_transition_sha256")
+                    == right.get("first_diagnostic_transition_sha256")
+                ),
                 "transition_components_exact": {
                     name: left_components.get(name) == right_components.get(name)
                     for name in sorted(set(left_components) | set(right_components))
                 },
+                "diagnostic_transition_components_exact": {
+                    name: left_diagnostic_components.get(name)
+                    == right_diagnostic_components.get(name)
+                    for name in sorted(
+                        set(left_diagnostic_components)
+                        | set(right_diagnostic_components)
+                    )
+                },
+                "observation_exact": (
+                    left.get("suffix_observation_sha256")
+                    == right.get("suffix_observation_sha256")
+                ),
                 "suffix_outcome_equal": (
                     left["task_success"] == right["task_success"]
                     and left["ordered_completed_subtasks"]
@@ -443,6 +484,8 @@ def analyze_phase2_replay(records, errors=None):
         and all(row["action_exact"] for row in valid_pairs),
         "same_seed_first_transitions_exact": bool(valid_pairs)
         and all(row["transition_exact"] for row in valid_pairs),
+        "same_seed_observations_exact": bool(valid_pairs)
+        and all(row["observation_exact"] for row in valid_pairs),
         "suffix_outcome_agreement_at_least_0p95": suffix_agreement >= 0.95,
         "candidate_diversity_at_least_0p90": diversity_rate >= 0.90,
         "record_alignment_exact": bool(primary)

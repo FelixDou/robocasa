@@ -2,6 +2,7 @@ import json
 import io
 import random
 from contextlib import redirect_stdout
+from copy import deepcopy
 from pathlib import Path
 import sys
 import tempfile
@@ -22,6 +23,7 @@ from robocasa.recovery.counterfactual_branch import (  # noqa: E402
     run_counterfactual_branch,
 )
 from robocasa.recovery.full_snapshot import (  # noqa: E402
+    causal_transition_fingerprint,
     capture_full_snapshot,
     load_full_snapshot,
     restore_full_snapshot,
@@ -260,6 +262,30 @@ class FakePolicy:
 
 
 class TestPhase2SnapshotReplay(unittest.TestCase):
+    def test_causal_fingerprint_excludes_only_declared_force_cache(self):
+        full = {
+            "simulator_state": {"qpos": np.asarray([1.0])},
+            "controller_state": [
+                {
+                    "object_path": "robots[0].recent_ee_forcetorques['right']",
+                    "attributes": {"current": np.asarray([1e-15])},
+                },
+                {
+                    "object_path": "robots[0].gripper['right']",
+                    "attributes": {"current_action": np.asarray([0.5])},
+                },
+            ],
+        }
+
+        causal = causal_transition_fingerprint(full)
+
+        self.assertEqual(len(causal["controller_state"]), 1)
+        self.assertEqual(
+            causal["controller_state"][0]["object_path"],
+            "robots[0].gripper['right']",
+        )
+        self.assertEqual(len(full["controller_state"]), 2)
+
     def test_stable_digest_uses_raw_bfloat16_storage_without_numpy_conversion(self):
         class FakeView:
             def __init__(self, bits):
@@ -419,6 +445,8 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         self.assertEqual(analysis["same_seed_suffix_outcome_agreement"], 1.0)
         self.assertEqual(analysis["candidate_diversity_rate"], 1.0)
         for pair in analysis["repeat_pairs"]:
+            self.assertTrue(pair["observation_exact"])
+            self.assertTrue(pair["diagnostic_transition_exact"])
             self.assertEqual(
                 pair["transition_components_exact"],
                 {
@@ -428,6 +456,27 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
                     "simulator_state": True,
                 },
             )
+
+        diagnostic_records = deepcopy(records)
+        changed_repeat = next(
+            row
+            for row in diagnostic_records
+            if row["kind"] == "same_seed_repeat" and row["repeat_index"] == 1
+        )
+        changed_repeat["first_diagnostic_transition_sha256"] = "diagnostic-only"
+        changed_repeat["first_diagnostic_transition_component_sha256"][
+            "controller_state"
+        ] = "diagnostic-only"
+        diagnostic_analysis = analyze_phase2_replay(diagnostic_records)
+        self.assertTrue(diagnostic_analysis["all_pass"], diagnostic_analysis)
+        diagnostic_pair = diagnostic_analysis["repeat_pairs"][0]
+        self.assertTrue(diagnostic_pair["transition_exact"])
+        self.assertFalse(diagnostic_pair["diagnostic_transition_exact"])
+        self.assertFalse(
+            diagnostic_pair["diagnostic_transition_components_exact"][
+                "controller_state"
+            ]
+        )
 
     def test_dry_run_plan_uses_frozen_training_horizons(self):
         with tempfile.TemporaryDirectory() as directory:

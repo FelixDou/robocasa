@@ -28,7 +28,7 @@ from typing import Any, Mapping
 import numpy as np
 
 
-FULL_SNAPSHOT_SCHEMA_VERSION = 4
+FULL_SNAPSHOT_SCHEMA_VERSION = 5
 FULL_SNAPSHOT_PROTOCOL = "robocasa_complete_simulator_policy_snapshot"
 
 # MuJoCo's generalized position and velocity are not a complete integration
@@ -79,6 +79,13 @@ CONTROLLER_CHILD_CLASS_TOKENS = (
     "Buffer",
     "Gripper",
 )
+
+# These RoboSuite buffers are downstream sensor caches. They are retained in
+# the full diagnostic fingerprint, but they are not controller inputs and do
+# not affect the physical transition. Exact post-step observations are gated
+# separately, so excluding them from the causal fingerprint cannot hide a
+# policy-visible discrepancy.
+NON_CAUSAL_CONTROLLER_PATH_FRAGMENTS = (".recent_ee_forcetorques[",)
 
 # These values affect termination, observation construction, or task-language
 # state but are not part of MuJoCo's flattened qpos/qvel state.  They are
@@ -588,6 +595,20 @@ def environment_fingerprint(env) -> dict:
     }
 
 
+def causal_transition_fingerprint(fingerprint: Mapping[str, Any]) -> dict:
+    """Remove only declared downstream caches from a full diagnostic state."""
+    causal = deepcopy(fingerprint)
+    causal["controller_state"] = [
+        record
+        for record in causal.get("controller_state", [])
+        if not any(
+            fragment in record.get("object_path", "")
+            for fragment in NON_CAUSAL_CONTROLLER_PATH_FRAGMENTS
+        )
+    ]
+    return causal
+
+
 @dataclass
 class FullSnapshot:
     schema_version: int
@@ -986,6 +1007,7 @@ __all__ = [
     "FULL_SNAPSHOT_SCHEMA_VERSION",
     "FullSnapshot",
     "capture_full_snapshot",
+    "causal_transition_fingerprint",
     "compare_structures",
     "environment_fingerprint",
     "load_full_snapshot",
