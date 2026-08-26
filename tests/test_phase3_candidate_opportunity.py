@@ -45,10 +45,23 @@ def _payload(stage, completed, marker):
                 },
             }
         ],
-        "subtask_evals": [],
+        "subtask_evals": [
+            {
+                "required_predicates": [stage],
+                "predicates": {stage: {"value": False}},
+                "subtask_progress": 0.0,
+                "task_success": False,
+            },
+            {
+                "required_predicates": [stage],
+                "predicates": {stage: {"value": completed}},
+                "subtask_progress": final_progress,
+                "task_success": False,
+            },
+        ],
         "subtask_trace": [
             {
-                "ordered_current_subtask": stage,
+                "ordered_current_subtask": "earlier_regressed_stage",
                 "ordered_completed_subtasks": [],
                 "ordered_subtask_progress": 0.0,
             },
@@ -221,6 +234,11 @@ class Phase3CandidateOpportunityTest(unittest.TestCase):
             )
 
             self.assertEqual(analysis["status"], "pilot_complete")
+            self.assertEqual(analysis["schema_version"], 3)
+            self.assertEqual(
+                analysis["primary_outcome"],
+                "live_trigger_predicate_completion_within_frozen_suffix",
+            )
             self.assertEqual(analysis["parents"], 2)
             self.assertEqual(analysis["snapshots"], 2)
             self.assertEqual(analysis["candidates"], 8)
@@ -247,6 +265,11 @@ class Phase3CandidateOpportunityTest(unittest.TestCase):
             self.assertEqual(candidates[0]["robocasa_commit"], "abc123")
             self.assertIn("source_payload_file_sha256", candidates[0])
             self.assertIn("safe_feature_sha256", candidates[0])
+            self.assertFalse(candidates[0]["trigger_predicate_initial_value"])
+            self.assertEqual(
+                candidates[0]["outcome_definition"],
+                "live_trigger_predicate_becomes_true_within_suffix",
+            )
             self.assertNotIn("features", candidates[0])
             self.assertTrue((output / "analysis.json").is_file())
             with (output / "snapshot_opportunity.csv").open() as stream:

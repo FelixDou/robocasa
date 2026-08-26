@@ -22,7 +22,7 @@ The collector should compute selection policies offline after all candidate outc
 
 \subsection{Two-tier experimental design}
 
-\textbf{Tier 1: active bounded pilot.} Analyze the 20 validated Phase~2 snapshots and 80 existing explicit candidates. The two same-seed repeats collapse to one nominal control; the environment-only branch remains a replay diagnostic and is excluded from utility estimates. No checkpoint, normalization, threshold, candidate set, or outcome is updated. The active-stage predicate must enter the ordered completed-stage prefix within the frozen suffix; generic progress does not count as completion. This tier estimates mixed-outcome frequency and oracle headroom on two tasks. It cannot pass or fail the formal ``three of five tasks'' requirement.
+\textbf{Tier 1: active bounded pilot.} Analyze the 20 validated Phase~2 snapshots and 80 existing explicit candidates. The two same-seed repeats collapse to one nominal control; the environment-only branch remains a replay diagnostic and is excluded from utility estimates. No checkpoint, normalization, threshold, candidate set, or outcome is updated. The frozen live trigger predicate must be false at the snapshot and become true within the suffix, or the full task must succeed; generic progress and branch-local ordered traces do not count as completion. This tier estimates mixed-outcome frequency and oracle headroom on two tasks. It cannot pass or fail the formal ``three of five tasks'' requirement.
 
 The pilot supports scaling only if at least 20\% of snapshots have mixed candidate outcomes and task-macro oracle-best-of-four exceeds expected random-of-four completion by at least 15 percentage points. Failure means redesign before collection, not critic training.
 
@@ -37,7 +37,7 @@ From each parent, branch two states selected independently of SAFE score:
 \end{enumerate}
 At each of 200 snapshots, evaluate the nominal candidate and four explicitly seeded candidates. Execute the selected first chunk and then continue with one frozen fallback-policy seed schedule. The planning total is 1,000 suffixes.
 
-The primary outcome is active-stage completion within a frozen horizon, for example a training-derived 90th percentile of successful remaining-stage duration with lower and upper caps. Full-task success, progress, regression, safety, and cost are secondary. A candidate that finishes the immediate stage but systematically destroys later task success must not be considered a successful recovery method.
+The primary outcome is completion of the frozen live trigger predicate within a frozen horizon, for example a training-derived 90th percentile of successful remaining-stage duration with lower and upper caps. The predicate must be false at the snapshot and become true during the suffix, or the full task must succeed. Branch-local ordered traces restart without the parent's monotonic completed-prefix history and are diagnostic only; they must not redefine the active trigger. Full-task success, progress, regression, safety, and cost are secondary. A candidate that finishes the immediate stage but systematically destroys later task success must not be considered a successful recovery method.
 
 \subsection{Evaluation}
 

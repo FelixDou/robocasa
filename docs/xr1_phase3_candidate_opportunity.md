@@ -20,8 +20,10 @@ critic can identify the useful candidate online.
 - The environment-only branch is a restore diagnostic and is excluded from
   candidate-utility estimates.
 - The four `candidate` branches form one paired candidate set per snapshot.
-- The primary outcome is completion of the active trigger-stage predicate
-  within the Phase 2 frozen suffix horizon.
+- The primary outcome is the frozen live trigger predicate changing from false
+  at the snapshot to true within the Phase 2 suffix (or full task success).
+  Branch-local ordered traces restart without the parent's monotonic completed
+  prefix and are therefore diagnostic only; they do not redefine the trigger.
 - Candidate payloads are not copied. The manifest stores their immutable paths,
   compressed-file hashes, scientific-payload hashes, and action/feature hashes.
 - Phase 2 embeds `payload_sha256` inside the saved payload after computing it,

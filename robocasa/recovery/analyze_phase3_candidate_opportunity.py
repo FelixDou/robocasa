@@ -28,8 +28,8 @@ import numpy as np
 from robocasa.recovery.full_snapshot import stable_digest
 
 
-ANALYSIS_SCHEMA_VERSION = 2
-ANALYSIS_PROTOCOL = "phase3_counterfactual_candidate_opportunity_v2"
+ANALYSIS_SCHEMA_VERSION = 3
+ANALYSIS_PROTOCOL = "phase3_counterfactual_candidate_opportunity_v3"
 SCIENTIFIC_PAYLOAD_PROTOCOL = "phase3_scientific_payload_without_replay_fingerprints_v1"
 
 
@@ -199,9 +199,16 @@ def _load_payload(root: Path, record):
     return payload, path, integrity
 
 
-def _active_stage(plan, task_name):
+def _trigger_predicate(plan, task_name):
     value = plan["trigger_stages"][task_name]
     return str(value).split("::", 1)[-1]
+
+
+def _predicate_value(subtask_eval, name):
+    predicate = (subtask_eval.get("predicates") or {}).get(name)
+    if not isinstance(predicate, dict) or "value" not in predicate:
+        raise ValueError(f"Subtask evaluation lacks trigger predicate {name!r}")
+    return bool(predicate["value"])
 
 
 def _branch_outcome(root, plan, record):
@@ -209,23 +216,22 @@ def _branch_outcome(root, plan, record):
     trace = payload.get("subtask_trace") or []
     if not trace:
         raise ValueError(f"Branch {record['branch_id']} has no subtask trace")
-    initial = trace[0]
-    final = trace[-1]
-    active_stage = _active_stage(plan, record["task_name"])
-    initial_stage = initial.get("ordered_current_subtask")
-    if initial_stage != active_stage:
+    subtask_evals = [value for value in payload.get("subtask_evals") or [] if value]
+    if not subtask_evals:
+        raise ValueError(f"Branch {record['branch_id']} has no subtask evaluation")
+    active_stage = _trigger_predicate(plan, record["task_name"])
+    initial_stage_value = _predicate_value(subtask_evals[0], active_stage)
+    if initial_stage_value:
         raise ValueError(
-            f"Snapshot {record['snapshot_id']} active stage mismatch: "
-            f"plan={active_stage!r}, trace={initial_stage!r}"
+            f"Snapshot {record['snapshot_id']} trigger predicate "
+            f"{active_stage!r} was already complete"
         )
-    completed = list(final.get("ordered_completed_subtasks") or [])
-    initial_progress = float(initial.get("ordered_subtask_progress", 0.0))
-    final_progress = float(final.get("ordered_subtask_progress", 0.0))
-    # ``build_subtask_trace`` advances this ordered prefix only when the active
-    # predicate becomes true (and completes every remaining predicate on true
-    # task success). Using membership avoids treating generic progress or a
-    # stage-name change as causal stage completion.
-    stage_completed = bool(active_stage in completed)
+    stage_completed = any(
+        bool(value.get("task_success", False)) or _predicate_value(value, active_stage)
+        for value in subtask_evals[1:]
+    )
+    initial_progress = float(subtask_evals[0].get("subtask_progress", 0.0))
+    final_progress = float(subtask_evals[-1].get("subtask_progress", 0.0))
     regressions = sorted(set(record.get("regressed_predicates") or []))
     inference_records = payload.get("inference_records") or []
     if not inference_records:
@@ -250,6 +256,8 @@ def _branch_outcome(root, plan, record):
         "kind": record["kind"],
         "sampling_seed": int(record["sampling_seed"]),
         "active_stage": active_stage,
+        "trigger_predicate_initial_value": initial_stage_value,
+        "outcome_definition": "live_trigger_predicate_becomes_true_within_suffix",
         "stage_completed": stage_completed,
         "task_success": bool(record.get("task_success")),
         "initial_progress": initial_progress,
@@ -632,7 +640,7 @@ def analyze_candidate_opportunity(
         "snapshots": len(snapshot_rows),
         "candidates": len(candidate_manifest),
         "candidate_count_per_snapshot": expected_candidates,
-        "primary_outcome": "active_stage_completion_within_frozen_suffix",
+        "primary_outcome": "live_trigger_predicate_completion_within_frozen_suffix",
         "environment_only_controls_excluded": True,
         "nominal_repeat_pairs_collapsed": True,
         "safe_scoring_enabled": scorer is not None,
