@@ -1,0 +1,88 @@
+\phaseheader{7}{Frozen end-to-end trigger, router, and recovery evaluation}{Test whether the complete deployable system improves final long-horizon task success while controlling unnecessary interventions, harm, latency, and compute. This is the primary experiment for a robotics conference paper.}
+
+\subsection{Scientific hypothesis}
+
+The primary hypothesis is
+\begin{equation}
+  H_7:\quad
+  \Delta_{\mathrm{success}}
+  = \mathrm{E}_{\mathrm{task}}
+  [\Pr(Y=1\mid A=\mathrm{utility})
+  -\Pr(Y=1\mid A=\mathrm{best\ baseline})]>0.
+\end{equation}
+The utility system uses the causal stage tracker and predicted $\hat{\Delta}_k$ to decide whether to intervene and which deployable operator or candidate selector to use. The strongest baseline is selected on development data and frozen before the final trial.
+
+\subsection{What must be implemented}
+
+\paragraph{Online monitor.}
+At each genuine policy inference, collect the frozen SAFE/action feature and causal observation/state history, update the stage tracker, and compute failure-risk baselines and recovery-value predictions. Cached actions do not produce extra monitor updates.
+
+\paragraph{Utility gate and router.}
+Trigger only when the lower-confidence estimate of $\max_k\hat{\Delta}_k$ exceeds the frozen intervention threshold and the episode budget is not exhausted. Route to $\arg\max_k\hat{\Delta}_k$, with a safe fallback when critic uncertainty or stage confidence is too low.
+
+\paragraph{Matched executors.}
+Use the same frozen recovery executor in the periodic, stage/time, and SAFE trigger arms so their comparison isolates trigger timing. The candidate-selection contribution has already been isolated in Phase 6.
+
+\paragraph{Operating-point calibration.}
+Calibrate alarm and utility thresholds on successful parents disjoint from final evaluation. The calibration unit is the maximum eligible score per successful parent, not an inference. For a 5\% successful-parent intervention target, use at least 200 successful calibration parents; approximately 400 is preferable for a precise estimate.
+
+\implementationnote{Proposed modules.}{Add \proposedfile{robocasa/recovery/safe/runtime_monitor.py}, \proposedfile{robocasa/recovery/safe/recovery_router.py}, and \proposedfile{robocasa/recovery/evaluate_online_recovery.py}. Integrate through the policy hooks and inference-record path already present in \path{robocasa/recovery/xiaomi_robotics_1_policy.py}.}
+
+\implementationnote{Runtime tests.}{Test that monitoring is causal, one record is consumed per genuine inference, thresholds are immutable, successful-parent intervention count obeys budget, intervention modes use matched horizons/calls, router fallbacks are deterministic, and all assignments survive resume/partial-run handling.}
+
+\subsection{Experimental arms}
+
+The final deployable comparison should include:
+\begin{enumerate}
+  \item no intervention;
+  \item invocation-matched periodic recovery;
+  \item task/stage-conditioned elapsed-time trigger;
+  \item frozen terminal SAFE or a confirmed \emph{predicted-stage} SAFE trigger; predicate-stage SAFE remains an oracle arm;
+  \item proposed recovery-value trigger and critic-selected recovery.
+\end{enumerate}
+Add oracle failure-onset timing, oracle stage, oracle best operator, and environment rewind only as separate upper bounds. A random trigger matched to the full method's alarm count and timing distribution is a useful secondary control.
+
+Use at least 12 composite tasks, including current development tasks and at least four held-out task or scene identities. Power one primary two-arm comparison---the full utility system versus the strongest frozen deployable baseline. Run the additional diagnostic trigger arms on a smaller predeclared cohort or increase the total budget; do not dilute power across every ablation. A planning floor is 30-50 unique parent identities per task and main arm. Final sample size must be frozen through a blinded hierarchical power simulation using pilot baseline rate, task/session variance, and paired discordance rather than the observed treatment effect.
+
+Randomize within task, layout, seed/reset family, and server-session block. Interleave arms within each allocation so model/server drift cannot align with treatment. Match initial environment and ordinary-policy seeds; analyze intention to treat after trajectories diverge.
+
+\subsection{Primary and secondary evaluation}
+
+\begin{table}[H]
+\centering
+\caption{Final prospective endpoints.}
+\label{tab:phase7-endpoints}
+\small
+\begin{tabularx}{\textwidth}{P{0.25\textwidth}P{0.32\textwidth}Y}
+\toprule
+Endpoint & Definition & Role \\
+\midrule
+Final task success & Equal-task absolute success difference, utility system minus strongest frozen baseline. & Primary paper endpoint. \\
+Rescue & Baseline fails and utility system succeeds on matched identity. & Positive embodied benefit. \\
+Harm & Baseline succeeds and utility system fails. & Intervention safety. \\
+Successful-parent intervention & Any intervention during a would-be successful parent. & Episode-level false-intervention burden. \\
+Deadline lead & Trigger time relative to the operator-specific last useful delay; misses charged at horizon. & Actionable timing. \\
+Router regret & Oracle branch value minus chosen operator/candidate value. & Decision quality. \\
+Cost & Alarms, interventions, candidates, model calls, NFE, GPU time, and wall-clock latency. & Deployment feasibility and matched-budget validity. \\
+Safety & Collision, action saturation, oscillation, prior-stage regression, and repeated-recovery failure. & Guardrail outcome. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+``Would-be successful'' is counterfactual and cannot be inferred from the intervened trajectory alone. Estimate it from the paired no-intervention clone with the same initial identity and common randomness up to divergence; report successful-parent intervention and harm only on this matched population, with discordant pairs retained.
+
+Report task-level effects, benefit/harm discordance, blocked randomization inference, task/parent hierarchical bootstrap, and mixed-effects sensitivity. Use one primary comparison and adjust secondary model/arm families with a prespecified hierarchical order or Holm correction.
+
+Artificially add execution delays $d\in\{0,1,2,4\}$ genuine inferences in a secondary latency sweep. This tests whether the learned gate predicts remaining recovery time without making monotonicity an assumption.
+
+\positiveresult{The lower 95\% hierarchical confidence bound on task-success lift is above zero, the absolute gain is at least five percentage points, the sign is positive in most task blocks, and benefit is not explained by one task, seed family, or server session. Successful-parent harm and intervention burden remain within the frozen budget, and latency/cost are reported at matched conditions. This result supports the deployable recovery-system claim.}
+
+\negativeresult{Do not claim online recovery utility. Use the oracle decomposition: if oracle recovery helps but utility triggering does not, timing or value prediction is the bottleneck; if alarms are early but no operator helps, recovery execution is the bottleneck; if successful parents are harmed, the intervention policy is unsafe; if only environment rewind helps, the result is simulator-oracle only.}
+
+\subsection{Power interpretation}
+
+The current Xiaomi timing study remained imprecise with 380 failed parents. If a 0.05-horizon timing effect remains a primary claim, approximately 400-600 failures may be required before task clustering, with 500-700 a defensible planning range after heterogeneity inflation. Similarly, an improvement from approximately 12\% to 20\% task success needs roughly 330 parents per arm before clustering; server/task heterogeneity can raise the requirement to approximately 500-650 per main arm. These are planning calculations and must be replaced by a frozen simulation using the observed blinded-pilot design variance.
+
+\subsection{Required outputs}
+
+Release assignment, started/completed/error/analyzed flow; immutable outcome manifest; primary randomization and bootstrap results; per-task success; rescue/harm; calibration; deadline and latency; router regret; compute/safety tables; and predeclared representative videos, including no-headroom and harmful cases.

@@ -1,0 +1,93 @@
+\phaseheader{2}{Validate complete simulator-policy snapshot replay}{Establish that alternative recovery branches differ because of the declared intervention rather than unrecorded simulator state, cached policy actions, observation queues, instructions, counters, or random-number state.}
+
+\subsection{Scientific hypothesis}
+
+The scientific hypothesis is an experimental-identification condition:
+\begin{quote}
+Given an identical complete snapshot and common-randomness schedule, the nominal suffix is reproducible; changing only the declared candidate seed or recovery operator produces an aligned counterfactual branch.
+\end{quote}
+
+The historical \code{\_capture\_state()} path in \path{robocasa/recovery/recovery_rollout.py} captured environment/simulator state and selected qpos/qvel arrays, but did not by itself guarantee restoration of policy image queues, proprioception queues, cached action chunks, instruction, inference indices, candidate-selection indices, stage-tracker state, or remote sampling state. Phase~2 implemented and tested the stronger complete-state contract needed to attribute branch differences to the declared intervention.
+
+\subsection{Implemented snapshot contract}
+
+The versioned \code{FullSnapshot} contains:
+\begin{itemize}
+  \item serialized RoboCasa environment state, MuJoCo qpos/qvel, model state where required, task randomization, and environment RNG;
+  \item the exact current observation and ordered subtask trace;
+  \item Xiaomi image queues, state queues, cached action plan, last instruction, environment/inference counters, ordinary-inference index, and candidate-selection index;
+  \item explicit policy/server sampling seed schedule and model request metadata;
+  \item causal stage-tracker distribution, transition state, and completed-stage prefix;
+  \item parent, snapshot, schema, code, and artifact hashes.
+\end{itemize}
+
+The branch runner should restore the complete snapshot, validate its hash, request a declared candidate, execute the first chunk, and continue with a frozen fallback-policy seed schedule. It must log where common randomness ends after treatment-induced state divergence.
+
+\implementationnote{Implemented modules.}{\path{robocasa/recovery/full_snapshot.py} serializes and validates complete simulator, policy, controller, tracker, observation, and RNG state. \path{robocasa/recovery/counterfactual_branch.py} restores and executes declared branches. \path{robocasa/recovery/xiaomi_robotics_1_policy.py} exposes explicit policy-state capture/restoration and a shared restored server connection, avoiding hidden reconstruction of private fields.}
+
+\implementationnote{Completed validation.}{Unit tests cover snapshot round trips, controller and RNG state, observation/request/action sequence alignment, branch composition, resume semantics, and combined audits. Live debugging separated noncausal diagnostic sensor caches from causal controller state, restored deterministic environment construction, and enforced a single shared restored policy connection. The final bounded run compared complete request, action, observation, simulator, controller, ordered-progress, and suffix records.}
+
+\subsection{Bounded validation experiment}
+
+Use two diagnostic tasks: \code{ArrangeTea} and \code{CuttingToolSelection}. Collect five new parent identities per task and two snapshots per parent: active-stage prefix 2 and the first inference at or beyond a fixed 25\% training-derived stage horizon. For each of 20 snapshots, execute:
+\begin{itemize}
+  \item two repeated nominal branches with identical seeds;
+  \item four branches using explicit, distinct Xiaomi candidate seeds.
+\end{itemize}
+This produces 120 primary policy branches. One environment-only negative control per snapshot adds 20 diagnostic branches, for 140 total.
+
+\begin{table}[H]
+\centering
+\caption{Snapshot-replay validation metrics.}
+\label{tab:phase2-metrics}
+\small
+\begin{tabularx}{\textwidth}{P{0.28\textwidth}Y P{0.22\textwidth}}
+\toprule
+Metric & Scientific role & Proposed positive criterion \\
+\midrule
+Request/action equivalence & Verifies identical policy input and sampling. & Exact seed/request match and numerically identical action. \\
+Immediate state deviation & Detects incomplete simulator restoration. & qpos/qvel within frozen tolerance; identical ordered progress. \\
+Suffix outcome agreement & Tests practical reproducibility. & At least 95\% agreement for same-seed repeated branches, with no task-specific failure pattern. \\
+Candidate action diversity & Determines whether the proposal distribution offers alternatives. & Non-identical chunks in at least 90\% of snapshots. \\
+Record alignment & Prevents candidate/feature/outcome mismatch. & One-to-one seed, feature, action, and outcome mapping. \\
+Restore-induced regression & Detects predicate or observation corruption. & Zero previously completed-stage regressions caused solely by restoration. \\
+Branch error rate & Measures infrastructure fitness. & Below 2\% with all errors retained. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The seed, serialized request, returned action chunk, and first restored transition are exact reproducibility requirements, subject only to a predeclared numerical tolerance for floating-point simulator arrays. The 95\% suffix criterion is a secondary practical diagnostic for residual nondeterminism; it is not permission to accept mismatched requests or first actions.
+
+An environment-only reset branch should be retained as a diagnostic negative control. If it differs while the full snapshot reproduces, the experiment directly demonstrates why policy-state restoration is necessary.
+
+\subsection{Completed evidence}
+
+The final bounded run completed on 25 August 2026 using the shared-restored policy protocol. Ten eligible parents---five per task---produced 20 complete snapshots and all 140 planned branches. Two additional parent attempts were retained as ineligible because they did not reach both predeclared boundaries; they are reachability exclusions, not missing branch outcomes. The immutable artifact root, complete path, and provenance hashes are retained in the durable Phase~2 manifests.
+
+\begin{table}[H]
+\centering
+\caption{Completed Phase~2 bounded validation. Every predeclared engineering gate passed.}
+\label{tab:phase2-completed}
+\small
+\begin{tabularx}{\textwidth}{P{0.34\textwidth}Y}
+\toprule
+Audit item & Observed result \\
+\midrule
+Parent/snapshot support & 10/10 eligible parents and 20/20 snapshots; five parents per task. \\
+Branch support & 140/140 total: 80 candidates, 40 same-seed repeats, and 20 environment-only controls; 120/120 primary branches. \\
+Errors and artifacts & Zero errors, unique branch identifiers, no missing payloads, and 20 referenced snapshots. \\
+Exact reproducibility & Requests, request sequences, first actions, action sequences, observations, first transitions, and causal environment sequences all exact. \\
+Practical reproducibility & Same-seed suffix outcome agreement 1.000; no non-reproducing repeat pairs. \\
+Proposal diversity & Candidate-diverse snapshot fraction 1.000. \\
+Restore safety & Zero restore-induced regressions; branch error rate 0.000. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\positiveresult{\textbf{Observed.} Exact-state branch contrasts are scientifically interpretable within this bounded simulator protocol, and Xiaomi's proposal distribution produced nondegenerate first actions. This does not show that the candidates differ in recovery utility, that SAFE can rank them, or that recovery improves full-task success.}
+
+\negativeresult{This gate did not fail in the final bounded run. If a later task or platform violates it, stop that counterfactual collection block and diagnose simulator state, policy cache, observation refresh, instruction, counters, or server sampling rather than averaging irreproducible branches.}
+
+\subsection{Required outputs}
+
+The run retains the snapshot schema, per-snapshot payloads and checksums, branch records, exact-repeat diagnostics, candidate-diversity audit, error ledger, frozen plan, and analysis. Videos remain a human-facing diagnostic; numerical state and trace checks are the validity evidence.

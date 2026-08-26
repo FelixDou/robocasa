@@ -1,0 +1,93 @@
+\clearpage
+\section{Implementation map, execution order, and venue strategy}
+
+\subsection{Current versus proposed code}
+
+\begin{longtable}{P{0.19\textwidth}P{0.37\textwidth}P{0.36\textwidth}}
+\caption{Implementation map. Remaining proposed items must not be described as implemented.}\label{tab:module-map}\\
+\toprule
+Phase & Current reusable code & Proposed implementation \\
+\midrule
+\endfirsthead
+\toprule
+Phase & Current reusable code & Proposed implementation \\
+\midrule
+\endhead
+0 & SAFE schema/dataset validators; cluster runbook; frozen stage runner. & Experiment contract, allocation validator, and cross-manifest identity audit. \\
+1 & \path{run_stage_aware_parent_safe.py}; \path{stage_aware_parent_safe.py}; frozen documentation and tests. & Confirmation count/support validator; CI criterion in the frozen gate; deliberate CI-failure test. \\
+2 & \path{full_snapshot.py}; \path{counterfactual_branch.py}; Xiaomi policy \code{get\_state/set\_state}; exact replay runner, printer, combined audit, and focused tests. & Conditional task/platform extensions only; the bounded two-task gate has passed. \\
+3 & Phase~2 candidate payloads; frozen terminal SAFE scorer; ordered subtask evaluator; \path{analyze_phase3_candidate_opportunity.py} and tests. & Conditional five-task collection plan, support validator, and opportunity-video sampler after the bounded pilot gate. \\
+4 & Recovery modes, ordered progress/regression trace, policy-pluggable benchmark. & Operator API, delay-grid collector, common-randomness provenance, and recoverability-surface analysis. \\
+5 & Raw action-token features; proprioceptive state history; stage-aware weighting ideas. & Candidate-specific critic dataset/model/runner and causal stage tracker. \\
+6 & Deterministic random/lowest/highest candidate selection and mock tests. & Recovery-value scorer interface, sealed-snapshot arm runner, and matched candidate-set audit. \\
+7 & Genuine-inference feature records and post-failure recovery hooks. & Pre-action Xiaomi monitor, utility gate/router, intervention budget, and online randomized evaluator. \\
+8 & Detached pre-output hidden feature and client-side no-gradient scoring. & New model/server patch for noise-step critic and differentiable flow guidance. \\
+9 & RLDX raw feature adapter and separate official recovery path. & Second-policy snapshot/session restoration, frozen shift wrappers, and external physical safety infrastructure. \\
+\bottomrule
+\end{longtable}
+
+The current Xiaomi ``observation context'' is flattened proprioceptive state history, not a visual embedding. The report and code should call it \emph{state context}. A visual-context ablation requires explicit causal RGB embeddings and their own storage, normalization, and domain-shift evaluation.
+
+\subsection{Execution order}
+
+Phase 1 is complete and failed its frozen confirmation gate. Phase 2 is complete and passed all bounded exact-replay gates. Phase 3 is now active, beginning with a read-only opportunity analysis of the validated two-task branches. No simulator server or new collection is required for this first step. Critic training must not begin until Phase~3 establishes causal candidate/operator headroom; when it does begin, validation and test parents remain sealed.
+
+The following dependencies must remain sequential:
+\begin{enumerate}
+  \item exact snapshot replay before counterfactual scale;
+  \item oracle opportunity before critic training;
+  \item sealed offline critic gate before prospective reranking;
+  \item prospective reranking before differentiable guidance;
+  \item development freeze before every fresh confirmation or final trial;
+  \item healthy ordinary-policy positive control before second-policy failure collection.
+\end{enumerate}
+
+\subsection{Cluster and artifact discipline}
+
+Source code lives under \path{/gs/fs/tga-shinoda/felid}; environments, checkpoints, datasets, rollouts, videos, logs, and reports live under \path{/gs/bs/tga-shinoda/felid}. Start and verify the policy server before the simulator client. Use \code{python -u} under background execution, unique ports and output roots, disabled W\&B by default, immutable manifests, and persistent logs. Storage quota or inode errors are stop-and-inspect events. Preserve partial evidence and resume or merge rather than deleting failed blocks.
+
+\subsection{Venue completion bars}
+
+\begin{table}[H]
+\centering
+\caption{Recommended evidence packages. These are competitive research recommendations, not official acceptance rules.}
+\label{tab:venues}
+\small
+\begin{tabularx}{\textwidth}{P{0.13\textwidth}Y P{0.28\textwidth}}
+\toprule
+Venue & Competitive package & Main risk \\
+\midrule
+CoRL & Causal benchmark; learned utility gate; held-out tasks/scenes; prospective closed-loop gain; preferably second policy or physical evidence. & Five-task detector or oracle-heavy recovery appears incremental beside CheckVLA and B2FF. \\
+RSS & Exceptionally clean exact-state causal design, deadline/latency and safety analysis, strong physical-system evidence, and direct comparison to the closest recovery systems. & Broad benchmark tables without a crisp robotics mechanism. \\
+ICRA & Complete integrated system, broad RoboCasa365 simulation, runtime/safety analysis, strong component ablations, and several physical multi-stage tasks where feasible. & Simulator-only one-backbone evaluation may look incomplete. \\
+CVPR/ICCV & Recoverability as a visual/action representation contribution, multiple encoders, held-out camera/object/scene shifts, and closed-loop control validating the vision method. & A primarily trigger/control paper is a scope mismatch. \\
+WACV & Reproducible causal benchmark/application, public code/data, rigorous negative audit, critic reranking, and meaningful visual/context evaluation. & Weak fit without released artifacts or significant vision/application content. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Recommended paper contributions}
+
+\begin{enumerate}
+  \item We introduce intervention-specific recoverability curves for long-horizon VLA execution, measured through exact-prefix counterfactual branches over task stages, delays, and recovery operators.
+  \item We show that terminal failure likelihood is not equivalent to causal intervention value or remaining recovery time.
+  \item We learn a stage-aware utility gate and candidate critic that improve prospective task success while controlling unnecessary and harmful intervention.
+\end{enumerate}
+
+Critic-guided flow is a fourth contribution only if Phase 8 passes matched-compute and held-out safety tests. Otherwise, discrete critic reranking is the final executor.
+
+\subsection{Immediate next actions}
+
+\begin{enumerate}
+  \item Preserve the failed Phase~1 bundles and the passing Phase~2 root, plan, branch payloads, hashes, and error ledger as immutable evidence.
+  \item Run \path{analyze_phase3_candidate_opportunity.py} on the existing 20 snapshots and 80 candidate branches; optionally score the identical sets with the frozen independent SAFE ensemble.
+  \item Inspect task/stage support, mixed outcomes, oracle headroom, successful-control harm, numerical ties, and hierarchical intervals without changing any Phase~2 artifact.
+  \item If either bounded pilot criterion fails, stop critic work and predeclare one redesign of proposal diversity, timing, horizon, or operator.
+  \item If both estimable criteria pass, freeze and collect the five-task Phase~3 opportunity screen needed to evaluate the formal three-of-five-task gate.
+  \item Scale recovery surfaces only if the formal oracle-headroom and support gates pass.
+  \item Train simple recovery-value probes before any broad neural sweep.
+  \item Run the 200-rollout fixed-trigger critic-selection pilot.
+  \item Power the primary Phase 7 comparison, then consider flow guidance and external validation.
+\end{enumerate}
+
+\cautionnote{First research priority.}{Do not launch another detector sweep, train a candidate critic, or scale to the approximately 1,000-suffix formal screen first. Exact replay has passed. The highest-value next evidence is the inexpensive, frozen two-task oracle-opportunity analysis of branches already collected.}

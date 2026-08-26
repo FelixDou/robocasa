@@ -1,0 +1,69 @@
+\phaseheader{4}{Construct intervention-specific recoverability surfaces}{Create the paper's central causal dataset by branching multiple recovery operators at multiple prespecified times from identical long-horizon states, then estimate where each intervention helps, harms, or becomes too late.}
+
+\subsection{Scientific hypotheses}
+
+This phase tests three hypotheses:
+\begin{enumerate}
+  \item $\Delta_k(h_t,d)$ depends on active stage, failure mode, and recovery operator;
+  \item recoverability can be non-monotonic because of self-correction and stage transitions;
+  \item terminal failure confidence is an imperfect ranking of intervention advantage and time remaining before the last useful intervention.
+\end{enumerate}
+
+The contribution is not the generic observation that long delays are bad. The distinctive object is a dense, paired, multi-operator surface measured from identical simulator-policy states. This differs from applying one repair at one trigger and sweeping only execution latency.
+
+\subsection{What must be implemented}
+
+\paragraph{Operator interface.}
+Define a common recovery operator API with explicit \code{prepare}, \code{act}, and \code{end} methods plus a cost record. Initial operators should be:
+\begin{itemize}
+  \item \code{continue}: no intervention;
+  \item \code{replan}: clear the cached chunk and request a new nominal chunk under the original task instruction;
+  \item \code{subtask\_retry}: use the causal stage tracker to re-prompt or retry the current atomic goal;
+  \item \code{random\_K4}: sample four chunks and select randomly;
+  \item \code{env\_to\_last\_good}: simulator-oracle rewind, reported only as an upper bound.
+\end{itemize}
+
+\paragraph{State and delay grid.}
+Select branch states at prespecified genuine-inference prefixes such as $\{1,2,4,8\}$ within the active stage. For trigger-conditioned latency analysis, apply delays $\mathcal{D}=\{0,1,2,4\}$ genuine inferences after the frozen trigger. Cached environment actions are not independent warning opportunities.
+
+\paragraph{Analysis tooling.}
+Add a surface builder that estimates $R_k$, $\Delta_k$, uncertainty, task/stage support, censoring, and the operational deadline in Equation~\eqref{eq:deadline}. It must preserve the difference between natural and injected failures and between oracle and deployable context.
+
+\implementationnote{Proposed modules.}{Add \proposedfile{robocasa/recovery/operators.py}, \proposedfile{robocasa/recovery/collect_recoverability_surface.py}, and \proposedfile{robocasa/recovery/safe/analyze_recoverability_surface.py}. Reuse ordered stage evaluation from \path{robocasa/recovery/subtask_eval.py} and state restoration from Phase 2.}
+
+\subsection{Experimental design}
+
+Select 12-16 composite tasks before method results, stratified by horizon, number of semantic stages, baseline success, and observed failure support. Use the five current tasks for method development but reserve at least four tasks or scenes as untouched generalization identities.
+
+A planning design is 12 tasks, 15 parent identities per task, three supported prefix states per parent, four deployable operators, and two predeclared continuation-seed schedules, yielding approximately 4,320 suffix executions before censoring. On a stratified calibration subset, use at least five continuation seeds per state/operator to estimate seed variance. The final allocation may be adjusted using Phase 3 support, not method performance.
+
+For a single snapshot and a single seed, the outcome is a realized finite-seed utility, not a probability. Define the empirical operator value as
+\begin{equation}
+  \hat{R}_k(h_t,d)=\operatorname{mean}_{m=1,\ldots,M}Y_{k,m}(h_t,d),
+\end{equation}
+where the $M$ continuation seeds are declared before branching. Population-level recovery probabilities average these finite-seed outcomes across prespecified snapshots and tasks. Reports must show $M$, seed variance, and sensitivity to the continuation schedule rather than treating one suffix as an exact-state probability estimate.
+
+Natural failures and successful controls are primary. Injected actuation noise, visual occlusion, distractors, or state perturbations may be added as a separate stress-test stratum. They must not be pooled into natural failure prevalence or the primary deployment estimand.
+
+\subsection{Evaluation and scientific tests}
+
+\begin{enumerate}
+  \item \textbf{Recoverability curves.} Plot $R_k(h_t,d)$ and $\Delta_k(h_t,d)$ by task, stage, operator, and delay with task/parent/snapshot uncertainty.
+  \item \textbf{Deadline.} Estimate the last supported delay at which the lower confidence bound of $\Delta_k$ exceeds a positive margin. Report grid-resolution uncertainty rather than pretending to know a continuous exact time.
+  \item \textbf{Integrated value.} Summarize the area under the supported $\Delta_k$ curve, weighting tasks equally and reporting the supported risk set.
+  \item \textbf{Heterogeneity.} Fit an interpretable mixed-effects or hierarchical model with task/stage/failure-type effects, and retain raw task-level curves.
+  \item \textbf{Failure probability versus value.} Compare SAFE score ranking with realized $\Delta_k$, best-operator identity, and deadline. Use within-snapshot and task-level analyses.
+  \item \textbf{Rescue and harm.} Report rescue among failed nominal suffixes and corruption among successful nominal suffixes. Do not summarize only average success.
+\end{enumerate}
+
+\positiveresult{The dataset supports several task-stage strata in which at least one deployable operator has positive paired advantage, the best operator or deadline varies across states, and failure probability does not perfectly rank causal recovery value. The finding should replicate across multiple tasks rather than one favorable stage. Such a result establishes the scientific object and justifies learning a utility gate.}
+
+\negativeresult{If only environment rewind helps, the current deployable recovery operators are insufficient. If all deployable $\Delta_k$ values are near zero, narrow the project to a diagnostic benchmark or change the recovery mechanism. If only one task contributes signal, do not claim a general long-horizon recoverability surface.}
+
+\subsection{Validity controls}
+
+Branch-state selection must be detector-independent. Later prefixes require explicit risk-set denominators because short stages have already completed or failed. Common randomness must be shared until treatment divergence. Oracle simulator stage, oracle failure onset, and environment rewind must be shown separately from the deployable controller.
+
+\subsection{Required outputs}
+
+The dataset release should contain a versioned manifest, full snapshot hashes, branch provenance, natural/injected labels, common-randomness schedule, support/censoring table, recoverability curves, deadline estimates, rescue/harm plots, and a failure taxonomy with representative videos.

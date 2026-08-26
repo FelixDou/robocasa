@@ -1,0 +1,54 @@
+\phaseheader{8}{Add differentiable recovery-value guidance to the flow policy}{Attempt an algorithmic efficiency extension only after discrete critic reranking proves prospective actionability. Test whether a noise-step-conditioned critic can guide one action-generation trajectory as effectively as sampling and ranking four complete candidates.}
+
+\subsection{Scientific hypothesis and relation to prior work}
+
+Failure-informed or critic-guided diffusion/flow improvement is already an active area~\cite{afil,rover,qvgm,checkvla}. Therefore, ``using a critic to guide flow'' is not by itself a sufficient novelty claim. Within this project, guidance is valuable if it uses the causal recovery-value target in Equation~\eqref{eq:advantage}, operates only when the utility gate identifies a recoverable state, and achieves the same or better embodied recovery with lower matched cost.
+
+Let $z_{\tau}$ be the noisy action latent and $v_{\theta}(z_{\tau},h_t,\tau)$ the frozen policy velocity. A generic guided form is
+\begin{equation}
+  v_{\mathrm{guided}}
+  = v_{\theta}
+  +s(\tau)\,\Pi\!(
+    \nabla_{z_{\tau}}Q_{\phi}(h_t,z_{\tau},\tau)
+  ),
+  \label{eq:flow-guidance}
+\end{equation}
+where $s(\tau)$ is a frozen scale schedule and $\Pi$ clips or projects the gradient to preserve action bounds. The exact sign and parameterization must match the Xiaomi flow implementation; Equation~\eqref{eq:flow-guidance} is a design template, not evidence that the current detached client score is differentiable.
+
+\subsection{What must be implemented}
+
+\begin{enumerate}
+  \item Expose the noisy action/token latent and flow integration step inside the Xiaomi model-side generation loop.
+  \item Train or distill a critic conditioned on $z_{\tau}$ and $\tau$, using the same counterfactual recovery outcomes as Phase 5.
+  \item Execute the critic inside the model server and preserve the original unguided action-only and feature-return behavior when guidance is disabled.
+  \item Freeze guidance sign, scale schedule, integration-step window, suffix scope, gradient norm clipping, action deviation limit, and uncertainty fallback.
+  \item Log intermediate critic values, gradient norms, clipping frequency, action deviation, NFE, backward passes, GPU time, and executed outcome.
+\end{enumerate}
+
+\implementationnote{Required architectural change.}{The current SAFE/best-of-$K$ scorer receives detached final candidate features on the client. True guidance requires a model-side gradient path through intermediate action latents. Implement this as an opt-in server protocol with focused tests and an unguided-equivalence smoke.}
+
+\subsection{Development and locked test}
+
+Develop on \code{ArrangeTea} and \code{CuttingToolSelection}, for example with 20 fresh identities per task. Tune one small guidance-scale grid and guided integration window on development identities only. Freeze the selected setting and test on the remaining current tasks plus held-out composite tasks from Phase 7.
+
+Compare:
+\begin{enumerate}
+  \item unguided $K=1$;
+  \item random $K=4$;
+  \item critic-reranked $K=4$;
+  \item critic-guided $K=1$;
+  \item shuffled-critic or random-gradient negative control.
+\end{enumerate}
+Provide both matched-NFE and matched-wall-clock comparisons. An apparent gain obtained by spending more backward passes or latency than $K=4$ is not an efficiency result.
+
+\subsection{Evaluation}
+
+Primary outcomes are active-stage recovery and full-task success. Secondary outcomes are predicted versus realized $\Delta$, prior-stage regression, collision, saturation, oscillation, action-distribution shift, NFE, model calls, memory, GPU time, and end-to-end latency. Ablate guidance scale, guided step window, suffix length, terminal SAFE risk target versus recovery-value target, and the negative gradient control.
+
+\positiveresult{Guided $K=1$ matches or exceeds critic-reranked $K=4$ within a frozen statistical margin, uses meaningfully less inference cost or latency, and does not increase collision, saturation, oscillation, or completed-stage regression. The frozen guidance setting transfers from the two development tasks to held-out tasks.}
+
+\negativeresult{Retain critic reranking as the recovery executor. Do not present guidance as successful if it raises the critic score but not executed task outcomes, if a shuffled gradient performs similarly, or if matched-compute comparisons remove the benefit. Phase 8 is optional; the causal recoverability paper does not require it to pass.}
+
+\subsection{Required outputs}
+
+Release the opt-in model/server protocol, unguided-equivalence tests, noise-step critic bundle, frozen guidance configuration, matched-compute evaluation, gradient/action diagnostics, safety analysis, and videos comparing unguided, reranked, and guided executions from matched initial identities.

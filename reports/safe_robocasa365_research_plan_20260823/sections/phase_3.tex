@@ -1,0 +1,71 @@
+\phaseheader{3}{Screen for counterfactual recovery opportunity}{Measure whether the current stochastic action proposal and recovery horizon contain enough within-state outcome variation for a candidate critic to be scientifically and practically learnable.}
+
+\subsection{Scientific hypothesis}
+
+Even a perfect critic cannot improve recovery if all candidate chunks from a snapshot lead to the same outcome. Before training, estimate the oracle headroom of the proposal set. For candidate set $\mathcal{A}_i=\{a_{i1},\ldots,a_{iK}\}$ at snapshot $i$, define
+\begin{equation}
+  O_i = \max_{a\in\mathcal{A}_i}Y_i(a)-\operatorname{mean}_{a\in\mathcal{A}_i}Y_i(a).
+\end{equation}
+$O_i>0$ means candidate selection can outperform random choice for that snapshot. The phase hypothesis is that a nontrivial fraction of early and mid-stage snapshots have mixed candidate outcomes and positive oracle headroom.
+
+\subsection{Implemented bounded analyzer and remaining collector work}
+
+Phase~2 already collected the first bounded candidate set with exact parent, snapshot, candidate, seed, action, raw SAFE feature, state context, suffix outcome, ordered progress, regression, and source provenance. Phase~3 begins by analyzing those existing artifacts without new simulator calls. Each derived candidate row retains an immutable source-payload reference plus compressed-file, payload, action, feature, snapshot, plan, runtime, code, and checkpoint hashes.
+
+The collector should compute selection policies offline after all candidate outcomes are available. This permits exactly paired comparisons among default $K=1$, expected random $K=4$, lowest terminal-SAFE score, highest terminal-SAFE score, action-norm heuristics, and oracle best-of-$K$ without generating different candidate sets.
+
+\implementationnote{Existing implementation.}{Reuse explicit sampling seeds and diversity logging in \path{robocasa/recovery/xiaomi_robotics_1_policy.py}, frozen SAFE scoring in \path{robocasa/recovery/safe/xr1_best_of_k.py}, ordered completion in \path{robocasa/recovery/subtask_eval.py}, exact branches in \path{robocasa/recovery/counterfactual_branch.py}, and the complete Phase~2 runner in \path{robocasa/recovery/run_phase2_snapshot_replay.py}.}
+
+\cautionnote{Current limitation.}{The Phase~2 pilot covers two tasks, 20 snapshots, four explicit candidates per snapshot, and one frozen short suffix. It can screen proposal headroom, but it cannot estimate the formal five-task task-support gate, deployment prevalence, long-delay recoverability, or final-task benefit.}
+
+\implementationnote{Phase~3 analyzer.}{\path{robocasa/recovery/analyze_phase3_candidate_opportunity.py} is a read-only paired analyzer. It requires a zero-error all-pass shared-restored Phase~2 source, collapses exactly agreeing nominal repeats, excludes environment-only controls, scores the four explicit candidates, computes task-macro and task--parent--snapshot bootstrap estimates, optionally applies the frozen three-seed independent SAFE ensemble, refuses output overwrite, and verifies that source hashes remain unchanged. Its focused tests include a mixed-outcome opportunity case, invalid Phase~2 rejection, and nominal-repeat disagreement rejection.}
+
+\subsection{Two-tier experimental design}
+
+\textbf{Tier 1: active bounded pilot.} Analyze the 20 validated Phase~2 snapshots and 80 existing explicit candidates. The two same-seed repeats collapse to one nominal control; the environment-only branch remains a replay diagnostic and is excluded from utility estimates. No checkpoint, normalization, threshold, candidate set, or outcome is updated. The active-stage predicate must enter the ordered completed-stage prefix within the frozen suffix; generic progress does not count as completion. This tier estimates mixed-outcome frequency and oracle headroom on two tasks. It cannot pass or fail the formal ``three of five tasks'' requirement.
+
+The pilot supports scaling only if at least 20\% of snapshots have mixed candidate outcomes and task-macro oracle-best-of-four exceeds expected random-of-four completion by at least 15 percentage points. Failure means redesign before collection, not critic training.
+
+\textbf{Tier 2: conditional formal screen.} If Tier~1 passes, use the same five development tasks and the exact Phase~2 snapshot protocol. The larger design below is frozen before new collection.
+
+Use the same five development tasks. For each task, collect 10 eventually failed and 10 eventually successful-control parents, producing 100 parents. This is an explicit case-control opportunity study and must never be used to estimate deployment prevalence or event rates.
+
+From each parent, branch two states selected independently of SAFE score:
+\begin{enumerate}
+  \item exact active-stage prefix 2;
+  \item the first inference at or beyond 25\% of a successful-stage horizon derived only from training data.
+\end{enumerate}
+At each of 200 snapshots, evaluate the nominal candidate and four explicitly seeded candidates. Execute the selected first chunk and then continue with one frozen fallback-policy seed schedule. The planning total is 1,000 suffixes.
+
+The primary outcome is active-stage completion within a frozen horizon, for example a training-derived 90th percentile of successful remaining-stage duration with lower and upper caps. Full-task success, progress, regression, safety, and cost are secondary. A candidate that finishes the immediate stage but systematically destroys later task success must not be considered a successful recovery method.
+
+\subsection{Evaluation}
+
+\begin{table}[H]
+\centering
+\caption{Counterfactual opportunity estimands.}
+\label{tab:phase3-estimands}
+\small
+\begin{tabularx}{\textwidth}{P{0.28\textwidth}Y}
+\toprule
+Estimand & Interpretation \\
+\midrule
+Mixed-outcome fraction & Fraction of snapshots containing at least one successful and one unsuccessful candidate. \\
+Oracle headroom & Oracle-best-of-four recovery minus expected random-of-four recovery. \\
+Nominal proposal benefit & Random-of-four minus default $K=1$, separating sampling benefit from scoring benefit. \\
+SAFE actionability & Lowest-SAFE minus random and lowest-SAFE minus highest-SAFE on identical candidate sets. \\
+Successful-control harm & Probability that intervention breaks a snapshot whose nominal continuation succeeds. \\
+Candidate support & Pairwise action distance, feature distance, numerical score spread, and tie rate. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Use snapshot-level paired contrasts and bootstrap task, then parent, then snapshot while retaining all candidate branches. Equalize snapshot weight so a task with more valid candidate records does not dominate.
+
+\positiveresult{For the formal Tier~2 screen, proceed when at least 20\% of snapshots have mixed outcomes, mixed outcomes occur in at least three of five tasks, and oracle-best-of-four improves recovery by at least 15 percentage points over random choice. Tier~1 uses only the two estimable numerical criteria as a scale decision. A positive result means the action proposal contains exploitable causal recovery variation; it does not mean SAFE or a learned critic can identify the good candidate.}
+
+\negativeresult{Do not train a critic. Permit one predeclared bounded redesign of proposal diversity, snapshot timing, recovery prompt, replan length, or horizon using development data only. If oracle headroom remains negligible, abandon local candidate reranking and prioritize higher-level replan or rollback operators.}
+
+\subsection{Required outputs}
+
+Tier~1 writes an immutable candidate-reference manifest, snapshot table, per-task summary, source hashes, task-macro opportunity estimates, hierarchical uncertainty, successful-control harm, and explicit continuation gates. Tier~2 additionally publishes the full five-task support/tie tables and matched videos showing homogeneous, mixed, beneficial, and harmful candidate sets.

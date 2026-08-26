@@ -1,0 +1,142 @@
+% !TEX root = main.tex
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=21mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{fancyhdr}
+\usepackage{amsmath}
+\usepackage{pifont}
+
+\definecolor{navy}{HTML}{183B56}
+\definecolor{navydark}{HTML}{102838}
+\definecolor{teal}{HTML}{168C8C}
+\definecolor{orange}{HTML}{D17A22}
+\definecolor{green}{HTML}{3F7D5A}
+\definecolor{red}{HTML}{B84A4A}
+\definecolor{lightblue}{HTML}{EDF4F7}
+\definecolor{lightteal}{HTML}{EAF5F4}
+\definecolor{lightorange}{HTML}{FFF2E4}
+\definecolor{lightgreen}{HTML}{EDF6F0}
+\definecolor{lightred}{HTML}{FCEEEE}
+\definecolor{lightgray}{HTML}{F3F5F6}
+\definecolor{darkgray}{HTML}{4C5661}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=navy,
+  urlcolor=teal,
+  citecolor=navy,
+  pdfauthor={Felix Doublet},
+  pdftitle={When Is It Too Late? A Scientific Experiment Plan for Causal VLA Recoverability},
+  pdfsubject={SAFE, RoboCasa365, long-horizon failure detection, causal recoverability, and recovery guidance}
+}
+
+\captionsetup{font=small,labelfont=bf}
+\setlist{leftmargin=1.45em,itemsep=0.25em,topsep=0.35em}
+\setlength{\parskip}{0.48em}
+\setlength{\parindent}{0pt}
+\setlength{\headheight}{14pt}
+\renewcommand{\arraystretch}{1.18}
+\graphicspath{{figures/}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Causal recoverability for long-horizon VLAs}
+\rhead{Scientific experiment plan}
+\cfoot{\thepage}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\metric}[1]{\textbf{#1}}
+\newcommand{\good}{\textcolor{green}{\ding{51}}}
+\newcommand{\bad}{\textcolor{red}{\ding{55}}}
+\newcommand{\planned}{\textcolor{orange}{\ding{108}}}
+
+\newcommand{\boxednote}[4]{%
+  \begin{center}
+  \setlength{\fboxsep}{7pt}%
+  \fcolorbox{#1}{#2}{%
+    \begin{minipage}{0.91\textwidth}
+    \textbf{#3}\quad #4
+    \end{minipage}}
+  \end{center}}
+
+\newcommand{\sciencenote}[2]{\boxednote{teal}{lightteal}{#1}{#2}}
+\newcommand{\implementationnote}[2]{\boxednote{navy}{lightblue}{#1}{#2}}
+\newcommand{\positiveresult}[1]{\boxednote{green}{lightgreen}{Positive result.}{#1}}
+\newcommand{\negativeresult}[1]{\boxednote{red}{lightred}{If the result is negative.}{#1}}
+\newcommand{\cautionnote}[2]{\boxednote{orange}{lightorange}{#1}{#2}}
+
+\newcommand{\phaseheader}[3]{%
+  \clearpage
+  \section{Phase #1: #2}
+  \sciencenote{Scientific purpose.}{#3}}
+
+\newcommand{\proposedfile}[1]{\path{#1}\textsuperscript{new}}
+
+\begin{document}
+\pagenumbering{roman}
+\hypersetup{pageanchor=false}
+
+\begin{titlepage}
+\centering
+\vspace*{16mm}
+{\color{teal}\rule{\textwidth}{2.2pt}}\\[14mm]
+{\Huge\bfseries\color{navydark} When Is It Too Late?\\[5mm]}
+{\LARGE Causal Recoverability Curves for Long-Horizon\\Vision-Language-Action Manipulation}\\[14mm]
+{\large\color{darkgray} A hypothesis-driven LaTeX experiment plan for adapting SAFE, measuring actionable warning time, learning recovery value, and evaluating critic-guided recovery on RoboCasa365}\\[17mm]
+{\color{teal}\rule{\textwidth}{1.2pt}}\\[16mm]
+
+\begin{tabular}{rl}
+Primary target: & CoRL \\
+Natural alternative: & ICRA \\
+Stretch target: & RSS \\
+Conditional vision route: & CVPR / ICCV / WACV \\
+Primary policy: & Xiaomi-Robotics-1 on RoboCasa365 \\
+Report date: & 26 August 2026 \\
+\end{tabular}
+
+\vfill
+\begin{minipage}{0.9\textwidth}
+\small
+This document starts from the verified SAFE and recovery evidence already present in the repository. It incorporates the completed Phase~1 five-task frozen confirmation, the subsequent state-context development study, and the passing Phase~2 exact snapshot-replay validation. Phase~3 is now active as a bounded read-only candidate-opportunity analysis. The plan separates development evidence, retrospective analysis, frozen prospective shadow evaluation, simulator-oracle recovery, prospective intervention, and real-robot evidence. Every phase specifies the scientific hypothesis, the implementation required, the evaluation estimand, the statistical unit, the result that would count as positive, and the scientific meaning of a failed gate.
+\end{minipage}
+\vfill
+{\small Felix Doublet --- Shinoda Laboratory}
+\end{titlepage}
+\hypersetup{pageanchor=true}
+
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+\input{sections/executive}
+\input{sections/formal_framework}
+\input{sections/phase_0}
+\input{sections/phase_1}
+\input{sections/phase_2}
+\input{sections/phase_3}
+\input{sections/phase_4}
+\input{sections/phase_5}
+\input{sections/phase_6}
+\input{sections/phase_7}
+\input{sections/phase_8}
+\input{sections/phase_9}
+\input{sections/statistics}
+\input{sections/execution_and_venues}
+\input{sections/references}
+
+\end{document}

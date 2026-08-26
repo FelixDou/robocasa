@@ -1,0 +1,5 @@
+\ProvidesFile{omllmm.fd}[2026/08/23 Local scalable Latin Modern math italic map]
+\DeclareFontFamily{OML}{lmm}{\skewchar\font=127}
+\DeclareFontShape{OML}{lmm}{m}{it}{<-> lmmi10}{}
+\DeclareFontShape{OML}{lmm}{b}{it}{<-> ssub*lmm/m/it}{}
+\endinput

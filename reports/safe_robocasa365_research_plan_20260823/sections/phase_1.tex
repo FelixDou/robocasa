@@ -1,0 +1,174 @@
+\phaseheader{1}{Frozen confirmation of full-parent predicate-stage-aware SAFE}{\textbf{Completed; confirmatory gate failed.} The promising 0.696 development result was tested on 250 genuinely new parent and seed/reset identities without refitting, renormalization, threshold update, or stage-support change. The result did not transfer.}
+
+\subsection{Scientific hypothesis}
+
+The working explanation for composite-task difficulty is label and temporal-context misalignment. Terminal labels ask whether the entire parent eventually fails. Subtask-SAFE evaluated on independent stage windows discards the parent history and broadcasts an eventual stage outcome across all early samples. The proposed correction preserves the full parent trajectory while conditioning the representation on active stage, stage-anchor feature change, causal progress, task/stage identity, and near-failure horizons. In the current evaluator, however, active-stage labels come from simulator predicates. They therefore provide an oracle-stage estimate of representation quality and must not be confused with a causal online stage estimate.
+
+The confirmatory hypothesis is
+\begin{equation}
+  H_1:\quad
+  \Delta_{\mathrm{rank}}
+  = \theta_{\mathrm{conditioned}}
+  -\theta_{\mathrm{terminal}}>0,
+\end{equation}
+where $\theta$ is the equal-task/equal-stage ROC averaged over exact active-stage prefixes 1 and 2. A positive result would demonstrate early stage-specific ranking signal. It would not yet demonstrate calibrated online warning or recovery utility.
+
+\subsection{Completed implementation and frozen protocol}
+
+The confirmation path collected a pristine context-enabled cohort and enforced the frozen runtime contract.
+
+\begin{enumerate}
+  \item Fifty fixed-attempt parents were retained for each of the five predeclared composite tasks: 250 parents total, 120 successes and 130 failures. The task names and effects are reported in Table~\ref{tab:phase1-context-by-task}.
+  \item The seed/reset family was disjoint from the 170 development parents and the opened 80-parent outer set. Every valid attempt was retained.
+  \item Raw Xiaomi SAFE features, decoded action chunks, semantic traces, and causal state history were recorded. The context is a 240-dimensional flattened proprioceptive state history, not RGB or a visual embedding, and it was forbidden as an input to the frozen confirmation.
+  \item The frozen conditioned, terminal, multihorizon, stage, prototype, time-only, and broad SAFE38 comparators were applied. No model, normalizer, threshold, supported-stage rule, or score transformation was updated on test.
+  \item The evaluation contained 431 stage events. One failed parent ended in a failed stage with zero genuine policy inferences; it was reported as causally unobserved rather than imputed or silently dropped.
+\end{enumerate}
+
+\implementationnote{Existing implementation.}{The primary entry point is \path{robocasa/recovery/safe/run_stage_aware_parent_safe.py} in \code{evaluate} mode, with modeling and grouped metrics in \path{robocasa/recovery/safe/stage_aware_parent_safe.py}. The frozen procedure is documented in \path{docs/safe_xiaomi_stage_aware_parent.md}.}
+
+\implementationnote{Tests to add or retain.}{Tests must verify exact rollout-ID agreement for external SAFE38 scores, rejection of development identity reuse, prohibition of test-time threshold updates, exact prefix aggregation, task/stage macro weighting, and preservation of the context channel without reading it in the confirmation arm.}
+
+\cautionnote{Deployability boundary.}{A positive result in this phase authorizes a simulator-predicate-stage-conditioned upper bound only. Phase 5 must replace predicate stage with a frozen causal stage tracker and quantify the oracle-versus-predicted-stage gap before the method can be used online.}
+
+\subsection{Frozen confirmation result}
+
+\begin{table}[H]
+\centering
+\caption{Development selection versus frozen identity-disjoint confirmation. ROC-AUC is the equal-task/equal-stage average over active-stage prefixes 1 and 2. Confidence intervals are hierarchical task/parent bootstrap intervals for the paired contrast.}
+\label{tab:phase1-confirmation}
+\small
+\begin{tabularx}{\textwidth}{P{0.24\textwidth}P{0.19\textwidth}P{0.21\textwidth}Y}
+\toprule
+Quantity & Development & Frozen confirmation & Interpretation \\
+\midrule
+Parents & 170 total; 37 selection & 250 identity-disjoint & Confirmation identities were never used for fitting or selection. \\
+Conditioned SAFE ROC & 0.696 & 0.489 & The development advantage did not transfer. \\
+Terminal SAFE ROC & 0.592 & 0.523 & Terminal SAFE exceeded conditioned SAFE on confirmation. \\
+SAFE38 independent ROC & Not primary & 0.563 & Best frozen SAFE comparator, but still only modest early ranking. \\
+Time-only ROC & 0.500 & 0.500 & Exact early prefixes remove elapsed-time ranking by construction. \\
+Conditioned minus terminal & $+0.104$ descriptive & $-0.034$; 95\% CI $[-0.146,+0.076]$ & Direction reversed and interval crossed zero. \\
+Conditioned minus time & $+0.196$ descriptive & $-0.011$; 95\% CI $[-0.119,+0.112]$ & No evidence beyond the time control. \\
+Conditioned minus SAFE38 & Not frozen & $-0.073$; 95\% CI $[-0.243,+0.111]$ & No advantage over the broad frozen detector. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+At the frozen matched-FPR operating point, conditioned SAFE reached failed-stage TPR 0.145 at successful-parent FPR 0.067, compared with time-only TPR 0.504 at FPR 0.033. Miss-adjusted detection fraction was 0.965 for conditioned SAFE and 1.000 for time-only, where a lower fraction is earlier. Thus the detector was neither more sensitive nor operationally earlier than the time baseline.
+
+\begin{table}[H]
+\centering
+\caption{Preregistered Phase~1 gate audit. Every criterion was evaluated without test-time updates.}
+\label{tab:phase1-gates}
+\small
+\begin{tabularx}{\textwidth}{Y P{0.25\textwidth}P{0.12\textwidth}}
+\toprule
+Criterion & Observed & Verdict \\
+\midrule
+Conditioned macro ROC at least 0.60 & 0.489 & \bad \\
+Conditioned minus terminal at least $+0.05$ & $-0.034$ & \bad \\
+Hierarchical 95\% interval entirely above zero & $[-0.146,+0.076]$ & \bad \\
+Conditioned beats terminal on at least four of five tasks & 2 of 5 & \bad \\
+Conditioned beats time-only on at least four of five tasks & 2 of 5 & \bad \\
+Matched-FPR TPR no more than 0.05 below time & difference $-0.359$ & \bad \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\negativeresult{The preregistered Phase~1 result is negative. Treat the 0.696 development ROC as selection noise or cohort-specific structure. Do not refit on the confirmation parents, promote conditioned SAFE as a deployable trigger, or start another broad detector sweep on this cohort. SAFE remains a baseline and a possible input to a later recovery-value model.}
+
+\subsection{Post-confirmation state-context development study}
+
+After the frozen failure was published, the 250-parent context-enabled cohort was used for a new, explicitly developmental study. It was repartitioned into 92 fit, 35 selection, 38 calibration, and 85 locked retrospective-holdout parents. Because this study began after the cohort had already been scored in the frozen confirmation, the 85-parent result is \emph{retrospective locked-holdout evidence}, not a new prospective claim.
+
+Sixty screening fits and 15 refits compared terminal, stage, multihorizon, conditioned, and state-context arms. The selection ROC values were 0.690 terminal, 0.693 stage, 0.685 multihorizon, 0.653 conditioned, and 0.691 context. Stage was selected, but its advantage over context was only 0.002 and over terminal only 0.003, both smaller than the observed seed variation.
+
+On the frozen 85-parent holdout, stage reached prefix-1/2 macro ROC 0.584, context 0.566, terminal 0.470, and time-only 0.500. Stage minus terminal was $+0.113$ with 95\% CI $[-0.075,+0.300]$; stage minus time was $+0.084$ with 95\% CI $[-0.118,+0.267]$. Stage beat terminal on four tasks but time on only three, and its macro ROC remained below the predeclared 0.60 gate. At matched FPR, stage had failed-stage TPR 0.100 at parent FPR 0.049, versus time-only TPR 0.125 at FPR 0.024. Its miss-adjusted timing contrast versus time was $-0.014$ with 95\% CI $[-0.064,0.000]$. All preregistered operational criteria failed.
+
+\begin{table}[H]
+\centering
+\caption{Retrospective 85-parent prefix-1/2 ROC-AUC by task. These heterogeneous effects are descriptive and not multiplicity-adjusted.}
+\label{tab:phase1-context-by-task}
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+Task & Stage & Context & Conditioned & Multi & Terminal & Time \\
+\midrule
+ArrangeBreadBasket & 0.316 & 0.173 & 0.279 & 0.368 & 0.376 & 0.500 \\
+ArrangeTea & 0.625 & 0.712 & 0.673 & 0.567 & 0.404 & 0.500 \\
+BreadSelection & 0.482 & 0.569 & 0.565 & 0.431 & 0.324 & 0.500 \\
+CuttingToolSelection & 0.838 & 0.709 & 0.675 & 0.849 & 0.613 & 0.500 \\
+GarnishPancake & 0.657 & 0.664 & 0.743 & 0.686 & 0.636 & 0.500 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Retrospective prefix-1/2 ROC-AUC by supported semantic stage. Support is the number of evaluable stage events in the 85-parent holdout; sparse rows are descriptive only.}
+\label{tab:phase1-context-by-stage}
+\scriptsize
+\begin{tabularx}{\textwidth}{Y rrrrr}
+\toprule
+Task and semantic stage & Support & Stage & Context & Terminal & Time \\
+\midrule
+ArrangeBreadBasket: OpenCabinet\_1 & 16 & 0.250 & 0.089 & 0.643 & 0.500 \\
+ArrangeBreadBasket: PickPlaceCabinetToCounter\_2\_place & 7 & 0.333 & 0.083 & 0.042 & 0.500 \\
+ArrangeBreadBasket: PickPlaceCounterToCounter\_3\_place & 15 & 0.365 & 0.346 & 0.442 & 0.500 \\
+ArrangeTea: PickPlaceCabinetToCounter\_2\_place & 17 & 0.625 & 0.712 & 0.404 & 0.500 \\
+BreadSelection: PickPlaceCabinetToCounter\_2\_place & 14 & 0.488 & 0.450 & 0.363 & 0.500 \\
+BreadSelection: PickPlaceCabinetToCounter\_2\_release & 5 & 0.625 & 0.875 & 0.125 & 0.500 \\
+BreadSelection: PickPlaceCounterToCounter\_1\_place & 17 & 0.333 & 0.383 & 0.483 & 0.500 \\
+CuttingToolSelection: OpenDrawer\_1 & 17 & 0.697 & 0.689 & 0.538 & 0.500 \\
+CuttingToolSelection: PickPlaceDrawerToCounter\_2\_place & 11 & 0.979 & 0.729 & 0.688 & 0.500 \\
+GarnishPancake: strawberry\_on\_pancake & 17 & 0.657 & 0.664 & 0.636 & 0.500 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The task audit identifies a real scientific diagnostic rather than a general detector win. Stage-aware scoring was strong for \code{CuttingToolSelection} and positive for \code{ArrangeTea} and \code{GarnishPancake}, but failed sharply for \code{ArrangeBreadBasket}. Within \code{ArrangeBreadBasket}, stage ROC ranged from 0.250 for \code{OpenCabinet\_1} to 0.365 for the third placement stage; state context fell to 0.089 on \code{OpenCabinet\_1}. Conversely, \code{CuttingToolSelection::PickPlaceDrawerToCounter\_2\_place} reached stage ROC 0.979. A sparse five-event BreadSelection release stage produced context ROC 0.875 and must not be treated as stable evidence. This heterogeneity argues for measuring intervention value by state and operator, not for adding more global stage-label complexity.
+
+\cautionnote{Interpretation of state context.}{The recorded context is proprioceptive state history only. It did not beat the selected stage arm on the locked holdout and does not establish a visual-context contribution. Any future visual ablation requires causal RGB embeddings and a new untouched cohort.}
+
+\subsection{Evaluation design}
+
+\begin{table}[H]
+\centering
+\caption{Frozen stage-aware confirmation design.}
+\label{tab:phase1-design}
+\small
+\begin{tabularx}{\textwidth}{P{0.26\textwidth}Y}
+\toprule
+Component & Frozen definition \\
+\midrule
+Primary sampling unit & Parent rollout; inferences and stages remain clustered within parent. \\
+Primary prefixes & First one and two genuine policy inferences of the active stage. \\
+Primary endpoint & Equal-task/equal-stage macro ROC averaged over prefixes 1 and 2. \\
+Primary contrast & Conditioned stage-aware SAFE minus frozen terminal SAFE. \\
+Mandatory controls & Terminal SAFE, stage-conditioned elapsed time, broad SAFE38, and prototype distance. \\
+Uncertainty & Hierarchical bootstrap: resample tasks, then parents, and retain all stages/inferences of each parent; at least 2,000 frozen-seed replicates. \\
+Secondary analyses & Per-task/per-stage ROC and AP; prefixes 4 and 8 with risk-set support; calibration and event metrics labeled descriptive. \\
+Forbidden updates & Model, regularization, epoch, normalizer, stage catalog, prototype, threshold, task support, prefix, or score transformation. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The existing 50-parent-per-task plan is a screening minimum. If the fixed-attempt cohort lacks sufficient attempted-stage failures, the extension rule must be specified before model scores are inspected. For example, continue fixed attempts for all tasks until a predeclared parent cap or class-support target is reached; never extend only favorable tasks.
+
+\subsection{What counts as a positive result}
+
+All gates should pass:
+\begin{enumerate}
+  \item conditioned macro ROC is at least 0.60;
+  \item conditioned minus terminal is at least $+0.05$;
+  \item the hierarchical 95\% interval for the contrast is entirely above zero;
+  \item conditioned beats terminal on at least four of five tasks;
+  \item conditioned beats time-only on at least four of five tasks;
+  \item the result is not explained only by \code{ArrangeTea} or \code{GarnishPancake}; \code{CuttingToolSelection} and \code{ArrangeBreadBasket} remain explicit diagnostics.
+\end{enumerate}
+
+\positiveresult{A passing result means that complete-parent, predicate-stage-conditioned action features contain replicable early ranking information beyond terminal SAFE and task/stage timing on these five tasks. It licenses development of a recovery-value model using SAFE/state-context features and a deployable stage tracker. It does not prove a useful 5\% alarm threshold, a recovery deadline, task-success improvement, or deployability without simulator predicates.}
+
+\subsection{Required outputs}
+
+The completed artifacts include the development-versus-confirmation comparison, all five task effects, supported-stage audit, parent/task bootstrap intervals, explicit PASS/FAIL gate table, frozen runtime bundles, and the zero-inference censoring record. The original 18-success calibration and the later 38-parent context calibration remain too small for a precise operational 5\% FPR claim; zero empirical calibration FPR is not evidence of exact control.

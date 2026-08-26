@@ -1,0 +1,57 @@
+\phaseheader{6}{Prospective best-of-K action-selection pilot}{Isolate candidate-selection quality from trigger quality and from the generic benefit of sampling more chunks. This is the first live test that the learned critic chooses recovery actions with greater causal utility.}
+
+\subsection{Scientific hypothesis}
+
+For an identical observation and identical $K=4$ candidate-seed set,
+\begin{equation}
+  H_6:\quad
+  \Delta_K
+  = \Pr(Y_{\mathrm{stage}}=1\mid \text{critic }K=4)
+  -\Pr(Y_{\mathrm{stage}}=1\mid \text{random }K=4)>0.
+\end{equation}
+The fixed trigger deliberately removes detector timing from this experiment. If the critic fails here, a later end-to-end result cannot be repaired by claiming that the trigger was responsible.
+
+\subsection{What must be implemented}
+
+Extend the current Xiaomi best-of-$K$ policy path so that candidate scoring can be selected from either the frozen terminal SAFE ensemble or the frozen recovery critic. The policy must log the complete candidate set before selection, including action chunks, raw features, critic scores, terminal SAFE scores, candidate seeds, selected index, diversity, tie status, and runtime.
+
+All $K=4$ arms for an identity must receive identical first candidate sets. After different actions are executed, later states and candidate sets will diverge; analysis remains paired by initial task/environment identity and follows intention to treat.
+
+\implementationnote{Existing modules.}{Reuse \path{robocasa/recovery/xiaomi_robotics_1_policy.py}, \path{robocasa/recovery/safe/xr1_best_of_k.py}, \path{robocasa/recovery/recovery_rollout.py}, and \path{robocasa/recovery/evaluate_recovery_benchmark.py}. The current stable centered SAFE score is a ranking probe, not the calibrated alarm score, and must remain labeled accordingly.}
+
+\implementationnote{Proposed additions.}{Add a scorer protocol field and strict runtime loader for the recovery critic. Add tests that random, SAFE, and critic arms receive identical candidate seeds/actions before selection; that selected indices differ only through the scorer; and that ordinary high-level inference remains unchanged outside recovery.}
+
+\subsection{Pilot design}
+
+Use the five development tasks and 10 new parent identities per task. Trigger recovery at a fixed stage prefix or simulator-oracle snapshot shared across arms so that only candidate selection changes. Run four arms:
+\begin{enumerate}
+  \item nominal $K=1$;
+  \item random $K=4$;
+  \item lowest terminal-SAFE $K=4$;
+  \item highest predicted recovery-value $K=4$.
+\end{enumerate}
+This produces 200 high-level arm rollouts. Compute oracle best-of-$K$ offline from the Phase 3-5 branch corpus; do not execute it as a deployable arm.
+
+Block and interleave assignments by task and server session. Match the initial environment seed/reset and ordinary-policy sampling family. Also match candidate seeds, recovery horizon, and the fallback seed schedule. Run arms sequentially against one stateful server or use separately validated servers with the same model and sampling behavior.
+
+\subsection{Evaluation}
+
+The primary endpoint is active-stage recovery. Full-task success, ordered progress, completed-stage regression, collision/safety events, number of policy calls, and wall-clock latency are secondary. Report:
+\begin{itemize}
+  \item critic $K=4$ minus random $K=4$;
+  \item terminal SAFE $K=4$ minus random $K=4$;
+  \item critic versus terminal SAFE;
+  \item sampling benefit: random $K=4$ minus nominal $K=1$;
+  \item regret to oracle best-of-$K$;
+  \item effects conditional on candidate-set oracle headroom and diversity.
+\end{itemize}
+
+Use paired task/parent bootstrap or a blocked randomization test that preserves initial identity. Errors after assignment count against the assigned arm in the primary intention-to-treat analysis; a per-protocol sensitivity may be reported separately.
+
+\positiveresult{This 50-identity pilot is a screening gate, not the definitive efficacy test. Proceed when critic $K=4$ improves task-macro active-stage recovery over random $K=4$ by at least 10 percentage points, the effect is not driven by one task, and successful-control harm, regression, and safety events do not materially increase. Report the paired hierarchical interval and its width, but do not require this small pilot to exclude zero; Phase 7 must power and confirm the frozen primary comparison. A passing pilot is prospective evidence consistent with critic actionability under a fixed trigger, not a final system claim.}
+
+\negativeresult{Do not implement flow guidance. If offline ranking passed but prospective selection fails, preserve the discrepancy as distribution-shift or proxy-mismatch evidence. One new development cohort may be justified, but never tune on the prospective identities.}
+
+\subsection{Required outputs}
+
+Produce the interleaved allocation manifest, candidate-set equality audit, intention-to-treat sample-flow table, paired stage/task success table, latency and call accounting, error ledger, harm/regression analysis, and matched videos of rescue, harm, tie, and critic-error cases.

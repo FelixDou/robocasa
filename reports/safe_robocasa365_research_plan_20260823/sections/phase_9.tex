@@ -1,0 +1,47 @@
+\phaseheader{9}{Generalize across tasks, scenes, policies, and physical execution}{Demonstrate that the causal recoverability finding and utility gate are not artifacts of five Xiaomi tasks, one visual distribution, privileged stage information, or simulator-only recovery.}
+
+\subsection{Scientific hypotheses}
+
+The strongest external-validity hypothesis is that the recovery-value formulation transfers more reliably than a raw SAFE threshold, even when feature extractors and calibration remain policy-specific. The claims should be separated:
+\begin{enumerate}
+  \item \textbf{same-task generalization}: new seed/reset identities;
+  \item \textbf{scene/layout generalization}: new arrangements, appearances, cameras, and distractors;
+  \item \textbf{task generalization}: semantic task identities excluded from critic/model selection;
+  \item \textbf{policy generalization}: a second VLA family under the same causal protocol;
+  \item \textbf{embodiment generalization}: physical robot execution without simulator predicates or state rewind.
+\end{enumerate}
+
+\subsection{What must be implemented}
+
+\paragraph{Held-out simulation.}
+Freeze at least four unseen composite tasks or scenes. Add language paraphrases, camera/view shifts, object distractors, and layout/style changes where they test a stated representation claim. The task/stage descriptions and online tracker must be fixed before outcomes.
+
+Here ``unseen task'' means excluded from critic, stage-tracker, threshold, and model-selection development; it does not imply that the underlying VLA policy never encountered related tasks during its original pretraining unless that stronger provenance is independently established.
+
+\paragraph{Second policy.}
+RLDX-1 is the natural replication candidate only after a no-SAFE official-path health check demonstrates nonzero success and ordered progress. Reproduce the same snapshot, branch, label, calibration, and intervention protocol with policy-specific features and checkpoints. Never average raw Xiaomi and RLDX scores or imply that absolute SAFE metrics rank the policies.
+
+\paragraph{Physical validation.}
+Choose three or four multi-stage tabletop tasks with the main conditions: no intervention, strongest deployable baseline, and full utility system. Use predicted stage from observations, not simulator predicates; define human takeover, emergency stop, collision, object drop, timeout, retry, and exclusion rules before trials. Aim for 15-20 trials per task and main condition, or at least approximately 90 controlled recovery trials total if hardware time is limited.
+
+Robot access, safety approval, calibrated sensing, reset procedures, and an operator-independent logging stack are external dependencies not provided by the current repository. The physical phase starts only after these prerequisites and the simulator safety gate are complete.
+
+\implementationnote{Policy health gate.}{Before any second-policy failure collection, require a model-loaded server, listening port, live GPU process, correct task list, ordinary no-SAFE success/progress, and a bounded smoke. Stop repeated zero-success or no-progress collection rather than creating a scientifically unusable failure corpus.}
+
+\subsection{Evaluation}
+
+For each external axis, report task-macro task-success lift, critic ranking, calibration, intervention rate, deadline error, router regret, rescue, harm, latency, and safety. Report zero-shot critic transfer, feature-adapter transfer, and policy-specific critic retraining as separate settings.
+
+On physical trials, use trial-level uncertainty and report all takeovers and technical failures. Manual stage or failure-onset annotations may be used for evaluation when annotators are blinded to alarms, but not for online decision making. Measure stage-estimator accuracy and transition delay independently.
+
+\positiveresult{The prespecified external endpoint retains a positive effect with lower uncertainty bound above zero, no severe calibration drift, and no dependence on one task or policy subgroup. The deployable stage tracker supports the result, and gains are not obtained by increasing intervention count or compute beyond the matched baseline. A strong CoRL/RSS submission should pass at least two external axes, preferably held-out tasks plus a second policy or physical evidence.}
+
+\negativeresult{Scope the claim to Xiaomi RoboCasa365. Identify whether the gap arises from representation, calibration, stage tracking, proposal support, critic ranking, recovery execution, or embodiment. A transparent same-policy result may remain appropriate for ICRA or WACV, but it cannot support policy-agnostic or real-robot language.}
+
+\subsection{Venue interpretation}
+
+For CoRL, the target package is the causal benchmark, learned utility gate, held-out task/scene evaluation, prospective closed-loop gain, and preferably another policy or robot. RSS requires especially clean causal identification, latency/safety analysis, and compelling physical-system evidence. ICRA can support a narrower but complete integrated system with broad RoboCasa365 simulation and a smaller robot study. CVPR/ICCV requires the visual/action representation or guidance method to become central, with cross-camera/object/scene and multiple-encoder experiments. WACV is a strong route for a released causal benchmark and evaluation audit with a useful learned critic.
+
+\subsection{Required outputs}
+
+Provide frozen external identities; second-policy positive-control and replication reports; physical trial and safety logs; all videos and exclusions; domain-shift and stage-tracker ablations; policy-specific calibration; and a claim table that states exactly which external axes passed.

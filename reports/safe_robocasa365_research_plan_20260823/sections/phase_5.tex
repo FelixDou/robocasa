@@ -1,0 +1,98 @@
+\phaseheader{5}{Train and validate a recovery-value critic}{Learn a candidate- and operator-conditioned model of causal recovery utility, rather than another classifier of eventual terminal failure, and validate it on sealed parents and held-out task identities.}
+
+\subsection{Scientific model}
+
+For candidate action chunk $a^{1:H}$ and operator $k$, learn
+\begin{equation}
+  Q_{\phi}(h_t,a^{1:H},k)
+  \approx \Pr(Y=1\mid \operatorname{do}(a^{1:H},k),h_t).
+\end{equation}
+The decision score is predicted advantage relative to continuation,
+\begin{equation}
+  \hat{\Delta}_{\phi,k}
+  = Q_{\phi}(h_t,a^{1:H},k)-\hat{R}_{\mathrm{continue}}(h_t)
+  -\lambda C_k-\mu H_k.
+\end{equation}
+
+The critic must see the candidate or operator. A model that consumes only the current history can predict failure risk or state recoverability, but cannot rank two actions proposed from the same state.
+
+\subsection{What must be implemented}
+
+\paragraph{Inputs and ablations.}
+Preserve separate input arms:
+\begin{enumerate}
+  \item task/stage/time and progress only;
+  \item terminal SAFE scalar;
+  \item raw candidate SAFE/action token;
+  \item decoded action statistics;
+  \item causal proprioceptive state history;
+  \item action token plus proprioceptive state;
+  \item causal visual embeddings plus state history as a separately implemented ablation;
+  \item full action, observation, task language, predicted stage, and progress model;
+  \item oracle-stage version as an upper bound.
+\end{enumerate}
+The raw original action-feature path must remain an explicit pinned ablation when context is added. The repository's current ``observation context'' is flattened proprioceptive history; a visual-context claim requires a new RGB embedding path with causal timestamps and separate normalization. For held-out tasks, task and stage representations must be generated from task language or a semantic descriptor, with a declared unknown-token fallback. A closed learned task-ID catalog cannot support task-generalization claims.
+
+\paragraph{Training targets.}
+Use stage completion within the frozen horizon as a dense target, full-task success where available, progress gain, prior-stage regression, and safety cost. A practical multi-objective loss is
+\begin{equation}
+\begin{split}
+  \mathcal{L}(\phi)
+  ={}& \mathcal{L}_{\mathrm{BCE}}
+  +\alpha\mathcal{L}_{\mathrm{pairwise}}
+  +\beta\mathcal{L}_{\mathrm{calibration}}\\
+  &+\gamma\mathcal{L}_{\mathrm{harm}},
+\end{split}
+\label{eq:critic-loss}
+\end{equation}
+with equal snapshot and task weighting. Hyperparameters must be selected on parent-grouped validation data only.
+
+\paragraph{Deployable stage tracker.}
+Train a causal stage estimator from task language, observation/state history, and optionally visual embeddings. Its outputs are active-stage distribution, transition confidence, and completed-stage prefix. Measure macro stage F1 and transition latency. Oracle predicate stage is used only for an upper bound. If the critic works only with oracle stage, it is not deployable.
+
+\implementationnote{Proposed modules.}{Add \proposedfile{robocasa/recovery/safe/recovery_critic.py}, \proposedfile{robocasa/recovery/safe/train_recovery_critic.py}, \proposedfile{robocasa/recovery/safe/evaluate_recovery_critic.py}, and \proposedfile{robocasa/recovery/safe/stage_tracker.py}. Extend \path{robocasa/recovery/safe/xr1_best_of_k.py} with a critic runtime distinct from the terminal SAFE ensemble.}
+
+\implementationnote{Tests.}{Test parent/snapshot split inheritance, equal-snapshot weighting, strict runtime loading, score direction, candidate permutation, missing-context masking, predicted-stage versus oracle-stage paths, and exact compatibility with the Xiaomi candidate-seed interface.}
+
+\subsection{Data splits and efficient model development}
+
+Split by parent before snapshots or candidates are generated. Every candidate from a snapshot stays in one split. Reserve complete task/scene identities for generalization. A practical order is:
+\begin{enumerate}
+  \item fit logistic or linear probes for every input arm with one seed;
+  \item train one small MLP for the top three representations;
+  \item select one representation, objective, and regularization on validation parents;
+  \item refit only the top two frozen arms with three initialization seeds;
+  \item open sealed parents and held-out tasks once.
+\end{enumerate}
+The effective sample size is the number of independent snapshots, parents, and tasks, not candidate rows. Large neural architectures are unlikely to be justified by the initial corpus.
+
+\subsection{Evaluation}
+
+\begin{table}[H]
+\centering
+\caption{Recovery-critic endpoints.}
+\label{tab:phase5-endpoints}
+\small
+\begin{tabularx}{\textwidth}{P{0.27\textwidth}P{0.34\textwidth}Y}
+\toprule
+Endpoint & Definition & Scientific interpretation \\
+\midrule
+Within-snapshot pairwise ROC & Probability that the critic ranks a successful candidate above an unsuccessful candidate from the same state. & Candidate-specific discrimination. \\
+Top-1 recovery & Recovery rate of the highest-scored candidate. & Direct offline selection utility. \\
+Oracle regret & Oracle-best candidate outcome minus critic-selected outcome. & Remaining decision headroom. \\
+Calibration/Brier score & Agreement between predicted and observed success/advantage. & Whether thresholds and uncertainty are meaningful. \\
+Successful-control harm & Harm rate of critic choice versus matched random choice. & Safety of intervention selection. \\
+Held-out task effect & Task-macro critic minus random recovery on unseen identities. & Generalization beyond memorized task offsets. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Bootstrap tasks, then parents, then snapshots; retain all candidates from a sampled snapshot. Report per-task effects and uncertainty across model seeds separately.
+
+\positiveresult{The sealed-test within-snapshot pairwise ROC is at least 0.65 with lower interval above 0.50; critic top-1 recovery exceeds random $K=4$ by at least 10 percentage points with a paired interval above zero; the sign is positive on at least four development tasks and on held-out tasks; and successful-control harm rises by no more than five points. This establishes offline causal actionability, not yet prospective control.}
+
+\negativeresult{Do not guide or control the policy. Diagnose target-horizon mismatch, insufficient proposal diversity, stage leakage, context overfit, and the gap between stage completion and full-task success. A strong recoverability benchmark and failure-risk-versus-utility negative finding may remain publishable even when the critic fails.}
+
+\subsection{Required outputs}
+
+Release grouped split manifests, critic checkpoints and runtime bundle, feature/normalization provenance, candidate-level sealed predictions, calibration curves, top-1 and regret tables, stage-tracker confusion and latency, oracle-versus-predicted-stage gap, and representative critic error cases.

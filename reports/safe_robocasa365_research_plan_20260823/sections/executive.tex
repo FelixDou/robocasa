@@ -1,0 +1,85 @@
+\section{Executive recommendation}
+
+\subsection{Recommended scientific thesis}
+
+The research plan remains viable, but the central contribution should no longer be described as ``SAFE plus early triggering plus critic-guided flow.'' Recent work already studies calibrated VLA verification, recovery windows, counterfactual recovery labels, subtask backtracking, and critic- or reward-guided action generation~\cite{checkvla,b2ff,cyclevla,afil,rover,qvgm}. The stronger and more defensible thesis is:
+
+\begin{quote}
+\textbf{A failure detector's confidence is not its intervention value. Long-horizon VLA recovery has a state-, stage-, delay-, and operator-dependent deadline that must be measured causally and predicted directly.}
+\end{quote}
+
+The method should therefore learn whether intervention has positive value, when that value disappears, and which recovery action or operator should be selected. SAFE remains scientifically important as (i) the internal action-policy representation being adapted, (ii) a strong terminal-failure baseline, and (iii) a candidate input to the recovery-value model. It should not be assumed to be a value function.
+
+\subsection{Primary paper endpoint}
+
+The final primary endpoint is not detector ROC-AUC. It is the equal-task absolute improvement in final RoboCasa365 task success produced by the complete deployable system relative to the strongest frozen non-oracle baseline, under a matched intervention and inference budget. Detector ranking, warning time, stage recovery, and candidate-selection accuracy are mechanistic secondary endpoints that explain the task-success result.
+
+\sciencenote{Recommended contribution statement.}{The paper introduces exact-prefix counterfactual recoverability curves, demonstrates that terminal-failure likelihood and causal intervention value diverge, and learns a stage-aware utility gate that decides whether, when, and how to recover while controlling harmful interventions.}
+
+\subsection{Starting evidence}
+
+Table~\ref{tab:starting-evidence} summarizes the evidence already available in the repository. The strongest current detector evidence is a frozen prospective Xiaomi shadow test, but it did not execute recovery. The five-task stage-aware development gain was tested on 250 new identity-disjoint parents and did not transfer. Phase~2 has since established exact complete-snapshot branching on a bounded two-task validation. The active dependency is therefore no longer replay engineering: it is whether the already-collected candidate branches contain enough causal outcome variation to justify a recovery critic.
+
+\begin{table}[H]
+\centering
+\caption{Current evidence and the strongest defensible interpretation. ``Prospective shadow'' means the detector bundle was frozen before scoring new trajectories, but the detector did not change policy execution.}
+\label{tab:starting-evidence}
+\small
+\begin{tabularx}{\textwidth}{P{0.22\textwidth}P{0.36\textwidth}Y}
+\toprule
+Component & Evidence & Current interpretation \\
+\midrule
+Xiaomi matched-FPR shadow test & 760 balanced primary rollouts. Staged SAFE plus time reached TPR 0.668 at FPR 0.050, versus time-only TPR 0.632 at FPR 0.047. The timing gain was 0.0259 task horizons and its bootstrap interval crossed zero; only 2.9\% of failures were detected by the 25\% landmark. & Modest prospective classification gain; overall early-warning gate failed; no recovery claim. \\
+Full-parent stage-aware confirmation & Development selection favored conditioned SAFE (ROC 0.696 versus 0.592 terminal). On 250 frozen, identity-disjoint parents, conditioned SAFE reached 0.489 versus 0.523 terminal, 0.563 SAFE38, and 0.500 time-only. All preregistered gates failed. & The development gain did not replicate. Predicate-stage-aware SAFE remains a baseline or model input, not a deployable trigger contribution. \\
+State-context follow-up & A new 250-parent cohort recorded a 240-dimensional proprioceptive state history. Development selected stage SAFE at 0.693, context at 0.691, and terminal at 0.690. On the locked 85-parent retrospective holdout, stage reached 0.584, context 0.566, terminal 0.470, and time-only 0.500; both primary contrast intervals crossed zero. & Descriptive evidence of task-specific signal, not prospective confirmation. State context did not improve the selected ranking or the matched-FPR operating point. \\
+RLDX Subtask-SAFE & Raw segment ROC 0.734 fell to parent-aware ROC 0.558, while an elapsed-time baseline reached 0.740. Frozen causal-prefix variants remained near chance. & Retrospective segment separation did not translate to online intervention evidence. \\
+Recovery infrastructure & Ordered subtask anchors, environment reset, EEF recovery, continuation, and Xiaomi deterministic best-of-$K$ proposals exist. & Useful implementation base; existing runs do not establish randomized recovery utility. \\
+Complete snapshot replay & On two tasks, 10 of 10 eligible parents produced 20 of 20 snapshots and 140 of 140 branches: 80 explicit candidates, 40 same-seed repeats, and 20 environment-only controls. There were zero branch errors, exact repeated requests/actions/observations/causal transitions, 100\% repeated-suffix agreement, and 100\% candidate diversity. & Phase~2 engineering validity passed. The branches are causally aligned simulator evidence, but candidate recovery utility has not yet been measured. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[t]{0.48\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{subtask_causal_prefix_roc.pdf}
+  \caption{Causal prefix evaluation exposes the gap between retrospective Subtask-SAFE ranking and online utility.}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.48\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{xr1_matched_fpr_recall_by_landmark.pdf}
+  \caption{The frozen Xiaomi shadow test achieved low early-landmark recall on composite failures.}
+\end{subfigure}
+\caption{The research plan begins from negative causal and timing evidence rather than from retrospective ROC alone. Figures are reproduced from the checksum-backed full report.}
+\label{fig:starting-point}
+\end{figure}
+
+\subsection{Dependency-gated roadmap}
+
+\begin{longtable}{P{0.07\textwidth}P{0.28\textwidth}P{0.28\textwidth}P{0.269\textwidth}}
+\caption{Experiment dependency structure. Each expensive phase is conditional on the preceding scientific or engineering gate.}\label{tab:roadmap}\\
+\toprule
+Phase & Experiment & Positive result & If the gate fails \\
+\midrule
+\endfirsthead
+\toprule
+Phase & Experiment & Positive result & If the gate fails \\
+\midrule
+\endhead
+0 & Protocol freeze and evidence audit & Artifacts, identities, and endpoints are immutable and reproducible. & Repair integrity; do not collect. \\
+1 & Frozen stage-aware confirmation \bad & Early stage-aware ranking transfers to new parents. & \textbf{Observed: gate failed.} SAFE becomes a baseline/input, not the trigger contribution. \\
+2 & Complete snapshot replay \good & \textbf{Observed: gate passed.} Same state and randomness reproduced while declared candidate seeds created controlled alternatives. & Not applicable; preserve the passing bundle and hashes. \\
+3 & Counterfactual opportunity screen \planned & Candidate choice changes recovery outcome with substantial oracle headroom. & Change proposal distribution, timing, or recovery operator before critic training. \\
+4 & Recoverability surfaces & Intervention value varies meaningfully with delay, stage, and operator. & Narrow to a diagnostic benchmark or improve operators. \\
+5 & Recovery-value critic & The learned critic predicts and ranks causal utility on sealed parents/tasks. & Do not guide the policy; preserve the benchmark result. \\
+6 & Prospective best-of-$K$ selection & Critic selection beats random $K=4$ under identical candidates. & No flow guidance; critic is not actionably causal. \\
+7 & Frozen end-to-end intervention & Final task success improves without excessive harm. & No deployable recovery-system claim. \\
+8 & Differentiable flow guidance & Guided $K=1$ matches critic $K=4$ at lower cost and no safety loss. & Retain discrete critic reranking. \\
+9 & Generalization and physical validation & Benefit survives held-out tasks/scenes and another policy or robot. & Scope the paper to same-policy RoboCasa365. \\
+\bottomrule
+\end{longtable}
+
+\cautionnote{Planning thresholds.}{The numerical gates in this report are proposed research decisions, not official venue requirements. Final powered sample sizes must be frozen from blinded pilot variance and the exact hierarchical analysis.}
+
+\sciencenote{Current decision.}{Freeze the passing Phase~2 run and start Phase~3 with a read-only analysis of its 20 paired snapshots and 80 explicit candidate branches. This two-task pilot can estimate mixed-outcome frequency and oracle headroom, but cannot satisfy the formal requirement for mixed outcomes in at least three of five tasks. Scale to the predeclared five-task opportunity study only if the bounded pilot reaches at least 20\% mixed snapshots and at least 15 percentage points of oracle-over-random headroom. Do not train a critic before that gate.}

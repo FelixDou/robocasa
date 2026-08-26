@@ -1,0 +1,144 @@
+\clearpage
+\section{Cross-phase statistical and validity plan}
+
+\subsection{Confirmatory hierarchy}
+
+The report should use sequential gates rather than treating every endpoint as independently confirmatory:
+\begin{enumerate}
+  \item frozen stage-aware ranking transfers to new parents;
+  \item complete snapshot replay makes counterfactual branches valid;
+  \item candidate/operator sets contain recovery headroom;
+  \item a recovery-value critic ranks candidate utility on sealed data;
+  \item critic selection works prospectively under a fixed trigger;
+  \item the complete utility system improves final task success;
+  \item external validity and flow guidance are tested only after the core system passes.
+\end{enumerate}
+
+A failed detector gate does not prohibit studying recoverability with time, progress, and observable context. A failed oracle-opportunity or critic-actionability gate does prohibit claiming a useful local recovery critic or gradient guide.
+
+\subsection{Alarm and timing definitions}
+
+For failed unit $u$, let $H_u$ be the frozen normalization horizon and $\tau_u$ the first alarm. Define miss-adjusted detection time
+\begin{align}
+T_u &= \min(\tau_u/H_u,1) && \text{if detected},\\
+T_u &= 1 && \text{if missed}.
+\end{align}
+The primary timing contrast is $\mathrm{E}[T^{\mathrm{SAFE}}-T^{\mathrm{time}}]$; negative favors SAFE. Conditional-on-detection time is secondary because a method could appear early by detecting only a few easy failures.
+
+For $q\in\{0.10,0.25,0.50\}$, early-landmark recall is
+\begin{equation}
+  \Pr(\tau_u/H_u\le q\mid u\text{ fails}).
+\end{equation}
+The successful-parent false-intervention rate is the probability of at least one alarm/intervention over an entire paired would-be successful parent. A treated rollout alone does not reveal whether it would have succeeded without intervention; this outcome requires a matched no-intervention clone or randomized arm under the same initial identity.
+
+\subsection{Calibration}
+
+For successful-parent maximum scores $Z_1,\ldots,Z_n$ and target $\alpha$, a split-conformal upper threshold uses order statistic
+\begin{equation}
+  k=\lceil(n+1)(1-\alpha)\rceil.
+\end{equation}
+If $k>n$, place the threshold above the observed maximum and label the operating point unresolved. Zero empirical FPR with too few calibration successes is not evidence of precise control.
+
+Calibration requirements are:
+\begin{itemize}
+  \item successful parent is the calibration unit;
+  \item score aggregation, tie handling, task weighting, threshold rule, and target $\alpha$ are frozen;
+  \item normalization is fitted on training, not calibration or test;
+  \item calibration and final evaluation identities are disjoint;
+  \item report calibration count, order-statistic rank, realized FPR, and exact or Wilson interval;
+  \item evaluate drift by task/layout/policy without updating the final-test threshold.
+\end{itemize}
+
+\subsection{Randomization and paired inference}
+
+Intervention assignments should be generated before outcomes and blocked by task, layout/style, seed/reset family, and server/GPU session. Arms must be interleaved within server sessions. The primary analysis is intention to treat: differential runtime or model errors count against the assigned arm according to the frozen attrition rule.
+
+For exactly paired initial identities, report benefit and harm discordance:
+\begin{align}
+  B &= \Pr(Y^{\mathrm{method}}=1,Y^{\mathrm{control}}=0),\\
+  H &= \Pr(Y^{\mathrm{method}}=0,Y^{\mathrm{control}}=1),\\
+  \Delta_{\mathrm{paired}} &= B-H.
+\end{align}
+Use blocked randomization/permutation inference as primary where assignment supports it, task-then-parent hierarchical bootstrap as a transparent interval, and mixed-effects logistic regression only as a sensitivity analysis.
+
+\subsection{Bootstrap hierarchy}
+
+For detector comparisons on identical parents:
+\begin{enumerate}
+  \item resample tasks if claiming task-population generalization;
+  \item resample parents within each selected task;
+  \item retain every stage, prefix, snapshot, and candidate from the sampled parent;
+  \item recompute the complete metric and paired method contrast.
+\end{enumerate}
+For candidate studies, snapshots are nested within parents and candidate branches remain paired within snapshot. Three neural initialization seeds measure fitting instability and do not replace task or parent uncertainty.
+
+\subsection{Power and sample size}
+
+Final $N$ should be frozen through simulation or hierarchical bootstrap using development or blinded-pilot variance. Allowed adaptations include extending a fixed-attempt collection because predeclared support counts are unmet and blinded variance-based re-estimation. It is not acceptable to stop when ROC or success first becomes favorable, add tasks after seeing per-task effects, or alter thresholds from test alarms.
+
+Planning calculations from current evidence suggest:
+\begin{itemize}
+  \item roughly 400 failures before clustering to detect a 0.05-horizon paired timing effect under the observed variance, and approximately 500-700 after heterogeneity inflation;
+  \item roughly 330 parents per arm before clustering for a 12\%-to-20\% success difference, potentially 500-650 per main arm after task/server inflation;
+  \item at least 200 successful calibration parents for a 5\% threshold, with approximately 400 preferable;
+  \item approximately 25 successes and 25 failures per task-stage stratum for exploratory stage estimates, and closer to 50 per class for stable confirmatory estimates.
+\end{itemize}
+
+These calculations are not promises or venue rules. The final powered design should prioritize the primary two-arm comparison in Phase 7; secondary trigger and recovery ablations can use smaller frozen cohorts.
+
+\subsection{Leakage and survivor-bias controls}
+
+\begin{longtable}{P{0.24\textwidth}P{0.68\textwidth}}
+\caption{Cross-phase validity controls.}\label{tab:validity-controls}\\
+\toprule
+Risk & Required control \\
+\midrule
+\endfirsthead
+\toprule
+Risk & Required control \\
+\midrule
+\endhead
+Parent leakage & Assign parents before stages, windows, snapshots, or candidate augmentation. Every descendant inherits the parent split. \\
+Snapshot leakage & Keep all operators/candidates from a snapshot together and weight snapshots, not candidate rows. \\
+Future information & Exclude final horizon, termination reason, future predicate states, future stage completion, future features, and realized future duration from deployed inputs. \\
+Privileged stage & Report simulator predicate stage and causal observable stage tracker separately. \\
+Survivor bias & Publish risk-set denominator and class support at every later prefix; treat stage completion and failure as competing events in sensitivity analysis. \\
+Outcome quota & Use case-control/outcome-quota data for ranking or feasibility only, never deployment prevalence, FPR burden, or success rate. \\
+Feature duplication & Store one feature per genuine policy inference, not every cached action. \\
+Restore confounding & Restore simulator, policy queues/cache, counters, instruction, tracker, and RNG; prove exact same-request/action replay. \\
+Compute confounding & Match candidate count, recovery horizon, NFE, policy calls, or wall-clock budget according to the stated comparison and report both calls and time. \\
+Oracle mixing & Never average oracle stage, oracle onset, environment rewind, or oracle candidate choice with deployable results. \\
+Selective attrition & Freeze exclusion/retry rules; preserve partial manifests and technical errors; provide assigned/started/completed/invalid/analyzed flow. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Multiplicity and reporting}
+
+Declare one primary contrast per phase and one final primary contrast: full utility system versus strongest frozen non-oracle baseline on final task success. Test secondary families in a frozen hierarchy or use Holm correction. Per-task, per-stage, per-delay, and failure-type analyses remain descriptive unless explicitly powered and adjusted. Report effect sizes and intervals even when gates fail.
+
+\cautionnote{Gate interpretation.}{Pilot thresholds such as 20\% mixed snapshots, 15-point oracle headroom, pairwise ROC 0.65, or a 10-point critic gain are proposed continuation gates. They protect compute and scientific focus; they are not universal statistical truths.}
+
+\subsection{Claim ledger}
+
+\begin{longtable}{P{0.30\textwidth}P{0.23\textwidth}P{0.39\textwidth}}
+\caption{Claim-to-evidence ledger at the current starting point.}\label{tab:claim-ledger}\\
+\toprule
+Claim & Current status & Evidence required \\
+\midrule
+\endfirsthead
+\toprule
+Claim & Current status & Evidence required \\
+\midrule
+\endhead
+Xiaomi SAFE modestly improves matched-FPR classification. & Supported in frozen prospective shadow evaluation. & Preserve modest wording and artifact provenance. \\
+Xiaomi SAFE provides reliable overall early warning. & Rejected by timing interval and early recall. & New representation plus untouched prospective timing cohort. \\
+Full-parent stage conditioning improves early ranking. & Rejected as a general five-task claim: 0.696 development ROC fell to 0.489 in frozen identity-disjoint confirmation. & Preserve task/stage heterogeneity as diagnostic evidence; do not refit on confirmation. \\
+Proprioceptive state context improves early stage ranking. & Unsupported: context reached 0.566 on the retrospective 85-parent holdout versus stage 0.584 and time 0.500. & A new untouched cohort would be required for a context claim, but it is not the current priority. \\
+SAFE ranks useful action chunks. & Engineering path only. & Phase 3 opportunity and Phase 6 prospective selection. \\
+Recovery-value critic predicts causal utility. & Planned. & Phase 5 sealed evaluation and Phase 6 prospective result. \\
+Utility triggering improves task success. & Unsupported. & Phase 7 randomized closed-loop trial. \\
+Flow guidance improves recovery. & Unsupported. & Phase 8 model-side, matched-compute execution. \\
+Method generalizes to unseen tasks or policies. & Unsupported. & Phase 9 with identities unseen to critic development and separate policy calibration. \\
+Method is real-robot deployable. & Unsupported; simulator predicates/resets are currently used. & Causal stage tracker and physical intervention study. \\
+\bottomrule
+\end{longtable}

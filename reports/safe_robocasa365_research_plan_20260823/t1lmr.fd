@@ -1,0 +1,15 @@
+\ProvidesFile{t1lmr.fd}[2026/08/23 Local scalable Latin Modern Roman map]
+\DeclareFontFamily{T1}{lmr}{}
+\DeclareFontShape{T1}{lmr}{m}{n}{<-> ec-lmr10}{}
+\DeclareFontShape{T1}{lmr}{m}{it}{<-> ec-lmri10}{}
+\DeclareFontShape{T1}{lmr}{m}{sl}{<-> ssub*lmr/m/it}{}
+\DeclareFontShape{T1}{lmr}{m}{sc}{<-> ssub*lmr/m/n}{}
+\DeclareFontShape{T1}{lmr}{b}{n}{<-> ec-lmbx10}{}
+\DeclareFontShape{T1}{lmr}{bx}{n}{<-> ec-lmbx10}{}
+\DeclareFontShape{T1}{lmr}{b}{it}{<-> ssub*lmr/b/n}{}
+\DeclareFontShape{T1}{lmr}{bx}{it}{<-> ssub*lmr/bx/n}{}
+\DeclareFontShape{T1}{lmr}{b}{sl}{<-> ssub*lmr/b/n}{}
+\DeclareFontShape{T1}{lmr}{bx}{sl}{<-> ssub*lmr/bx/n}{}
+\DeclareFontShape{T1}{lmr}{b}{sc}{<-> ssub*lmr/b/n}{}
+\DeclareFontShape{T1}{lmr}{bx}{sc}{<-> ssub*lmr/bx/n}{}
+\endinput

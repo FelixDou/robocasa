@@ -1,0 +1,62 @@
+\phaseheader{0}{Freeze the protocol and audit experimental readiness}{Establish an immutable, machine-auditable foundation before any new scientific outcome is observed. This phase prevents hidden model selection, identity reuse, path drift, and accidental promotion of a development result into a confirmation claim.}
+
+\subsection{Scientific rationale}
+
+Phase 0 has no performance hypothesis. Its role is to make every later hypothesis falsifiable. A confirmatory result is interpretable only when the policy, feature layer, model, score transformation, task/stage catalog, prefixes, thresholds, seed families, retry rules, and statistical code were fixed before outcomes. Integrity failures are engineering failures, not negative scientific findings.
+
+The current project spans local source code, cluster source, durable artifacts, multiple policy families, and several already opened cohorts. Therefore, the protocol must explicitly distinguish the 170-parent stage-aware development allocation, the opened 80-parent outer set, the prospective Xiaomi shadow cohort, new confirmation identities, critic development identities, calibration identities, and final randomized-intervention identities.
+
+\subsection{What must be implemented}
+
+\begin{enumerate}
+  \item \textbf{Protocol manifest.} Add a machine-readable manifest containing repository commits, policy/checkpoint hashes, SAFE revision, task and stage catalogs, feature layer and aggregation, prefixes, model seeds, normalization, thresholds, candidate count, replan length, recovery horizon, primary endpoint, primary comparison, and bootstrap seed.
+  \item \textbf{Identity registry.} Represent each parent by the tuple
+  \[
+    (\text{task},\text{environment seed},\text{reset index},\text{policy-sampling family}).
+  \]
+  The registry must reject overlap across development, selection, calibration, confirmation, critic test, and final intervention roles.
+  \item \textbf{Artifact validation.} Verify checksums for the Xiaomi checkpoint, SAFE checkpoints, runtime bundles, server patches, and source commits. Refuse to run if a frozen artifact differs.
+  \item \textbf{Action-equivalence smoke.} Confirm that requesting SAFE/context features with an identical sampling seed does not change the decoded action chunk relative to the action-only request.
+  \item \textbf{Run metadata.} Every run must store exact command, task list, code revision, checkpoint, seed/reset allocation, GPU and port mapping, model-loaded log, output path, and partial/error status.
+\end{enumerate}
+
+\implementationnote{Existing modules to reuse.}{Use \path{docs/cluster_experiment_runbook.md}, \path{robocasa/recovery/safe/run_stage_aware_parent_safe.py}, \path{robocasa/recovery/safe/stage_aware_parent_safe.py}, \path{robocasa/recovery/xiaomi_robotics_1_policy.py}, and the current dataset/schema validators.}
+
+\implementationnote{Proposed additions.}{Add \proposedfile{robocasa/recovery/safe/experiment_protocol.py} for schema validation and \proposedfile{robocasa/recovery/safe/audit_experiment_identities.py} for cross-manifest overlap checks. Add unit tests that deliberately alter a checksum, reuse a seed/reset identity, change a frozen prefix, and duplicate one inference record.}
+
+\subsection{Evaluation}
+
+Phase 0 is evaluated with deterministic integrity tests rather than ROC or success rate. The required checks are listed in Table~\ref{tab:phase0-checks}.
+
+\begin{table}[H]
+\centering
+\caption{Phase 0 readiness checks.}
+\label{tab:phase0-checks}
+\small
+\begin{tabularx}{\textwidth}{P{0.28\textwidth}Y P{0.20\textwidth}}
+\toprule
+Check & Evaluation & Positive criterion \\
+\midrule
+Artifact integrity & Recompute hashes and reload every frozen runtime. & Exact hash agreement; strict model loading. \\
+Identity disjointness & Compare all role manifests by rollout ID and task/seed/reset tuple. & Zero overlap. \\
+Feature/action alignment & Repeat seeded action-only and feature-return requests. & Numerically identical decoded action. \\
+Inference sampling & Count genuine server requests and stored feature records. & Exactly one feature per genuine inference. \\
+Cluster preflight & Verify storage, model-loaded log, listening port, server/GPU process, and one bounded rollout. & Zero traceback; complete output and manifest. \\
+Analysis determinism & Re-run the frozen scorer and bootstrap with the same seed. & Identical scores and intervals within numerical tolerance. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\positiveresult{All frozen artifacts resolve, identity roles are disjoint, the feature-return path is action-equivalent, and one bounded live rollout produces aligned policy, feature, stage, and outcome records. This result establishes experimental readiness only; it does not support a detector or recovery claim.}
+
+\negativeresult{Stop new collection. Repair provenance, state alignment, server compatibility, storage, or identity allocation without changing the scientific endpoints. A Phase 0 failure invalidates the affected experiment rather than falsifying a scientific hypothesis.}
+
+\subsection{Required artifacts}
+
+\begin{itemize}
+  \item \path{protocol.json} and a human-readable protocol summary;
+  \item \path{allocation_manifest.jsonl} with all planned arms and identities;
+  \item \path{artifact_checksums.json} and source/checkpoint revisions;
+  \item preflight and one-rollout smoke logs under durable \path{/gs/bs} storage;
+  \item a PASS/FAIL audit report generated before Phase 1 outcomes are opened.
+\end{itemize}

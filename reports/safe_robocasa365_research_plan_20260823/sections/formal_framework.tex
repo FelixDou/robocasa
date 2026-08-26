@@ -1,0 +1,100 @@
+\section{Formal scientific framework}
+
+\subsection{Failure risk and recovery value are different estimands}
+
+Let $h_t$ denote all causal information available at genuine policy inference $t$: observations, proprioception, task language, executed action history, current cached-plan state, and any online stage estimate. Let $Y\in\{0,1\}$ denote eventual full-task success. A conventional failure monitor estimates
+\begin{equation}
+  p_{\mathrm{fail}}(h_t) = \Pr(Y=0\mid h_t).
+\end{equation}
+This quantity can be high even when no available recovery action improves outcome, and it can be low while a cheap early intervention would be beneficial. The proposed causal object is intervention-specific recoverability. For recovery operator $k$ applied after delay $d$,
+\begin{equation}
+  R_k(h_t,d) = \Pr\!(Y=1\mid \operatorname{do}(k\text{ at }t+d),h_t).
+  \label{eq:recoverability}
+\end{equation}
+The intervention advantage is
+\begin{equation}
+  \Delta_k(h_t,d)
+  = R_k(h_t,d)-R_{\mathrm{continue}}(h_t,d)
+  -\lambda C_k-\mu H_k,
+  \label{eq:advantage}
+\end{equation}
+where $C_k$ is compute or latency cost, $H_k$ is intervention harm, and $\lambda,\mu$ are frozen decision weights. A deployable controller intervenes only when the lower-confidence estimate of $\max_k\Delta_k$ exceeds a predeclared threshold, and chooses the operator with the largest predicted value.
+
+\subsection{Recovery deadline}
+
+The project should not assume that recoverability decays monotonically. A policy may self-correct, enter a more controllable state, or transition between stages. For a positive-value margin $\epsilon$, define the sampled operational deadline
+\begin{equation}
+  D_k(h_t;\epsilon)
+  = \sup\{d\in\mathcal{D}:\Delta_k(h_t,d)>\epsilon\},
+  \label{eq:deadline}
+\end{equation}
+where $\mathcal{D}$ is a prespecified delay grid in genuine policy inferences. The scientific question is therefore not simply whether ``earlier is better,'' but how $D_k$ and the shape of $\Delta_k(h_t,d)$ depend on task, stage, failure mode, and operator.
+
+\subsection{Counterfactual identification in simulation}
+
+For snapshot $i$, candidate/operator $k$, delay $d$, and common-randomness schedule $\omega$, let $Y_i(k,d;\omega)$ be the potential suffix outcome. RoboCasa simulation permits repeated branches from an identical state. This does not identify every real-world causal effect, but it permits controlled estimation of within-simulator intervention contrasts when four conditions hold:
+\begin{enumerate}
+  \item the simulator and policy state are fully restored;
+  \item intervention branches share the same environment and fallback-policy randomness until treatment induces divergence;
+  \item branch states are selected independently of the detector being evaluated;
+  \item all branches, including homogeneous candidate sets and harmful interventions, are retained.
+\end{enumerate}
+Under these conditions, the paired branch contrast
+\begin{equation}
+  Y_i(k,d;\omega)-Y_i(\mathrm{continue},d;\omega)
+\end{equation}
+is the fundamental training and evaluation signal. The top-level population claim still requires resampling tasks and parents; thousands of candidate branches do not create thousands of independent tasks.
+
+\subsection{Experimental hierarchy}
+
+\begin{table}[H]
+\centering
+\caption{Statistical hierarchy and grouping rules.}
+\label{tab:hierarchy}
+\small
+\begin{tabularx}{\textwidth}{P{0.20\textwidth}P{0.34\textwidth}Y}
+\toprule
+Unit & Definition & Required rule \\
+\midrule
+Task & One RoboCasa365 task identity and its semantic-stage catalog. & Top-level resampling unit for cross-task claims. \\
+Parent & One original rollout identified by task, environment seed, reset index, and policy-sampling family. & Split before extracting stages, prefixes, or snapshots. \\
+Snapshot & One complete causal simulator-policy state nested within a parent. & Every operator and candidate branch stays in the same split. \\
+Candidate branch & One action chunk or recovery operator executed after restoration. & Paired observation, not an independent sample. \\
+Inference & One genuine policy model request. & Store one SAFE/context feature; cached actions do not create new samples. \\
+Model seed & One neural initialization. & Measures training instability, not environment or task replication. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Primary estimands}
+
+\paragraph{Frozen detector confirmation.}
+At exact active-stage prefixes 1 and 2, define the task-and-stage macro ROC $\theta_{\mathrm{rank}}$, with equal weight for every supported task-stage stratum. The primary contrast is
+\begin{equation}
+  \Delta_{\mathrm{rank}}
+  = \theta_{\mathrm{conditioned}}-\theta_{\mathrm{terminal}}.
+\end{equation}
+
+\paragraph{Candidate actionability.}
+For identical candidate sets,
+\begin{equation}
+  \Delta_K
+  = \Pr(Y=1\mid K=4,\text{critic})
+  -\Pr(Y=1\mid K=4,\text{random}).
+\end{equation}
+
+\paragraph{End-to-end task success.}
+For method $a$ and frozen control $c$, the primary deployment estimand is the equal-task treatment effect
+\begin{equation}
+  \Delta_{\mathrm{success}}
+  = \operatorname{mean}_{i\in\mathcal{T}}
+  [\Pr(Y=1\mid A=a,i)-\Pr(Y=1\mid A=c,i)].
+  \label{eq:task-effect}
+\end{equation}
+
+\paragraph{Successful-parent harm.}
+The safety quantity is episode-level: a would-be successful parent that is made unsuccessful by intervention counts as harm. Per-inference false-positive rate is secondary and cannot replace this unit.
+
+\subsection{Evidence labels}
+
+Every result table and caption should label evidence as one of: \emph{development selection}, \emph{retrospective locked}, \emph{prospective shadow}, \emph{prospective randomized intervention}, \emph{simulator oracle}, or \emph{physical deployment}. Local unit tests and source inspection establish implementation properties only; they are not simulator or policy-performance evidence.

@@ -1,0 +1,11 @@
+\ProvidesFile{t1lmtt.fd}[2026/08/23 Local scalable Latin Modern Typewriter map]
+\DeclareFontFamily{T1}{lmtt}{\hyphenchar\font\m@ne}
+\DeclareFontShape{T1}{lmtt}{m}{n}{<-> ec-lmtt10}{}
+\DeclareFontShape{T1}{lmtt}{m}{it}{<-> ssub*lmtt/m/n}{}
+\DeclareFontShape{T1}{lmtt}{m}{sl}{<-> ssub*lmtt/m/n}{}
+\DeclareFontShape{T1}{lmtt}{m}{sc}{<-> ssub*lmtt/m/n}{}
+\DeclareFontShape{T1}{lmtt}{b}{n}{<-> ssub*lmtt/m/n}{}
+\DeclareFontShape{T1}{lmtt}{bx}{n}{<-> ssub*lmtt/m/n}{}
+\DeclareFontShape{T1}{lmtt}{b}{it}{<-> ssub*lmtt/m/n}{}
+\DeclareFontShape{T1}{lmtt}{bx}{it}{<-> ssub*lmtt/m/n}{}
+\endinput
