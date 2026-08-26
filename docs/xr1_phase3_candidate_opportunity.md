@@ -24,9 +24,14 @@ critic can identify the useful candidate online.
   within the Phase 2 frozen suffix horizon.
 - Candidate payloads are not copied. The manifest stores their immutable paths,
   compressed-file hashes, scientific-payload hashes, and action/feature hashes.
-- Phase 2 embeds `payload_sha256` inside the saved payload after computing it.
-  Verification reproduces that original definition by excluding only the
-  embedded checksum field; every scientific payload field remains covered.
+- Phase 2 embeds `payload_sha256` inside the saved payload after computing it,
+  but its two replay-transition fingerprints are not hash-portable after
+  deserialization across Python/Torch environments. For the legacy run,
+  verification requires the external and embedded checksums to agree, checks
+  the duplicated summary and recorded action/request/observation hashes, then
+  freezes a cross-environment scientific digest over every field except the two
+  replay-only fingerprints. Raw compressed-file hashes are checked again after
+  analysis. New Phase 2 branch manifests also record the raw file SHA-256.
 - Task-macro estimates give every task equal weight. Uncertainty bootstraps
   task, then parent, then snapshot.
 - Optional SAFE ranking uses the already-frozen three-seed independent SAFE

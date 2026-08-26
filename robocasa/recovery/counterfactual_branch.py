@@ -13,6 +13,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import gzip
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -55,6 +56,14 @@ def branch_payload_digest(payload):
         return stable_digest(payload)
     finally:
         summary["payload_sha256"] = embedded
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)
@@ -389,6 +398,7 @@ def save_branch_result(result, output_dir: str | Path):
         pickle.dump(payload, stream, protocol=5)
     os.replace(temporary, payload_path)
     summary["payload_path"] = str(payload_path.relative_to(output_dir))
+    summary["payload_file_sha256"] = _sha256_file(payload_path)
     summary_path = output_dir / "branch_records.jsonl"
     line = (json.dumps(_jsonable(summary), sort_keys=True) + "\n").encode()
     descriptor = os.open(summary_path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)

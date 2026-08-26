@@ -25,12 +25,12 @@ from typing import Any
 
 import numpy as np
 
-from robocasa.recovery.counterfactual_branch import branch_payload_digest
 from robocasa.recovery.full_snapshot import stable_digest
 
 
-ANALYSIS_SCHEMA_VERSION = 1
-ANALYSIS_PROTOCOL = "phase3_counterfactual_candidate_opportunity_v1"
+ANALYSIS_SCHEMA_VERSION = 2
+ANALYSIS_PROTOCOL = "phase3_counterfactual_candidate_opportunity_v2"
+SCIENTIFIC_PAYLOAD_PROTOCOL = "phase3_scientific_payload_without_replay_fingerprints_v1"
 
 
 def sha256_file(path: str | Path):
@@ -103,26 +103,100 @@ def _write_csv(path: Path, rows):
     os.replace(temporary, path)
 
 
+def _phase3_scientific_payload_digest(payload):
+    """Hash fields used by Phase 3 without process-dependent replay blobs."""
+    scientific = {
+        key: value
+        for key, value in payload.items()
+        if key
+        not in {
+            "first_transition_fingerprint",
+            "first_causal_transition_fingerprint",
+        }
+    }
+    summary = dict(scientific.get("summary") or {})
+    summary.pop("payload_sha256", None)
+    scientific["summary"] = summary
+    return stable_digest(scientific)
+
+
+def _require_hash_sequence(record, payload, *, record_key, payload_key):
+    expected = record.get(record_key)
+    if expected is None or payload_key not in payload:
+        return
+    actual = [stable_digest(value) for value in payload[payload_key]]
+    if actual != expected:
+        raise ValueError(
+            f"Branch {record['branch_id']} failed {payload_key} hash validation"
+        )
+
+
 def _load_payload(root: Path, record):
     path = root / record["payload_path"]
     if not path.is_file():
         raise FileNotFoundError(f"Missing branch payload: {path}")
     with gzip.open(path, "rb") as stream:
         payload = pickle.load(stream)  # noqa: S301 - trusted experiment artifact
+    file_sha256 = sha256_file(path)
+    recorded_file_sha256 = record.get("payload_file_sha256")
+    if recorded_file_sha256 is not None and file_sha256 != recorded_file_sha256:
+        raise ValueError(
+            f"Branch payload file hash mismatch for {record['branch_id']}: "
+            f"{file_sha256} != {recorded_file_sha256}"
+        )
     expected = record.get("payload_sha256")
     embedded = (payload.get("summary") or {}).get("payload_sha256")
-    if expected is not None and embedded is not None and embedded != expected:
+    if expected is None or embedded != expected:
         raise ValueError(
             f"Branch payload embedded digest mismatch for {record['branch_id']}: "
             f"{embedded} != {expected}"
         )
-    actual = branch_payload_digest(payload)
-    if expected is not None and actual != expected:
+    payload_summary = _jsonable(payload.get("summary") or {})
+    for key, value in payload_summary.items():
+        if key == "payload_sha256":
+            continue
+        if key not in record or record[key] != value:
+            raise ValueError(f"Branch {record['branch_id']} summary mismatch for {key}")
+    if stable_digest(payload.get("first_action")) != record.get("first_action_sha256"):
         raise ValueError(
-            f"Branch payload digest mismatch for {record['branch_id']}: "
-            f"{actual} != {expected}"
+            f"Branch {record['branch_id']} failed first-action hash validation"
         )
-    return payload, path
+    inference_records = payload.get("inference_records") or []
+    if not inference_records:
+        raise ValueError(f"Branch {record['branch_id']} has no inference record")
+    if stable_digest(inference_records[0].get("actions")) != record.get(
+        "first_inference_actions_sha256"
+    ):
+        raise ValueError(
+            f"Branch {record['branch_id']} failed inference-action hash validation"
+        )
+    _require_hash_sequence(
+        record,
+        payload,
+        record_key="suffix_action_sha256",
+        payload_key="actions",
+    )
+    _require_hash_sequence(
+        record,
+        payload,
+        record_key="suffix_request_sha256",
+        payload_key="request_records",
+    )
+    _require_hash_sequence(
+        record,
+        payload,
+        record_key="suffix_observation_sha256",
+        payload_key="observations",
+    )
+    integrity = {
+        "source_payload_file_sha256": file_sha256,
+        "source_payload_file_sha256_recorded": recorded_file_sha256,
+        "legacy_payload_sha256": expected,
+        "legacy_payload_manifest_embedded_equal": True,
+        "scientific_payload_protocol": SCIENTIFIC_PAYLOAD_PROTOCOL,
+        "scientific_payload_sha256": _phase3_scientific_payload_digest(payload),
+    }
+    return payload, path, integrity
 
 
 def _active_stage(plan, task_name):
@@ -131,7 +205,7 @@ def _active_stage(plan, task_name):
 
 
 def _branch_outcome(root, plan, record):
-    payload, payload_path = _load_payload(root, record)
+    payload, payload_path, integrity = _load_payload(root, record)
     trace = payload.get("subtask_trace") or []
     if not trace:
         raise ValueError(f"Branch {record['branch_id']} has no subtask trace")
@@ -192,8 +266,8 @@ def _branch_outcome(root, plan, record):
         "safe_feature_l2": float(np.linalg.norm(features.astype(np.float64))),
         "state_context_shape": list(state_context.shape),
         "source_payload_path": record["payload_path"],
-        "source_payload_file_sha256": sha256_file(payload_path),
-        "source_payload_sha256": record.get("payload_sha256"),
+        **integrity,
+        "_source_payload_absolute_path": str(payload_path),
         "action_chunk_sha256": stable_digest(actions),
         "safe_feature_sha256": stable_digest(features),
         "features": features,
@@ -366,6 +440,8 @@ def analyze_candidate_opportunity(
     candidate_manifest = []
     snapshot_rows = []
     scorer_provenance = None
+    primary_payload_file_hashes = {}
+    primary_recorded_file_hashes = 0
     for snapshot_id, snapshot_records in sorted(grouped.items()):
         kinds = defaultdict(list)
         for record in snapshot_records:
@@ -388,6 +464,13 @@ def analyze_candidate_opportunity(
                 kinds["candidate"], key=lambda row: row["sampling_seed"]
             )
         ]
+        for branch in repeats + candidates:
+            primary_payload_file_hashes[
+                branch["_source_payload_absolute_path"]
+            ] = branch["source_payload_file_sha256"]
+            primary_recorded_file_hashes += int(
+                branch["source_payload_file_sha256_recorded"] is not None
+            )
         repeat_contract = (
             repeats[0]["stage_completed"] == repeats[1]["stage_completed"]
             and repeats[0]["task_success"] == repeats[1]["task_success"]
@@ -429,7 +512,7 @@ def analyze_candidate_opportunity(
             row = {
                 key: value
                 for key, value in candidate.items()
-                if key not in {"features", "actions"}
+                if key not in {"features", "actions", "_source_payload_absolute_path"}
             }
             row["candidate_index"] = index
             row.update(frozen_provenance)
@@ -518,6 +601,16 @@ def analyze_candidate_opportunity(
     }
     if source_hashes_before != source_hashes_after:
         raise RuntimeError("Phase 2 source artifacts changed during analysis")
+    changed_payload_files = [
+        path
+        for path, expected in primary_payload_file_hashes.items()
+        if sha256_file(path) != expected
+    ]
+    if changed_payload_files:
+        raise RuntimeError(
+            "Phase 2 branch payloads changed during analysis: "
+            + ", ".join(changed_payload_files)
+        )
     analysis = {
         "schema_version": ANALYSIS_SCHEMA_VERSION,
         "protocol": ANALYSIS_PROTOCOL,
@@ -527,6 +620,13 @@ def analyze_candidate_opportunity(
         "phase2_source_hashes": source_hashes_before,
         "phase2_source_unchanged": True,
         "phase2_error_ledger_present": errors_path.is_file(),
+        "legacy_payload_digest_verification": (
+            "manifest_equals_embedded; aggregate rehash not portable because "
+            "replay transition fingerprints vary across Python environments"
+        ),
+        "scientific_payload_protocol": SCIENTIFIC_PAYLOAD_PROTOCOL,
+        "primary_payload_files_verified_unchanged": len(primary_payload_file_hashes),
+        "recorded_raw_payload_file_hashes_available": primary_recorded_file_hashes,
         "tasks": sorted(task_summary),
         "parents": len({row["parent_id"] for row in snapshot_rows}),
         "snapshots": len(snapshot_rows),

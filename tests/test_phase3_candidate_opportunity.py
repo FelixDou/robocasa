@@ -68,6 +68,16 @@ def _payload(stage, completed, marker):
 def _write_branch(root, *, snapshot, parent, kind, seed, completed, marker, repeat=0):
     branch_id = f"{snapshot}-{kind}-{seed}-{repeat}"
     payload = _payload("active_stage", completed, marker)
+    payload["summary"].update(
+        {
+            "branch_id": branch_id,
+            "snapshot_id": snapshot,
+            "parent_id": parent,
+            "task_name": "ArrangeTea",
+            "kind": kind,
+            "sampling_seed": seed,
+        }
+    )
     payload_sha256 = branch_payload_digest(payload)
     payload["summary"]["payload_sha256"] = payload_sha256
     payload_path = root / "branches" / f"{branch_id}.pkl.gz"
@@ -87,6 +97,14 @@ def _write_branch(root, *, snapshot, parent, kind, seed, completed, marker, repe
         "termination_reason": "suffix_horizon",
         "num_steps": 4,
         "num_policy_requests": 1,
+        "first_action_sha256": stable_digest(payload["first_action"]),
+        "first_inference_actions_sha256": stable_digest(
+            payload["inference_records"][0]["actions"]
+        ),
+        "suffix_action_sha256": [
+            stable_digest(action) for action in payload["actions"]
+        ],
+        "suffix_request_sha256": [],
         "payload_path": str(payload_path.relative_to(root)),
         "payload_sha256": payload_sha256,
     }
@@ -267,6 +285,24 @@ class Phase3CandidateOpportunityTest(unittest.TestCase):
             root.mkdir()
             _write_source(root, disagree_nominal=True)
             with self.assertRaisesRegex(ValueError, "Nominal repeat outcomes disagree"):
+                analyze_candidate_opportunity(root, Path(directory) / "out")
+
+    def test_rejects_payload_summary_manifest_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "phase2"
+            root.mkdir()
+            _write_source(root)
+            record = json.loads(
+                (root / "branch_records.jsonl").read_text().splitlines()[0]
+            )
+            payload_path = root / record["payload_path"]
+            with gzip.open(payload_path, "rb") as stream:
+                payload = pickle.load(stream)
+            payload["summary"]["task_name"] = "MutatedTask"
+            with gzip.open(payload_path, "wb") as stream:
+                pickle.dump(payload, stream, protocol=5)
+
+            with self.assertRaisesRegex(ValueError, "summary mismatch for task_name"):
                 analyze_candidate_opportunity(root, Path(directory) / "out")
 
 
