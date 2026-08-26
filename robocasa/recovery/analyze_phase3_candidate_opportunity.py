@@ -49,6 +49,15 @@ def _read_jsonl(path: Path):
         return [json.loads(line) for line in stream if line.strip()]
 
 
+def _source_artifact_hash(path: Path, *, optional=False):
+    """Hash a frozen source artifact, preserving an absent optional ledger."""
+    if path.is_file():
+        return sha256_file(path)
+    if optional and not path.exists():
+        return None
+    raise FileNotFoundError(f"Phase 2 artifact is missing: {path}")
+
+
 def _jsonable(value: Any):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -307,18 +316,21 @@ def analyze_candidate_opportunity(
     analysis_path = root / "analysis.json"
     branches_path = root / "branch_records.jsonl"
     errors_path = root / "errors.jsonl"
-    for path in (plan_path, analysis_path, branches_path, errors_path):
-        if not path.is_file():
-            raise FileNotFoundError(f"Phase 2 artifact is missing: {path}")
     source_hashes_before = {
-        path.name: sha256_file(path)
-        for path in (plan_path, analysis_path, branches_path, errors_path)
+        plan_path.name: _source_artifact_hash(plan_path),
+        analysis_path.name: _source_artifact_hash(analysis_path),
+        branches_path.name: _source_artifact_hash(branches_path),
+        errors_path.name: _source_artifact_hash(errors_path, optional=True),
     }
     plan = _read_json(plan_path)
     phase2_analysis = _read_json(analysis_path)
     records = _read_jsonl(branches_path)
-    errors = _read_jsonl(errors_path)
-    if phase2_analysis.get("all_pass") is not True or errors:
+    errors = _read_jsonl(errors_path) if errors_path.is_file() else []
+    if (
+        phase2_analysis.get("all_pass") is not True
+        or int(phase2_analysis.get("errors", -1)) != 0
+        or errors
+    ):
         raise ValueError("Phase 3 requires a zero-error, all-pass Phase 2 source")
     if plan.get("branch_policy_connection_mode") != "shared_restored":
         raise ValueError("Phase 3 requires shared-restored Phase 2 policy state")
@@ -492,8 +504,10 @@ def analyze_candidate_opportunity(
         "oracle_headroom_at_least_0p15": macro["oracle_headroom"] >= 0.15,
     }
     source_hashes_after = {
-        path.name: sha256_file(path)
-        for path in (plan_path, analysis_path, branches_path, errors_path)
+        plan_path.name: _source_artifact_hash(plan_path),
+        analysis_path.name: _source_artifact_hash(analysis_path),
+        branches_path.name: _source_artifact_hash(branches_path),
+        errors_path.name: _source_artifact_hash(errors_path, optional=True),
     }
     if source_hashes_before != source_hashes_after:
         raise RuntimeError("Phase 2 source artifacts changed during analysis")
@@ -505,6 +519,7 @@ def analyze_candidate_opportunity(
         "phase2_run_dir": str(root),
         "phase2_source_hashes": source_hashes_before,
         "phase2_source_unchanged": True,
+        "phase2_error_ledger_present": errors_path.is_file(),
         "tasks": sorted(task_summary),
         "parents": len({row["parent_id"] for row in snapshot_rows}),
         "snapshots": len(snapshot_rows),

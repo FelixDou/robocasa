@@ -12,6 +12,9 @@ critic can identify the useful candidate online.
 
 - Input must be a zero-error Phase 2 run for which every engineering validity
   gate passed and `branch_policy_connection_mode` is `shared_restored`.
+- Phase 2 only writes `errors.jsonl` after an error. A missing ledger is
+  therefore accepted only when frozen `analysis.json` explicitly records zero
+  errors; its absence is recorded as `null` in the Phase 3 source provenance.
 - The two same-seed repeats are a reproducibility control and collapse to one
   nominal outcome. Their outcomes must agree exactly.
 - The environment-only branch is a restore diagnostic and is excluded from

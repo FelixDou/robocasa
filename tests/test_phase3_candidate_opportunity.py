@@ -89,7 +89,13 @@ def _write_branch(root, *, snapshot, parent, kind, seed, completed, marker, repe
     }
 
 
-def _write_source(root, *, all_pass=True, disagree_nominal=False):
+def _write_source(
+    root,
+    *,
+    all_pass=True,
+    disagree_nominal=False,
+    write_empty_error_ledger=True,
+):
     plan = {
         "schema_version": 4,
         "protocol": "phase2_complete_snapshot_replay",
@@ -105,8 +111,9 @@ def _write_source(root, *, all_pass=True, disagree_nominal=False):
         "branch_policy_connection_mode": "shared_restored",
     }
     (root / "plan.json").write_text(json.dumps(plan))
-    (root / "analysis.json").write_text(json.dumps({"all_pass": all_pass}))
-    (root / "errors.jsonl").write_text("")
+    (root / "analysis.json").write_text(json.dumps({"all_pass": all_pass, "errors": 0}))
+    if write_empty_error_ledger:
+        (root / "errors.jsonl").write_text("")
     (root / "snapshots").mkdir()
 
     rows = []
@@ -195,6 +202,7 @@ class Phase3CandidateOpportunityTest(unittest.TestCase):
                 0.0,
             )
             self.assertTrue(analysis["phase2_source_unchanged"])
+            self.assertTrue(analysis["phase2_error_ledger_present"])
 
             candidates = [
                 json.loads(line)
@@ -210,6 +218,25 @@ class Phase3CandidateOpportunityTest(unittest.TestCase):
             self.assertTrue((output / "analysis.json").is_file())
             with (output / "snapshot_opportunity.csv").open() as stream:
                 self.assertEqual(len(list(csv.DictReader(stream))), 2)
+
+    def test_accepts_absent_zero_error_ledger_without_mutating_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "phase2"
+            output = Path(directory) / "phase3"
+            root.mkdir()
+            _write_source(root, write_empty_error_ledger=False)
+
+            analysis = analyze_candidate_opportunity(
+                root,
+                output,
+                bootstrap_replicates=10,
+                bootstrap_seed=3,
+            )
+
+            self.assertFalse(analysis["phase2_error_ledger_present"])
+            self.assertIsNone(analysis["phase2_source_hashes"]["errors.jsonl"])
+            self.assertTrue(analysis["phase2_source_unchanged"])
+            self.assertFalse((root / "errors.jsonl").exists())
 
     def test_rejects_invalid_phase2_gate(self):
         with tempfile.TemporaryDirectory() as directory:
