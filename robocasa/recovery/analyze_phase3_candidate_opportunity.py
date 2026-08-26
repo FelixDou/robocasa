@@ -226,9 +226,8 @@ def _branch_outcome(root, plan, record):
             f"Snapshot {record['snapshot_id']} trigger predicate "
             f"{active_stage!r} was already complete"
         )
-    stage_completed = any(
-        bool(value.get("task_success", False)) or _predicate_value(value, active_stage)
-        for value in subtask_evals[1:]
+    stage_completed = bool(record.get("task_success")) or any(
+        _predicate_value(value, active_stage) for value in subtask_evals[1:]
     )
     initial_progress = float(subtask_evals[0].get("subtask_progress", 0.0))
     final_progress = float(subtask_evals[-1].get("subtask_progress", 0.0))

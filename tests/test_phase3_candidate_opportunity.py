@@ -9,6 +9,7 @@ import unittest
 import numpy as np
 
 from robocasa.recovery.analyze_phase3_candidate_opportunity import (
+    _branch_outcome,
     analyze_candidate_opportunity,
 )
 from robocasa.recovery.counterfactual_branch import branch_payload_digest
@@ -293,6 +294,28 @@ class Phase3CandidateOpportunityTest(unittest.TestCase):
             self.assertIsNone(analysis["phase2_source_hashes"]["errors.jsonl"])
             self.assertTrue(analysis["phase2_source_unchanged"])
             self.assertFalse((root / "errors.jsonl").exists())
+
+    def test_full_task_success_satisfies_primary_outcome(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "phase2"
+            root.mkdir()
+            _write_source(root)
+            plan = json.loads((root / "plan.json").read_text())
+            records = [
+                json.loads(line)
+                for line in (root / "branch_records.jsonl").read_text().splitlines()
+            ]
+            record = next(
+                row
+                for row in records
+                if row["kind"] == "candidate" and row["sampling_seed"] == 1001
+            )
+            record["task_success"] = True
+
+            outcome = _branch_outcome(root, plan, record)
+
+            self.assertTrue(outcome["stage_completed"])
+            self.assertTrue(outcome["task_success"])
 
     def test_rejects_invalid_phase2_gate(self):
         with tempfile.TemporaryDirectory() as directory:
