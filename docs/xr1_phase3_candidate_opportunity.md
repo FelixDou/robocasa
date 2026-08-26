@@ -24,6 +24,9 @@ critic can identify the useful candidate online.
   within the Phase 2 frozen suffix horizon.
 - Candidate payloads are not copied. The manifest stores their immutable paths,
   compressed-file hashes, scientific-payload hashes, and action/feature hashes.
+- Phase 2 embeds `payload_sha256` inside the saved payload after computing it.
+  Verification reproduces that original definition by excluding only the
+  embedded checksum field; every scientific payload field remains covered.
 - Task-macro estimates give every task equal weight. Uncertainty bootstraps
   task, then parent, then snapshot.
 - Optional SAFE ranking uses the already-frozen three-seed independent SAFE

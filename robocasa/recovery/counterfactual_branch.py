@@ -39,6 +39,24 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def branch_payload_digest(payload):
+    """Hash branch content without recursively hashing its embedded checksum.
+
+    Phase 2 stores the checksum inside ``payload["summary"]`` for artifact
+    self-description.  The checksum is defined over the payload before that
+    field is inserted.  Temporarily removing only that field makes the digest
+    reproducible after loading while leaving the in-memory payload unchanged.
+    """
+    summary = payload.get("summary") if isinstance(payload, dict) else None
+    if not isinstance(summary, dict) or "payload_sha256" not in summary:
+        return stable_digest(payload)
+    embedded = summary.pop("payload_sha256")
+    try:
+        return stable_digest(payload)
+    finally:
+        summary["payload_sha256"] = embedded
+
+
 @dataclass(frozen=True)
 class BranchSpec:
     branch_id: str
@@ -354,7 +372,7 @@ def run_counterfactual_branch(
     }
     if repeat_observations is not None:
         payload["observations"] = repeat_observations
-    summary["payload_sha256"] = stable_digest(payload)
+    summary["payload_sha256"] = branch_payload_digest(payload)
     return {"summary": summary, "payload": payload}
 
 
@@ -603,6 +621,7 @@ __all__ = [
     "BRANCH_SCHEMA_VERSION",
     "BranchSpec",
     "analyze_phase2_replay",
+    "branch_payload_digest",
     "load_branch_records",
     "run_counterfactual_branch",
     "save_branch_result",

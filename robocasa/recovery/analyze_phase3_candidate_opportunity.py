@@ -25,6 +25,7 @@ from typing import Any
 
 import numpy as np
 
+from robocasa.recovery.counterfactual_branch import branch_payload_digest
 from robocasa.recovery.full_snapshot import stable_digest
 
 
@@ -109,7 +110,13 @@ def _load_payload(root: Path, record):
     with gzip.open(path, "rb") as stream:
         payload = pickle.load(stream)  # noqa: S301 - trusted experiment artifact
     expected = record.get("payload_sha256")
-    actual = stable_digest(payload)
+    embedded = (payload.get("summary") or {}).get("payload_sha256")
+    if expected is not None and embedded is not None and embedded != expected:
+        raise ValueError(
+            f"Branch payload embedded digest mismatch for {record['branch_id']}: "
+            f"{embedded} != {expected}"
+        )
+    actual = branch_payload_digest(payload)
     if expected is not None and actual != expected:
         raise ValueError(
             f"Branch payload digest mismatch for {record['branch_id']}: "

@@ -11,6 +11,7 @@ import numpy as np
 from robocasa.recovery.analyze_phase3_candidate_opportunity import (
     analyze_candidate_opportunity,
 )
+from robocasa.recovery.counterfactual_branch import branch_payload_digest
 from robocasa.recovery.full_snapshot import stable_digest
 
 
@@ -67,6 +68,8 @@ def _payload(stage, completed, marker):
 def _write_branch(root, *, snapshot, parent, kind, seed, completed, marker, repeat=0):
     branch_id = f"{snapshot}-{kind}-{seed}-{repeat}"
     payload = _payload("active_stage", completed, marker)
+    payload_sha256 = branch_payload_digest(payload)
+    payload["summary"]["payload_sha256"] = payload_sha256
     payload_path = root / "branches" / f"{branch_id}.pkl.gz"
     payload_path.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(payload_path, "wb") as stream:
@@ -85,7 +88,7 @@ def _write_branch(root, *, snapshot, parent, kind, seed, completed, marker, repe
         "num_steps": 4,
         "num_policy_requests": 1,
         "payload_path": str(payload_path.relative_to(root)),
-        "payload_sha256": stable_digest(payload),
+        "payload_sha256": payload_sha256,
     }
 
 
@@ -171,6 +174,18 @@ def _write_source(
 
 
 class Phase3CandidateOpportunityTest(unittest.TestCase):
+    def test_branch_payload_digest_excludes_only_embedded_checksum(self):
+        payload = _payload("active_stage", True, 3)
+        expected = branch_payload_digest(payload)
+        payload["summary"]["payload_sha256"] = expected
+
+        self.assertEqual(branch_payload_digest(payload), expected)
+        self.assertEqual(payload["summary"]["payload_sha256"], expected)
+        self.assertNotEqual(stable_digest(payload), expected)
+
+        payload["infos"].append({"changed": True})
+        self.assertNotEqual(branch_payload_digest(payload), expected)
+
     def test_paired_opportunity_analysis_and_frozen_safe_selection(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "phase2"
