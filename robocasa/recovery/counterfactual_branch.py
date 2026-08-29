@@ -208,7 +208,9 @@ def run_counterfactual_branch(
     environment_sha256 = []
     diagnostic_environment_sha256 = []
     request_records = []
+    request_environment_step_indices = []
     inference_records = []
+    inference_environment_step_indices = []
     rewards = []
     infos = []
     termination_reason = "suffix_horizon"
@@ -232,10 +234,14 @@ def run_counterfactual_branch(
         pop_requests = getattr(policy, "pop_request_records", None)
         current_requests = pop_requests() if callable(pop_requests) else []
         request_records.extend(deepcopy(current_requests))
+        request_environment_step_indices.extend(
+            [int(step_index)] * len(current_requests)
+        )
         pop_inference = getattr(policy, "pop_inference_record", None)
         inference_record = pop_inference() if callable(pop_inference) else None
         if inference_record is not None:
             inference_records.append(deepcopy(inference_record))
+            inference_environment_step_indices.append(int(step_index))
 
         obs, reward, done, info = step_fn(env, action)
         rewards.append(float(reward) if reward is not None else None)
@@ -267,7 +273,18 @@ def run_counterfactual_branch(
             termination_reason = "success"
             break
         if done:
-            termination_reason = "environment_done"
+            declared_reason = (
+                info.get("termination_reason") if isinstance(info, dict) else None
+            )
+            explicitly_unsafe = isinstance(info, dict) and bool(
+                info.get("safety_termination") or info.get("safety_violation")
+            )
+            termination_reason = (
+                "safety_termination"
+                if explicitly_unsafe
+                or "safety" in str(declared_reason or "").lower()
+                else "environment_done"
+            )
             break
 
     if spec.kind != "environment_only":
@@ -330,6 +347,8 @@ def run_counterfactual_branch(
         "request_sampling_seeds": [
             record.get("sampling_seed") for record in request_records
         ],
+        "request_environment_step_indices": request_environment_step_indices,
+        "inference_environment_step_indices": inference_environment_step_indices,
         "suffix_request_sha256": [
             stable_digest(record) for record in request_records
         ],
