@@ -31,6 +31,8 @@ def main(argv=None):
     print("branches:", len(records), "/", registration["expected_branches"])
     print("first-64 exact:", sum(bool(row.get("first64_exact")) for row in records), "/", len(records))
     print("errors:", len(errors))
+    if status["status"] == "failed":
+        print("failure:", status.get("error_type"), status.get("error"))
     if not (root / "analysis.json").is_file():
         print("Engineering analysis is not frozen yet.")
         return

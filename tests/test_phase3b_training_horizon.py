@@ -1,20 +1,66 @@
+import gzip
+import hashlib
 import json
 from pathlib import Path
+import pickle
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from robocasa.recovery.phase3b_training_horizon import (
     PHASE3B_TASK_HORIZONS,
     build_registration,
     completion_event,
     first64_equality_audit,
+    load_registered_phase2_snapshot,
     route_phase3b,
     sha256_file,
     validate_registration_source,
 )
+from robocasa.recovery.full_snapshot import (
+    FULL_SNAPSHOT_PROTOCOL,
+    FULL_SNAPSHOT_SCHEMA_VERSION,
+    FullSnapshot,
+    load_full_snapshot,
+    save_full_snapshot,
+    stable_digest,
+)
+from robocasa.recovery.run_phase3b_training_horizon_continuation import main
 
 
 TASKS = ("ArrangeTea", "CuttingToolSelection")
+
+
+def _snapshot(path: Path):
+    snapshot = FullSnapshot(
+        schema_version=FULL_SNAPSHOT_SCHEMA_VERSION,
+        protocol=FULL_SNAPSHOT_PROTOCOL,
+        snapshot_id="",
+        parent_id="parent",
+        task_name="ArrangeTea",
+        trigger_name="prefix",
+        environment_step=16,
+        captured_at="2026-08-30T00:00:00+00:00",
+        environment_state={"state": [1, 2]},
+        simulator_integration_state={},
+        controller_state=[],
+        policy_state={"at_inference_boundary": True},
+        observation={"state": [3, 4]},
+        subtask_eval={},
+        tracker_state=None,
+        global_rng_state={},
+        environment_rng_state=[],
+        environment_control_state=[],
+        metadata={},
+        payload_sha256="",
+    )
+    snapshot.payload_sha256 = stable_digest(snapshot.payload())
+    snapshot.snapshot_id = hashlib.sha256(
+        f"{snapshot.parent_id}:{snapshot.trigger_name}:"
+        f"{snapshot.environment_step}:{snapshot.payload_sha256}".encode()
+    ).hexdigest()[:24]
+    save_full_snapshot(snapshot, path)
+    return snapshot
 
 
 def _write_phase2_source(root: Path):
@@ -107,6 +153,86 @@ def _write_phase2_source(root: Path):
 
 
 class Phase3BTrainingHorizonTest(unittest.TestCase):
+    def test_early_cli_failure_finalizes_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "run"
+            output.mkdir()
+            with patch(
+                "robocasa.recovery.run_phase3b_training_horizon_continuation.run",
+                side_effect=ValueError("snapshot rejected"),
+            ):
+                with self.assertRaisesRegex(SystemExit, "snapshot rejected"):
+                    main(
+                        [
+                            "--phase2-run-dir",
+                            str(Path(directory) / "phase2"),
+                            "--output-dir",
+                            str(output),
+                            "--scope",
+                            "sentinel",
+                            "--model-path",
+                            str(Path(directory) / "model"),
+                        ]
+                    )
+            status = json.loads((output / "status.json").read_text())
+            self.assertEqual(status["status"], "failed")
+            self.assertEqual(status["error_type"], "ValueError")
+            self.assertEqual(status["error"], "snapshot rejected")
+
+    def test_registered_snapshot_loader_keeps_general_loader_strict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.pkl.gz"
+            expected = _snapshot(path)
+
+            loaded, audit = load_registered_phase2_snapshot(
+                path,
+                expected_file_sha256=sha256_file(path),
+                expected_snapshot_id=expected.snapshot_id,
+                expected_parent_id=expected.parent_id,
+                expected_task_name=expected.task_name,
+            )
+
+            self.assertEqual(loaded.snapshot_id, expected.snapshot_id)
+            self.assertTrue(audit["strict_internal_checksums_exact"])
+            self.assertIn("strict_internal_checksums", audit["loading_mode"])
+
+    def test_registered_snapshot_loader_anchors_legacy_fallback_to_file_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.pkl.gz"
+            expected = _snapshot(path)
+            with gzip.open(path, "rb") as stream:
+                envelope = pickle.load(stream)
+            envelope["snapshot"].metadata["legacy_process_local_value"] = "changed"
+            with gzip.open(path, "wb") as stream:
+                pickle.dump(envelope, stream, protocol=5)
+            frozen_file_sha256 = sha256_file(path)
+
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                load_full_snapshot(path)
+
+            loaded, audit = load_registered_phase2_snapshot(
+                path,
+                expected_file_sha256=frozen_file_sha256,
+                expected_snapshot_id=expected.snapshot_id,
+                expected_parent_id=expected.parent_id,
+                expected_task_name=expected.task_name,
+            )
+
+            self.assertEqual(loaded.snapshot_id, expected.snapshot_id)
+            self.assertFalse(audit["strict_internal_checksums_exact"])
+            self.assertEqual(
+                audit["loading_mode"],
+                "legacy_schema5_registered_file_sha256_and_embedded_identity",
+            )
+            with self.assertRaisesRegex(ValueError, "file changed"):
+                load_registered_phase2_snapshot(
+                    path,
+                    expected_file_sha256="0" * 64,
+                    expected_snapshot_id=expected.snapshot_id,
+                    expected_parent_id=expected.parent_id,
+                    expected_task_name=expected.task_name,
+                )
+
     def test_sentinel_selection_and_registered_horizons_are_deterministic(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "phase2"

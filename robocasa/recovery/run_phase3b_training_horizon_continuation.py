@@ -24,13 +24,14 @@ from robocasa.recovery.counterfactual_branch import (
     run_counterfactual_branch,
     save_branch_result,
 )
-from robocasa.recovery.full_snapshot import load_full_snapshot, restore_full_snapshot
+from robocasa.recovery.full_snapshot import restore_full_snapshot
 from robocasa.recovery.phase3b_training_horizon import (
     annotate_continued_result,
     atomic_write_json,
     build_registration,
     first64_equality_audit,
     load_branch_payload,
+    load_registered_phase2_snapshot,
     read_jsonl,
     sha256_file,
     validate_registration_source,
@@ -52,6 +53,34 @@ def _append_jsonl(path: Path, row: dict) -> None:
     rows = read_jsonl(path)
     rows.append(row)
     write_jsonl(path, rows)
+
+
+def _record_snapshot_integrity_audit(path: Path, audit: dict) -> None:
+    rows = {row["snapshot_id"]: row for row in read_jsonl(path)}
+    rows[audit["snapshot_id"]] = audit
+    write_jsonl(path, [rows[key] for key in sorted(rows)])
+
+
+def _load_registered_snapshot(
+    source_root: Path,
+    registration: dict,
+    selected: dict,
+    output_dir: Path,
+):
+    snapshot_id = selected["snapshot_id"]
+    snapshot, audit = load_registered_phase2_snapshot(
+        source_root / "snapshots" / f"{snapshot_id}.pkl.gz",
+        expected_file_sha256=registration["phase2_snapshot_file_sha256"][
+            snapshot_id
+        ],
+        expected_snapshot_id=snapshot_id,
+        expected_parent_id=selected["parent_id"],
+        expected_task_name=selected["task_name"],
+    )
+    _record_snapshot_integrity_audit(
+        output_dir / "snapshot_integrity_audits.jsonl", audit
+    )
+    return snapshot
 
 
 def _source_plan(registration: dict) -> dict:
@@ -175,6 +204,9 @@ def _execute_registered_branch(
 def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
     records = load_branch_records(output_dir / "branch_records.jsonl")
     errors = read_jsonl(output_dir / "errors.jsonl")
+    snapshot_integrity = read_jsonl(
+        output_dir / "snapshot_integrity_audits.jsonl"
+    )
     phase2_style = analyze_phase2_replay(records, errors)
     registered = {row["branch_id"]: row for row in registration["registered_branches"]}
     record_ids = {row["branch_id"] for row in records}
@@ -215,6 +247,23 @@ def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
     }
     gates = {
         "frozen_source_hashes_exact": True,
+        "snapshot_integrity_audit_complete": {
+            row["snapshot_id"] for row in snapshot_integrity
+        }
+        == {
+            row["snapshot_id"] for row in registration["selected_snapshots"]
+        },
+        "snapshot_registered_file_hashes_exact": bool(snapshot_integrity)
+        and all(
+            row.get("registered_file_sha256_exact")
+            for row in snapshot_integrity
+        ),
+        "snapshot_embedded_identities_exact": bool(snapshot_integrity)
+        and all(
+            row.get("embedded_snapshot_id_exact") for row in snapshot_integrity
+        ),
+        "snapshot_integrity_records_accepted": bool(snapshot_integrity)
+        and all(row.get("accepted") for row in snapshot_integrity),
         "registered_branch_support_complete": record_ids == set(registered),
         "first64_all_channels_exact": prefix_exact,
         "same_seed_repeats_exact": bool(repeat_gates)
@@ -238,6 +287,20 @@ def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
         "branches": len(records),
         "expected_branches": registration["expected_branches"],
         "errors": len(errors),
+        "snapshot_integrity": {
+            "audited_snapshots": len(snapshot_integrity),
+            "strict_internal_checksum_snapshots": sum(
+                bool(row.get("strict_internal_checksums_exact"))
+                for row in snapshot_integrity
+            ),
+            "legacy_schema5_compatibility_snapshots": sum(
+                row.get("loading_mode")
+                == "legacy_schema5_registered_file_sha256_and_embedded_identity"
+                for row in snapshot_integrity
+            ),
+            "all_accepted": bool(snapshot_integrity)
+            and all(row.get("accepted") for row in snapshot_integrity),
+        },
         "engineering_gates": gates,
         "engineering_all_pass": all(gates.values()),
         "scientific_outcomes_used_as_engineering_gate": False,
@@ -314,10 +377,11 @@ def run(args, runtime=None):
         by_parent[snapshot["parent_id"]].append(snapshot)
 
     for parent_id, selected_snapshots in sorted(by_parent.items()):
-        first_snapshot = load_full_snapshot(
-            source_root
-            / "snapshots"
-            / f"{selected_snapshots[0]['snapshot_id']}.pkl.gz"
+        first_snapshot = _load_registered_snapshot(
+            source_root,
+            registration,
+            selected_snapshots[0],
+            output_dir,
         )
         base_env = _make_fresh_branch_environment(first_snapshot, runtime_args, runtime)
         policy = None
@@ -340,8 +404,11 @@ def run(args, runtime=None):
                 selected_snapshots,
                 key=lambda row: (row["boundary"] != "prefix", row["snapshot_id"]),
             ):
-                snapshot = load_full_snapshot(
-                    source_root / "snapshots" / f"{selected['snapshot_id']}.pkl.gz"
+                snapshot = _load_registered_snapshot(
+                    source_root,
+                    registration,
+                    selected,
+                    output_dir,
                 )
                 for registered in grouped[snapshot.snapshot_id]:
                     branch_id = registered["branch_id"]
@@ -439,7 +506,29 @@ def main(argv=None):
     try:
         run(args)
     except (ValueError, FileExistsError, FileNotFoundError) as error:
+        if args.output_dir.is_dir():
+            atomic_write_json(
+                args.output_dir / "status.json",
+                {
+                    "status": "failed",
+                    "updated_at": utc_now(),
+                    "error_type": type(error).__name__,
+                    "error": str(error),
+                },
+            )
         raise SystemExit(f"error: {error}") from error
+    except Exception as error:
+        if args.output_dir.is_dir():
+            atomic_write_json(
+                args.output_dir / "status.json",
+                {
+                    "status": "failed",
+                    "updated_at": utc_now(),
+                    "error_type": type(error).__name__,
+                    "error": str(error),
+                },
+            )
+        raise
 
 
 if __name__ == "__main__":

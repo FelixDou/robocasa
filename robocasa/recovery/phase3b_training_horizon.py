@@ -24,10 +24,15 @@ from robocasa.recovery.counterfactual_branch import (
     branch_payload_digest,
     load_branch_records,
 )
-from robocasa.recovery.full_snapshot import stable_digest
+from robocasa.recovery.full_snapshot import (
+    FULL_SNAPSHOT_PROTOCOL,
+    FULL_SNAPSHOT_SCHEMA_VERSION,
+    FullSnapshot,
+    stable_digest,
+)
 
 
-PHASE3B_SCHEMA_VERSION = 1
+PHASE3B_SCHEMA_VERSION = 2
 PHASE3B_PROTOCOL = "phase3b_training_horizon_continuation"
 PHASE3B_TASK_HORIZONS = {
     "ArrangeTea": 480,
@@ -109,6 +114,115 @@ def load_branch_payload(root: str | Path, record: dict) -> dict:
     # runtime can yield a false mismatch.  File hash + embedded/ledger equality
     # is therefore the cross-runtime integrity contract.
     return payload
+
+
+def _is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def load_registered_phase2_snapshot(
+    path: str | Path,
+    *,
+    expected_file_sha256: str,
+    expected_snapshot_id: str,
+    expected_parent_id: str,
+    expected_task_name: str,
+) -> tuple[FullSnapshot, dict]:
+    """Load a frozen Phase 2 snapshot under the registered file-hash contract.
+
+    Phase 2 schema-5 snapshots were written with a legacy ``stable_digest``
+    that can hash process-local representations of a few diagnostic objects.
+    Consequently, recomputing the embedded payload and envelope checksums in a
+    new process can fail even when the compressed snapshot file is bit-for-bit
+    unchanged. Phase 3B may use the compatibility path only when the exact
+    file SHA-256 frozen in its checksummed registration matches and the
+    snapshot's embedded identity is self-consistent with its embedded payload
+    checksum. General snapshot loading remains strict.
+    """
+    path = Path(path)
+    frozen_bytes = path.read_bytes()
+    actual_file_sha256 = hashlib.sha256(frozen_bytes).hexdigest()
+    if actual_file_sha256 != expected_file_sha256:
+        raise ValueError(f"Frozen snapshot file changed: {expected_snapshot_id}")
+
+    envelope = pickle.loads(  # noqa: S301 - trusted, file-hash-anchored artifact
+        gzip.decompress(frozen_bytes)
+    )
+    if envelope.get("schema_version") != FULL_SNAPSHOT_SCHEMA_VERSION:
+        raise ValueError("Unsupported FullSnapshot file schema")
+    snapshot = envelope.get("snapshot")
+    if not isinstance(snapshot, FullSnapshot):
+        raise ValueError("Snapshot file does not contain FullSnapshot")
+
+    if snapshot.schema_version != FULL_SNAPSHOT_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported FullSnapshot schema {snapshot.schema_version}; "
+            f"expected {FULL_SNAPSHOT_SCHEMA_VERSION}"
+        )
+    if snapshot.protocol != FULL_SNAPSHOT_PROTOCOL:
+        raise ValueError(f"Unexpected snapshot protocol: {snapshot.protocol}")
+    expected_identity = {
+        "snapshot_id": str(expected_snapshot_id),
+        "parent_id": str(expected_parent_id),
+        "task_name": str(expected_task_name),
+    }
+    actual_identity = {
+        "snapshot_id": snapshot.snapshot_id,
+        "parent_id": snapshot.parent_id,
+        "task_name": snapshot.task_name,
+    }
+    if actual_identity != expected_identity:
+        raise ValueError(
+            f"Frozen snapshot identity mismatch for {expected_snapshot_id}: "
+            f"{actual_identity} != {expected_identity}"
+        )
+    if not _is_sha256(snapshot.payload_sha256):
+        raise ValueError(f"Invalid embedded payload checksum: {expected_snapshot_id}")
+    if not _is_sha256(envelope.get("snapshot_sha256")):
+        raise ValueError(f"Invalid embedded envelope checksum: {expected_snapshot_id}")
+    embedded_id = hashlib.sha256(
+        f"{snapshot.parent_id}:{snapshot.trigger_name}:"
+        f"{snapshot.environment_step}:{snapshot.payload_sha256}".encode()
+    ).hexdigest()[:24]
+    if embedded_id != snapshot.snapshot_id:
+        raise ValueError(f"Embedded snapshot ID mismatch: {expected_snapshot_id}")
+
+    envelope_checksum_exact = stable_digest(snapshot) == envelope["snapshot_sha256"]
+    payload_checksum_exact = stable_digest(snapshot.payload()) == snapshot.payload_sha256
+    strict_internal_checksums_exact = bool(
+        envelope_checksum_exact and payload_checksum_exact
+    )
+    strict_error = (
+        None
+        if strict_internal_checksums_exact
+        else "Legacy schema-5 internal checksum is process-dependent"
+    )
+    loading_mode = (
+        "strict_internal_checksums_and_registered_file_sha256"
+        if strict_internal_checksums_exact
+        else "legacy_schema5_registered_file_sha256_and_embedded_identity"
+    )
+    audit = {
+        "snapshot_id": snapshot.snapshot_id,
+        "parent_id": snapshot.parent_id,
+        "task_name": snapshot.task_name,
+        "snapshot_path": str(path),
+        "registered_file_sha256": expected_file_sha256,
+        "actual_file_sha256": actual_file_sha256,
+        "registered_file_sha256_exact": True,
+        "embedded_snapshot_id_exact": True,
+        "internal_envelope_checksum_exact": envelope_checksum_exact,
+        "internal_payload_checksum_exact": payload_checksum_exact,
+        "strict_internal_checksums_exact": strict_internal_checksums_exact,
+        "strict_load_error": strict_error,
+        "loading_mode": loading_mode,
+        "accepted": True,
+    }
+    return snapshot, audit
 
 
 def _source_paths(root: Path) -> dict[str, Path]:
@@ -352,6 +466,13 @@ def build_registration(
         "phase2_run_dir": str(root),
         "phase2_source_hashes": source_hashes,
         "phase2_snapshot_file_sha256": snapshot_hashes,
+        "snapshot_integrity_policy": {
+            "primary": "strict_internal_checksums_and_registered_file_sha256",
+            "schema5_compatibility": (
+                "registered_file_sha256_and_embedded_snapshot_identity"
+            ),
+            "general_full_snapshot_loader_remains_strict": True,
+        },
         "phase2_branch_payload_file_sha256": payload_hashes,
         "phase3b_code_file_sha256": {
             name: sha256_file(path) for name, path in _phase3b_code_paths().items()
