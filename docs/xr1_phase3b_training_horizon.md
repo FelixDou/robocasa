@@ -18,6 +18,15 @@ The sentinel is not a scientific stopping screen. It can block the full run
 only for provenance, support, replay-prefix, repeat, restore, or artifact
 failures.
 
+Phase 2 schema-5 snapshots contain a legacy in-memory checksum that is
+process-dependent for some diagnostic values. Phase 3B therefore keeps the
+general snapshot loader strict but uses a registered compatibility contract:
+the compressed snapshot must exactly match the SHA-256 frozen in the
+checksummed Phase 3B registration, and its embedded snapshot ID, parent, task,
+protocol, schema, and payload-checksum-derived identity must all agree. Every
+accepted snapshot is written to `snapshot_integrity_audits.jsonl`; the
+engineering sentinel fails unless this ledger covers all four snapshots.
+
 ## Fresh-session exports and preflight
 
 ```bash
@@ -122,15 +131,19 @@ nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
   > "$XR1_PHASE3B_SENTINEL_LOG" 2>&1 &
 export XR1_PHASE3B_SENTINEL_PID=$!
 
-printf 'export XR1_PHASE3B_SENTINEL=%q\nexport XR1_PHASE3B_SENTINEL_LOG=%q\nexport XR1_PHASE3B_SENTINEL_PID=%q\n' \
-  "$XR1_PHASE3B_SENTINEL" "$XR1_PHASE3B_SENTINEL_LOG" "$XR1_PHASE3B_SENTINEL_PID" \
+printf 'export STORAGE_BS=%q\nexport ROBOCASA_REPO=%q\nexport XR1_CLIENT_ENV=%q\nexport XR1_PHASE2_ROOT=%q\nexport XR1_PHASE2_MODEL_PATH=%q\nexport XR1_PHASE3B_PORT=%q\nexport XR1_PHASE3B_SENTINEL=%q\nexport XR1_PHASE3B_SENTINEL_LOG=%q\nexport XR1_PHASE3B_SENTINEL_PID=%q\n' \
+  "$STORAGE_BS" "$ROBOCASA_REPO" "$XR1_CLIENT_ENV" "$XR1_PHASE2_ROOT" \
+  "$XR1_PHASE2_MODEL_PATH" "$XR1_PHASE3B_PORT" "$XR1_PHASE3B_SENTINEL" \
+  "$XR1_PHASE3B_SENTINEL_LOG" "$XR1_PHASE3B_SENTINEL_PID" \
   > "$STORAGE_BS/robocasa_checkpoints/safe/xr1_phase3b_sentinel_latest.env"
 ```
 
 Monitor from another shell:
 
 ```bash
+export STORAGE_BS=/gs/bs/tga-shinoda/felid
 source "$STORAGE_BS/robocasa_checkpoints/safe/xr1_phase3b_sentinel_latest.env"
+cd "$ROBOCASA_REPO"
 while kill -0 "$XR1_PHASE3B_SENTINEL_PID" 2>/dev/null; do
   clear
   date
@@ -179,7 +192,9 @@ nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
   > "$XR1_PHASE3B_FULL_LOG" 2>&1 &
 export XR1_PHASE3B_FULL_PID=$!
 
-printf 'export XR1_PHASE3B_FULL=%q\nexport XR1_PHASE3B_FULL_LOG=%q\nexport XR1_PHASE3B_FULL_PID=%q\n' \
+printf 'export STORAGE_BS=%q\nexport ROBOCASA_REPO=%q\nexport XR1_CLIENT_ENV=%q\nexport XR1_PHASE2_ROOT=%q\nexport XR1_PHASE2_MODEL_PATH=%q\nexport XR1_PHASE3B_PORT=%q\nexport XR1_PHASE3B_SENTINEL=%q\nexport XR1_PHASE3B_FULL=%q\nexport XR1_PHASE3B_FULL_LOG=%q\nexport XR1_PHASE3B_FULL_PID=%q\n' \
+  "$STORAGE_BS" "$ROBOCASA_REPO" "$XR1_CLIENT_ENV" "$XR1_PHASE2_ROOT" \
+  "$XR1_PHASE2_MODEL_PATH" "$XR1_PHASE3B_PORT" "$XR1_PHASE3B_SENTINEL" \
   "$XR1_PHASE3B_FULL" "$XR1_PHASE3B_FULL_LOG" "$XR1_PHASE3B_FULL_PID" \
   > "$STORAGE_BS/robocasa_checkpoints/safe/xr1_phase3b_full_latest.env"
 ```
