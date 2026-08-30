@@ -137,6 +137,7 @@ def run_counterfactual_branch(
     restore_atol=1e-8,
     restore_rtol=1e-8,
     verify_restored_observation=True,
+    snapshot_integrity_prevalidated=False,
 ):
     """Restore one branch point and execute a declared finite suffix."""
     from robocasa.recovery.recovery_rollout import (
@@ -150,7 +151,8 @@ def run_counterfactual_branch(
     )
 
     spec.validate()
-    snapshot.validate()
+    if not snapshot_integrity_prevalidated:
+        snapshot.validate()
     step_fn = step_fn or _step_env
     success_fn = success_fn or _is_task_success
     subtask_eval_fn = subtask_eval_fn or get_subtask_eval
@@ -165,6 +167,7 @@ def run_counterfactual_branch(
             atol=restore_atol,
             rtol=restore_rtol,
             verify_observation=verify_restored_observation,
+            snapshot_integrity_prevalidated=snapshot_integrity_prevalidated,
         )
         if not restore_audit["valid"]:
             raise RuntimeError(

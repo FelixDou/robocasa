@@ -172,7 +172,12 @@ def _execute_registered_branch(
     branch_env = _make_fresh_branch_environment(snapshot, runtime_args, runtime)
     try:
         if spec.kind == "environment_only":
-            restore_full_snapshot(snapshot, branch_env, policy)
+            restore_full_snapshot(
+                snapshot,
+                branch_env,
+                policy,
+                snapshot_integrity_prevalidated=True,
+            )
             mutation_action = runtime["call_policy"](
                 policy, deepcopy(snapshot.observation)
             )
@@ -193,6 +198,7 @@ def _execute_registered_branch(
             subtask_eval_fn=runtime["get_subtask_eval"],
             restore_atol=runtime_args.restore_atol,
             restore_rtol=runtime_args.restore_rtol,
+            snapshot_integrity_prevalidated=True,
         )
         audit = first64_equality_audit(source_record, source_payload, result)
         annotate_continued_result(result, registration_branch, audit)

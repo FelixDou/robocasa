@@ -863,15 +863,23 @@ def restore_full_snapshot(
     atol=1e-8,
     rtol=1e-8,
     verify_observation=True,
+    snapshot_integrity_prevalidated=False,
 ) -> dict:
-    """Restore all declared state and return an exact round-trip audit."""
+    """Restore all declared state and return an exact round-trip audit.
+
+    ``snapshot_integrity_prevalidated`` is reserved for a caller that already
+    applied a stronger artifact-specific integrity contract. The default
+    remains the strict embedded-checksum validation used by Phase 2 and all
+    general snapshot consumers.
+    """
     from robocasa.recovery.recovery_rollout import (
         _capture_state,
         _get_obs_after_state_change,
         _reset_to_state,
     )
 
-    snapshot.validate()
+    if not snapshot_integrity_prevalidated:
+        snapshot.validate()
     setter = getattr(policy, "set_state", None)
     if not callable(setter):
         raise TypeError("Policy must expose set_state() for complete snapshots")
