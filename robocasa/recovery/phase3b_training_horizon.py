@@ -2,9 +2,10 @@
 
 Phase 3B is deliberately a continuation of the frozen Phase 2 experiment.  It
 does not recollect parents, choose new snapshots, or draw new treatment seeds.
-The engineering sentinel replays four deterministically selected snapshots and
-must reproduce every causal channel of the original 64-step suffix before the
-full 20-snapshot screen is allowed to run.
+The engineering sentinel replays four deterministically selected snapshots.
+It qualifies each same-runtime 64-step reference against the frozen legacy
+artifact, then requires the long continuation to reproduce every reference
+causal channel before the full 20-snapshot screen is allowed to run.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from robocasa.recovery.full_snapshot import (
 )
 
 
-PHASE3B_SCHEMA_VERSION = 2
+PHASE3B_SCHEMA_VERSION = 3
 PHASE3B_PROTOCOL = "phase3b_training_horizon_continuation"
 PHASE3B_TASK_HORIZONS = {
     "ArrangeTea": 480,
@@ -613,6 +614,10 @@ def first64_equality_audit(
         "declared_seed": int(source_record["sampling_seed"])
         == int(continued_summary["sampling_seed"]),
     }
+    if source_record.get("stable_digest_schema_version") is not None:
+        channels["stable_digest_schema"] = source_record.get(
+            "stable_digest_schema_version"
+        ) == continued_summary.get("stable_digest_schema_version")
     audit = {
         "source_branch_id": source_record["branch_id"],
         "continued_branch_id": continued_summary["branch_id"],
@@ -646,6 +651,80 @@ def first64_equality_audit(
     return audit
 
 
+def qualify_legacy_phase2_prefix(audit: dict) -> dict:
+    """Qualify an exact replay against legacy process-local env hashes.
+
+    Phase 2 hashed ``dtype=object`` controller arrays through their raw pointer
+    bytes. A frozen Phase 2 prefix can therefore be qualified only when every
+    portable channel and the raw first causal transition are exact. The legacy
+    causal hash channel must either match outright or exhibit the observed
+    all-64 process-local mismatch signature; partial mismatches fail closed.
+    """
+    channels = audit["channels"]
+    portable_channels = {
+        name: exact for name, exact in channels.items() if name != "causal_environment"
+    }
+    mismatch_indices = audit.get("sequence_mismatch_indices", {}).get(
+        "causal_environment", []
+    )
+    causal_hash_exact = bool(channels.get("causal_environment"))
+    legacy_signature = mismatch_indices == list(range(PHASE2_PREFIX_STEPS))
+    qualified = bool(
+        all(portable_channels.values())
+        and audit.get("first_causal_transition_structure_exact")
+        and (causal_hash_exact or legacy_signature)
+    )
+    return {
+        "qualified": qualified,
+        "mode": (
+            "legacy_hashes_exact"
+            if causal_hash_exact
+            else (
+                "legacy_object_array_hash_replaced_by_two_pass_reference"
+                if qualified
+                else "rejected"
+            )
+        ),
+        "portable_channels": portable_channels,
+        "causal_environment_hash_exact": causal_hash_exact,
+        "causal_environment_mismatch_indices": mismatch_indices,
+        "first_causal_transition_structure_exact": bool(
+            audit.get("first_causal_transition_structure_exact")
+        ),
+    }
+
+
+def two_pass_first64_audit(
+    source_record: dict,
+    source_payload: dict,
+    reference_result: dict,
+    continued_result: dict,
+) -> dict:
+    """Audit legacy Phase 2 -> current reference -> long continuation."""
+    legacy_audit = first64_equality_audit(
+        source_record, source_payload, reference_result
+    )
+    legacy_qualification = qualify_legacy_phase2_prefix(legacy_audit)
+    reference_audit = first64_equality_audit(
+        reference_result["summary"],
+        reference_result["payload"],
+        continued_result,
+    )
+    return {
+        "source_branch_id": source_record["branch_id"],
+        "reference_branch_id": reference_result["summary"]["branch_id"],
+        "continued_branch_id": continued_result["summary"]["branch_id"],
+        "prefix_steps": PHASE2_PREFIX_STEPS,
+        "legacy_phase2": legacy_audit,
+        "legacy_phase2_qualification": legacy_qualification,
+        "reference_to_continuation": reference_audit,
+        "channels": deepcopy(reference_audit["channels"]),
+        "all_exact": bool(
+            legacy_qualification["qualified"] and reference_audit["all_exact"]
+        ),
+    }
+
+
 def annotate_continued_result(
     result: dict, registration_branch: dict, audit: dict
 ) -> None:
@@ -659,6 +738,13 @@ def annotate_continued_result(
             "boundary": registration_branch["boundary"],
             "first64_exact": bool(audit["all_exact"]),
             "first64_channels": deepcopy(audit["channels"]),
+            "legacy_phase2_prefix_qualified": bool(
+                audit.get("legacy_phase2_qualification", {}).get("qualified")
+            ),
+            "legacy_phase2_prefix_mode": audit.get(
+                "legacy_phase2_qualification", {}
+            ).get("mode"),
+            "prefix_reference_branch_id": audit.get("reference_branch_id"),
             "registered_horizon_environment_steps": int(
                 registration_branch["suffix_steps"]
             ),
@@ -729,9 +815,11 @@ __all__ = [
     "deterministic_snapshot_selection",
     "first64_equality_audit",
     "load_branch_payload",
+    "qualify_legacy_phase2_prefix",
     "read_jsonl",
     "route_phase3b",
     "sha256_file",
     "validate_registration_source",
     "write_jsonl",
+    "two_pass_first64_audit",
 ]

@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 
 from robocasa.recovery.full_snapshot import (
+    STABLE_DIGEST_SCHEMA_VERSION,
     FullSnapshot,
     causal_transition_fingerprint,
     environment_fingerprint,
@@ -205,9 +206,7 @@ def run_counterfactual_branch(
     action_sha256 = []
     observation_sha256 = [stable_digest(obs)]
     observation_component_digests = [observation_component_sha256(obs)]
-    repeat_observations = (
-        [deepcopy(obs)] if spec.kind == "same_seed_repeat" else None
-    )
+    repeat_observations = [deepcopy(obs)] if spec.kind == "same_seed_repeat" else None
     environment_sha256 = []
     diagnostic_environment_sha256 = []
     request_records = []
@@ -284,8 +283,7 @@ def run_counterfactual_branch(
             )
             termination_reason = (
                 "safety_termination"
-                if explicitly_unsafe
-                or "safety" in str(declared_reason or "").lower()
+                if explicitly_unsafe or "safety" in str(declared_reason or "").lower()
                 else "environment_done"
             )
             break
@@ -322,6 +320,7 @@ def run_counterfactual_branch(
         )
     summary = {
         "schema_version": BRANCH_SCHEMA_VERSION,
+        "stable_digest_schema_version": STABLE_DIGEST_SCHEMA_VERSION,
         "protocol": BRANCH_PROTOCOL,
         "created_at": utc_now(),
         "snapshot_id": snapshot.snapshot_id,
@@ -352,9 +351,7 @@ def run_counterfactual_branch(
         ],
         "request_environment_step_indices": request_environment_step_indices,
         "inference_environment_step_indices": inference_environment_step_indices,
-        "suffix_request_sha256": [
-            stable_digest(record) for record in request_records
-        ],
+        "suffix_request_sha256": [stable_digest(record) for record in request_records],
         "common_randomness_contract": {
             "identical_complete_state_before_first_request": (
                 spec.kind != "environment_only"
@@ -557,9 +554,7 @@ def analyze_phase2_replay(records, errors=None):
                     left.get("suffix_observation_sha256")
                     == right.get("suffix_observation_sha256")
                 ),
-                "observation_component_mismatches": (
-                    observation_component_mismatches
-                ),
+                "observation_component_mismatches": (observation_component_mismatches),
                 "action_sequence_exact": (
                     left.get("suffix_action_sha256")
                     == right.get("suffix_action_sha256")

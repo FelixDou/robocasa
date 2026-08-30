@@ -4,7 +4,9 @@ Use ``--scope sentinel`` first.  The sentinel deterministically selects one
 frozen parent per task (four snapshots total) and gates only replay integrity.
 After it passes, ``--scope full --sentinel-run-dir ...`` rebranches all twenty
 frozen Phase 2 snapshots without changing snapshots, treatment seeds, or the
-first 64 environment steps.
+first 64 environment steps. Each continuation is preceded by a frozen 64-step
+same-runtime reference so legacy process-local controller hashes are never
+accepted as evidence of hidden-state equality.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import traceback
 from robocasa.recovery.counterfactual_branch import (
     BranchSpec,
     analyze_phase2_replay,
+    branch_payload_digest,
     load_branch_records,
     run_counterfactual_branch,
     save_branch_result,
@@ -32,8 +35,10 @@ from robocasa.recovery.phase3b_training_horizon import (
     first64_equality_audit,
     load_branch_payload,
     load_registered_phase2_snapshot,
+    qualify_legacy_phase2_prefix,
     read_jsonl,
     sha256_file,
+    two_pass_first64_audit,
     validate_registration_source,
     write_jsonl,
 )
@@ -157,66 +162,134 @@ def _execute_registered_branch(
     policy,
     runtime,
     runtime_args,
+    reference_result=None,
 ):
-    spec = BranchSpec(
+    continued_spec = BranchSpec(
         branch_id=registration_branch["branch_id"],
         kind=registration_branch["kind"],
         sampling_seed=int(registration_branch["sampling_seed"]),
         suffix_steps=int(registration_branch["suffix_steps"]),
         repeat_index=registration_branch.get("repeat_index"),
     )
-    branch_env = _make_fresh_branch_environment(snapshot, runtime_args, runtime)
-    try:
-        if spec.kind == "environment_only":
-            restore_full_snapshot(
+
+    def execute(spec):
+        branch_env = _make_fresh_branch_environment(snapshot, runtime_args, runtime)
+        try:
+            if spec.kind == "environment_only":
+                restore_full_snapshot(
+                    snapshot,
+                    branch_env,
+                    policy,
+                    snapshot_integrity_prevalidated=True,
+                )
+                mutation_action = runtime["call_policy"](
+                    policy, deepcopy(snapshot.observation)
+                )
+                runtime["step_fn"](branch_env, mutation_action)
+                pop_requests = getattr(policy, "pop_request_records", None)
+                if callable(pop_requests):
+                    pop_requests()
+                pop_inference = getattr(policy, "pop_inference_record", None)
+                if callable(pop_inference):
+                    pop_inference()
+            return run_counterfactual_branch(
                 snapshot,
                 branch_env,
                 policy,
+                spec,
+                step_fn=runtime["step_fn"],
+                success_fn=runtime["success_fn"],
+                subtask_eval_fn=runtime["get_subtask_eval"],
+                restore_atol=runtime_args.restore_atol,
+                restore_rtol=runtime_args.restore_rtol,
                 snapshot_integrity_prevalidated=True,
             )
-            mutation_action = runtime["call_policy"](
-                policy, deepcopy(snapshot.observation)
-            )
-            runtime["step_fn"](branch_env, mutation_action)
-            pop_requests = getattr(policy, "pop_request_records", None)
-            if callable(pop_requests):
-                pop_requests()
-            pop_inference = getattr(policy, "pop_inference_record", None)
-            if callable(pop_inference):
-                pop_inference()
-        result = run_counterfactual_branch(
-            snapshot,
-            branch_env,
-            policy,
-            spec,
-            step_fn=runtime["step_fn"],
-            success_fn=runtime["success_fn"],
-            subtask_eval_fn=runtime["get_subtask_eval"],
-            restore_atol=runtime_args.restore_atol,
-            restore_rtol=runtime_args.restore_rtol,
-            snapshot_integrity_prevalidated=True,
+        finally:
+            _close_branch_environment(branch_env)
+
+    if reference_result is None:
+        reference_spec = BranchSpec(
+            branch_id=f"{registration_branch['branch_id']}--prefix-reference",
+            kind=registration_branch["kind"],
+            sampling_seed=int(registration_branch["sampling_seed"]),
+            suffix_steps=64,
+            repeat_index=registration_branch.get("repeat_index"),
         )
-        audit = first64_equality_audit(source_record, source_payload, result)
-        annotate_continued_result(result, registration_branch, audit)
-        return result, audit
-    finally:
-        _close_branch_environment(branch_env)
+        reference_result = execute(reference_spec)
+    legacy_audit = first64_equality_audit(
+        source_record, source_payload, reference_result
+    )
+    legacy_qualification = qualify_legacy_phase2_prefix(legacy_audit)
+    reference_summary = reference_result["summary"]
+    reference_summary.pop("payload_sha256", None)
+    reference_summary.update(
+        {
+            "phase3b_protocol": "phase3b_same_runtime_prefix_reference",
+            "source_branch_id": registration_branch["source_branch_id"],
+            "legacy_phase2_prefix_qualified": bool(legacy_qualification["qualified"]),
+            "legacy_phase2_prefix_mode": legacy_qualification["mode"],
+        }
+    )
+    reference_result["payload"]["summary"] = reference_summary
+    reference_summary["payload_sha256"] = branch_payload_digest(
+        reference_result["payload"]
+    )
+    if not legacy_qualification["qualified"]:
+        return (
+            reference_result,
+            None,
+            {
+                "source_branch_id": source_record["branch_id"],
+                "reference_branch_id": reference_summary["branch_id"],
+                "continued_branch_id": continued_spec.branch_id,
+                "prefix_steps": 64,
+                "legacy_phase2": legacy_audit,
+                "legacy_phase2_qualification": legacy_qualification,
+                "reference_to_continuation": None,
+                "channels": {},
+                "all_exact": False,
+            },
+        )
+    continued_result = execute(continued_spec)
+    audit = two_pass_first64_audit(
+        source_record,
+        source_payload,
+        reference_result,
+        continued_result,
+    )
+    annotate_continued_result(continued_result, registration_branch, audit)
+    return reference_result, continued_result, audit
 
 
 def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
     records = load_branch_records(output_dir / "branch_records.jsonl")
+    reference_records = load_branch_records(
+        output_dir / "prefix_references" / "branch_records.jsonl"
+    )
     errors = read_jsonl(output_dir / "errors.jsonl")
     snapshot_integrity = read_jsonl(output_dir / "snapshot_integrity_audits.jsonl")
     phase2_style = analyze_phase2_replay(records, errors)
     registered = {row["branch_id"]: row for row in registration["registered_branches"]}
     record_ids = {row["branch_id"] for row in records}
+    expected_reference_ids = {
+        f"{branch_id}--prefix-reference" for branch_id in registered
+    }
+    reference_ids = {row["branch_id"] for row in reference_records}
     prefix_exact = bool(records) and all(row.get("first64_exact") for row in records)
+    legacy_prefixes_qualified = bool(reference_records) and all(
+        row.get("legacy_phase2_prefix_qualified") for row in reference_records
+    )
     first64_audits = [
         {
             "source_branch_id": row.get("source_branch_id"),
             "continued_branch_id": row["branch_id"],
             "prefix_steps": 64,
             "channels": row.get("first64_channels") or {},
+            "legacy_phase2_prefix_qualified": bool(
+                row.get("legacy_phase2_prefix_qualified")
+            ),
+            "legacy_phase2_prefix_mode": row.get("legacy_phase2_prefix_mode"),
+            "reference_branch_id": row.get("prefix_reference_branch_id"),
             "all_exact": bool(row.get("first64_exact")),
         }
         for row in sorted(records, key=lambda value: value["branch_id"])
@@ -258,6 +331,8 @@ def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
         "snapshot_integrity_records_accepted": bool(snapshot_integrity)
         and all(row.get("accepted") for row in snapshot_integrity),
         "registered_branch_support_complete": record_ids == set(registered),
+        "prefix_reference_support_complete": (reference_ids == expected_reference_ids),
+        "legacy_phase2_prefixes_qualified": legacy_prefixes_qualified,
         "first64_all_channels_exact": prefix_exact,
         "same_seed_repeats_exact": bool(repeat_gates) and all(repeat_gates.values()),
         "record_alignment_exact": phase2_style["gates"]["record_alignment_exact"],
@@ -269,7 +344,7 @@ def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
         "zero_branch_errors": not errors,
     }
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "protocol": "phase3b_training_horizon_engineering_audit",
         "status": "complete",
         "scope": registration["scope"],
@@ -277,6 +352,8 @@ def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
         "parents": len({row["parent_id"] for row in records}),
         "snapshots": len({row["snapshot_id"] for row in records}),
         "branches": len(records),
+        "prefix_references": len(reference_records),
+        "expected_prefix_references": len(expected_reference_ids),
         "expected_branches": registration["expected_branches"],
         "errors": len(errors),
         "snapshot_integrity": {
@@ -366,6 +443,11 @@ def run(args, runtime=None):
         row["branch_id"]
         for row in load_branch_records(output_dir / "branch_records.jsonl")
     }
+    reference_root = output_dir / "prefix_references"
+    reference_records = {
+        row["branch_id"]: row
+        for row in load_branch_records(reference_root / "branch_records.jsonl")
+    }
     errors = read_jsonl(output_dir / "errors.jsonl")
     failed_ids = {row["branch_id"] for row in errors}
     by_parent = defaultdict(list)
@@ -413,10 +495,24 @@ def run(args, runtime=None):
                     if branch_id in failed_ids and not args.retry_errors:
                         continue
                     audit = None
+                    result = None
+                    reference_payload_saved = False
+                    continued_payload_saved = False
                     try:
                         source_record = source_records[registered["source_branch_id"]]
                         source_payload = load_branch_payload(source_root, source_record)
-                        result, audit = _execute_registered_branch(
+                        reference_id = f"{branch_id}--prefix-reference"
+                        reference_result = None
+                        if reference_id in reference_records:
+                            reference_payload_saved = True
+                            reference_payload = load_branch_payload(
+                                reference_root, reference_records[reference_id]
+                            )
+                            reference_result = {
+                                "summary": deepcopy(reference_payload["summary"]),
+                                "payload": reference_payload,
+                            }
+                        reference_result, result, audit = _execute_registered_branch(
                             registration_branch=registered,
                             snapshot=snapshot,
                             source_record=source_record,
@@ -424,16 +520,35 @@ def run(args, runtime=None):
                             policy=policy,
                             runtime=runtime,
                             runtime_args=runtime_args,
+                            reference_result=reference_result,
                         )
-                        save_branch_result(result, output_dir)
+                        if reference_id not in reference_records:
+                            saved_reference = save_branch_result(
+                                reference_result, reference_root
+                            )
+                            reference_records[reference_id] = saved_reference
+                            reference_payload_saved = True
+                        if result is not None:
+                            save_branch_result(result, output_dir)
+                            continued_payload_saved = True
                         _append_jsonl(output_dir / "first64_audits.jsonl", audit)
-                        completed.add(branch_id)
+                        if result is not None:
+                            completed.add(branch_id)
                         if not audit["all_exact"]:
+                            reference_audit = (
+                                audit.get("reference_to_continuation") or {}
+                            )
                             failed_channels = sorted(
                                 name
-                                for name, exact in audit["channels"].items()
+                                for name, exact in reference_audit.get(
+                                    "channels", {}
+                                ).items()
                                 if not exact
                             )
+                            if not audit["legacy_phase2_qualification"]["qualified"]:
+                                failed_channels.append(
+                                    "legacy_phase2_prefix_qualification"
+                                )
                             raise ValueError(
                                 "Phase 3B first-64 mismatch for "
                                 f"{registered['source_branch_id']}: "
@@ -449,9 +564,15 @@ def run(args, runtime=None):
                         }
                         if audit is not None:
                             error_row["first64_audit"] = audit
-                            error_row[
-                                "diagnostic_payload_path"
-                            ] = f"branches/{branch_id}.pkl.gz"
+                            if continued_payload_saved:
+                                error_row[
+                                    "diagnostic_payload_path"
+                                ] = f"branches/{branch_id}.pkl.gz"
+                            if reference_payload_saved:
+                                error_row["prefix_reference_payload_path"] = (
+                                    "prefix_references/branches/"
+                                    f"{branch_id}--prefix-reference.pkl.gz"
+                                )
                         _append_jsonl(output_dir / "errors.jsonl", error_row)
                         failed_ids.add(branch_id)
                         if args.fail_fast:
@@ -463,6 +584,10 @@ def run(args, runtime=None):
                             "updated_at": utc_now(),
                             "branches": len(completed),
                             "expected_branches": registration["expected_branches"],
+                            "prefix_references": len(reference_records),
+                            "expected_prefix_references": registration[
+                                "expected_branches"
+                            ],
                             "errors": len(read_jsonl(output_dir / "errors.jsonl")),
                         },
                     )
@@ -483,6 +608,8 @@ def run(args, runtime=None):
             "scope": registration["scope"],
             "branches": analysis["branches"],
             "expected_branches": analysis["expected_branches"],
+            "prefix_references": analysis["prefix_references"],
+            "expected_prefix_references": analysis["expected_prefix_references"],
             "errors": analysis["errors"],
             "engineering_all_pass": analysis["engineering_all_pass"],
         },

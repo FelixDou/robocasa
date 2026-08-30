@@ -27,6 +27,25 @@ protocol, schema, and payload-checksum-derived identity must all agree. Every
 accepted snapshot is written to `snapshot_integrity_audits.jsonl`; the
 engineering sentinel fails unless this ledger covers all four snapshots.
 
+The same legacy issue affects the per-step causal-environment hash because a
+RoboSuite controller buffer can be a NumPy `dtype=object` array. The old digest
+hashed its process-local object pointers. Phase 3B does not waive the 64-step
+prefix gate. For every registered branch it now performs two passes:
+
+1. a new 64-step same-runtime prefix reference using the frozen snapshot,
+   branch kind, treatment seed, policy state, and action-generation protocol;
+2. the registered training-horizon continuation.
+
+The reference must match the frozen Phase 2 requests, actions, observations,
+semantic trace, declared seed, and raw first causal transition. The legacy
+causal hash must either match or have the complete 64-of-64 process-local
+mismatch signature. The continuation must then match every reference channel,
+including all 64 causal-environment states under the corrected logical-value
+object-array digest (`stable_digest_schema_version=2`). References are retained
+under `prefix_references/`; the
+full run remains blocked by any failed qualification, missing reference, or
+reference-to-continuation mismatch.
+
 ## Fresh-session exports and preflight
 
 ```bash

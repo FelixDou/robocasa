@@ -7,14 +7,18 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import numpy as np
+
 from robocasa.recovery.phase3b_training_horizon import (
     PHASE3B_TASK_HORIZONS,
     build_registration,
     completion_event,
     first64_equality_audit,
     load_registered_phase2_snapshot,
+    qualify_legacy_phase2_prefix,
     route_phase3b,
     sha256_file,
+    two_pass_first64_audit,
     validate_registration_source,
 )
 from robocasa.recovery.full_snapshot import (
@@ -153,6 +157,16 @@ def _write_phase2_source(root: Path):
 
 
 class Phase3BTrainingHorizonTest(unittest.TestCase):
+    def test_object_array_digest_is_logical_not_pointer_based(self):
+        self.assertEqual(
+            stable_digest(np.array(None, dtype=object)),
+            "249d6a9e15a23e77a11a1651941401dfb18fe6aa155522f52d1e645fee49787f",
+        )
+        self.assertEqual(
+            stable_digest(np.array([None, "ready", 3], dtype=object)),
+            "4942b51deace0f32acf57ee7dbedadb34944bd8fd66954c8402ffd8fde0341b8",
+        )
+
     def test_early_cli_failure_finalizes_status(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "run"
@@ -342,6 +356,74 @@ class Phase3BTrainingHorizonTest(unittest.TestCase):
         self.assertEqual(audit["sequence_mismatch_indices"], {"actions": [10]})
         self.assertTrue(audit["first_causal_transition_structure_exact"])
         self.assertEqual(audit["first_causal_transition_structure_mismatches"], [])
+
+    def test_two_pass_audit_qualifies_only_complete_legacy_hash_signature(self):
+        actions = [f"a-{index}" for index in range(64)]
+        observations = [f"o-{index}" for index in range(65)]
+        portable_environment = [f"new-e-{index}" for index in range(64)]
+        legacy_environment = [f"old-e-{index}" for index in range(64)]
+        requests = [f"r-{index}" for index in range(4)]
+        trace = [{"step": index} for index in range(65)]
+        fingerprint = {"controller_state": np.array(None, dtype=object)}
+        source_record = {
+            "branch_id": "source",
+            "sampling_seed": 17,
+            "num_steps": 64,
+            "num_policy_requests": 4,
+            "suffix_action_sha256": actions,
+            "suffix_observation_sha256": observations,
+            "suffix_environment_sha256": legacy_environment,
+            "suffix_request_sha256": requests,
+        }
+        source_payload = {
+            "subtask_trace": trace,
+            "first_causal_transition_fingerprint": fingerprint,
+        }
+        reference = {
+            "summary": {
+                **source_record,
+                "branch_id": "reference",
+                "stable_digest_schema_version": 2,
+                "suffix_environment_sha256": portable_environment,
+            },
+            "payload": {
+                "subtask_trace": trace,
+                "first_causal_transition_fingerprint": fingerprint,
+            },
+        }
+        continued = {
+            "summary": {
+                **reference["summary"],
+                "branch_id": "continued",
+                "num_steps": 480,
+                "suffix_action_sha256": actions + ["later"],
+                "suffix_observation_sha256": observations + ["later"],
+                "suffix_environment_sha256": portable_environment + ["later"],
+                "suffix_request_sha256": requests + ["later"],
+            },
+            "payload": {
+                "subtask_trace": trace + [{"step": 65}],
+                "first_causal_transition_fingerprint": fingerprint,
+            },
+        }
+
+        audit = two_pass_first64_audit(
+            source_record, source_payload, reference, continued
+        )
+        self.assertTrue(audit["legacy_phase2_qualification"]["qualified"])
+        self.assertEqual(
+            audit["legacy_phase2_qualification"]["mode"],
+            "legacy_object_array_hash_replaced_by_two_pass_reference",
+        )
+        self.assertTrue(audit["reference_to_continuation"]["all_exact"])
+        self.assertTrue(
+            audit["reference_to_continuation"]["channels"]["stable_digest_schema"]
+        )
+        self.assertTrue(audit["all_exact"])
+
+        reference["summary"]["suffix_environment_sha256"][0] = legacy_environment[0]
+        partial = first64_equality_audit(source_record, source_payload, reference)
+        self.assertFalse(qualify_legacy_phase2_prefix(partial)["qualified"])
 
     def test_routing_only_unlocks_critic_when_all_registered_gates_pass(self):
         tasks = {

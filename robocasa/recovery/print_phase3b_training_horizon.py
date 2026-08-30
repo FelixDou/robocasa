@@ -22,6 +22,9 @@ def main(argv=None):
         else {"status": "registered"}
     )
     records = load_branch_records(root / "branch_records.jsonl")
+    references = load_branch_records(
+        root / "prefix_references" / "branch_records.jsonl"
+    )
     errors = read_jsonl(root / "errors.jsonl")
     print("PHASE 3B TRAINING-HORIZON CONTINUATION")
     print("status:", status["status"])
@@ -40,6 +43,12 @@ def main(argv=None):
     )
     print("branches:", len(records), "/", registration["expected_branches"])
     print(
+        "prefix references:",
+        len(references),
+        "/",
+        registration["expected_branches"],
+    )
+    print(
         "first-64 exact:",
         sum(bool(row.get("first64_exact")) for row in records),
         "/",
@@ -50,19 +59,27 @@ def main(argv=None):
         print("failure:", status.get("error_type"), status.get("error"))
         if errors and errors[-1].get("first64_audit"):
             audit = errors[-1]["first64_audit"]
+            legacy = audit.get("legacy_phase2_qualification") or {}
+            print("legacy Phase 2 prefix qualified:", legacy.get("qualified"))
+            print("legacy qualification mode:", legacy.get("mode"))
+            reference_audit = audit.get("reference_to_continuation") or audit
             failed_channels = [
-                name for name, exact in audit.get("channels", {}).items() if not exact
+                name
+                for name, exact in reference_audit.get("channels", {}).items()
+                if not exact
             ]
             print("failed first-64 channels:", " ".join(failed_channels))
             for name, indices in sorted(
-                audit.get("sequence_mismatch_indices", {}).items()
+                reference_audit.get("sequence_mismatch_indices", {}).items()
             ):
                 print(f"  {name} mismatch indices:", indices)
             print(
                 "first causal transition structure exact:",
-                audit.get("first_causal_transition_structure_exact"),
+                reference_audit.get("first_causal_transition_structure_exact"),
             )
-            mismatches = audit.get("first_causal_transition_structure_mismatches", [])
+            mismatches = reference_audit.get(
+                "first_causal_transition_structure_mismatches", []
+            )
             for mismatch in mismatches[:10]:
                 print("  transition mismatch:", json.dumps(mismatch, sort_keys=True))
             if len(mismatches) > 10:
@@ -71,6 +88,11 @@ def main(argv=None):
                 print(
                     "diagnostic payload:",
                     root / errors[-1]["diagnostic_payload_path"],
+                )
+            if errors[-1].get("prefix_reference_payload_path"):
+                print(
+                    "prefix reference payload:",
+                    root / errors[-1]["prefix_reference_payload_path"],
                 )
     if not (root / "analysis.json").is_file():
         print("Engineering analysis is not frozen yet.")

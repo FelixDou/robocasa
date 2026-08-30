@@ -28,6 +28,9 @@ from typing import Any, Mapping
 import numpy as np
 
 
+STABLE_DIGEST_SCHEMA_VERSION = 2
+
+
 FULL_SNAPSHOT_SCHEMA_VERSION = 5
 FULL_SNAPSHOT_PROTOCOL = "robocasa_complete_simulator_policy_snapshot"
 
@@ -162,7 +165,17 @@ def _update_digest(digest, value: Any) -> None:
         digest.update(b"ndarray:")
         _update_digest(digest, str(array.dtype))
         _update_digest(digest, tuple(array.shape))
-        digest.update(array.tobytes(order="C"))
+        if array.dtype.hasobject:
+            # ``object`` arrays store process-local PyObject pointers in their
+            # raw bytes. Hashing ``tobytes()`` therefore made equal controller
+            # snapshots differ across Python processes. Traverse the logical
+            # values instead; object-array shape and dtype remain part of the
+            # digest above.
+            digest.update(b"object_values:")
+            for item in array.flat:
+                _update_digest(digest, item)
+        else:
+            digest.update(array.tobytes(order="C"))
         return
     if is_dataclass(value):
         digest.update(f"dataclass:{value.__class__.__qualname__}:".encode())
@@ -1033,6 +1046,7 @@ __all__ = [
     "FULL_SNAPSHOT_PROTOCOL",
     "FULL_SNAPSHOT_SCHEMA_VERSION",
     "FullSnapshot",
+    "STABLE_DIGEST_SCHEMA_VERSION",
     "capture_full_snapshot",
     "causal_transition_fingerprint",
     "compare_structures",
