@@ -70,9 +70,7 @@ def _load_registered_snapshot(
     snapshot_id = selected["snapshot_id"]
     snapshot, audit = load_registered_phase2_snapshot(
         source_root / "snapshots" / f"{snapshot_id}.pkl.gz",
-        expected_file_sha256=registration["phase2_snapshot_file_sha256"][
-            snapshot_id
-        ],
+        expected_file_sha256=registration["phase2_snapshot_file_sha256"][snapshot_id],
         expected_snapshot_id=snapshot_id,
         expected_parent_id=selected["parent_id"],
         expected_task_name=selected["task_name"],
@@ -84,9 +82,7 @@ def _load_registered_snapshot(
 
 
 def _source_plan(registration: dict) -> dict:
-    return json.loads(
-        (Path(registration["phase2_run_dir"]) / "plan.json").read_text()
-    )
+    return json.loads((Path(registration["phase2_run_dir"]) / "plan.json").read_text())
 
 
 def _runtime_args(args, source_plan: dict) -> SimpleNamespace:
@@ -210,9 +206,7 @@ def _execute_registered_branch(
 def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
     records = load_branch_records(output_dir / "branch_records.jsonl")
     errors = read_jsonl(output_dir / "errors.jsonl")
-    snapshot_integrity = read_jsonl(
-        output_dir / "snapshot_integrity_audits.jsonl"
-    )
+    snapshot_integrity = read_jsonl(output_dir / "snapshot_integrity_audits.jsonl")
     phase2_style = analyze_phase2_replay(records, errors)
     registered = {row["branch_id"]: row for row in registration["registered_branches"]}
     record_ids = {row["branch_id"] for row in records}
@@ -256,24 +250,16 @@ def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
         "snapshot_integrity_audit_complete": {
             row["snapshot_id"] for row in snapshot_integrity
         }
-        == {
-            row["snapshot_id"] for row in registration["selected_snapshots"]
-        },
+        == {row["snapshot_id"] for row in registration["selected_snapshots"]},
         "snapshot_registered_file_hashes_exact": bool(snapshot_integrity)
-        and all(
-            row.get("registered_file_sha256_exact")
-            for row in snapshot_integrity
-        ),
+        and all(row.get("registered_file_sha256_exact") for row in snapshot_integrity),
         "snapshot_embedded_identities_exact": bool(snapshot_integrity)
-        and all(
-            row.get("embedded_snapshot_id_exact") for row in snapshot_integrity
-        ),
+        and all(row.get("embedded_snapshot_id_exact") for row in snapshot_integrity),
         "snapshot_integrity_records_accepted": bool(snapshot_integrity)
         and all(row.get("accepted") for row in snapshot_integrity),
         "registered_branch_support_complete": record_ids == set(registered),
         "first64_all_channels_exact": prefix_exact,
-        "same_seed_repeats_exact": bool(repeat_gates)
-        and all(repeat_gates.values()),
+        "same_seed_repeats_exact": bool(repeat_gates) and all(repeat_gates.values()),
         "record_alignment_exact": phase2_style["gates"]["record_alignment_exact"],
         "zero_restore_induced_regressions": phase2_style["gates"][
             "zero_restore_induced_regressions"
@@ -336,9 +322,13 @@ def run(args, runtime=None):
             "registered_branches",
             "sentinel_provenance",
         ]
-        mismatches = [key for key in immutable_keys if registration.get(key) != requested.get(key)]
+        mismatches = [
+            key for key in immutable_keys if registration.get(key) != requested.get(key)
+        ]
         if mismatches:
-            raise ValueError(f"Resume differs from frozen Phase 3B registration: {mismatches}")
+            raise ValueError(
+                f"Resume differs from frozen Phase 3B registration: {mismatches}"
+            )
     else:
         if output_dir.exists() and any(output_dir.iterdir()):
             raise FileExistsError(f"Output directory is not empty: {output_dir}")
@@ -422,6 +412,7 @@ def run(args, runtime=None):
                         continue
                     if branch_id in failed_ids and not args.retry_errors:
                         continue
+                    audit = None
                     try:
                         source_record = source_records[registered["source_branch_id"]]
                         source_payload = load_branch_payload(source_root, source_record)
@@ -437,6 +428,17 @@ def run(args, runtime=None):
                         save_branch_result(result, output_dir)
                         _append_jsonl(output_dir / "first64_audits.jsonl", audit)
                         completed.add(branch_id)
+                        if not audit["all_exact"]:
+                            failed_channels = sorted(
+                                name
+                                for name, exact in audit["channels"].items()
+                                if not exact
+                            )
+                            raise ValueError(
+                                "Phase 3B first-64 mismatch for "
+                                f"{registered['source_branch_id']}: "
+                                f"{failed_channels}; diagnostic branch and audit saved"
+                            )
                     except Exception as error:  # preserve evidence before stopping
                         error_row = {
                             **registered,
@@ -445,6 +447,11 @@ def run(args, runtime=None):
                             "error": str(error),
                             "traceback": traceback.format_exc(),
                         }
+                        if audit is not None:
+                            error_row["first64_audit"] = audit
+                            error_row[
+                                "diagnostic_payload_path"
+                            ] = f"branches/{branch_id}.pkl.gz"
                         _append_jsonl(output_dir / "errors.jsonl", error_row)
                         failed_ids.add(branch_id)
                         if args.fail_fast:

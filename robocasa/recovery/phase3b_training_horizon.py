@@ -28,6 +28,7 @@ from robocasa.recovery.full_snapshot import (
     FULL_SNAPSHOT_PROTOCOL,
     FULL_SNAPSHOT_SCHEMA_VERSION,
     FullSnapshot,
+    compare_structures,
     stable_digest,
 )
 
@@ -192,7 +193,9 @@ def load_registered_phase2_snapshot(
         raise ValueError(f"Embedded snapshot ID mismatch: {expected_snapshot_id}")
 
     envelope_checksum_exact = stable_digest(snapshot) == envelope["snapshot_sha256"]
-    payload_checksum_exact = stable_digest(snapshot.payload()) == snapshot.payload_sha256
+    payload_checksum_exact = (
+        stable_digest(snapshot.payload()) == snapshot.payload_sha256
+    )
     strict_internal_checksums_exact = bool(
         envelope_checksum_exact and payload_checksum_exact
     )
@@ -249,9 +252,15 @@ def _phase3b_code_paths() -> dict[str, Path]:
 
 def _validate_source(root: Path) -> tuple[dict, dict, list[dict], list[dict]]:
     paths = _source_paths(root)
-    missing = [str(path) for key, path in paths.items() if key != "errors" and not path.is_file()]
+    missing = [
+        str(path)
+        for key, path in paths.items()
+        if key != "errors" and not path.is_file()
+    ]
     if missing:
-        raise FileNotFoundError("Missing Phase 2 source artifacts: " + ", ".join(missing))
+        raise FileNotFoundError(
+            "Missing Phase 2 source artifacts: " + ", ".join(missing)
+        )
     plan = json.loads(paths["plan"].read_text())
     analysis = json.loads(paths["analysis"].read_text())
     parents = read_jsonl(paths["parents"])
@@ -266,10 +275,14 @@ def _validate_source(root: Path) -> tuple[dict, dict, list[dict], list[dict]]:
     if int(plan.get("suffix_steps", -1)) != PHASE2_PREFIX_STEPS:
         raise ValueError("Phase 3B requires the frozen 64-step Phase 2 suffix")
     if set(plan.get("tasks") or ()) != set(PHASE3B_TASK_HORIZONS):
-        raise ValueError("Phase 3B is registered for ArrangeTea and CuttingToolSelection")
+        raise ValueError(
+            "Phase 3B is registered for ArrangeTea and CuttingToolSelection"
+        )
     expected = int(plan.get("expected_total_branches", len(records)))
     if len(records) != expected:
-        raise ValueError(f"Phase 2 branch support is incomplete: {len(records)} != {expected}")
+        raise ValueError(
+            f"Phase 2 branch support is incomplete: {len(records)} != {expected}"
+        )
     return plan, analysis, parents, records
 
 
@@ -336,7 +349,11 @@ def deterministic_snapshot_selection(
         for boundary in ("prefix", "landmark"):
             rows.append(
                 {
-                    **{key: value for key, value in parent.items() if key != "snapshots"},
+                    **{
+                        key: value
+                        for key, value in parent.items()
+                        if key != "snapshots"
+                    },
                     "boundary": boundary,
                     "snapshot_id": parent["snapshots"][boundary],
                     "horizon_environment_steps": PHASE3B_TASK_HORIZONS[
@@ -450,7 +467,9 @@ def build_registration(
         if sentinel_analysis.get("engineering_all_pass") is not True:
             raise ValueError("Full Phase 3B is blocked by the engineering sentinel")
         if sentinel_plan.get("phase2_source_hashes") != source_hashes:
-            raise ValueError("Sentinel and full run reference different Phase 2 artifacts")
+            raise ValueError(
+                "Sentinel and full run reference different Phase 2 artifacts"
+            )
         sentinel = {
             "run_dir": str(sentinel_root),
             "registration_sha256": sha256_file(sentinel_plan_path),
@@ -521,9 +540,7 @@ def validate_registration_source(registration: dict) -> None:
     }
     if current != registration["phase2_source_hashes"]:
         raise ValueError("Frozen Phase 2 source artifacts changed after registration")
-    for snapshot_id, expected in registration[
-        "phase2_snapshot_file_sha256"
-    ].items():
+    for snapshot_id, expected in registration["phase2_snapshot_file_sha256"].items():
         path = root / "snapshots" / f"{snapshot_id}.pkl.gz"
         if sha256_file(path) != expected:
             raise ValueError(f"Frozen snapshot changed: {snapshot_id}")
@@ -563,26 +580,35 @@ def first64_equality_audit(
             f"{continued_summary.get('branch_id')}"
         )
     request_count = int(source_record.get("num_policy_requests", 0))
-    channels = {
-        "requests": source_record.get("suffix_request_sha256", [])
-        == continued_summary.get("suffix_request_sha256", [])[:request_count],
-        "actions": source_record.get("suffix_action_sha256", [])
-        == continued_summary.get("suffix_action_sha256", [])[:PHASE2_PREFIX_STEPS],
-        "observations": source_record.get("suffix_observation_sha256", [])
-        == continued_summary.get("suffix_observation_sha256", [])[
-            : PHASE2_PREFIX_STEPS + 1
-        ],
-        "causal_environment": source_record.get("suffix_environment_sha256", [])
-        == continued_summary.get("suffix_environment_sha256", [])[
+    expected_sequences = {
+        "requests": source_record.get("suffix_request_sha256", []),
+        "actions": source_record.get("suffix_action_sha256", []),
+        "observations": source_record.get("suffix_observation_sha256", []),
+        "causal_environment": source_record.get("suffix_environment_sha256", []),
+    }
+    actual_sequences = {
+        "requests": continued_summary.get("suffix_request_sha256", [])[:request_count],
+        "actions": continued_summary.get("suffix_action_sha256", [])[
             :PHASE2_PREFIX_STEPS
         ],
+        "observations": continued_summary.get("suffix_observation_sha256", [])[
+            : PHASE2_PREFIX_STEPS + 1
+        ],
+        "causal_environment": continued_summary.get("suffix_environment_sha256", [])[
+            :PHASE2_PREFIX_STEPS
+        ],
+    }
+    sequence_channels = {
+        name: expected_sequences[name] == actual_sequences[name]
+        for name in expected_sequences
+    }
+    channels = {
+        **sequence_channels,
         "semantic_trace": stable_digest(
             (source_payload.get("subtask_trace") or [])[: PHASE2_PREFIX_STEPS + 1]
         )
         == stable_digest(
-            (continued_payload.get("subtask_trace") or [])[
-                : PHASE2_PREFIX_STEPS + 1
-            ]
+            (continued_payload.get("subtask_trace") or [])[: PHASE2_PREFIX_STEPS + 1]
         ),
         "declared_seed": int(source_record["sampling_seed"])
         == int(continued_summary["sampling_seed"]),
@@ -592,17 +618,37 @@ def first64_equality_audit(
         "continued_branch_id": continued_summary["branch_id"],
         "prefix_steps": PHASE2_PREFIX_STEPS,
         "channels": channels,
+        "sequence_mismatch_indices": {
+            name: [
+                index
+                for index in range(
+                    max(len(expected_sequences[name]), len(actual_sequences[name]))
+                )
+                if index >= len(expected_sequences[name])
+                or index >= len(actual_sequences[name])
+                or expected_sequences[name][index] != actual_sequences[name][index]
+            ]
+            for name, exact in sequence_channels.items()
+            if not exact
+        },
+        "first_causal_transition_structure_mismatches": compare_structures(
+            source_payload.get("first_causal_transition_fingerprint"),
+            continued_payload.get("first_causal_transition_fingerprint"),
+            atol=0.0,
+            rtol=0.0,
+            path="first_causal_transition",
+        ),
         "all_exact": all(channels.values()),
     }
-    if not audit["all_exact"]:
-        failed = sorted(name for name, exact in channels.items() if not exact)
-        raise ValueError(
-            f"Phase 3B first-64 mismatch for {source_record['branch_id']}: {failed}"
-        )
+    audit["first_causal_transition_structure_exact"] = not audit[
+        "first_causal_transition_structure_mismatches"
+    ]
     return audit
 
 
-def annotate_continued_result(result: dict, registration_branch: dict, audit: dict) -> None:
+def annotate_continued_result(
+    result: dict, registration_branch: dict, audit: dict
+) -> None:
     summary = result["summary"]
     summary.pop("payload_sha256", None)
     summary.update(
@@ -663,9 +709,10 @@ def route_phase3b(task_rows: dict, macro: dict, gates: dict) -> str:
     )
     if homogeneous_success:
         return "fresh_replan_without_candidate_ranking"
-    if macro.get("mixed_outcome_fraction", 0.0) > 0.0 and macro.get(
-        "oracle_minus_nominal", 0.0
-    ) <= 0.0:
+    if (
+        macro.get("mixed_outcome_fraction", 0.0) > 0.0
+        and macro.get("oracle_minus_nominal", 0.0) <= 0.0
+    ):
         return "do_not_train_candidate_critic"
     return "higher_level_operator_screen"
 

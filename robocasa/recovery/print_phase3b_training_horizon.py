@@ -26,13 +26,52 @@ def main(argv=None):
     print("PHASE 3B TRAINING-HORIZON CONTINUATION")
     print("status:", status["status"])
     print("scope:", registration["scope"])
-    print("parents:", len({row["parent_id"] for row in records}), "/", registration["expected_parents"])
-    print("snapshots:", len({row["snapshot_id"] for row in records}), "/", registration["expected_snapshots"])
+    print(
+        "parents:",
+        len({row["parent_id"] for row in records}),
+        "/",
+        registration["expected_parents"],
+    )
+    print(
+        "snapshots:",
+        len({row["snapshot_id"] for row in records}),
+        "/",
+        registration["expected_snapshots"],
+    )
     print("branches:", len(records), "/", registration["expected_branches"])
-    print("first-64 exact:", sum(bool(row.get("first64_exact")) for row in records), "/", len(records))
+    print(
+        "first-64 exact:",
+        sum(bool(row.get("first64_exact")) for row in records),
+        "/",
+        len(records),
+    )
     print("errors:", len(errors))
     if status["status"] == "failed":
         print("failure:", status.get("error_type"), status.get("error"))
+        if errors and errors[-1].get("first64_audit"):
+            audit = errors[-1]["first64_audit"]
+            failed_channels = [
+                name for name, exact in audit.get("channels", {}).items() if not exact
+            ]
+            print("failed first-64 channels:", " ".join(failed_channels))
+            for name, indices in sorted(
+                audit.get("sequence_mismatch_indices", {}).items()
+            ):
+                print(f"  {name} mismatch indices:", indices)
+            print(
+                "first causal transition structure exact:",
+                audit.get("first_causal_transition_structure_exact"),
+            )
+            mismatches = audit.get("first_causal_transition_structure_mismatches", [])
+            for mismatch in mismatches[:10]:
+                print("  transition mismatch:", json.dumps(mismatch, sort_keys=True))
+            if len(mismatches) > 10:
+                print("  additional transition mismatches:", len(mismatches) - 10)
+            if errors[-1].get("diagnostic_payload_path"):
+                print(
+                    "diagnostic payload:",
+                    root / errors[-1]["diagnostic_payload_path"],
+                )
     if not (root / "analysis.json").is_file():
         print("Engineering analysis is not frozen yet.")
         return

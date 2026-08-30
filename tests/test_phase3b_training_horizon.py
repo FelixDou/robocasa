@@ -246,7 +246,10 @@ class Phase3BTrainingHorizonTest(unittest.TestCase):
             self.assertEqual(registration["expected_branches"], 28)
             self.assertEqual(registration["expected_scientific_branches"], 16)
             self.assertEqual(
-                {row["environment_reset_index"] for row in registration["selected_snapshots"]},
+                {
+                    row["environment_reset_index"]
+                    for row in registration["selected_snapshots"]
+                },
                 {0},
             )
             self.assertEqual(
@@ -293,16 +296,14 @@ class Phase3BTrainingHorizonTest(unittest.TestCase):
                 json.dumps({"engineering_all_pass": True})
             )
 
-            full = build_registration(
-                root, scope="full", sentinel_run_dir=sentinel
-            )
+            full = build_registration(root, scope="full", sentinel_run_dir=sentinel)
 
             self.assertEqual(full["expected_parents"], 10)
             self.assertEqual(full["expected_snapshots"], 20)
             self.assertEqual(full["expected_branches"], 140)
             self.assertEqual(full["expected_scientific_branches"], 80)
 
-    def test_first64_audit_fails_closed_on_any_channel(self):
+    def test_first64_audit_reports_any_mismatched_channel(self):
         action = [f"a-{index}" for index in range(64)]
         observations = [f"o-{index}" for index in range(65)]
         environment = [f"e-{index}" for index in range(64)]
@@ -332,13 +333,15 @@ class Phase3BTrainingHorizonTest(unittest.TestCase):
             "payload": {"subtask_trace": trace + [{"step": 65}]},
         }
         self.assertTrue(
-            first64_equality_audit(source_record, source_payload, result)[
-                "all_exact"
-            ]
+            first64_equality_audit(source_record, source_payload, result)["all_exact"]
         )
         result["summary"]["suffix_action_sha256"][10] = "mismatch"
-        with self.assertRaisesRegex(ValueError, "actions"):
-            first64_equality_audit(source_record, source_payload, result)
+        audit = first64_equality_audit(source_record, source_payload, result)
+        self.assertFalse(audit["all_exact"])
+        self.assertFalse(audit["channels"]["actions"])
+        self.assertEqual(audit["sequence_mismatch_indices"], {"actions": [10]})
+        self.assertTrue(audit["first_causal_transition_structure_exact"])
+        self.assertEqual(audit["first_causal_transition_structure_mismatches"], [])
 
     def test_routing_only_unlocks_critic_when_all_registered_gates_pass(self):
         tasks = {
@@ -383,8 +386,7 @@ class Phase3BTrainingHorizonTest(unittest.TestCase):
         payload = {
             "summary": {"request_environment_step_indices": [0, 16, 32, 48]},
             "subtask_evals": [
-                {"predicates": {"trigger": {"value": False}}}
-                for _ in range(34)
+                {"predicates": {"trigger": {"value": False}}} for _ in range(34)
             ],
         }
         payload["subtask_evals"][33]["predicates"]["trigger"]["value"] = True
