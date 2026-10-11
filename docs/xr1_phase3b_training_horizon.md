@@ -170,6 +170,9 @@ printf 'export STORAGE_BS=%q\nexport ROBOCASA_REPO=%q\nexport XR1_CLIENT_ENV=%q\
 
 Monitor from another shell:
 
+The printer reports `initializing_registration` while frozen source hashes are
+still being built; this is startup progress rather than a failure.
+
 ```bash
 export STORAGE_BS=/gs/bs/tga-shinoda/felid
 source "$STORAGE_BS/robocasa_checkpoints/safe/xr1_phase3b_sentinel_latest.env"

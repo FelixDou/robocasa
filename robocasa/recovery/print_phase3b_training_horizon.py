@@ -25,7 +25,13 @@ def main(argv=None):
     parser.add_argument("--run-dir", type=Path, required=True)
     args = parser.parse_args(argv)
     root = args.run_dir
-    registration = json.loads((root / "registration.json").read_text())
+    registration_path = root / "registration.json"
+    if not registration_path.is_file():
+        print("PHASE 3B TRAINING-HORIZON CONTINUATION")
+        print("status: initializing_registration")
+        print("registration is not frozen yet; source hashes are still being built")
+        return
+    registration = json.loads(registration_path.read_text())
     status = (
         json.loads((root / "status.json").read_text())
         if (root / "status.json").is_file()
