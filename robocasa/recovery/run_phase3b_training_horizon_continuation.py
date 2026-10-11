@@ -394,6 +394,19 @@ def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
                 int(row.get("allowed_mesh_content_type_omissions", 0))
                 for row in model_xml_audits
             ),
+            "allowed_mesh_content_type_insertions": sum(
+                int(row.get("allowed_mesh_content_type_insertions", 0))
+                for row in model_xml_audits
+            ),
+            "allowed_mesh_content_type_normalizations": sum(
+                int(
+                    row.get(
+                        "allowed_mesh_content_type_normalizations",
+                        row.get("allowed_mesh_content_type_omissions", 0),
+                    )
+                )
+                for row in model_xml_audits
+            ),
             "all_compatible": bool(model_xml_audits)
             and len(model_xml_audits) == len(complete_restore_records)
             and all(row.get("compatible") for row in model_xml_audits),

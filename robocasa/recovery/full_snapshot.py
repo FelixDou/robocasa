@@ -869,18 +869,18 @@ def compare_structures(expected, actual, *, atol=0.0, rtol=0.0, path="root"):
 
 
 def _model_xml_roundtrip_audit(expected, actual) -> dict:
-    """Audit the one metadata omission made by the current MuJoCo serializer.
+    """Audit redundant OBJ MIME normalization by the MuJoCo serializer.
 
     Frozen Phase 2 models can contain ``content_type="model/obj"`` on mesh
     assets.  After ``reset_from_xml_string()``, the current MuJoCo serializer
-    omits that redundant MIME hint when the file already has an ``.obj``
-    extension.  The compiled model is unchanged, but bytewise XML comparison
-    would otherwise reject the restore.
+    may omit or insert that redundant MIME hint when the file already has an
+    ``.obj`` extension.  The compiled model is unchanged, but bytewise XML
+    comparison would otherwise reject the restore.
 
     This compatibility path is intentionally narrow.  Element order, tags,
     non-whitespace text, children, and every other attribute must remain
-    exact.  Only expected-side OBJ MIME hints may be absent from the restored
-    XML.  Any geometry, physics, path, or other metadata change still fails.
+    exact.  Only ``model/obj`` versus absent may differ on an OBJ mesh.  Any
+    geometry, physics, path, or other metadata change still fails.
     """
 
     audit = {
@@ -890,6 +890,8 @@ def _model_xml_roundtrip_audit(expected, actual) -> dict:
         "expected_sha256": None,
         "actual_sha256": None,
         "allowed_mesh_content_type_omissions": 0,
+        "allowed_mesh_content_type_insertions": 0,
+        "allowed_mesh_content_type_normalizations": 0,
         "allowed_mesh_names_sample": [],
         "allowed_mesh_names_sha256": None,
         "structure_mismatches": [],
@@ -930,6 +932,7 @@ def _model_xml_roundtrip_audit(expected, actual) -> dict:
         return audit
 
     omissions = []
+    insertions = []
     mismatches = []
 
     def record(path, reason, **details):
@@ -955,15 +958,25 @@ def _model_xml_roundtrip_audit(expected, actual) -> dict:
                 actual=right_attributes,
             )
         if left_content_type != right_content_type:
-            filename = left_attributes.get("file", "")
-            allowed = (
+            filename = left_attributes.get("file") or right_attributes.get(
+                "file", ""
+            )
+            allowed_omission = (
                 left_tag == "mesh"
                 and left_content_type == "model/obj"
                 and right_content_type is None
                 and filename.lower().endswith(".obj")
             )
-            if allowed:
+            allowed_insertion = (
+                left_tag == "mesh"
+                and left_content_type is None
+                and right_content_type == "model/obj"
+                and filename.lower().endswith(".obj")
+            )
+            if allowed_omission:
                 omissions.append(left_attributes.get("name") or filename)
+            elif allowed_insertion:
+                insertions.append(left_attributes.get("name") or filename)
             else:
                 record(
                     path,
@@ -1004,19 +1017,27 @@ def _model_xml_roundtrip_audit(expected, actual) -> dict:
 
     compare_elements(expected_root, actual_root, "environment.model")
     omission_names = [str(value) for value in omissions]
+    insertion_names = [str(value) for value in insertions]
+    normalization_names = omission_names + insertion_names
+    if omission_names and insertion_names:
+        compatibility_mode = "mesh_obj_content_type_normalization"
+    elif omission_names:
+        compatibility_mode = "mesh_obj_content_type_omission"
+    elif insertion_names:
+        compatibility_mode = "mesh_obj_content_type_insertion"
+    else:
+        compatibility_mode = None
     audit.update(
         {
-            "compatible": bool(omission_names) and not mismatches,
-            "compatibility_mode": (
-                "mesh_obj_content_type_omission"
-                if omission_names and not mismatches
-                else None
-            ),
+            "compatible": bool(normalization_names) and not mismatches,
+            "compatibility_mode": compatibility_mode if not mismatches else None,
             "allowed_mesh_content_type_omissions": len(omission_names),
-            "allowed_mesh_names_sample": omission_names[:10],
+            "allowed_mesh_content_type_insertions": len(insertion_names),
+            "allowed_mesh_content_type_normalizations": len(normalization_names),
+            "allowed_mesh_names_sample": normalization_names[:10],
             "allowed_mesh_names_sha256": (
-                hashlib.sha256("\0".join(omission_names).encode()).hexdigest()
-                if omission_names
+                hashlib.sha256("\0".join(normalization_names).encode()).hexdigest()
+                if normalization_names
                 else None
             ),
             "structure_mismatches": mismatches,

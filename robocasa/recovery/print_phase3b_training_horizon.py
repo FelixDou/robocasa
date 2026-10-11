@@ -151,8 +151,17 @@ def main(argv=None):
         )
         print("compatibility modes:", model_xml["compatibility_modes"])
         print(
-            "allowed OBJ MIME omissions:",
-            model_xml["allowed_mesh_content_type_omissions"],
+            "allowed OBJ MIME normalizations:",
+            model_xml.get(
+                "allowed_mesh_content_type_normalizations",
+                model_xml.get("allowed_mesh_content_type_omissions", 0),
+            ),
+        )
+        print(
+            "  omissions:",
+            model_xml.get("allowed_mesh_content_type_omissions", 0),
+            "insertions:",
+            model_xml.get("allowed_mesh_content_type_insertions", 0),
         )
     print("\nENGINEERING GATES")
     for name, passed in analysis["engineering_gates"].items():

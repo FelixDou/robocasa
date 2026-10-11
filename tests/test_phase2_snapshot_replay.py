@@ -293,6 +293,47 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         self.assertEqual(mismatches, [])
         self.assertTrue(environment_audit["compatible"])
 
+    def test_model_xml_roundtrip_accepts_redundant_obj_content_type_insertion(self):
+        expected = (
+            '<mujoco><asset><mesh name="cup" file="/assets/cup.obj" '
+            'scale="1 1 1"/></asset></mujoco>'
+        )
+        actual = expected.replace(
+            ' name="cup"', ' name="cup" content_type="model/obj"'
+        )
+
+        audit = _model_xml_roundtrip_audit(expected, actual)
+
+        self.assertTrue(audit["compatible"], audit)
+        self.assertEqual(audit["compatibility_mode"], "mesh_obj_content_type_insertion")
+        self.assertEqual(audit["allowed_mesh_content_type_omissions"], 0)
+        self.assertEqual(audit["allowed_mesh_content_type_insertions"], 1)
+        self.assertEqual(audit["allowed_mesh_content_type_normalizations"], 1)
+
+    def test_model_xml_roundtrip_accepts_mixed_obj_content_type_normalization(self):
+        expected = (
+            '<mujoco><asset>'
+            '<mesh name="left" content_type="model/obj" file="left.obj"/>'
+            '<mesh name="right" file="right.obj"/>'
+            '</asset></mujoco>'
+        )
+        actual = (
+            '<mujoco><asset>'
+            '<mesh name="left" file="left.obj"/>'
+            '<mesh name="right" content_type="model/obj" file="right.obj"/>'
+            '</asset></mujoco>'
+        )
+
+        audit = _model_xml_roundtrip_audit(expected, actual)
+
+        self.assertTrue(audit["compatible"], audit)
+        self.assertEqual(
+            audit["compatibility_mode"], "mesh_obj_content_type_normalization"
+        )
+        self.assertEqual(audit["allowed_mesh_content_type_omissions"], 1)
+        self.assertEqual(audit["allowed_mesh_content_type_insertions"], 1)
+        self.assertEqual(audit["allowed_mesh_content_type_normalizations"], 2)
+
     def test_model_xml_roundtrip_rejects_every_other_change(self):
         expected = (
             '<mujoco><asset><mesh name="cup" content_type="model/obj" '
@@ -328,6 +369,21 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
 
         self.assertFalse(audit["compatible"], audit)
         self.assertEqual(audit["structure_mismatches"][0]["reason"], "content_type")
+
+        insertion_expected = (
+            '<mujoco><asset><mesh name="finger" '
+            'file="/assets/finger.stl"/></asset></mujoco>'
+        )
+        insertion_actual = insertion_expected.replace(
+            ' name="finger"', ' name="finger" content_type="model/obj"'
+        )
+        insertion_audit = _model_xml_roundtrip_audit(
+            insertion_expected, insertion_actual
+        )
+        self.assertFalse(insertion_audit["compatible"], insertion_audit)
+        self.assertEqual(
+            insertion_audit["structure_mismatches"][0]["reason"], "content_type"
+        )
 
     def test_environment_construction_seed_is_reproducible_and_scoped(self):
         random.seed(41)
