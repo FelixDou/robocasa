@@ -35,7 +35,7 @@ from robocasa.recovery.full_snapshot import (
 )
 
 
-PHASE3B_SCHEMA_VERSION = 6
+PHASE3B_SCHEMA_VERSION = 7
 PHASE3B_PROTOCOL = "phase3b_training_horizon_continuation"
 PHASE3B_TASK_HORIZONS = {
     "ArrangeTea": 480,
@@ -43,6 +43,13 @@ PHASE3B_TASK_HORIZONS = {
 }
 PHASE2_PREFIX_STEPS = 64
 BRANCH_KINDS = {"same_seed_repeat", "candidate", "environment_only"}
+LEGACY_TERMINAL_CAMERA_KEYS = frozenset(
+    {
+        "video.robot0_agentview_left",
+        "video.robot0_agentview_right",
+        "video.robot0_eye_in_hand",
+    }
+)
 
 
 def utc_now() -> str:
@@ -609,6 +616,44 @@ def first64_equality_audit(
         name: expected_sequences[name] == actual_sequences[name]
         for name in expected_sequences
     }
+    expected_observation_components = source_record.get(
+        "suffix_observation_component_sha256", []
+    )
+    actual_observation_components = continued_summary.get(
+        "suffix_observation_component_sha256", []
+    )[: PHASE2_PREFIX_STEPS + 1]
+    observation_component_mismatches = []
+    for index in range(
+        max(
+            len(expected_observation_components),
+            len(actual_observation_components),
+        )
+    ):
+        expected_components = (
+            expected_observation_components[index]
+            if index < len(expected_observation_components)
+            else None
+        )
+        actual_components = (
+            actual_observation_components[index]
+            if index < len(actual_observation_components)
+            else None
+        )
+        if expected_components == actual_components:
+            continue
+        if not isinstance(expected_components, dict) or not isinstance(
+            actual_components, dict
+        ):
+            components = ["<component-digests-unavailable>"]
+        else:
+            components = sorted(
+                key
+                for key in set(expected_components) | set(actual_components)
+                if expected_components.get(key) != actual_components.get(key)
+            )
+        observation_component_mismatches.append(
+            {"index": index, "components": components}
+        )
     channels = {
         **sequence_channels,
         "semantic_trace": stable_digest(
@@ -670,6 +715,7 @@ def first64_equality_audit(
 
     audit = {
         "source_branch_id": source_record["branch_id"],
+        "source_kind": source_record.get("kind"),
         "continued_branch_id": continued_summary["branch_id"],
         "prefix_steps": PHASE2_PREFIX_STEPS,
         "channels": channels,
@@ -686,6 +732,7 @@ def first64_equality_audit(
             for name, exact in sequence_channels.items()
             if not exact
         },
+        "observation_component_mismatches": observation_component_mismatches,
         "first_causal_transition_structure_mismatches": transition_mismatches,
         "first_causal_transition_model_xml_audit": model_xml_audit,
         "all_exact": bool(all(channels.values()) and not transition_mismatches),
@@ -711,28 +758,55 @@ def qualify_legacy_phase2_prefix(audit: dict) -> dict:
     portable_channels = {
         name: exact for name, exact in channels.items() if name != "causal_environment"
     }
+    effective_portable_channels = dict(portable_channels)
+    observation_mismatch_indices = audit.get("sequence_mismatch_indices", {}).get(
+        "observations", []
+    )
+    observation_component_mismatches = audit.get("observation_component_mismatches", [])
+    terminal_camera_observation_qualified = bool(
+        audit.get("source_kind") == "environment_only"
+        and observation_mismatch_indices == [PHASE2_PREFIX_STEPS]
+        and observation_component_mismatches
+        == [
+            {
+                "index": PHASE2_PREFIX_STEPS,
+                "components": sorted(LEGACY_TERMINAL_CAMERA_KEYS),
+            }
+        ]
+    )
+    if terminal_camera_observation_qualified:
+        effective_portable_channels["observations"] = True
     mismatch_indices = audit.get("sequence_mismatch_indices", {}).get(
         "causal_environment", []
     )
     causal_hash_exact = bool(channels.get("causal_environment"))
     legacy_signature = mismatch_indices == list(range(PHASE2_PREFIX_STEPS))
     qualified = bool(
-        all(portable_channels.values())
+        all(effective_portable_channels.values())
         and audit.get("first_causal_transition_structure_exact")
         and (causal_hash_exact or legacy_signature)
     )
+    if qualified and terminal_camera_observation_qualified:
+        mode = (
+            "legacy_environment_only_terminal_camera_observation_"
+            "replaced_by_two_pass_reference"
+        )
+    elif causal_hash_exact:
+        mode = "legacy_hashes_exact"
+    elif qualified:
+        mode = "legacy_object_array_hash_replaced_by_two_pass_reference"
+    else:
+        mode = "rejected"
     return {
         "qualified": qualified,
-        "mode": (
-            "legacy_hashes_exact"
-            if causal_hash_exact
-            else (
-                "legacy_object_array_hash_replaced_by_two_pass_reference"
-                if qualified
-                else "rejected"
-            )
-        ),
+        "mode": mode,
         "portable_channels": portable_channels,
+        "effective_portable_channels": effective_portable_channels,
+        "terminal_camera_observation_qualified": (
+            terminal_camera_observation_qualified
+        ),
+        "observation_mismatch_indices": observation_mismatch_indices,
+        "observation_component_mismatches": observation_component_mismatches,
         "causal_environment_hash_exact": causal_hash_exact,
         "causal_environment_mismatch_indices": mismatch_indices,
         "first_causal_transition_structure_exact": bool(

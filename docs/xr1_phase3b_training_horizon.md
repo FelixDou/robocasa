@@ -36,14 +36,18 @@ prefix gate. For every registered branch it now performs two passes:
    branch kind, treatment seed, policy state, and action-generation protocol;
 2. the registered training-horizon continuation.
 
-The reference must match the frozen Phase 2 requests, actions, observations,
-semantic trace, declared seed, and raw first causal transition. The legacy
-causal hash must either match or have the complete 64-of-64 process-local
-mismatch signature. The continuation must then match every reference channel,
-including all 64 causal-environment states under the corrected logical-value
-object-array digest (`stable_digest_schema_version=2`). References are retained
-under `prefix_references/`; the
-full run remains blocked by any failed qualification, missing reference, or
+The reference must match the frozen Phase 2 requests, actions, observations
+consumed by actions 0--63, semantic trace, declared seed, and raw first causal
+transition. The legacy causal hash must either match or have the complete
+64-of-64 process-local mismatch signature. For the non-scientific
+`environment_only` diagnostic alone, the unconsumed observation at index 64
+may differ only in all three registered camera fields; this exact condition is
+recorded explicitly. No state or proprioceptive difference is accepted. The
+continuation must then match every fresh reference channel exactly, including
+observation 64 and all 64 causal-environment states under the corrected
+logical-value object-array digest (`stable_digest_schema_version=2`).
+References are retained under `prefix_references/`; the full run remains
+blocked by any failed qualification, missing reference, or
 reference-to-continuation mismatch.
 
 The frozen Phase 2 XML can also differ in whether mesh assets explicitly carry

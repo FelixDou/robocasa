@@ -94,6 +94,15 @@ def main(argv=None):
                 for name, exact in sorted(legacy["portable_channels"].items()):
                     print(f"  {'PASS' if exact else 'FAIL':4s}  {name}")
             print(
+                "legacy terminal camera observation qualified:",
+                legacy.get("terminal_camera_observation_qualified"),
+            )
+            if legacy.get("observation_component_mismatches"):
+                print(
+                    "legacy observation component mismatches:",
+                    legacy["observation_component_mismatches"],
+                )
+            print(
                 "legacy causal environment mismatch indices:",
                 legacy.get("causal_environment_mismatch_indices"),
             )

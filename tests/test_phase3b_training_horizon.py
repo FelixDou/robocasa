@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 import pickle
 import tempfile
@@ -424,6 +425,134 @@ class Phase3BTrainingHorizonTest(unittest.TestCase):
         reference["summary"]["suffix_environment_sha256"][0] = legacy_environment[0]
         partial = first64_equality_audit(source_record, source_payload, reference)
         self.assertFalse(qualify_legacy_phase2_prefix(partial)["qualified"])
+
+    def test_environment_only_legacy_terminal_camera_observation_qualification(self):
+        camera_keys = (
+            "video.robot0_agentview_left",
+            "video.robot0_agentview_right",
+            "video.robot0_eye_in_hand",
+        )
+        actions = [f"a-{index}" for index in range(64)]
+        observations = [f"o-{index}" for index in range(65)]
+        legacy_environment = [f"old-e-{index}" for index in range(64)]
+        current_environment = [f"new-e-{index}" for index in range(64)]
+        requests = [f"r-{index}" for index in range(4)]
+        trace = [{"step": index} for index in range(65)]
+        components = [
+            {
+                "state": f"state-{index}",
+                **{key: f"camera-{index}" for key in camera_keys},
+            }
+            for index in range(65)
+        ]
+        reference_components = deepcopy(components)
+        for key in camera_keys:
+            reference_components[64][key] = f"reference-{key}"
+        source_record = {
+            "branch_id": "source-environment-only",
+            "kind": "environment_only",
+            "sampling_seed": 17,
+            "num_steps": 64,
+            "num_policy_requests": 4,
+            "suffix_action_sha256": actions,
+            "suffix_observation_sha256": observations,
+            "suffix_observation_component_sha256": components,
+            "suffix_environment_sha256": legacy_environment,
+            "suffix_request_sha256": requests,
+        }
+        source_payload = {
+            "subtask_trace": trace,
+            "first_causal_transition_fingerprint": {"state": "exact"},
+        }
+        reference = {
+            "summary": {
+                **source_record,
+                "branch_id": "reference",
+                "stable_digest_schema_version": 2,
+                "suffix_observation_sha256": observations[:64]
+                + ["reference-terminal-observation"],
+                "suffix_observation_component_sha256": reference_components,
+                "suffix_environment_sha256": current_environment,
+            },
+            "payload": {
+                "subtask_trace": trace,
+                "first_causal_transition_fingerprint": {"state": "exact"},
+            },
+        }
+
+        audit = first64_equality_audit(source_record, source_payload, reference)
+        qualification = qualify_legacy_phase2_prefix(audit)
+
+        self.assertFalse(audit["channels"]["observations"])
+        self.assertEqual(audit["sequence_mismatch_indices"]["observations"], [64])
+        self.assertEqual(
+            audit["observation_component_mismatches"],
+            [{"index": 64, "components": sorted(camera_keys)}],
+        )
+        self.assertTrue(qualification["qualified"], qualification)
+        self.assertTrue(qualification["terminal_camera_observation_qualified"])
+        self.assertEqual(
+            qualification["mode"],
+            "legacy_environment_only_terminal_camera_observation_"
+            "replaced_by_two_pass_reference",
+        )
+
+        candidate_source = {**source_record, "kind": "candidate"}
+        candidate_audit = first64_equality_audit(
+            candidate_source, source_payload, reference
+        )
+        self.assertFalse(qualify_legacy_phase2_prefix(candidate_audit)["qualified"])
+
+        non_camera_reference = deepcopy(reference)
+        non_camera_reference["summary"]["suffix_observation_component_sha256"][64][
+            "state"
+        ] = "different-state"
+        non_camera_audit = first64_equality_audit(
+            source_record, source_payload, non_camera_reference
+        )
+        self.assertFalse(qualify_legacy_phase2_prefix(non_camera_audit)["qualified"])
+
+        early_reference = deepcopy(reference)
+        early_reference["summary"]["suffix_observation_sha256"][63] = "early"
+        early_reference["summary"]["suffix_observation_component_sha256"][63][
+            camera_keys[0]
+        ] = "early"
+        early_audit = first64_equality_audit(
+            source_record, source_payload, early_reference
+        )
+        self.assertFalse(qualify_legacy_phase2_prefix(early_audit)["qualified"])
+
+        continued = deepcopy(reference)
+        continued["summary"]["branch_id"] = "continued"
+        continued["summary"]["num_steps"] = 480
+        continued["summary"]["suffix_action_sha256"] = actions + ["later"]
+        continued["summary"]["suffix_observation_sha256"] = reference["summary"][
+            "suffix_observation_sha256"
+        ] + ["later"]
+        continued["summary"][
+            "suffix_observation_component_sha256"
+        ] = reference_components + [{"state": "later"}]
+        continued["summary"]["suffix_environment_sha256"] = current_environment + [
+            "later"
+        ]
+        continued["summary"]["suffix_request_sha256"] = requests + ["later"]
+        continued["payload"]["subtask_trace"] = trace + [{"step": 65}]
+        two_pass = two_pass_first64_audit(
+            source_record, source_payload, reference, continued
+        )
+        self.assertTrue(two_pass["all_exact"], two_pass)
+
+        continued["summary"]["suffix_observation_sha256"][64] = "not-exact"
+        continued["summary"]["suffix_observation_component_sha256"][64][
+            camera_keys[0]
+        ] = "not-exact"
+        failed_two_pass = two_pass_first64_audit(
+            source_record, source_payload, reference, continued
+        )
+        self.assertFalse(failed_two_pass["all_exact"])
+        self.assertFalse(
+            failed_two_pass["reference_to_continuation"]["channels"]["observations"]
+        )
 
     def test_legacy_qualification_accepts_only_obj_mesh_mime_xml_roundtrip(self):
         actions = [f"a-{index}" for index in range(64)]
