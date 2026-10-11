@@ -82,7 +82,29 @@ def main(argv=None):
             legacy = audit.get("legacy_phase2_qualification") or {}
             print("legacy Phase 2 prefix qualified:", legacy.get("qualified"))
             print("legacy qualification mode:", legacy.get("mode"))
-            reference_audit = audit.get("reference_to_continuation") or audit
+            if audit.get("reference_to_continuation") is not None:
+                audit_scope = "reference-to-continuation"
+                reference_audit = audit["reference_to_continuation"]
+            else:
+                audit_scope = "legacy-Phase-2-to-reference"
+                reference_audit = audit.get("legacy_phase2") or audit
+            print("displayed first-64 audit:", audit_scope)
+            if legacy.get("portable_channels"):
+                print("legacy portable channels:")
+                for name, exact in sorted(legacy["portable_channels"].items()):
+                    print(f"  {'PASS' if exact else 'FAIL':4s}  {name}")
+            print(
+                "legacy causal environment mismatch indices:",
+                legacy.get("causal_environment_mismatch_indices"),
+            )
+            print(
+                "legacy first-transition model XML compatible:",
+                legacy.get("first_causal_transition_model_xml_compatible"),
+            )
+            print(
+                "legacy first-transition model XML mode:",
+                legacy.get("first_causal_transition_model_xml_compatibility_mode"),
+            )
             failed_channels = [
                 name
                 for name, exact in reference_audit.get("channels", {}).items()

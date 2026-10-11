@@ -425,6 +425,78 @@ class Phase3BTrainingHorizonTest(unittest.TestCase):
         partial = first64_equality_audit(source_record, source_payload, reference)
         self.assertFalse(qualify_legacy_phase2_prefix(partial)["qualified"])
 
+    def test_legacy_qualification_accepts_only_obj_mesh_mime_xml_roundtrip(self):
+        actions = [f"a-{index}" for index in range(64)]
+        observations = [f"o-{index}" for index in range(65)]
+        requests = [f"r-{index}" for index in range(4)]
+        legacy_environment = [f"old-e-{index}" for index in range(64)]
+        current_environment = [f"new-e-{index}" for index in range(64)]
+        trace = [{"step": index} for index in range(65)]
+        legacy_model = (
+            '<mujoco><asset><mesh name="window" content_type="model/obj" '
+            'file="window.obj" scale="1 1 1"/></asset></mujoco>'
+        )
+        current_model = legacy_model.replace(' content_type="model/obj"', "")
+
+        source_record = {
+            "branch_id": "source",
+            "sampling_seed": 17,
+            "num_steps": 64,
+            "num_policy_requests": 4,
+            "suffix_action_sha256": actions,
+            "suffix_observation_sha256": observations,
+            "suffix_environment_sha256": legacy_environment,
+            "suffix_request_sha256": requests,
+        }
+        source_payload = {
+            "subtask_trace": trace,
+            "first_causal_transition_fingerprint": {
+                "simulator_state": {
+                    "environment_state": {
+                        "model": legacy_model,
+                        "states": np.array([1.0, 2.0]),
+                    }
+                }
+            },
+        }
+        reference = {
+            "summary": {
+                **source_record,
+                "branch_id": "reference",
+                "suffix_environment_sha256": current_environment,
+            },
+            "payload": {
+                "subtask_trace": trace,
+                "first_causal_transition_fingerprint": {
+                    "simulator_state": {
+                        "environment_state": {
+                            "model": current_model,
+                            "states": np.array([1.0, 2.0]),
+                        }
+                    }
+                },
+            },
+        }
+
+        audit = first64_equality_audit(source_record, source_payload, reference)
+        qualification = qualify_legacy_phase2_prefix(audit)
+
+        self.assertTrue(audit["first_causal_transition_structure_exact"])
+        self.assertEqual(
+            audit["first_causal_transition_model_xml_audit"]["compatibility_mode"],
+            "mesh_obj_content_type_omission",
+        )
+        self.assertTrue(qualification["qualified"])
+        self.assertTrue(qualification["first_causal_transition_model_xml_compatible"])
+
+        reference["payload"]["first_causal_transition_fingerprint"]["simulator_state"][
+            "environment_state"
+        ]["model"] = current_model.replace('scale="1 1 1"', 'scale="2 1 1"')
+        changed = first64_equality_audit(source_record, source_payload, reference)
+        self.assertFalse(changed["all_exact"])
+        self.assertFalse(changed["first_causal_transition_structure_exact"])
+        self.assertFalse(qualify_legacy_phase2_prefix(changed)["qualified"])
+
     def test_routing_only_unlocks_critic_when_all_registered_gates_pass(self):
         tasks = {
             task: {

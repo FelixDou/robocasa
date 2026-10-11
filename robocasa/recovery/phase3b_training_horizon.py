@@ -29,12 +29,13 @@ from robocasa.recovery.full_snapshot import (
     FULL_SNAPSHOT_PROTOCOL,
     FULL_SNAPSHOT_SCHEMA_VERSION,
     FullSnapshot,
+    _model_xml_roundtrip_audit,
     compare_structures,
     stable_digest,
 )
 
 
-PHASE3B_SCHEMA_VERSION = 4
+PHASE3B_SCHEMA_VERSION = 5
 PHASE3B_PROTOCOL = "phase3b_training_horizon_continuation"
 PHASE3B_TASK_HORIZONS = {
     "ArrangeTea": 480,
@@ -567,7 +568,12 @@ def first64_equality_audit(
     source_payload: dict,
     continued_result: dict,
 ) -> dict:
-    """Fail-closed equality audit for every registered causal prefix channel."""
+    """Fail-closed equality audit for every registered causal prefix channel.
+
+    The only non-byte-exact allowance is the same MuJoCo OBJ-mesh MIME
+    round-trip already admitted by complete-snapshot restoration.  The XML
+    structure and every other attribute remain exact.
+    """
     continued_summary = continued_result["summary"]
     continued_payload = continued_result["payload"]
     source_steps = int(source_record.get("num_steps", 0))
@@ -618,6 +624,50 @@ def first64_equality_audit(
         channels["stable_digest_schema"] = source_record.get(
             "stable_digest_schema_version"
         ) == continued_summary.get("stable_digest_schema_version")
+    expected_transition = source_payload.get("first_causal_transition_fingerprint")
+    actual_transition = continued_payload.get("first_causal_transition_fingerprint")
+    expected_transition_without_model = deepcopy(expected_transition)
+    actual_transition_without_model = deepcopy(actual_transition)
+
+    def pop_environment_model(value):
+        if not isinstance(value, dict):
+            return None, False
+        simulator = value.get("simulator_state")
+        if not isinstance(simulator, dict):
+            return None, False
+        environment = simulator.get("environment_state")
+        if not isinstance(environment, dict) or "model" not in environment:
+            return None, False
+        return environment.pop("model"), True
+
+    expected_model, expected_model_present = pop_environment_model(
+        expected_transition_without_model
+    )
+    actual_model, actual_model_present = pop_environment_model(
+        actual_transition_without_model
+    )
+    model_xml_audit = None
+    if expected_model_present or actual_model_present:
+        model_xml_audit = _model_xml_roundtrip_audit(expected_model, actual_model)
+
+    transition_mismatches = compare_structures(
+        expected_transition_without_model,
+        actual_transition_without_model,
+        atol=0.0,
+        rtol=0.0,
+        path="first_causal_transition",
+    )
+    if model_xml_audit is not None and not model_xml_audit["compatible"]:
+        transition_mismatches.append(
+            {
+                "path": (
+                    "first_causal_transition.simulator_state." "environment_state.model"
+                ),
+                "reason": "model_xml_incompatible",
+                "audit": model_xml_audit,
+            }
+        )
+
     audit = {
         "source_branch_id": source_record["branch_id"],
         "continued_branch_id": continued_summary["branch_id"],
@@ -636,14 +686,9 @@ def first64_equality_audit(
             for name, exact in sequence_channels.items()
             if not exact
         },
-        "first_causal_transition_structure_mismatches": compare_structures(
-            source_payload.get("first_causal_transition_fingerprint"),
-            continued_payload.get("first_causal_transition_fingerprint"),
-            atol=0.0,
-            rtol=0.0,
-            path="first_causal_transition",
-        ),
-        "all_exact": all(channels.values()),
+        "first_causal_transition_structure_mismatches": transition_mismatches,
+        "first_causal_transition_model_xml_audit": model_xml_audit,
+        "all_exact": bool(all(channels.values()) and not transition_mismatches),
     }
     audit["first_causal_transition_structure_exact"] = not audit[
         "first_causal_transition_structure_mismatches"
@@ -659,6 +704,8 @@ def qualify_legacy_phase2_prefix(audit: dict) -> dict:
     portable channel and the raw first causal transition are exact. The legacy
     causal hash channel must either match outright or exhibit the observed
     all-64 process-local mismatch signature; partial mismatches fail closed.
+    The raw first transition remains exact under the complete-snapshot model
+    XML compatibility contract; no geometry or physics change is accepted.
     """
     channels = audit["channels"]
     portable_channels = {
@@ -690,6 +737,20 @@ def qualify_legacy_phase2_prefix(audit: dict) -> dict:
         "causal_environment_mismatch_indices": mismatch_indices,
         "first_causal_transition_structure_exact": bool(
             audit.get("first_causal_transition_structure_exact")
+        ),
+        "first_causal_transition_model_xml_compatible": (
+            None
+            if audit.get("first_causal_transition_model_xml_audit") is None
+            else bool(
+                audit["first_causal_transition_model_xml_audit"].get("compatible")
+            )
+        ),
+        "first_causal_transition_model_xml_compatibility_mode": (
+            None
+            if audit.get("first_causal_transition_model_xml_audit") is None
+            else audit["first_causal_transition_model_xml_audit"].get(
+                "compatibility_mode"
+            )
         ),
     }
 
