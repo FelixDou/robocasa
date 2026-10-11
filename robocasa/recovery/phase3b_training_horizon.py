@@ -34,7 +34,7 @@ from robocasa.recovery.full_snapshot import (
 )
 
 
-PHASE3B_SCHEMA_VERSION = 3
+PHASE3B_SCHEMA_VERSION = 4
 PHASE3B_PROTOCOL = "phase3b_training_horizon_continuation"
 PHASE3B_TASK_HORIZONS = {
     "ArrangeTea": 480,

@@ -46,6 +46,17 @@ under `prefix_references/`; the
 full run remains blocked by any failed qualification, missing reference, or
 reference-to-continuation mismatch.
 
+The frozen Phase 2 XML can also contain
+`content_type="model/obj"` on mesh assets. Current MuJoCo serialization omits
+this redundant MIME hint after `reset_from_xml_string()` when the same mesh
+already has an `.obj` filename. The restore audit accepts only that exact
+expected-side omission, and records its count, name digest, XML hashes, and a
+small name sample in `environment_model_xml_audit`. Element order, tags,
+children, text, asset paths, and every other attribute remain exact; any
+geometry, physics, visual, path, or other XML change still fails closed.
+The final engineering analysis separately gates complete coverage and reports
+the strict-versus-compatible restore counts and total accepted MIME omissions.
+
 ## Fresh-session exports and preflight
 
 ```bash

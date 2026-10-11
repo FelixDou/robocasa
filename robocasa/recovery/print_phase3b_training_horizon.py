@@ -10,6 +10,16 @@ from robocasa.recovery.counterfactual_branch import load_branch_records
 from robocasa.recovery.phase3b_training_horizon import read_jsonl
 
 
+def _compact_error(value, limit=600):
+    value = str(value or "")
+    if len(value) <= limit:
+        return value
+    return (
+        value[:limit]
+        + f"... [truncated {len(value) - limit} characters; inspect errors.jsonl]"
+    )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True)
@@ -56,7 +66,11 @@ def main(argv=None):
     )
     print("errors:", len(errors))
     if status["status"] == "failed":
-        print("failure:", status.get("error_type"), status.get("error"))
+        print(
+            "failure:",
+            status.get("error_type"),
+            _compact_error(status.get("error")),
+        )
         if errors and errors[-1].get("first64_audit"):
             audit = errors[-1]["first64_audit"]
             legacy = audit.get("legacy_phase2_qualification") or {}
@@ -98,6 +112,20 @@ def main(argv=None):
         print("Engineering analysis is not frozen yet.")
         return
     analysis = json.loads((root / "analysis.json").read_text())
+    model_xml = analysis.get("environment_model_xml_restore") or {}
+    if model_xml:
+        print("\nMODEL XML RESTORE")
+        print(
+            "audited complete restores:",
+            model_xml["audited_complete_restores"],
+            "/",
+            model_xml["expected_complete_restores"],
+        )
+        print("compatibility modes:", model_xml["compatibility_modes"])
+        print(
+            "allowed OBJ MIME omissions:",
+            model_xml["allowed_mesh_content_type_omissions"],
+        )
     print("\nENGINEERING GATES")
     for name, passed in analysis["engineering_gates"].items():
         print(f"{'PASS' if passed else 'FAIL':4s}  {name}")

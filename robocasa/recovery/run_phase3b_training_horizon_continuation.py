@@ -318,6 +318,17 @@ def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
         for key, value in phase2_style["gates"].items()
         if key.startswith("same_seed_")
     }
+    complete_restore_records = [
+        row for row in records if row.get("kind") != "environment_only"
+    ]
+    model_xml_audits = [
+        (row.get("restore_audit") or {}).get("environment_model_xml_audit")
+        for row in complete_restore_records
+    ]
+    model_xml_audits = [row for row in model_xml_audits if row is not None]
+    model_xml_modes = defaultdict(int)
+    for row in model_xml_audits:
+        model_xml_modes[str(row.get("compatibility_mode"))] += 1
     gates = {
         "frozen_source_hashes_exact": True,
         "snapshot_integrity_audit_complete": {
@@ -330,6 +341,11 @@ def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
         and all(row.get("embedded_snapshot_id_exact") for row in snapshot_integrity),
         "snapshot_integrity_records_accepted": bool(snapshot_integrity)
         and all(row.get("accepted") for row in snapshot_integrity),
+        "environment_model_xml_restore_compatible": (
+            bool(complete_restore_records)
+            and len(model_xml_audits) == len(complete_restore_records)
+            and all(row.get("compatible") for row in model_xml_audits)
+        ),
         "registered_branch_support_complete": record_ids == set(registered),
         "prefix_reference_support_complete": (reference_ids == expected_reference_ids),
         "legacy_phase2_prefixes_qualified": legacy_prefixes_qualified,
@@ -344,7 +360,7 @@ def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
         "zero_branch_errors": not errors,
     }
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "protocol": "phase3b_training_horizon_engineering_audit",
         "status": "complete",
         "scope": registration["scope"],
@@ -369,6 +385,18 @@ def _engineering_analysis(registration: dict, output_dir: Path) -> dict:
             ),
             "all_accepted": bool(snapshot_integrity)
             and all(row.get("accepted") for row in snapshot_integrity),
+        },
+        "environment_model_xml_restore": {
+            "expected_complete_restores": len(complete_restore_records),
+            "audited_complete_restores": len(model_xml_audits),
+            "compatibility_modes": dict(sorted(model_xml_modes.items())),
+            "allowed_mesh_content_type_omissions": sum(
+                int(row.get("allowed_mesh_content_type_omissions", 0))
+                for row in model_xml_audits
+            ),
+            "all_compatible": bool(model_xml_audits)
+            and len(model_xml_audits) == len(complete_restore_records)
+            and all(row.get("compatible") for row in model_xml_audits),
         },
         "engineering_gates": gates,
         "engineering_all_pass": all(gates.values()),

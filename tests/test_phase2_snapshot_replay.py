@@ -23,6 +23,8 @@ from robocasa.recovery.counterfactual_branch import (  # noqa: E402
     run_counterfactual_branch,
 )
 from robocasa.recovery.full_snapshot import (  # noqa: E402
+    _compare_environment_states,
+    _model_xml_roundtrip_audit,
     _restore_controller_attribute,
     causal_transition_fingerprint,
     capture_full_snapshot,
@@ -266,6 +268,67 @@ class FakePolicy:
 
 
 class TestPhase2SnapshotReplay(unittest.TestCase):
+    def test_model_xml_roundtrip_accepts_only_redundant_obj_content_type(self):
+        expected = (
+            '<mujoco><asset><mesh name="cup" content_type="model/obj" '
+            'file="/assets/cup.obj" scale="1 1 1"/></asset>'
+            '<worldbody><geom name="table" size="1 1 0.1"/></worldbody></mujoco>'
+        )
+        actual = expected.replace(' content_type="model/obj"', "")
+
+        audit = _model_xml_roundtrip_audit(expected, actual)
+
+        self.assertTrue(audit["compatible"], audit)
+        self.assertFalse(audit["strict_exact"])
+        self.assertEqual(audit["compatibility_mode"], "mesh_obj_content_type_omission")
+        self.assertEqual(audit["allowed_mesh_content_type_omissions"], 1)
+        self.assertEqual(audit["allowed_mesh_names_sample"], ["cup"])
+
+        mismatches, environment_audit = _compare_environment_states(
+            {"states": np.asarray([1.0]), "model": expected},
+            {"states": np.asarray([1.0]), "model": actual},
+            atol=0.0,
+            rtol=0.0,
+        )
+        self.assertEqual(mismatches, [])
+        self.assertTrue(environment_audit["compatible"])
+
+    def test_model_xml_roundtrip_rejects_every_other_change(self):
+        expected = (
+            '<mujoco><asset><mesh name="cup" content_type="model/obj" '
+            'file="/assets/cup.obj" scale="1 1 1"/></asset>'
+            '<worldbody><geom name="table" size="1 1 0.1"/></worldbody></mujoco>'
+        )
+        actual = expected.replace(' content_type="model/obj"', "").replace(
+            'size="1 1 0.1"', 'size="2 1 0.1"'
+        )
+
+        audit = _model_xml_roundtrip_audit(expected, actual)
+
+        self.assertFalse(audit["compatible"], audit)
+        self.assertTrue(audit["structure_mismatches"])
+        mismatches, _ = _compare_environment_states(
+            {"states": np.asarray([1.0]), "model": expected},
+            {"states": np.asarray([1.0]), "model": actual},
+            atol=0.0,
+            rtol=0.0,
+        )
+        self.assertEqual(len(mismatches), 1)
+        self.assertEqual(mismatches[0]["path"], "environment.model")
+        self.assertEqual(mismatches[0]["reason"], "model_xml_incompatible")
+
+    def test_model_xml_roundtrip_rejects_non_obj_content_type_omission(self):
+        expected = (
+            '<mujoco><asset><mesh name="finger" content_type="model/stl" '
+            'file="/assets/finger.stl"/></asset></mujoco>'
+        )
+        actual = expected.replace(' content_type="model/stl"', "")
+
+        audit = _model_xml_roundtrip_audit(expected, actual)
+
+        self.assertFalse(audit["compatible"], audit)
+        self.assertEqual(audit["structure_mismatches"][0]["reason"], "content_type")
+
     def test_environment_construction_seed_is_reproducible_and_scoped(self):
         random.seed(41)
         np.random.seed(41)
@@ -278,12 +341,8 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         def sample_legacy_globals():
             return random.random(), np.random.random()
 
-        first = _call_with_deterministic_environment_seed(
-            1234, sample_legacy_globals
-        )
-        second = _call_with_deterministic_environment_seed(
-            1234, sample_legacy_globals
-        )
+        first = _call_with_deterministic_environment_seed(1234, sample_legacy_globals)
+        second = _call_with_deterministic_environment_seed(1234, sample_legacy_globals)
 
         self.assertEqual(first, second)
         self.assertEqual(random.random(), expected_python)
@@ -569,9 +628,7 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
             for row in observation_records
             if row["kind"] == "same_seed_repeat" and row["repeat_index"] == 1
         )
-        observation_repeat["suffix_observation_sha256"][1] = (
-            "observation-divergence"
-        )
+        observation_repeat["suffix_observation_sha256"][1] = "observation-divergence"
         observation_repeat["suffix_observation_component_sha256"][1][
             "value"
         ] = "value-divergence"
@@ -619,9 +676,7 @@ class TestPhase2SnapshotReplay(unittest.TestCase):
         request_repeat["suffix_request_sha256"][1] = "second-request-divergence"
         request_analysis = analyze_phase2_replay(request_records)
         self.assertFalse(request_analysis["all_pass"])
-        self.assertFalse(
-            request_analysis["gates"]["same_seed_request_sequences_exact"]
-        )
+        self.assertFalse(request_analysis["gates"]["same_seed_request_sequences_exact"])
         request_pair = request_analysis["repeat_pairs"][0]
         self.assertTrue(request_pair["request_exact"])
         self.assertFalse(request_pair["request_sequence_exact"])

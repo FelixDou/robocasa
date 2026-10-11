@@ -24,6 +24,7 @@ import pickle
 import random
 import struct
 from typing import Any, Mapping
+import xml.etree.ElementTree as ET
 
 import numpy as np
 
@@ -867,6 +868,206 @@ def compare_structures(expected, actual, *, atol=0.0, rtol=0.0, path="root"):
     return mismatches
 
 
+def _model_xml_roundtrip_audit(expected, actual) -> dict:
+    """Audit the one metadata omission made by the current MuJoCo serializer.
+
+    Frozen Phase 2 models can contain ``content_type="model/obj"`` on mesh
+    assets.  After ``reset_from_xml_string()``, the current MuJoCo serializer
+    omits that redundant MIME hint when the file already has an ``.obj``
+    extension.  The compiled model is unchanged, but bytewise XML comparison
+    would otherwise reject the restore.
+
+    This compatibility path is intentionally narrow.  Element order, tags,
+    non-whitespace text, children, and every other attribute must remain
+    exact.  Only expected-side OBJ MIME hints may be absent from the restored
+    XML.  Any geometry, physics, path, or other metadata change still fails.
+    """
+
+    audit = {
+        "strict_exact": expected == actual,
+        "compatible": False,
+        "compatibility_mode": None,
+        "expected_sha256": None,
+        "actual_sha256": None,
+        "allowed_mesh_content_type_omissions": 0,
+        "allowed_mesh_names_sample": [],
+        "allowed_mesh_names_sha256": None,
+        "structure_mismatches": [],
+    }
+    if not isinstance(expected, str) or not isinstance(actual, str):
+        audit["structure_mismatches"] = [
+            {
+                "path": "environment.model",
+                "reason": "model_xml_type",
+                "expected_type": type(expected).__name__,
+                "actual_type": type(actual).__name__,
+            }
+        ]
+        return audit
+
+    audit["expected_sha256"] = hashlib.sha256(expected.encode()).hexdigest()
+    audit["actual_sha256"] = hashlib.sha256(actual.encode()).hexdigest()
+    if expected == actual:
+        audit.update(
+            {
+                "compatible": True,
+                "compatibility_mode": "strict_xml_exact",
+            }
+        )
+        return audit
+
+    try:
+        expected_root = ET.fromstring(expected)
+        actual_root = ET.fromstring(actual)
+    except ET.ParseError as error:
+        audit["structure_mismatches"] = [
+            {
+                "path": "environment.model",
+                "reason": "model_xml_parse",
+                "error": str(error),
+            }
+        ]
+        return audit
+
+    omissions = []
+    mismatches = []
+
+    def record(path, reason, **details):
+        if len(mismatches) < 20:
+            mismatches.append({"path": path, "reason": reason, **details})
+
+    def compare_elements(left, right, path):
+        left_tag = str(left.tag).split("}")[-1]
+        right_tag = str(right.tag).split("}")[-1]
+        if left.tag != right.tag:
+            record(path, "tag", expected=left_tag, actual=right_tag)
+            return
+
+        left_attributes = dict(left.attrib)
+        right_attributes = dict(right.attrib)
+        left_content_type = left_attributes.pop("content_type", None)
+        right_content_type = right_attributes.pop("content_type", None)
+        if left_attributes != right_attributes:
+            record(
+                path,
+                "attributes",
+                expected=left_attributes,
+                actual=right_attributes,
+            )
+        if left_content_type != right_content_type:
+            filename = left_attributes.get("file", "")
+            allowed = (
+                left_tag == "mesh"
+                and left_content_type == "model/obj"
+                and right_content_type is None
+                and filename.lower().endswith(".obj")
+            )
+            if allowed:
+                omissions.append(left_attributes.get("name") or filename)
+            else:
+                record(
+                    path,
+                    "content_type",
+                    expected=left_content_type,
+                    actual=right_content_type,
+                    file=filename,
+                )
+
+        left_text = (left.text or "").strip()
+        right_text = (right.text or "").strip()
+        if left_text != right_text:
+            record(path, "text", expected=left_text, actual=right_text)
+        left_tail = (left.tail or "").strip()
+        right_tail = (right.tail or "").strip()
+        if left_tail != right_tail:
+            record(path, "tail", expected=left_tail, actual=right_tail)
+
+        left_children = list(left)
+        right_children = list(right)
+        if len(left_children) != len(right_children):
+            record(
+                path,
+                "children",
+                expected=len(left_children),
+                actual=len(right_children),
+            )
+            return
+        for index, (left_child, right_child) in enumerate(
+            zip(left_children, right_children)
+        ):
+            child_name = left_child.attrib.get("name") or index
+            compare_elements(
+                left_child,
+                right_child,
+                f"{path}/{str(left_child.tag).split('}')[-1]}[{child_name}]",
+            )
+
+    compare_elements(expected_root, actual_root, "environment.model")
+    omission_names = [str(value) for value in omissions]
+    audit.update(
+        {
+            "compatible": bool(omission_names) and not mismatches,
+            "compatibility_mode": (
+                "mesh_obj_content_type_omission"
+                if omission_names and not mismatches
+                else None
+            ),
+            "allowed_mesh_content_type_omissions": len(omission_names),
+            "allowed_mesh_names_sample": omission_names[:10],
+            "allowed_mesh_names_sha256": (
+                hashlib.sha256("\0".join(omission_names).encode()).hexdigest()
+                if omission_names
+                else None
+            ),
+            "structure_mismatches": mismatches,
+        }
+    )
+    return audit
+
+
+def _compare_environment_states(expected, actual, *, atol, rtol):
+    """Compare reset state while auditing model XML with its own contract."""
+
+    model_audit = None
+    if (
+        isinstance(expected, Mapping)
+        and isinstance(actual, Mapping)
+        and ("model" in expected or "model" in actual)
+    ):
+        expected_state = dict(expected)
+        actual_state = dict(actual)
+        expected_model = expected_state.pop("model", None)
+        actual_model = actual_state.pop("model", None)
+        model_audit = _model_xml_roundtrip_audit(expected_model, actual_model)
+        mismatches = compare_structures(
+            expected_state,
+            actual_state,
+            atol=atol,
+            rtol=rtol,
+            path="environment",
+        )
+        if not model_audit["compatible"]:
+            mismatches.append(
+                {
+                    "path": "environment.model",
+                    "reason": "model_xml_incompatible",
+                    "audit": model_audit,
+                }
+            )
+        return mismatches, model_audit
+
+    return (
+        compare_structures(
+            expected,
+            actual,
+            atol=atol,
+            rtol=rtol,
+            path="environment",
+        ),
+        model_audit,
+    )
+
+
 def restore_full_snapshot(
     snapshot: FullSnapshot,
     env,
@@ -917,12 +1118,11 @@ def restore_full_snapshot(
     current_simulator_integration_state = _capture_simulator_integration_state(env)
     current_controller_state = _capture_controller_state(env)
     current_policy_state = policy.get_state()
-    environment_mismatches = compare_structures(
+    environment_mismatches, environment_model_xml_audit = _compare_environment_states(
         snapshot.environment_state,
         current_environment_state,
         atol=atol,
         rtol=rtol,
-        path="environment",
     )
     simulator_integration_mismatches = compare_structures(
         snapshot.simulator_integration_state,
@@ -981,6 +1181,7 @@ def restore_full_snapshot(
     return {
         "snapshot_id": snapshot.snapshot_id,
         "environment_exact": not environment_mismatches,
+        "environment_model_xml_audit": environment_model_xml_audit,
         "simulator_integration_exact": not simulator_integration_mismatches,
         "controller_exact": not controller_mismatches,
         "policy_exact": not policy_mismatches,
