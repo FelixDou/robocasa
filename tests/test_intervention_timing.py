@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import numpy as np
+
 from tests.safe_import_helper import install_lightweight_robocasa_packages
 install_lightweight_robocasa_packages()
 
@@ -44,9 +46,28 @@ def runtime(*, complete_at=None, done_at=6):
             "get_subtask_eval": evaluate}
 
 
-def snapshot(task="ArrangeTea", parent="p", step=0, rt=None):
+class LazyBookkeepingEnvironment(XiaoEnvironment):
+    """Model Gymnasium's unseeded lazy helper alongside a seeded simulator RNG."""
+    @property
+    def np_random(self):
+        if self._np_random is None:
+            self._np_random = np.random.default_rng()
+        return self._np_random
+
+    @np_random.setter
+    def np_random(self, value):
+        self._np_random = value
+
+    def reset(self, seed=None):
+        observation, info = super().reset(seed=seed)
+        self._np_random = None  # RoboCasa seeds the simulator, not Gym's helper
+        self.rng = np.random.default_rng(seed)
+        return observation, info
+
+
+def snapshot(task="ArrangeTea", parent="p", step=0, rt=None, env_type=XiaoEnvironment):
     rt = rt or runtime(done_at=None)
-    env, policy = XiaoEnvironment(), make_policy()
+    env, policy = env_type(), make_policy()
     env.reset(seed=1)
     for _ in range(step):
         action = policy(env.get_current_observation())
@@ -170,6 +191,53 @@ class InterventionTimingTest(unittest.TestCase):
         noisy["step_fn"] = advance_rng
         with self.assertRaisesRegex(ValueError, "global RNG"):
             capture_entry(ref, XiaoEnvironment(), make_policy(), noisy)
+
+    def test_entropy_seeded_lazy_rng_reconstructed_before_entry_and_checked_exactly(self):
+        ref = snapshot(step=4, env_type=LazyBookkeepingEnvironment)
+        entry, nominal, audit, reproduced = capture_entry(ref, LazyBookkeepingEnvironment(), make_policy(), runtime())
+        self.assertTrue(audit["all_exact"], audit)
+        self.assertTrue(audit["reconstructed_environment_rng_idle_entire_replay"])
+        self.assertEqual(audit["environment_rng_idle_steps_checked"], 4)
+        alignment = audit["environment_rng_initial_alignment"]
+        self.assertEqual([r["attribute"] for r in alignment if not r["already_exact_after_reset"]], ["np_random"])
+        self.assertEqual(stable_digest(entry.environment_rng_state), stable_digest(ref.environment_rng_state))
+        self.assertEqual(stable_digest(reproduced.environment_rng_state), stable_digest(ref.environment_rng_state))
+        # The final strict audit still detects any subsequent RNG change.
+        reproduced.environment_rng_state[0]["state"]["state"]["inc"] ^= 2
+        self.assertFalse(reference_audit(ref, reproduced)["channels"]["environment_rng_state"])
+
+    def test_consumed_reconstructed_rng_or_topology_change_rejects_reconstruction(self):
+        ref = snapshot(step=4, env_type=LazyBookkeepingEnvironment)
+        rt = runtime()
+        ordinary_step = rt["step_fn"]
+        def consume(env, action):
+            env.np_random.random()
+            return ordinary_step(env, action)
+        rt["step_fn"] = consume
+        with self.assertRaisesRegex(ValueError, "environment RNG"):
+            capture_entry(ref, LazyBookkeepingEnvironment(), make_policy(), rt)
+        with self.assertRaisesRegex(ValueError, "topology"):
+            capture_entry(ref, XiaoEnvironment(), make_policy(), runtime())
+
+    def test_seeded_simulator_rng_replays_normally_and_is_never_patched(self):
+        rt = runtime()
+        ordinary_step = rt["step_fn"]
+        def consume_seeded_simulator_rng(env, action):
+            env.rng.random()
+            return ordinary_step(env, action)
+        rt["step_fn"] = consume_seeded_simulator_rng
+        ref = snapshot(step=4, env_type=LazyBookkeepingEnvironment, rt=rt)
+        _, _, audit, _ = capture_entry(ref, LazyBookkeepingEnvironment(), make_policy(), rt)
+        self.assertTrue(audit["all_exact"], audit)
+        alignment = audit["environment_rng_initial_alignment"]
+        simulator = next(r for r in alignment if r["attribute"] == "rng")
+        self.assertFalse(simulator["already_exact_after_reset"])  # source is four draws ahead
+        self.assertFalse(simulator["reconstructed"])
+        self.assertEqual([r["attribute"] for r in alignment if r["reconstructed"]], ["np_random"])
+        # A different simulator draw schedule fails the unchanged endpoint audit.
+        wrong_rt = runtime()
+        _, _, failed, _ = capture_entry(ref, LazyBookkeepingEnvironment(), make_policy(), wrong_rt)
+        self.assertFalse(failed["channels"]["environment_rng_state"])
 
     def test_delays_share_control_prefix_count_chunks_and_scripted_steps(self):
         ref = snapshot()

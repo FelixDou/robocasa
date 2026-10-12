@@ -4,6 +4,13 @@ Status: **implemented; simulator-free checks pass; live replay and scientific
 collection remain pending on the cluster**.
 Read `docs/cluster_experiment_runbook.md` before any cluster operation.
 
+The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
+collection. Its first ArrangeTea reference matched simulator state, controller,
+policy state, observations, semantics, global RNG, counters, and XML exactly;
+only one environment generator's state and PCG increment differed. That run
+remains failed and preserved. The amended RNG reconstruction below has local
+regression coverage and requires a new live sentinel in a new output root.
+
 ## Why this is the next experiment
 
 The completed 160-branch operator screen passed every engineering gate but
@@ -48,8 +55,32 @@ The old source has no reset-time global RNG checkpoint. The collector reuses
 the source endpoint's global streams and accepts replay only if they remain
 unchanged through every nominal step and exactly match the source at the
 reference. If replay advances a module-level RNG, collection stops instead
-of inventing its missing initial state. Environment RNGs are captured separately
-and must reproduce the source exactly. Audits retain any endpoint mismatch.
+of inventing its missing initial state.
+
+Environment RNGs use an explicit, selective idle-stream reconstruction contract.
+`RoboCasaGymEnv.reset(seed=...)` seeds the underlying simulator's `rng`, while
+Gymnasium's separate `np_random` property can initialize an entropy-seeded
+generator on first access by snapshot capture. This behavior is documented in
+the [Gymnasium source](https://gymnasium.farama.org/v1.2.3/_modules/gymnasium/core/).
+After the ordinary seeded reset, before any nominal action or entry snapshot,
+the collector checks generator topology and identifies PCG64/PCG64DXSM streams
+whose fixed increment differs from the source. An ordinary draw advances the
+state but does not change that increment; see the
+[NumPy PCG64 state documentation](https://numpy.org/doc/1.24/reference/random/bit_generators/pcg64.html).
+Only these distinctly initialized streams receive their frozen source state.
+They must then remain unchanged after every nominal step. Normally seeded
+simulator generators retain their reset states and may advance naturally
+during replay; their endpoint must still match the source exactly. Any use of
+a reconstructed stream, topology change, or remaining source mismatch rejects
+the replay. It never patches an RNG at the endpoint or excludes it from strict
+equality. Audits report each generator's reset-state hash, source endpoint
+hash, initial equality, reconstruction decision, and number of idle checks.
+Reconstructed streams are explicitly labeled; their source endpoint does not
+independently record their original reset-time state.
+
+Full snapshot restoration and the final reference audit still require exact
+environment RNG equality. The old Phase 2/3B and operator execution modules
+are unchanged, preserving their frozen code hashes.
 
 ## Scientific allocation
 
@@ -189,6 +220,18 @@ bash /gs/fs/tga-shinoda/felid/robocasa/scripts/run_xr1_intervention_timing.sh re
 A recorded technical error or provenance/engineering failure stops collection.
 Preserve its root and logs for diagnosis; do not delete error files to force
 resume. A corrected implementation requires a new registration and output root.
+
+For the initial RNG-only failure, pull the patch and start a new run using the
+same source operator screen. Do not resume the old registration:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_20261012_192313/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_TIMING_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_rngfix_$(date +%Y%m%d_%H%M%S)"
+export XR1_TIMING_GPU=0
+bash "$ROBOCASA_REPO/scripts/run_xr1_intervention_timing.sh" start
+```
 
 Implementation: `intervention_timing.py`, `run_intervention_timing.py`, and
 `analyze_intervention_timing.py` under `robocasa/recovery/`; launcher under

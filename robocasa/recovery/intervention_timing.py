@@ -30,6 +30,7 @@ DEFAULT_SPEC = {
     "endpoint": "absolute_environment_steps_from_common_stage_entry",
     "ineligible_fallback": "continue_without_intervention_keep_assignment",
     "subgoal_source": "fixed_supervisor_supplied_no_online_stage_claim",
+    "environment_rng_replay": "distinct_pcg_seed_streams_reconstructed_before_nominal_replay_only_if_reconstructed_streams_remain_idle",
 }
 
 
@@ -44,7 +45,7 @@ def validate_spec(spec):
     if (len(seeds) != 2 or any(type(x) is not int or x < 0 for x in seeds)
             or type(stride) is not int or stride < 480 or abs(seeds[1]-seeds[0]) < 10*stride):
         raise ValueError("Require disjoint bounded per-parent request seed schedules")
-    for key in ("endpoint", "ineligible_fallback", "subgoal_source"):
+    for key in ("endpoint", "ineligible_fallback", "subgoal_source", "environment_rng_replay"):
         if spec[key] != DEFAULT_SPEC[key]:
             raise ValueError(f"Unsupported timing contract: {key}")
 

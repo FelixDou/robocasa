@@ -16,6 +16,7 @@ from robocasa.recovery.full_snapshot import (
     capture_full_snapshot, save_full_snapshot, load_full_snapshot, restore_full_snapshot,
     stable_digest, compare_structures, _compare_environment_states,
     _capture_global_rng_state, _restore_global_rng_state,
+    _capture_environment_rng_state, _restore_environment_rng_state,
     environment_fingerprint, causal_transition_fingerprint,
 )
 from robocasa.recovery.intervention_timing import (
@@ -56,6 +57,54 @@ def reference_audit(reference, replayed):
             "reference_limit": "complete_endpoint_and_latest_policy_records; source_does_not_store_entire_nominal_request_action_history"}
 
 
+def reconstruct_idle_environment_rng(reference, env):
+    """Reconstruct missing reset-time RNG state only under an idle-stream guard.
+
+    RoboCasaGymEnv.reset seeds the simulator's rng but not Gymnasium's lazy
+    np_random. Access by the first snapshot can therefore create a new,
+    entropy-seeded bookkeeping generator. A different PCG stream increment
+    identifies a separately seeded stream, rather than a stream advanced by
+    ordinary draws. Reconstruct only those streams before replay and require
+    them to remain idle. Seeded simulator RNGs retain their reset state and
+    replay normally. Never replace RNG state at the comparison endpoint.
+    """
+    before = _capture_environment_rng_state(env)
+    expected = reference.environment_rng_state
+
+    def topology(records):
+        return [{"object_path": r["object_path"], "attribute": r["attribute"],
+                 "kind": r["kind"], "bit_generator": r["state"].get("bit_generator")
+                 if r["kind"] == "numpy_generator" else None} for r in records]
+
+    if topology(before) != topology(expected):
+        raise ValueError("Environment RNG topology differs from source; cannot reconstruct reset-time streams")
+    reconstructed = []
+    alignment = []
+    for identity, initial, source in zip(topology(expected), before, expected):
+        distinct_pcg_stream = (source["kind"] == "numpy_generator"
+            and source["state"].get("bit_generator") in {"PCG64", "PCG64DXSM"}
+            and initial["state"]["state"]["inc"] != source["state"]["state"]["inc"])
+        if distinct_pcg_stream:
+            reconstructed.append(source)
+        alignment.append({**identity, "already_exact_after_reset": not compare_structures(initial["state"], source["state"]),
+                          "reconstructed": distinct_pcg_stream,
+                          "reason": "distinct_pcg_seed_stream_requires_idle_reconstruction" if distinct_pcg_stream else "ordinary_seeded_reset_replay",
+                          "reset_state_sha256": stable_digest(initial["state"]),
+                          "source_endpoint_state_sha256": stable_digest(source["state"])})
+    _restore_environment_rng_state(env, reconstructed)
+    assert_reconstructed_rng_idle(env, reconstructed)
+    return deepcopy(reconstructed), alignment
+
+
+def assert_reconstructed_rng_idle(env, reconstructed):
+    """A source endpoint can stand in for missing earlier state only if idle."""
+    actual = _capture_environment_rng_state(env)
+    by_key = {(r["object_path"], r["attribute"], r["kind"]): r for r in actual}
+    observed = [by_key.get((r["object_path"], r["attribute"], r["kind"])) for r in reconstructed]
+    if stable_digest(observed) != stable_digest(reconstructed):
+        raise ValueError("Nominal replay advances reconstructed reset-time environment RNG; cannot certify the old parent")
+
+
 def capture_entry(reference, env, policy, runtime, *, progress=None):
     """Replay reset -> source prefix-2; keep its real target-stage entry."""
     seed = int(reference.metadata["environment_seed"])
@@ -69,6 +118,7 @@ def capture_entry(reference, env, policy, runtime, *, progress=None):
     # replay leaves them idle, and verify them against the source at the end.
     _restore_global_rng_state(reference.global_rng_state)
     rng_digest = stable_digest(_capture_global_rng_state())
+    reconstructed_rng, rng_alignment = reconstruct_idle_environment_rng(reference, env)
     evaluations = [deepcopy(runtime["get_subtask_eval"](env))]
     predicate = reference.metadata["trigger_stage"].split("::", 1)[-1]
     current, local, entry = None, 0, None
@@ -96,6 +146,10 @@ def capture_entry(reference, env, policy, runtime, *, progress=None):
                 environment_step=step, observation=obs, subtask_eval=evaluations[-1])
             audit = reference_audit(reference, reproduced)
             audit["global_rng_replay_contract"] = "source_endpoint_streams_reused_only_with_no_global_advancement_during_entire_nominal_replay"
+            audit["environment_rng_replay_contract"] = "distinct_pcg_seed_streams_reconstructed_before_replay_only_if_they_remain_idle; other_streams_follow_ordinary_seeded_replay"
+            audit["environment_rng_initial_alignment"] = rng_alignment
+            audit["environment_rng_idle_steps_checked"] = len(steps)
+            audit["reconstructed_environment_rng_idle_entire_replay"] = True
             return entry, {"steps": steps, "subtask_evals": evaluations}, audit, reproduced
         action = runtime["call_policy"](policy, obs)
         requests, inference = policy.pop_request_records(), policy.pop_inference_record()
@@ -117,12 +171,14 @@ def capture_entry(reference, env, policy, runtime, *, progress=None):
         if progress is not None:
             progress({"step": step, "observation_sha256": before, "next_observation_sha256": stable_digest(obs),
                       "action_sha256": stable_digest(action), "policy_state_sha256": stable_digest(policy.get_state()),
+                      "environment_rng_sha256": stable_digest(_capture_environment_rng_state(env)),
                       "causal_environment_sha256": steps[-1]["causal_environment_sha256"],
                       "request_sha256": [r["request_sha256"] for r in requests],
                       "request_seeds": [r["sampling_seed"] for r in requests],
                       "target_stage": stage, "local_inferences": local})
         if stable_digest(_capture_global_rng_state()) != rng_digest:
             raise ValueError("Nominal replay advances unrecorded reset-time global RNG; cannot certify the old parent")
+        assert_reconstructed_rng_idle(env, reconstructed_rng)
         if done or runtime["success_fn"](info=info, reward=reward, env=env):
             raise ValueError("Nominal replay terminated before the source reference")
 
@@ -312,6 +368,10 @@ def engineering_analysis(root, registration, scope):
         "complete_unique_branch_support": set(records) == {b["branch_id"] for b in selected},
         "all_payloads_and_embedded_records_exact": True,
         "source_replay_and_base_integrity": expected_parents.issubset(bases),
+        "environment_rng_reconstruction_idle_valid": expected_parents.issubset(bases) and all(
+            bases[pid]["replay_audit"].get("reconstructed_environment_rng_idle_entire_replay") is True
+            and bases[pid]["replay_audit"]["channels"]["environment_rng_state"] is True
+            for pid in expected_parents),
         "all_complete_restores_valid": bool(records) and all(r["restore_valid"] and r["restore_subtask_exact"] for r in records.values()),
         "common_base_identity": all(r["parent_id"] in bases and r["source_base_snapshot_id"] == bases[r["parent_id"]]["snapshot_id"] for r in records.values()),
         "all_pre_intervention_prefixes_exact": bool(prefixes) and all(p["all_exact"] for p in prefixes),
