@@ -43,6 +43,21 @@ state, and matching requests do not prove determinism for untested inputs.
 The full timing study remains incomplete; inspect the observation path with
 the separate recorded-action diagnostic below before another full launch.
 
+The recorded-action run `xr1_timing_observations_20261013_015311` completed
+without policy calls. All audited environment channels, model XML, RNG, and
+non-camera observations matched throughout the two 400-step repeats. All three
+camera streams first differed at environment step 1, affecting over 99.9% of
+pixels, with mean absolute RGB differences of approximately 128--139 levels.
+The first environment's camera means dropped from approximately 131--169 at
+reset to 28--35 after its first step; approximately 56% of pixels became dark,
+and the RGB channel means became nearly equal. This dark, nearly achromatic
+output persisted at the sampled step 233. The second environment and separate
+third probe had matching, normally colored images at the sampled steps 1 and
+233. The third environment's four rerenders matched exactly. That probe did
+not test the outlying first environment. These results strongly suggest
+rendering corruption in this diagnostic, but do not establish its mechanism
+or that it is identical to the earlier nominal step-232 observation incident.
+
 ## Why this is the next experiment
 
 The completed 160-branch operator screen passed every engineering gate but
@@ -359,6 +374,62 @@ pair means the incident was not reproduced in those two instrumented replays;
 it does not certify a fix or justify restarting the full study. Raw-state
 capture adds I/O time, which can affect whether a timing-sensitive renderer
 problem recurs. SAFE-trigger recovery remains outside this diagnostic.
+
+### Compare CUDA/RNG-runtime initialization order
+
+The observation diagnostic currently restores and inspects source global RNG
+state after reset has already rendered the first observation. Its CUDA RNG
+inspection path can initialize CUDA after a renderer already exists;
+[PyTorch documents eager CUDA initialization for the RNG getter](https://docs.pytorch.org/docs/2.14/generated/torch.cuda.get_rng_state.html).
+Subsequent environments share an already initialized runtime.
+This is a testable explanation for the first-environment-only camera failure;
+it has not yet been validated on the cluster.
+
+Set `XR1_OBS_COMPARE_INIT_ORDER=1` to run a controlled comparison. The launcher
+starts the following two cases sequentially, each in a fresh Python interpreter:
+
+- `after_reset`: preserve the existing initialization order.
+- `before_env`: call the existing global RNG inspection path before environment
+  creation, initializing its optional Torch/CUDA runtime early. This early call
+  does not install source RNG state. Both cases keep the original post-reset
+  source RNG restoration and exact initial-state audit.
+
+Each case performs the same two 400-action replays and separate step-233
+render probe. This requires 2,066 simulator steps across six fresh environments,
+with no policy server or checkpoint. Startup events inspect whether Torch is
+loaded and CUDA is initialized without themselves importing Torch or
+initializing CUDA. Events before and after RNG restoration and inspection
+distinguish those two operations. The report checks that the control remained
+uninitialized through reset and initialized by RNG inspection, while the early
+case initialized before environment creation. It compares first environments
+across cases, and compares the early-initialized
+first environment with the control's second, already warmed environment. It
+also reports first-step camera color/darkness statistics automatically.
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_observations_20261013_015311/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_OBS_COMPARE_INIT_ORDER=1
+export XR1_OBS_GPU=0
+export XR1_OBS_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_init_order_$(date +%Y%m%d_%H%M%S)"
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_observations.sh" start
+
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_observations_latest.env
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_observations.sh" status
+tail -n 50 "$XR1_OBS_LOG"
+```
+
+The parent output contains `after_reset/`, `before_env/`, and a combined
+`report.json`. Every child retains raw frames, state audits, startup events,
+and artifact hashes. A child failure preserves its files and writes a failed
+parent status. If the recorded events do not show the intended change in CUDA
+initialization order, the report says this hypothesis was not exercised. If
+the control reproduces the mismatch, early initialization removes it, and the unchanged environment
+and warmed-control comparisons all pass, the conclusion remains scoped to
+this one fresh-process pair. It does not certify historical nominal prefix
+replay, solve the original step-232 incident, or authorize resuming the failed
+timing registration. The frozen timing collector is unchanged.
 
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:

@@ -5,6 +5,7 @@ from copy import deepcopy
 import io
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -22,7 +23,7 @@ from robocasa.recovery.phase3b_training_horizon import sha256_file
 from robocasa.recovery.diagnose_intervention_timing_replay import run as run_nominal, build_parser as nominal_parser
 from robocasa.recovery.diagnose_intervention_timing_observations import (
     inspect_state, replay_actions, observation_difference, compare_traces,
-    build_parser, run,
+    build_parser, run, initialize_rng_capture_runtime, camera_statistics,
 )
 
 
@@ -36,6 +37,22 @@ class RenderEnvironment(XiaoEnvironment):
 
 
 class ObservationDiagnosticTest(unittest.TestCase):
+    def test_early_initialization_captures_runtime_without_installing_source_rng(self):
+        module = "robocasa.recovery.diagnose_intervention_timing_observations"
+        with patch(module+"._capture_global_rng_state", return_value={
+                "torch_available": True, "torch_cuda_available": True, "torch_cuda": [b"state"]}) as capture, \
+             patch(module+"._restore_global_rng_state") as restore:
+            result = initialize_rng_capture_runtime()
+        capture.assert_called_once_with()
+        restore.assert_not_called()
+        self.assertTrue(result["torch_cuda_available"])
+        self.assertEqual(result["cuda_rng_streams"], 1)
+        self.assertFalse(result["source_rng_restored_early"])
+        stats = camera_statistics({"video.left": np.array([[[0, 0, 0], [255, 255, 255]]], dtype=np.uint8)})
+        self.assertEqual(stats["video.left"]["mean_rgb"], [127.5, 127.5, 127.5])
+        self.assertEqual(stats["video.left"]["dark_pixel_percent"], 50)
+        self.assertEqual(stats["video.left"]["bright_pixel_percent"], 50)
+
     def test_per_key_differences_include_pixel_count_bbox_and_uint8_error(self):
         a = {"video.left": np.zeros((3, 4, 3), dtype=np.uint8), "state.x": np.array([1.0])}
         b = deepcopy(a)
@@ -208,6 +225,104 @@ class ObservationDiagnosticTest(unittest.TestCase):
             (root/"nominal"/"attempt_0"/"nominal_progress.jsonl").write_text("tampered")
             with self.assertRaisesRegex(ValueError, "checksum"):
                 run(args, rt)
+
+    def test_initialization_comparison_dispatches_fresh_interpreters_and_checks_full_traces(self):
+        from tests.test_operator_screen import make_policy
+        module = "robocasa.recovery.diagnose_intervention_timing_observations"
+        with tempfile.TemporaryDirectory() as directory, patch("robocasa.recovery.intervention_timing.validate_operator_registration"):
+            root = Path(directory)
+            old = source_fixture(root)
+            registration = build_registration(old)
+            source = root/"timing"
+            source.mkdir()
+            (source/"registration.json").write_text(json.dumps(registration))
+            nominal_rt = runtime(done_at=None)
+            nominal_rt.update(load_factory=lambda _: None, call_factory=lambda *_: make_policy())
+            nominal_args = nominal_parser().parse_args([
+                "--timing-run-dir", str(source), "--parent-id", registration["parents"][0]["parent_id"],
+                "--output-dir", str(root/"nominal"), "--model-path", "/checkpoint"])
+            with patch("robocasa.recovery.diagnose_intervention_timing_replay._validate_live_provenance"), redirect_stdout(io.StringIO()):
+                run_nominal(nominal_args, nominal_rt)
+            args = build_parser().parse_args([
+                "--source-diagnostic-dir", str(root/"nominal"), "--output-dir", str(root/"comparison"),
+                "--probe-step", "3", "--compare-init-order", "--dry-run"])
+            commands, events = [], {}
+            force_cuda_initialized = False
+            class StableRenderer(XiaoEnvironment):
+                canonical_camera_observations = True
+                def get_canonical_camera_observation(self, observation):
+                    return deepcopy(observation)
+            def execute(command, *, check):
+                self.assertTrue(check)
+                self.assertEqual(command[1:4], ["-u", "-m", module])
+                child_args = build_parser().parse_args(command[4:])
+                self.assertFalse(child_args.compare_init_order)
+                mode = child_args.rng_runtime_init
+                commands.append(command)
+                events[mode] = []
+                rt = runtime(done_at=None)
+                normal_step = rt["step_fn"]
+                def make_env(*_):
+                    env = StableRenderer()
+                    env.corrupt_images = mode == "after_reset" and not events[mode]
+                    events[mode].append("make_env")
+                    return env
+                def step(env, action):
+                    obs, reward, done, info = normal_step(env, action)
+                    if env.corrupt_images:
+                        for key, value in obs.items():
+                            if key.startswith("video."):
+                                value[...] = 255
+                    return obs, reward, done, info
+                rt.update(make_env=make_env, step_fn=step)
+                def early():
+                    events[mode].append("early_rng_capture")
+                    return {"torch_available": False, "source_rng_restored_early": False}
+                # Model the CUDA lifecycle without requiring a GPU locally.
+                cuda_initialized = force_cuda_initialized
+                def record(path, phase):
+                    nonlocal cuda_initialized
+                    if phase == "after_early_rng_runtime_initialization" or phase.endswith(":after_global_rng_capture"):
+                        cuda_initialized = True
+                    if path is not None:
+                        with path.open("a") as stream:
+                            stream.write(json.dumps({"phase": phase, "torch_loaded": cuda_initialized,
+                                                     "cuda_initialized": cuda_initialized})+"\n")
+                with patch(module+".initialize_rng_capture_runtime", side_effect=early), \
+                     patch(module+".record_startup_event", side_effect=record):
+                    run(child_args, rt)
+            with patch(module+".subprocess.run", side_effect=execute), redirect_stdout(io.StringIO()):
+                run(args)
+                self.assertEqual(commands, [])
+                self.assertFalse(args.output_dir.exists())
+                args.dry_run = False
+                result = run(args)
+            self.assertEqual(len(commands), 2)
+            self.assertEqual(events["after_reset"], ["make_env"]*3)
+            self.assertEqual(events["before_env"], ["early_rng_capture", *["make_env"]*3])
+            self.assertEqual(result["finding"],
+                             "early_rng_runtime_initialization_removes_first_environment_divergence_in_this_pair")
+            self.assertTrue(result["cuda_initialization_order_changed"])
+            self.assertFalse(result["startup_order_evidence"]["control_cuda_after_rng_restore"])
+            self.assertTrue(result["startup_order_evidence"]["control_cuda_after_rng_capture"])
+            self.assertEqual(result["first_environment_cross_case_comparison"]["first_observation_difference_step"], 1)
+            self.assertIsNone(result["warmed_control_vs_first_early_environment"]["first_observation_difference_step"])
+            self.assertTrue(result["full_study_remains_incomplete"])
+            # Matching output alone cannot establish this explanation if CUDA
+            # was already initialized before both control and treatment.
+            force_cuda_initialized = True
+            args.output_dir = root/"already_initialized"
+            with patch(module+".subprocess.run", side_effect=execute), redirect_stdout(io.StringIO()):
+                already = run(args)
+            self.assertFalse(already["cuda_initialization_order_changed"])
+            self.assertEqual(already["finding"], "cuda_initialization_order_hypothesis_not_exercised")
+            # A child process failure preserves the parent status and registration.
+            args.output_dir = root/"failed"
+            with patch(module+".subprocess.run", side_effect=subprocess.CalledProcessError(1, ["child"])), \
+                 redirect_stdout(io.StringIO()), self.assertRaises(subprocess.CalledProcessError):
+                run(args)
+            self.assertEqual(json.loads((args.output_dir/"status.json").read_text())["status"], "failed")
+            self.assertTrue((args.output_dir/"registration.json").exists())
 
 
 if __name__ == "__main__":

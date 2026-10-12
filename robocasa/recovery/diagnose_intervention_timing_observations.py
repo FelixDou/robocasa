@@ -6,6 +6,8 @@ import gzip
 import json
 from pathlib import Path
 import pickle
+import subprocess
+import sys
 import traceback
 
 import numpy as np
@@ -31,6 +33,7 @@ from robocasa.recovery.run_phase3b_training_horizon_continuation import _runtime
 
 
 PROTOCOL = "xr1_recorded_action_observation_diagnostic_v1"
+INIT_ORDER_PROTOCOL = "xr1_rng_renderer_initialization_order_diagnostic_v1"
 STATE_FIELDS = (
     "environment_state", "simulator_integration_state", "controller_state",
     "environment_control_state", "environment_rng_state", "global_rng_state",
@@ -46,6 +49,43 @@ def save_state(path, value):
 def load_state(path):
     with gzip.open(path, "rb") as stream:
         return pickle.load(stream)
+
+
+def record_startup_event(path, phase):
+    """Inspect an already imported Torch module without initializing CUDA."""
+    if path is None:
+        return
+    torch = sys.modules.get("torch")
+    append_jsonl(path, {"phase": phase, "torch_loaded": torch is not None,
+                       "cuda_initialized": bool(torch.cuda.is_initialized()) if torch is not None else False})
+
+
+def initialize_rng_capture_runtime():
+    """Initialize the existing RNG inspection path before creating a renderer.
+
+    No source RNG state is installed here. Its original post-reset restoration
+    stays in place, so both startup orders must pass the same initial audit.
+    """
+    state = _capture_global_rng_state()
+    return {"torch_available": state["torch_available"],
+            "torch_cuda_available": state.get("torch_cuda_available", False),
+            "cuda_rng_streams": len(state.get("torch_cuda", [])),
+            "source_rng_restored_early": False}
+
+
+def camera_statistics(observation):
+    result = {}
+    for key, value in observation.items():
+        if not key.startswith("video."):
+            continue
+        rgb = np.asarray(value)
+        if rgb.ndim != 3 or rgb.shape[-1] != 3:
+            continue
+        result[key] = {"mean_rgb": [round(float(v), 2) for v in rgb.mean(axis=(0, 1))],
+                       "std": round(float(rgb.std()), 2),
+                       "dark_pixel_percent": round(100*float((rgb < 12).all(axis=-1).mean()), 2),
+                       "bright_pixel_percent": round(100*float((rgb > 243).all(axis=-1).mean()), 2)}
+    return result
 
 
 def inspect_state(env, observation, evaluation, step):
@@ -184,12 +224,15 @@ def render_probe(env, observation, evaluation, step, count, folder, evaluate):
             "environment_unchanged": all(r["environment_audit"]["all_exact"] for r in results)}
 
 
-def replay_actions(reference, initial_reference, actions, env, runtime, folder, *, render_count=0):
+def replay_actions(reference, initial_reference, actions, env, runtime, folder, *, render_count=0, startup_log=None):
     folder.mkdir()
     seed = int(reference.metadata["environment_seed"])
     observation, _ = _call_with_deterministic_environment_seed(seed, _reset_env, env, seed)
+    record_startup_event(startup_log, f"{folder.name}:after_reset_before_source_rng_restore")
     _restore_global_rng_state(reference.global_rng_state)
+    record_startup_event(startup_log, f"{folder.name}:after_source_rng_restore")
     global_rng = stable_digest(_capture_global_rng_state())
+    record_startup_event(startup_log, f"{folder.name}:after_global_rng_capture")
     reconstructed, alignment = reconstruct_idle_environment_rng(reference, env)
     rows = []
     initial_audit = None
@@ -272,6 +315,8 @@ def load_inputs(args):
 
 
 def run(args, runtime=None):
+    if args.compare_init_order:
+        return compare_initialization_orders(args)
     root, source = args.output_dir.resolve(), args.source_diagnostic_dir.resolve()
     if root == source or root.is_relative_to(source) or source.is_relative_to(root):
         raise ValueError("Observation diagnostic root must be separate from the source diagnostic")
@@ -290,10 +335,17 @@ def run(args, runtime=None):
         **provenance, "protocol": PROTOCOL, "created_at": utc_now(),
         "code_hashes": {p.name: sha256_file(p) for p in paths},
         "actions_sha256": stable_digest(actions), "replays": 2,
+        "rng_runtime_init": args.rng_runtime_init,
         "separate_render_probe_replay": {"environment_steps": args.probe_step, "renders": args.render_probes},
         "policy_calls": 0, "scientific_trajectories_collected": 0,
     })
     try:
+        startup_log = root/"startup_events.jsonl"
+        record_startup_event(startup_log, "before_optional_rng_runtime_initialization")
+        early_initialization = None
+        if args.rng_runtime_init == "before_env":
+            early_initialization = initialize_rng_capture_runtime()
+            record_startup_event(startup_log, "after_early_rng_runtime_initialization")
         runtime = runtime or _runtime()
         config = _runtime_args(args, plan)
         attempts = []
@@ -303,12 +355,15 @@ def run(args, runtime=None):
             env = None
             try:
                 seed = int(reference.metadata["environment_seed"])
+                record_startup_event(startup_log, f"{name}:before_environment_creation")
                 env = _call_with_deterministic_environment_seed(seed, runtime["make_env"],
                     reference.task_name, config.env_interface, config.split, seed, True)
+                record_startup_event(startup_log, f"{name}:after_environment_creation")
                 _configure_phase2_environment(env, config)
                 selected = actions if index < 2 else actions[:args.probe_step]
                 result = replay_actions(reference, initial, selected, env, runtime, root/name,
-                                        render_count=args.render_probes if index == 2 else 0)
+                                        render_count=args.render_probes if index == 2 else 0,
+                                        startup_log=startup_log)
                 attempts.append(result)
                 print(f"{name}: {len(selected)} fixed actions, initial audit exact, policy calls 0", flush=True)
             finally:
@@ -331,6 +386,11 @@ def run(args, runtime=None):
                          for row, p in zip(attempts[0][1][1:], progress)
                          if row["observation_sha256"] != p["next_observation_sha256"]), None)
         report = {"protocol": PROTOCOL, "status": "diagnostic_complete", "finding": finding,
+                  "rng_runtime_init": args.rng_runtime_init, "early_rng_runtime_initialization": early_initialization,
+                  "startup_events": read_jsonl(startup_log),
+                  "camera_statistics_at_step_1": {
+                      name: camera_statistics(load_state(root/name/"state_000001.pkl.gz")["observation"])
+                      for name in ("attempt_0", "attempt_1", "render_probe") if (root/name/"state_000001.pkl.gz").exists()},
                   "parent_id": reference.parent_id, "environment_steps_per_repeat": len(actions),
                   "source_attempt": args.source_attempt, "policy_calls": 0,
                   "repeat_comparison": comparison, "render_probe_prefix_comparison": probe_comparison,
@@ -348,6 +408,108 @@ def run(args, runtime=None):
         raise
 
 
+def compare_initialization_orders(args):
+    """Run each startup order in a new interpreter; never reuse a warmed process."""
+    root = args.output_dir.resolve()
+    reference, _, actions, _, _, provenance = load_inputs(args)
+    for name in provenance["protected_input_directories"]:
+        protected = Path(name).resolve()
+        if root == protected or root.is_relative_to(protected) or protected.is_relative_to(root):
+            raise ValueError("Initialization diagnostic root must be separate from all frozen input directories")
+    if args.dry_run:
+        print(json.dumps({"protocol": INIT_ORDER_PROTOCOL, "parent": provenance["parent"],
+                          "fresh_process_cases": ["after_reset", "before_env"],
+                          "environment_steps_per_repeat": len(actions), "policy_calls": 0}, indent=2))
+        return
+    root.mkdir(parents=True, exist_ok=False)
+    paths = [Path(__file__), Path(__file__).resolve().parents[2]/"scripts/diagnose_xr1_timing_observations.sh"]
+    atomic_write_json(root/"registration.json", {
+        **provenance, "protocol": INIT_ORDER_PROTOCOL, "created_at": utc_now(),
+        "code_hashes": {p.name: sha256_file(p) for p in paths},
+        "actions_sha256": stable_digest(actions), "fresh_process_cases": ["after_reset", "before_env"],
+        "source_rng_restoration": "unchanged_after_environment_reset_in_both_cases", "policy_calls": 0,
+        "scientific_trajectories_collected": 0,
+    })
+    try:
+        cases = {}
+        for mode in ("after_reset", "before_env"):
+            atomic_write_json(root/"status.json", {"status": "running", "case": mode, "updated_at": utc_now()})
+            command = [sys.executable, "-u", "-m", "robocasa.recovery.diagnose_intervention_timing_observations",
+                       "--source-diagnostic-dir", str(args.source_diagnostic_dir.resolve()),
+                       "--output-dir", str(root/mode), "--source-attempt", str(args.source_attempt),
+                       "--probe-step", str(args.probe_step), "--render-probes", str(args.render_probes),
+                       "--rng-runtime-init", mode,
+                       "--restore-atol", str(args.restore_atol), "--restore-rtol", str(args.restore_rtol)]
+            print("fresh process startup order: " + mode, flush=True)
+            subprocess.run(command, check=True)
+            case = json.loads((root/mode/"report.json").read_text())
+            if case["status"] != "diagnostic_complete" or case["rng_runtime_init"] != mode:
+                raise ValueError("Initialization case did not complete with the requested startup order")
+            cases[mode] = case
+        control, early = cases["after_reset"], cases["before_env"]
+        def cuda_at(case, phase):
+            return next((event["cuda_initialized"] for event in case["startup_events"]
+                         if event["phase"] == phase), None)
+        order_evidence = {
+            "control_cuda_before_environment": cuda_at(control, "attempt_0:before_environment_creation"),
+            "control_cuda_after_reset_before_rng_restore": cuda_at(control, "attempt_0:after_reset_before_source_rng_restore"),
+            "control_cuda_after_rng_restore": cuda_at(control, "attempt_0:after_source_rng_restore"),
+            "control_cuda_after_rng_capture": cuda_at(control, "attempt_0:after_global_rng_capture"),
+            "early_cuda_before_environment": cuda_at(early, "attempt_0:before_environment_creation"),
+        }
+        order_changed = (order_evidence["control_cuda_before_environment"] is False
+                         and order_evidence["control_cuda_after_reset_before_rng_restore"] is False
+                         and order_evidence["control_cuda_after_rng_capture"] is True
+                         and order_evidence["early_cuda_before_environment"] is True)
+        def comparison(a, b):
+            return compare_traces(read_jsonl(a/"observations.jsonl"), read_jsonl(b/"observations.jsonl"), a, b)
+        cross = comparison(root/"after_reset"/"attempt_0", root/"before_env"/"attempt_0")
+        warm = comparison(root/"after_reset"/"attempt_1", root/"before_env"/"attempt_0")
+        control_repeat, early_repeat = control["repeat_comparison"], early["repeat_comparison"]
+        early_probe_prefix = early["render_probe_prefix_comparison"]
+        comparisons = (control_repeat, early_repeat, early_probe_prefix, cross, warm)
+        if not order_changed:
+            finding = "cuda_initialization_order_hypothesis_not_exercised"
+        elif control_repeat["first_observation_difference_step"] is None:
+            finding = "control_did_not_reproduce_observation_divergence"
+        elif any(c["first_non_observation_difference_step"] is not None
+                 or c["first_model_xml_hash_difference_step"] is not None for c in comparisons):
+            finding = "audited_environment_difference_prevents_renderer_initialization_conclusion"
+        elif (early_repeat["first_observation_difference_step"] is not None
+              or early_probe_prefix["first_observation_difference_step"] is not None):
+            finding = "observation_divergence_persists_with_early_rng_runtime_initialization"
+        elif not early["render_probe"].get("performed"):
+            finding = "early_initialization_pair_matches_but_render_probe_unavailable"
+        elif (not early["render_probe"]["environment_unchanged"]
+              or any(r["changed_observation_keys"] for r in early["render_probe"]["renders"])):
+            finding = "early_initialization_pair_matches_but_render_probe_diverges"
+        elif warm["first_observation_difference_step"] is None:
+            finding = "early_rng_runtime_initialization_removes_first_environment_divergence_in_this_pair"
+        else:
+            finding = "early_initialization_repeat_matches_but_differs_from_warmed_control"
+        case_fields = ("finding", "rng_runtime_init", "early_rng_runtime_initialization", "startup_events",
+                       "camera_statistics_at_step_1", "repeat_comparison", "render_probe_prefix_comparison",
+                       "render_probe", "first_observation_difference_from_recorded_source")
+        report = {"protocol": INIT_ORDER_PROTOCOL, "status": "diagnostic_complete", "finding": finding,
+                  "parent_id": reference.parent_id, "policy_calls": 0,
+                  "cases": {mode: {key: case[key] for key in case_fields} for mode, case in cases.items()},
+                  "cuda_initialization_order_changed": order_changed, "startup_order_evidence": order_evidence,
+                  "first_environment_cross_case_comparison": cross,
+                  "warmed_control_vs_first_early_environment": warm,
+                  "full_study_remains_incomplete": True, "scientific_trajectories_collected": 0,
+                  "interpretation_limit": "one_fresh_process_pair; does_not_certify_historical_nominal_prefix_replay"}
+        report["artifact_hashes"] = {str(p.relative_to(root)): sha256_file(p)
+                                     for p in sorted(root.rglob("*")) if p.is_file() and p != root/"status.json"}
+        atomic_write_json(root/"report.json", report)
+        atomic_write_json(root/"status.json", {"status": "diagnostic_complete", "updated_at": utc_now()})
+        print("initialization comparison report: " + str(root/"report.json"), flush=True)
+        return report
+    except Exception as exc:
+        atomic_write_json(root/"status.json", {"status": "failed", "error": str(exc),
+                          "traceback": traceback.format_exc(), "updated_at": utc_now()})
+        raise
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-diagnostic-dir", type=Path, required=True)
@@ -356,6 +518,9 @@ def build_parser():
     parser.add_argument("--probe-step", type=int, default=233,
                         help="Environment step, so 233 is immediately after action index 232")
     parser.add_argument("--render-probes", type=int, default=4)
+    parser.add_argument("--rng-runtime-init", choices=("after_reset", "before_env"), default="after_reset")
+    parser.add_argument("--compare-init-order", action="store_true",
+                        help="Run both initialization orders in separate fresh Python processes")
     parser.add_argument("--restore-atol", type=float, default=1e-8)
     parser.add_argument("--restore-rtol", type=float, default=1e-8)
     parser.add_argument("--dry-run", action="store_true")
