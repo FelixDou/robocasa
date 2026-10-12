@@ -22,10 +22,23 @@ from robocasa.recovery.intervention_timing import build_registration
 from robocasa.recovery.phase3b_training_horizon import sha256_file
 from robocasa.recovery.diagnose_intervention_timing_replay import (
     RequestProbe, diagnose_attempt, diagnostic_state, first_divergence, run, build_parser,
+    initialize_rng_capture_runtime,
 )
 
 
 class ReplayDiagnosticTest(unittest.TestCase):
+    def test_runtime_initialization_uses_rng_inspection_without_early_source_restore(self):
+        with patch("robocasa.recovery.diagnose_intervention_timing_replay._capture_global_rng_state",
+                   return_value={"torch_available": True, "torch_cuda_available": True,
+                                 "torch_cuda": [b"state"]}) as capture, \
+             patch("robocasa.recovery.full_snapshot._restore_global_rng_state") as restore:
+            result = initialize_rng_capture_runtime()
+        capture.assert_called_once_with()
+        restore.assert_not_called()
+        self.assertTrue(result["torch_cuda_available"])
+        self.assertEqual(result["cuda_rng_streams"], 1)
+        self.assertFalse(result["source_rng_restored_early"])
+
     def test_probe_records_identical_input_and_never_inserts_calls_into_nominal_trace(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -175,6 +188,43 @@ class ReplayDiagnosticTest(unittest.TestCase):
             self.assertEqual(result["finding"], "isolated_replays_reproduce_source_full_study_still_blocked")
             self.assertEqual(result["scientific_trajectories_collected"], 0)
             self.assertEqual(before, {p.name: sha256_file(p) for p in source.iterdir()})
+            # Early initialization must run before factory loading or environment
+            # creation, add no policy requests, and retain exact replay gates.
+            control_root = args.output_dir
+            args.output_dir = base/"early_diagnostic"
+            args.rng_runtime_init = "before_env"
+            events = []
+            make_env = rt["make_env"]
+            def early():
+                events.append("initialize_rng_runtime")
+                return {"torch_available": False, "source_rng_restored_early": False}
+            def create(*a):
+                events.append("make_env")
+                return make_env(*a)
+            rt.update(make_env=create, load_factory=lambda _: events.append("load_factory"))
+            module = "robocasa.recovery.diagnose_intervention_timing_replay"
+            with patch(module+"._validate_live_provenance"), \
+                 patch(module+".initialize_rng_capture_runtime", side_effect=early) as warm, \
+                 redirect_stdout(io.StringIO()):
+                args.dry_run = True
+                run(args, rt)
+                warm.assert_not_called()
+                self.assertFalse(args.output_dir.exists())
+                args.dry_run = False
+                initialized = run(args, rt)
+                warm.assert_called_once_with()
+            self.assertEqual(events, ["initialize_rng_runtime", "load_factory", "make_env", "make_env"])
+            self.assertEqual(initialized["rng_runtime_init"], "before_env")
+            self.assertTrue(all(a["prefix_replay_accepted"] for a in initialized["attempts"]))
+            self.assertTrue(initialized["repeated_initial_state_audit"]["all_exact"])
+            self.assertTrue(initialized["repeated_endpoint_audit"]["all_exact"])
+            self.assertIsNone(initialized["first_repeat_divergence"])
+            for index in range(2):
+                name = f"attempt_{index}/requests.jsonl"
+                self.assertEqual((control_root/name).read_text(), (args.output_dir/name).read_text())
+            self.assertEqual(before, {p.name: sha256_file(p) for p in source.iterdir()})
+            self.assertEqual(len(policies), 4)
+            self.assertTrue(all(p.client.client.closed for p in policies))
             # Both a reused output root and an overlapping source/output root fail closed.
             with patch("robocasa.recovery.diagnose_intervention_timing_replay._validate_live_provenance"):
                 with self.assertRaises(FileExistsError):
@@ -182,6 +232,14 @@ class ReplayDiagnosticTest(unittest.TestCase):
                 args.output_dir = source/"nested"
                 with self.assertRaisesRegex(ValueError, "separate"):
                     run(args, rt)
+            args.output_dir = base/"failed_initialization"
+            with patch(module+"._validate_live_provenance"), \
+                 patch(module+".initialize_rng_capture_runtime", side_effect=RuntimeError("CUDA initialization failed")):
+                with self.assertRaisesRegex(RuntimeError, "CUDA initialization failed"):
+                    run(args, rt)
+            self.assertEqual(json.loads((args.output_dir/"status.json").read_text())["status"], "failed")
+            self.assertTrue((args.output_dir/"registration.json").exists())
+            self.assertEqual(events.count("make_env"), 2)
             reg["code_hashes"] = {}
             (source/"registration.json").write_text(json.dumps(reg))
             with self.assertRaisesRegex(ValueError, "checksum"):

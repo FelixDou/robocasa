@@ -6,6 +6,7 @@ import gzip
 import json
 from pathlib import Path
 import pickle
+import sys
 import traceback
 from types import SimpleNamespace
 
@@ -39,6 +40,24 @@ TRACE_FIELDS = (
 def save_payload(path, value):
     with gzip.open(path, "wb") as stream:
         pickle.dump(value, stream, protocol=5)
+
+
+def record_startup_event(path, phase):
+    """Observe an already loaded Torch runtime without initializing CUDA."""
+    if path is None:
+        return
+    torch = sys.modules.get("torch")
+    append_jsonl(path, {"phase": phase, "torch_loaded": torch is not None,
+                       "cuda_initialized": bool(torch.cuda.is_initialized()) if torch is not None else False})
+
+
+def initialize_rng_capture_runtime():
+    """Warm RNG inspection before rendering; keep source restoration unchanged."""
+    state = _capture_global_rng_state()
+    return {"torch_available": state["torch_available"],
+            "torch_cuda_available": state.get("torch_cuda_available", False),
+            "cuda_rng_streams": len(state.get("torch_cuda", [])),
+            "source_rng_restored_early": False}
 
 
 def diagnostic_state(env, policy, observation, evaluation, step):
@@ -117,7 +136,7 @@ class RequestProbe:
         self.client.close()
 
 
-def diagnose_attempt(reference, env, policy, runtime, folder):
+def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=None):
     folder.mkdir()
     rows, evaluations, actions, inferences = [], [], [], []
     state = {"step": 0, "observation": None, "initial": None}
@@ -132,6 +151,7 @@ def diagnose_attempt(reference, env, policy, runtime, folder):
     def call(p, obs):
         state["observation"] = deepcopy(obs)
         if state["initial"] is None:
+            record_startup_event(startup_log, f"{folder.name}:first_nominal_observation")
             state["initial"] = diagnostic_state(env, p, obs, evaluations[-1], 0)
             save_payload(folder/"initial_diagnostic_state.pkl.gz", state["initial"])
         boundary = p.at_inference_boundary
@@ -209,7 +229,8 @@ def run(args, runtime=None):
     plan = json.loads((Path(registration["phase2_run_dir"])/"plan.json").read_text())
     _validate_live_provenance(args, registration["phase2_registration"], plan)
     if args.dry_run:
-        print(json.dumps({"protocol": PROTOCOL, "parent": parent, "replays": 2}, indent=2))
+        print(json.dumps({"protocol": PROTOCOL, "parent": parent, "replays": 2,
+                          "rng_runtime_init": args.rng_runtime_init}, indent=2))
         return
     root = args.output_dir.resolve()
     if root == source or root.is_relative_to(source) or source.is_relative_to(root):
@@ -222,12 +243,27 @@ def run(args, runtime=None):
         "parent": parent, "source_integrity": integrity, "replays": 2,
         "code_hashes": {str(p.name): sha256_file(p) for p in paths},
         "policy_lifecycle": "fresh_policy_and_environment_per_attempt_like_original_phase2",
+        "rng_runtime_init": args.rng_runtime_init,
+        "source_rng_restoration": "unchanged_in_frozen_nominal_replay_after_environment_reset",
         "request_probe": "repeat_first_explicitly_seeded_input_after_nominal_endpoint_capture",
         "scientific_trajectories_collected": 0,
     })
-    config = _runtime_args(args, plan)
-    runtime = runtime or _runtime()
-    factory = runtime["load_factory"](plan["policy_module"])
+    startup_log = root/"startup_events.jsonl"
+    atomic_write_json(root/"status.json", {"status": "running", "stage": "runtime_initialization",
+                      "updated_at": utc_now()})
+    try:
+        record_startup_event(startup_log, "before_optional_rng_runtime_initialization")
+        early_initialization = None
+        if args.rng_runtime_init == "before_env":
+            early_initialization = initialize_rng_capture_runtime()
+            record_startup_event(startup_log, "after_early_rng_runtime_initialization")
+        config = _runtime_args(args, plan)
+        runtime = runtime or _runtime()
+        factory = runtime["load_factory"](plan["policy_module"])
+    except Exception as exc:
+        atomic_write_json(root/"status.json", {"status": "failed", "error": str(exc),
+                          "traceback": traceback.format_exc(), "updated_at": utc_now()})
+        raise
     attempts = []
     for index in range(2):
         atomic_write_json(root/"status.json", {"status": "running", "attempt": index,
@@ -235,11 +271,15 @@ def run(args, runtime=None):
         env = policy = None
         try:
             seed = int(reference.metadata["environment_seed"])
+            record_startup_event(startup_log, f"attempt_{index}:before_environment_creation")
             env = _call_with_deterministic_environment_seed(seed, runtime["make_env"],
                 reference.task_name, config.env_interface, config.split, seed, True)
+            record_startup_event(startup_log, f"attempt_{index}:after_environment_creation")
             _configure_phase2_environment(env, config)
             policy = runtime["call_factory"](factory, env, _policy_args(reference, args))
-            attempts.append(diagnose_attempt(reference, env, policy, runtime, root/f"attempt_{index}"))
+            record_startup_event(startup_log, f"attempt_{index}:after_policy_creation")
+            attempts.append(diagnose_attempt(reference, env, policy, runtime, root/f"attempt_{index}",
+                                             startup_log=startup_log))
             report = attempts[-1][0]
             print(f"replay {index+1}/2: " + json.dumps({k: report[k] for k in (
                 "prefix_replay_accepted", "source_endpoint_channels", "final_ordered_stage", "request_repeat_probe")}), flush=True)
@@ -261,6 +301,8 @@ def run(args, runtime=None):
                       key=lambda p: p.stat().st_mtime)
     report = {
         "protocol": PROTOCOL, "status": "diagnostic_complete", "parent_id": parent["parent_id"],
+        "rng_runtime_init": args.rng_runtime_init, "early_rng_runtime_initialization": early_initialization,
+        "startup_events": read_jsonl(startup_log),
         "attempts": [a[0] for a in attempts], "repeated_initial_state_audit": initial_audit,
         "repeated_endpoint_audit": endpoint_audit, "first_repeat_divergence": divergence,
         "previous_progress_path": str(previous[-1]) if previous else None,
@@ -299,6 +341,8 @@ def build_parser():
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=10319)
+    parser.add_argument("--rng-runtime-init", choices=("after_reset", "before_env"), default="after_reset",
+                        help="Optionally initialize RNG inspection before either environment is created")
     parser.add_argument("--restore-atol", type=float, default=1e-8)
     parser.add_argument("--restore-rtol", type=float, default=1e-8)
     parser.add_argument("--dry-run", action="store_true")

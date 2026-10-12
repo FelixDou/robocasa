@@ -17,8 +17,11 @@ if (root/"status.json").exists():
 if (root/"report.json").exists():
     data = json.loads((root/"report.json").read_text())
     print("finding:", data["finding"])
+    print("RNG runtime initialization:", data.get("rng_runtime_init", "after_reset"))
+    if "startup_events" in data:
+        print("startup events:", data["startup_events"])
     for i, attempt in enumerate(data["attempts"]):
-        print("attempt", i, {k: attempt[k] for k in ("source_endpoint_channels", "final_ordered_stage", "final_at_inference_boundary", "request_repeat_probe")})
+        print("attempt", i, {k: attempt[k] for k in ("prefix_replay_accepted", "environment_steps", "source_endpoint_channels", "final_ordered_stage", "final_at_inference_boundary", "request_repeat_probe")})
         print("initial XML:", {k: attempt["initial_model_xml_audit"][k] for k in ("available", "compatible")})
         print("replay error:", attempt["replay_error"]["message"] if attempt["replay_error"] else None)
     print("initial repeats:", data["repeated_initial_state_audit"]["channels"])
@@ -37,6 +40,11 @@ export XR1_SAFE_CHECKPOINT=${XR1_SAFE_CHECKPOINT:-$STORAGE_BS/robocasa_checkpoin
 export XR1_REPLAY_SOURCE=${XR1_REPLAY_SOURCE:-${XR1_TIMING_ROOT:?Source the failed timing run.env or set XR1_REPLAY_SOURCE}/full}
 export XR1_REPLAY_PARENT=${XR1_REPLAY_PARENT:-f9cd6c2c907171c2f8fea437}
 export XR1_REPLAY_GPU=${XR1_REPLAY_GPU:-0} XR1_REPLAY_PORT=${XR1_REPLAY_PORT:-10319}
+export XR1_REPLAY_RNG_RUNTIME_INIT=${XR1_REPLAY_RNG_RUNTIME_INIT:-after_reset}
+case "$XR1_REPLAY_RNG_RUNTIME_INIT" in
+  after_reset|before_env) ;;
+  *) echo "XR1_REPLAY_RNG_RUNTIME_INIT must be after_reset or before_env"; exit 1 ;;
+esac
 export CUDA_VISIBLE_DEVICES="$XR1_REPLAY_GPU" MUJOCO_EGL_DEVICE_ID=0
 export HF_HOME="$STORAGE_BS/hf_home" TRANSFORMERS_CACHE="$STORAGE_BS/hf_home/transformers"
 export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0 NO_ALBUMENTATIONS_UPDATE=1
@@ -60,7 +68,7 @@ if root.exists():
 PY
   mkdir -p "$XR1_REPLAY_ROOT" "$STORAGE_BS/robocasa_logs/eval"
   export XR1_REPLAY_LOG="$STORAGE_BS/robocasa_logs/eval/$(basename "$XR1_REPLAY_ROOT")_driver.log"
-  for name in STORAGE_BS ROBOCASA_REPO XR1_REPLAY_SOURCE XR1_REPLAY_ROOT XR1_REPLAY_PARENT XR1_REPLAY_GPU XR1_REPLAY_PORT XR1_REPLAY_LOG XR1_CLIENT_ENV XR1_SERVER_ENV XR1_SAFE_REPO XR1_SAFE_CHECKPOINT; do
+  for name in STORAGE_BS ROBOCASA_REPO XR1_REPLAY_SOURCE XR1_REPLAY_ROOT XR1_REPLAY_PARENT XR1_REPLAY_GPU XR1_REPLAY_PORT XR1_REPLAY_RNG_RUNTIME_INIT XR1_REPLAY_LOG XR1_CLIENT_ENV XR1_SERVER_ENV XR1_SAFE_REPO XR1_SAFE_CHECKPOINT; do
     printf 'export %s=%q\n' "$name" "${!name}"
   done > "$XR1_REPLAY_ROOT/run.env"
   cp "$XR1_REPLAY_ROOT/run.env" "$latest"
@@ -100,7 +108,7 @@ if [[ "$XR1_REPLAY_MODEL" == /tmp/ut06746/* ]]; then
 fi
 common=(--timing-run-dir "$XR1_REPLAY_SOURCE" --parent-id "$XR1_REPLAY_PARENT"
         --output-dir "$XR1_REPLAY_ROOT/diagnostic" --model-path "$XR1_REPLAY_MODEL"
-        --host 127.0.0.1 --port "$XR1_REPLAY_PORT")
+        --host 127.0.0.1 --port "$XR1_REPLAY_PORT" --rng-runtime-init "$XR1_REPLAY_RNG_RUNTIME_INIT")
 "$XR1_CLIENT_ENV/bin/python" -u -m robocasa.recovery.diagnose_intervention_timing_replay "${common[@]}" --dry-run
 if ss -ltn | awk '{print $4}' | grep -Eq ":${XR1_REPLAY_PORT}$"; then
   echo "Port $XR1_REPLAY_PORT is occupied; choose a unique XR1_REPLAY_PORT"; exit 1

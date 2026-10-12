@@ -58,6 +58,27 @@ not test the outlying first environment. These results strongly suggest
 rendering corruption in this diagnostic, but do not establish its mechanism
 or that it is identical to the earlier nominal step-232 observation incident.
 
+The controlled run `xr1_timing_init_order_20261013_071529` completed both
+fresh-process cases, each with two 400-step recorded-action replays and a
+separate 233-step probe. Startup events showed that the control remained CUDA
+uninitialized through reset and RNG restoration; global RNG inspection then
+initialized CUDA. Its first environment again had camera differences from
+step 1, while audited non-observation channels matched through all 400 steps.
+In the early-initialization case, CUDA was initialized before environment
+creation, and the two complete repeats had no observation or audited
+environment differences. The first early-initialized environment also matched
+the control's second, already warmed environment throughout the full trace.
+At step 1 its left-camera dark-pixel fraction was 0.06%, compared with 57.35%
+for the outlying control. The third probe completed in both cases; the pasted
+status excerpt does not include its detailed rerender audit.
+
+Early RNG-runtime initialization therefore removed the first-environment
+divergence in this one controlled process pair. This supports a workaround
+for the fixed-action diagnostic; it does not isolate the underlying graphics
+mechanism or establish that the historical policy-driven prefix is reproducible.
+The next check below keeps all source-replay gates intact and runs that
+policy-driven replay with early initialization.
+
 ## Why this is the next experiment
 
 The completed 160-branch operator screen passed every engineering gate but
@@ -382,8 +403,9 @@ state after reset has already rendered the first observation. Its CUDA RNG
 inspection path can initialize CUDA after a renderer already exists;
 [PyTorch documents eager CUDA initialization for the RNG getter](https://docs.pytorch.org/docs/2.14/generated/torch.cuda.get_rng_state.html).
 Subsequent environments share an already initialized runtime.
-This is a testable explanation for the first-environment-only camera failure;
-it has not yet been validated on the cluster.
+The controlled cluster pair described above supports early initialization for
+the first-environment failure. Historical nominal prefix replay still requires
+the separate policy-driven check below.
 
 Set `XR1_OBS_COMPARE_INIT_ORDER=1` to run a controlled comparison. The launcher
 starts the following two cases sequentially, each in a fresh Python interpreter:
@@ -430,6 +452,49 @@ and warmed-control comparisons all pass, the conclusion remains scoped to
 this one fresh-process pair. It does not certify historical nominal prefix
 replay, solve the original step-232 incident, or authorize resuming the failed
 timing registration. The frozen timing collector is unchanged.
+
+### Verify policy-driven replay after early initialization
+
+Set `XR1_REPLAY_RNG_RUNTIME_INIT=before_env` for the isolated nominal diagnostic
+to call global RNG inspection before loading the policy factory or creating
+either environment. This early call does not install source RNG state. Source
+restoration, policy requests and sampling seeds, prefix eligibility, and full
+endpoint audits still use the existing frozen replay implementation unchanged.
+The default remains `after_reset` for control runs. Dry-run validation does not
+initialize CUDA, construct environments, or issue policy requests.
+
+The diagnostic records the requested mode, initialization metadata, and startup
+events, including CUDA state before each environment is created. A warmup
+failure preserves its registration and writes a failed status. It performs
+two fresh policy-driven replays of the original ArrangeTea parent, with the
+existing post-endpoint request probes. This requires the private policy server
+and checkpoint, unlike the recorded-action diagnostic.
+
+Run in a GPU allocation with a new output root and an available private port:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_20261013_012318/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_REPLAY_RNG_RUNTIME_INIT=before_env
+export XR1_REPLAY_GPU=0
+export XR1_REPLAY_PORT=10320
+export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_earlycuda_$(date +%Y%m%d_%H%M%S)"
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+tail -n 50 "$XR1_REPLAY_LOG"
+```
+
+Check that CUDA is initialized before both environment creations, the two
+complete progress traces match, both initial and endpoint repeat audits are
+exact, and **both** attempts report `prefix_replay_accepted: true` against the
+historical source. The existing repeated seeded-request probes must also pass.
+A repeatable trajectory that still misses the historical endpoint
+is a distinct outcome, not a passing source replay. Even a successful isolated
+replay leaves the failed full registration preserved and the timing study
+incomplete; it provides evidence for a separately registered collector change.
 
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:
