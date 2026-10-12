@@ -1,7 +1,7 @@
 # XR1 common-stage-entry intervention timing study
 
-Status: **implemented; simulator-free checks pass; live replay and scientific
-collection remain pending on the cluster**.
+Status: **live 60-execution sentinel passed; full collection stopped at 80/220
+executions on a nominal source-replay mismatch; scientific analysis pending**.
 Read `docs/cluster_experiment_runbook.md` before any cluster operation.
 
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
@@ -10,6 +10,20 @@ policy state, observations, semantics, global RNG, counters, and XML exactly;
 only one environment generator's state and PCG increment differed. That run
 remains failed and preserved. The amended RNG reconstruction below has local
 regression coverage and requires a new live sentinel in a new output root.
+
+The amended run, `xr1_timing_rngfix_20261012_194551`, passed all 60 sentinel
+executions and reached 80/220 executions (60 unique primaries plus 20 repeats).
+It stopped while reconstructing ArrangeTea parent `f9cd6c2c907171c2f8fea437`
+(reset index 4, environment seed 950011), before any intervention trajectory
+for that parent. Source snapshot `d6c936ebf70e1dd79eee5559` is at environment
+step 400, stage `mug_on_tray`, local inference prefix 2, ordinary inference
+index 25, sampling base 6940000. The saved replay stayed at `kettle_on_tray`
+through step 399. At the endpoint its environment RNG hash matched the source,
+but observation and policy-state hashes did not. This is a trajectory mismatch,
+not evidence that the prefix eligibility condition should be relaxed. The
+existing collector stops before producing a complete endpoint audit for this
+failure; its progress trace and the 80 completed executions remain preserved.
+The cause of the trajectory mismatch has not yet been established.
 
 ## Why this is the next experiment
 
@@ -221,6 +235,54 @@ A recorded technical error or provenance/engineering failure stops collection.
 Preserve its root and logs for diagnosis; do not delete error files to force
 resume. A corrected implementation requires a new registration and output root.
 
+### Diagnose one failed nominal parent
+
+Use `scripts/diagnose_xr1_timing_replay.sh` in a GPU allocation for an isolated
+diagnostic. It leaves the timing collector, launcher, source registration,
+errors, and all completed trajectories unchanged. No recovery branches are
+collected and no historical source is replaced.
+
+The diagnostic validates the original registration and live checkpoint/server
+provenance, starts a private policy server on port 10319, and reconstructs only
+the selected parent twice. Each attempt uses a fresh environment and policy,
+matching the original Phase 2 per-parent lifecycle. It captures initial and
+endpoint diagnostic state, raw nominal actions/inferences, request/response
+hashes, stage transitions, and complete endpoint comparisons even when the
+prefix guard rejects replay. A cached endpoint is stored as diagnostic data;
+its cache is never cleared to manufacture an eligible branch snapshot. Initial
+model XML is compared with the historical source. Initial and endpoint states
+and every progress channel are also compared across the two attempts and with
+the previously saved failed trace.
+
+After capturing each nominal endpoint, repeat that attempt's first explicitly
+seeded request and compare its actions and full response. The extra server
+call is labeled as a probe and excluded from nominal request counts. It cannot
+change the already captured trajectory. Matching probes do not prove that
+every historical model invocation was deterministic. An isolated success
+also does not establish why the earlier run failed or permit resuming its
+failed registration.
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_rngfix_20261012_194551/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_REPLAY_SOURCE="$XR1_TIMING_ROOT/full"
+export XR1_REPLAY_PARENT=f9cd6c2c907171c2f8fea437
+export XR1_REPLAY_GPU=0
+export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_$(date +%Y%m%d_%H%M%S)"
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+tail -n 50 "$XR1_REPLAY_LOG"
+```
+
+The durable root is `xr1_timing_replay_<timestamp>/diagnostic/`, with its own
+registration, artifact hashes, and `report.json`. A `diagnostic_complete`
+status means the comparisons finished; it does not mean source replay passed
+or the timing study is complete. Diagnose the reported divergence before
+restarting the full study or considering a separately registered new cohort.
+
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:
 
@@ -238,6 +300,7 @@ Implementation: `intervention_timing.py`, `run_intervention_timing.py`, and
 `scripts/`. Local checks:
 
 ```bash
-.venv_video/bin/python -m unittest tests.test_intervention_timing tests.test_operator_screen tests.test_phase2_snapshot_replay tests.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
+.venv_video/bin/python -m unittest tests.test_intervention_timing_replay_diagnostic tests.test_intervention_timing tests.test_operator_screen tests.test_phase2_snapshot_replay tests.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
 bash -n scripts/run_xr1_intervention_timing.sh
+bash -n scripts/diagnose_xr1_timing_replay.sh
 ```
