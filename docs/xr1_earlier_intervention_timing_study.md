@@ -25,6 +25,24 @@ existing collector stops before producing a complete endpoint audit for this
 failure; its progress trace and the 80 completed executions remain preserved.
 The cause of the trajectory mismatch has not yet been established.
 
+The isolated diagnostic `xr1_timing_replay_20261013_012318` completed two
+400-step replays. Every audited initial-state channel matched between attempts,
+but both failed to reconstruct the historical prefix. The first recorded
+difference was the observation returned after action index 232 (environment
+step 233). Policy-state hashes first differed at action index 233; request,
+action, and causal-environment hashes first differed at index 240. The first
+different request was ordinary call index 15. All 25 paired calls used matching
+sampling seeds, and every pair with matching request hashes had matching full
+response hashes. Environment RNG hashes matched throughout. Ordered-stage
+labels first differed at index 309, and local inference counts at 320.
+
+This places the first observed mismatch in observation generation, before the
+next policy inference and physical-trajectory divergence. It does not yet
+identify a camera, observable, renderer mechanism, or unrecorded simulator
+state, and matching requests do not prove determinism for untested inputs.
+The full timing study remains incomplete; inspect the observation path with
+the separate recorded-action diagnostic below before another full launch.
+
 ## Why this is the next experiment
 
 The completed 160-branch operator screen passed every engineering gate but
@@ -283,6 +301,65 @@ status means the comparisons finished; it does not mean source replay passed
 or the timing study is complete. Diagnose the reported divergence before
 restarting the full study or considering a separately registered new cohort.
 
+### Isolate observation generation using recorded actions
+
+`scripts/diagnose_xr1_timing_observations.sh` uses the completed nominal
+diagnostic's attempt-0 actions. It requires a GPU allocation for rendering, but
+starts no model server and loads no policy checkpoint. It validates the frozen
+timing registration, source snapshot identity/file hash, diagnostic input
+artifact hashes, and all 400 recorded action hashes before creating output.
+It never changes the previous diagnostic, timing ledger, errors, or sources.
+
+Two fresh environments execute that identical action list. Each must first
+match the recorded attempt's initial environment, observations, semantics,
+RNG, and counters exactly under the existing narrow XML compatibility audit.
+The diagnostic records every returned observation separately by key, complete
+environment-state channels, and raw compressed state/observation envelopes.
+It compares camera pixels, changed-pixel counts, error magnitudes, and bounding
+boxes at the first mismatch. Model XML hashes are recorded separately from
+physical-state hashes; only the model field is removed from the latter, and
+XML compatibility is still checked explicitly. No policy state is invented,
+no snapshot is made eligible, and no recovery trajectories are collected.
+
+A third fresh environment executes the same actions through environment step
+233 (immediately after action index 232), then calls the existing canonical
+camera-render path four times without stepping. These extra render calls occur
+only in that separate probe environment. Each checks that audited environment
+state, semantics, counters, and RNG remain unchanged. The probe prefix is also
+compared with the first replay, so a different prefix is visible. The returned
+step observation is compared with the first rerender, then consecutive
+rerenders are compared. No forced raw-observable refresh is used.
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_20261013_012318/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_OBS_SOURCE="$XR1_REPLAY_ROOT/diagnostic"
+export XR1_OBS_GPU=0
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_observations.sh" start
+
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_observations_latest.env
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_observations.sh" status
+tail -n 50 "$XR1_OBS_LOG"
+```
+
+Outputs live in a new durable `xr1_timing_observations_<timestamp>/diagnostic/`
+root. Each environment's `observations.jsonl` contains per-key and state-channel
+hashes; `state_<step>.pkl.gz` retains raw frames and full diagnostic state.
+The separate probe saves `render_<index>.pkl.gz`. `report.json` contains the
+comparisons and an artifact-hash ledger. `diagnostic_complete` means this
+diagnostic finished; the timing experiment remains incomplete. Failure writes
+`status.json` and preserves partial states and traces.
+
+Camera-only differences with matching audited environment channels isolate the
+camera observation path. Differences in state observations point to their
+construction or observable caches. Environment differences under identical
+actions require investigating simulation or missing causal state. A matching
+pair means the incident was not reproduced in those two instrumented replays;
+it does not certify a fix or justify restarting the full study. Raw-state
+capture adds I/O time, which can affect whether a timing-sensitive renderer
+problem recurs. SAFE-trigger recovery remains outside this diagnostic.
+
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:
 
@@ -300,7 +377,8 @@ Implementation: `intervention_timing.py`, `run_intervention_timing.py`, and
 `scripts/`. Local checks:
 
 ```bash
-.venv_video/bin/python -m unittest tests.test_intervention_timing_replay_diagnostic tests.test_intervention_timing tests.test_operator_screen tests.test_phase2_snapshot_replay tests.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
+.venv_video/bin/python -m unittest tests.test_intervention_timing_observation_diagnostic tests.test_intervention_timing_replay_diagnostic tests.test_intervention_timing tests.test_operator_screen tests.test_phase2_snapshot_replay tests.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
 bash -n scripts/run_xr1_intervention_timing.sh
 bash -n scripts/diagnose_xr1_timing_replay.sh
+bash -n scripts/diagnose_xr1_timing_observations.sh
 ```
