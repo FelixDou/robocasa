@@ -137,6 +137,32 @@ retains raw observations over the entire trace, so another shift in onset will
 not prevent measuring the first image difference. Full state capture remains
 separately scoped to the requested window.
 
+The full-observation run `xr1_timing_replay_raw_20261013_124815` completed two
+400-step, 25-request attempts, with early CUDA initialization confirmed and all
+initial repeat channels exact. Both still failed historical prefix replay and
+ended at `kettle_on_tray`; both first-request probes passed. Each raw-observation
+archive contains all 401 observations. The first difference occurred after
+action index 236, at environment step 237, in all three camera streams.
+Numeric state observations first differed at step 241. At step 237 every other
+recorded progress channel matched, including the action, policy, request,
+environment RNG, and causal-environment hashes. Full raw-state audits remain
+limited to steps 232--236, where all channels matched.
+
+All 65,536 pixels in each 256-by-256 camera frame differed at step 237, with
+full-frame bounding boxes. Mean absolute RGB errors were 85.60 for left,
+81.11 for right, and 87.02 for wrist; maximum errors were 255, 255, and 246.
+Attempt 0's channel means became nearly equal: left
+`[115.62, 117.00, 115.22]`, right `[116.00, 115.41, 114.81]`, and wrist
+`[103.61, 103.85, 103.24]`. Attempt 1 retained colored-scene means of
+`[169.77, 145.94, 131.23]`, `[170.36, 150.03, 137.27]`, and
+`[140.41, 131.09, 129.34]`. Whole-frame disagreement under matching recorded
+causal-state fingerprints strongly supports a rendering-path failure. These
+statistics do not identify its graphics/context mechanism, establish that every
+pixel became grayscale, or prove equality of unrecorded state. The next control
+keeps rendering on GPU 0 and moves only the policy server to GPU 1 to test
+whether sharing a GPU contributes. The user confirmed a two-GPU allocation is
+available. Historical replay remains unresolved.
+
 ## Why this is the next experiment
 
 The completed 160-branch operator screen passed every engineering gate but
@@ -664,6 +690,53 @@ This remains two 400-step policy-driven replays and the existing two
 post-endpoint request probes. A matching instrumented pair means the observed
 failure was not reproduced; it does not certify historical prefix replay or
 complete the timing study.
+
+### Separate the policy-server and rendering GPUs
+
+The current same-GPU run exhibits large image differences before recorded
+causal-state or action differences. The launcher now accepts
+`XR1_REPLAY_SERVER_GPU`, defaulting to `XR1_REPLAY_GPU` to preserve the existing
+layout. `XR1_REPLAY_GPU` controls the simulator process's CUDA visibility, with
+logical EGL device 0. Only the policy-server subprocess receives
+`XR1_REPLAY_SERVER_GPU`. Registration and report record both visibility masks,
+the EGL device, and process IDs; `run.env` preserves the selected server GPU.
+This changes no frozen collector, source snapshot, prefix gate, seed, render
+path, or policy request schedule.
+
+With two allocated GPUs, keep the simulator on physical GPU 0 and move the
+model server to GPU 1. Retain early RNG-runtime initialization, the same raw
+observations, and the original full-state window. Use the completed
+`xr1_timing_replay_raw_20261013_124815` run as the same-GPU reference:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_raw_20261013_124815/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_REPLAY_GPU=0
+export XR1_REPLAY_SERVER_GPU=1
+export XR1_REPLAY_RNG_RUNTIME_INIT=before_env
+export XR1_REPLAY_RECORD_ALL_OBSERVATIONS=1
+export XR1_REPLAY_OBS_WINDOW_START=232
+export XR1_REPLAY_OBS_WINDOW_END=236
+export XR1_REPLAY_PORT=10323
+export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_splitgpu_$(date +%Y%m%d_%H%M%S)"
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+```
+
+The new diagnostic still performs two 400-step replays, 50 nominal requests,
+and two existing post-endpoint probes. Verify the logged GPU assignment and
+initial repeat audit. If camera divergence persists, splitting server and
+renderer did not eliminate the incident in this test. If both complete traces
+match, that supports the separated layout as a workaround for the tested pair;
+it does not identify the underlying mechanism. Compare identical-request full
+response hashes with the same-GPU reference before attributing trajectory
+changes to GPU sharing, since the model server now runs on another device.
+Repeatability and acceptance against the historical source remain separate:
+both source-prefix audits must pass to claim historical replay, and even an
+isolated success leaves the failed timing registration preserved.
 
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:

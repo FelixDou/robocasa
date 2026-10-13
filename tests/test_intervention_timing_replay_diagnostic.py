@@ -5,8 +5,11 @@ from copy import deepcopy
 import gzip
 import io
 import json
+import os
 from pathlib import Path
 import pickle
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -27,6 +30,69 @@ from robocasa.recovery.diagnose_intervention_timing_replay import (
 
 
 class ReplayDiagnosticTest(unittest.TestCase):
+    def test_launcher_scopes_server_gpu_without_changing_simulator_visibility(self):
+        script = Path(__file__).resolve().parents[1]/"scripts/diagnose_xr1_timing_replay.sh"
+        for server_gpu in (None, "1"):
+            with self.subTest(server_gpu=server_gpu), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                for name in ("bin", "client/bin", "server/bin", "safe/deploy", "phase2", "source", "run", "robocasa_logs/eval"):
+                    (base/name).mkdir(parents=True)
+                (base/"source/registration.json").write_text(json.dumps({"phase2_run_dir": str(base/"phase2")}))
+                (base/"phase2/plan.json").write_text(json.dumps({"checkpoint_provenance": {"path": str(base/"model")}}))
+                # Exercise the real launcher, replacing only the heavyweight
+                # executables. No socket, model, simulator, or GPU is used.
+                wrapper = f"#!{sys.executable}\n" + '''
+import json, os, pathlib, shutil, sys, time, types
+root = pathlib.Path(os.environ["XR1_REPLAY_ROOT"])
+cli = sys.argv[1:]
+assignment = {"visible": os.environ.get("CUDA_VISIBLE_DEVICES"),
+              "egl": os.environ.get("MUJOCO_EGL_DEVICE_ID"), "pid": os.getpid()}
+if cli[:2] == ["-u", "deploy/server.py"]:
+    (root/"server.json").write_text(json.dumps(assignment))
+    print("Model loaded", flush=True)
+    (root/"ready").touch()
+    time.sleep(10)
+elif cli[:2] == ["-u", "-m"]:
+    if "--dry-run" not in cli:
+        assignment["server_pid"] = os.environ.get("XR1_REPLAY_SERVER_PID")
+        (root/"client.json").write_text(json.dumps(assignment))
+elif cli[0] == "-" and cli[1].isdigit():
+    raise SystemExit(0 if (root/"ready").exists() else 1)
+elif cli[0] == "-":
+    shutil.disk_usage = lambda _: types.SimpleNamespace(free=20*2**30)
+    sys.argv = cli
+    exec(compile(sys.stdin.read(), "<launcher heredoc>", "exec"))
+else:
+    raise SystemExit("unexpected fake executable arguments")
+'''
+                for name in ("client/bin/python", "server/bin/python"):
+                    (base/name).write_text(wrapper)
+                    (base/name).chmod(0o755)
+                for name in ("ss", "flock"):
+                    (base/"bin"/name).write_text("#!/bin/sh\nexit 0\n")
+                    (base/"bin"/name).chmod(0o755)
+                (base/"bin/sleep").write_text(f"#!{sys.executable}\nimport time\ntime.sleep(0.02)\n")
+                (base/"bin/sleep").chmod(0o755)
+                env = {**os.environ, "PATH": str(base/"bin")+os.pathsep+os.environ["PATH"],
+                       "STORAGE_BS": str(base), "ROBOCASA_REPO": str(script.parents[1]),
+                       "XR1_REPLAY_SOURCE": str(base/"source"), "XR1_REPLAY_ROOT": str(base/"run"),
+                       "XR1_CLIENT_ENV": str(base/"client"), "XR1_SERVER_ENV": str(base/"server"),
+                       "XR1_SAFE_REPO": str(base/"safe"), "XR1_REPLAY_GPU": "0",
+                       "XR1_REPLAY_RNG_RUNTIME_INIT": "before_env", "XR1_REPLAY_RECORD_ALL_OBSERVATIONS": "1",
+                       "XR1_REPLAY_OBS_WINDOW_START": "232", "XR1_REPLAY_OBS_WINDOW_END": "236"}
+                env.pop("XR1_REPLAY_SERVER_GPU", None)
+                if server_gpu is not None:
+                    env["XR1_REPLAY_SERVER_GPU"] = server_gpu
+                process = subprocess.run(["bash", str(script), "worker"], env=env,
+                                         capture_output=True, text=True, timeout=15)
+                self.assertEqual(process.returncode, 0, process.stdout+process.stderr)
+                client = json.loads((base/"run/client.json").read_text())
+                server = json.loads((base/"run/server.json").read_text())
+                self.assertEqual(client["visible"], "0")
+                self.assertEqual(client["egl"], "0")
+                self.assertEqual(server["visible"], server_gpu or "0")
+                self.assertEqual(client["server_pid"], str(server["pid"]))
+
     def test_runtime_initialization_uses_rng_inspection_without_early_source_restore(self):
         with patch("robocasa.recovery.diagnose_intervention_timing_replay._capture_global_rng_state",
                    return_value={"torch_available": True, "torch_cuda_available": True,
@@ -327,6 +393,8 @@ class ReplayDiagnosticTest(unittest.TestCase):
             module = "robocasa.recovery.diagnose_intervention_timing_replay"
             with patch(module+"._validate_live_provenance"), \
                  patch(module+".initialize_rng_capture_runtime", side_effect=early) as warm, \
+                 patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "0", "XR1_REPLAY_SERVER_GPU": "1",
+                                         "MUJOCO_EGL_DEVICE_ID": "0", "XR1_REPLAY_SERVER_PID": "42"}), \
                  redirect_stdout(io.StringIO()):
                 args.dry_run = True
                 run(args, rt)
@@ -337,6 +405,12 @@ class ReplayDiagnosticTest(unittest.TestCase):
                 warm.assert_called_once_with()
             self.assertEqual(events, ["initialize_rng_runtime", "load_factory", "make_env", "make_env"])
             self.assertEqual(initialized["rng_runtime_init"], "before_env")
+            assignment = initialized["device_assignment"]
+            self.assertEqual(assignment["simulator_cuda_visible_devices"], "0")
+            self.assertEqual(assignment["policy_server_cuda_visible_devices"], "1")
+            self.assertEqual(assignment["simulator_egl_device_id"], "0")
+            self.assertEqual(assignment["policy_server_pid"], "42")
+            self.assertEqual(json.loads((args.output_dir/"registration.json").read_text())["device_assignment"], assignment)
             self.assertTrue(all(a["prefix_replay_accepted"] for a in initialized["attempts"]))
             self.assertTrue(initialized["repeated_initial_state_audit"]["all_exact"])
             self.assertTrue(initialized["repeated_endpoint_audit"]["all_exact"])

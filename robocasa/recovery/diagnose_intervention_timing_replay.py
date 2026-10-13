@@ -4,6 +4,7 @@ import argparse
 from copy import deepcopy
 import gzip
 import json
+import os
 from pathlib import Path
 import pickle
 import sys
@@ -370,6 +371,12 @@ def run(args, runtime=None):
     paths = [Path(__file__), Path(__file__).resolve().parents[2]/"scripts/diagnose_xr1_timing_replay.sh"]
     if window is not None or args.record_all_observations:
         paths.append(Path(__file__).with_name("diagnose_intervention_timing_observations.py"))
+    device_assignment = {
+        "simulator_cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+        "policy_server_cuda_visible_devices": os.environ.get("XR1_REPLAY_SERVER_GPU"),
+        "simulator_egl_device_id": os.environ.get("MUJOCO_EGL_DEVICE_ID"),
+        "simulator_pid": os.getpid(), "policy_server_pid": os.environ.get("XR1_REPLAY_SERVER_PID"),
+    }
     atomic_write_json(root/"registration.json", {
         "protocol": PROTOCOL, "created_at": utc_now(), "timing_run_dir": str(source),
         "timing_registration_sha256": registration["registration_sha256"],
@@ -377,6 +384,7 @@ def run(args, runtime=None):
         "code_hashes": {str(p.name): sha256_file(p) for p in paths},
         "policy_lifecycle": "fresh_policy_and_environment_per_attempt_like_original_phase2",
         "rng_runtime_init": args.rng_runtime_init,
+        "device_assignment": device_assignment,
         "observation_window": window,
         "record_all_observations": args.record_all_observations,
         "observation_capture": "per_key_hashes_all_steps; raw_window_after_step_evaluation_before_next_policy_append; buffered_until_endpoint; no_extra_renders",
@@ -439,6 +447,7 @@ def run(args, runtime=None):
     report = {
         "protocol": PROTOCOL, "status": "diagnostic_complete", "parent_id": parent["parent_id"],
         "rng_runtime_init": args.rng_runtime_init, "early_rng_runtime_initialization": early_initialization,
+        "device_assignment": device_assignment,
         "startup_events": read_jsonl(startup_log),
         "attempts": [a[0] for a in attempts], "repeated_initial_state_audit": initial_audit,
         "repeated_endpoint_audit": endpoint_audit, "first_repeat_divergence": divergence,

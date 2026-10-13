@@ -18,6 +18,7 @@ if (root/"report.json").exists():
     data = json.loads((root/"report.json").read_text())
     print("finding:", data["finding"])
     print("RNG runtime initialization:", data.get("rng_runtime_init", "after_reset"))
+    print("GPU assignment:", data.get("device_assignment"))
     if "startup_events" in data:
         print("startup events:", data["startup_events"])
     for i, attempt in enumerate(data["attempts"]):
@@ -57,6 +58,7 @@ export XR1_SAFE_CHECKPOINT=${XR1_SAFE_CHECKPOINT:-$STORAGE_BS/robocasa_checkpoin
 export XR1_REPLAY_SOURCE=${XR1_REPLAY_SOURCE:-${XR1_TIMING_ROOT:?Source the failed timing run.env or set XR1_REPLAY_SOURCE}/full}
 export XR1_REPLAY_PARENT=${XR1_REPLAY_PARENT:-f9cd6c2c907171c2f8fea437}
 export XR1_REPLAY_GPU=${XR1_REPLAY_GPU:-0} XR1_REPLAY_PORT=${XR1_REPLAY_PORT:-10319}
+export XR1_REPLAY_SERVER_GPU=${XR1_REPLAY_SERVER_GPU:-$XR1_REPLAY_GPU}
 export XR1_REPLAY_RNG_RUNTIME_INIT=${XR1_REPLAY_RNG_RUNTIME_INIT:-after_reset}
 export XR1_REPLAY_RECORD_ALL_OBSERVATIONS=${XR1_REPLAY_RECORD_ALL_OBSERVATIONS:-0}
 [[ "$XR1_REPLAY_RECORD_ALL_OBSERVATIONS" =~ ^[01]$ ]] || {
@@ -96,7 +98,7 @@ if root.exists():
 PY
   mkdir -p "$XR1_REPLAY_ROOT" "$STORAGE_BS/robocasa_logs/eval"
   export XR1_REPLAY_LOG="$STORAGE_BS/robocasa_logs/eval/$(basename "$XR1_REPLAY_ROOT")_driver.log"
-  for name in STORAGE_BS ROBOCASA_REPO XR1_REPLAY_SOURCE XR1_REPLAY_ROOT XR1_REPLAY_PARENT XR1_REPLAY_GPU XR1_REPLAY_PORT XR1_REPLAY_RNG_RUNTIME_INIT XR1_REPLAY_RECORD_ALL_OBSERVATIONS XR1_REPLAY_OBS_WINDOW_START XR1_REPLAY_OBS_WINDOW_END XR1_REPLAY_LOG XR1_CLIENT_ENV XR1_SERVER_ENV XR1_SAFE_REPO XR1_SAFE_CHECKPOINT; do
+  for name in STORAGE_BS ROBOCASA_REPO XR1_REPLAY_SOURCE XR1_REPLAY_ROOT XR1_REPLAY_PARENT XR1_REPLAY_GPU XR1_REPLAY_SERVER_GPU XR1_REPLAY_PORT XR1_REPLAY_RNG_RUNTIME_INIT XR1_REPLAY_RECORD_ALL_OBSERVATIONS XR1_REPLAY_OBS_WINDOW_START XR1_REPLAY_OBS_WINDOW_END XR1_REPLAY_LOG XR1_CLIENT_ENV XR1_SERVER_ENV XR1_SAFE_REPO XR1_SAFE_CHECKPOINT; do
     printf 'export %s=%q\n' "$name" "${!name}"
   done > "$XR1_REPLAY_ROOT/run.env"
   cp "$XR1_REPLAY_ROOT/run.env" "$latest"
@@ -149,11 +151,13 @@ if ss -ltn | awk '{print $4}' | grep -Eq ":${XR1_REPLAY_PORT}$"; then
 fi
 server_log="$STORAGE_BS/robocasa_logs/eval/$(basename "$XR1_REPLAY_ROOT")_server.log"
 (
+  export CUDA_VISIBLE_DEVICES="$XR1_REPLAY_SERVER_GPU"
   cd "$XR1_SAFE_REPO"
   exec "$XR1_SERVER_ENV/bin/python" -u deploy/server.py \
     --model "$XR1_REPLAY_MODEL" --host 127.0.0.1 --port "$XR1_REPLAY_PORT"
 ) > "$server_log" 2>&1 &
 server_pid=$!
+export XR1_REPLAY_SERVER_PID="$server_pid"
 deadline=$((SECONDS + 1800))
 until "$XR1_CLIENT_ENV/bin/python" - "$XR1_REPLAY_PORT" <<'PY'
 import socket, sys
