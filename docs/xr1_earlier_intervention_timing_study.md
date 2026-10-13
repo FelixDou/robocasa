@@ -1,7 +1,8 @@
 # XR1 common-stage-entry intervention timing study
 
-Status: **live 60-execution sentinel passed; full collection stopped at 80/220
-executions on a nominal source-replay mismatch; scientific analysis pending**.
+Status: **historical endpoint camera corruption confirmed for one source;
+the original timing study remains stopped at 80/220 executions; a new
+reference cohort is required before the timing comparison can proceed**.
 Read `docs/cluster_experiment_runbook.md` before any cluster operation.
 
 Latest preflight: **the corrected GC-scope audit accepted 4/10 parents, then
@@ -11,10 +12,15 @@ including all 305 observations, and the GC guard passed with zero collections.
 The originally failing parent also passed within this run on `r5n4`. The subsequent
 fresh-process check reproduced the source mismatch, so it does not require
 preceding parents. Offline inspection found identical current request/response
-and observation traces across runs, a remaining cross-process causal-hash
-difference, and unusual historical color statistics. Visual inspection of the
-exported PNGs and the saved XML audit are next. Full-study validation remains
-pending.
+and observation traces across runs. The supplied endpoint comparison now
+visually confirms corrupted historical camera images and coherent images in
+both current attempts. The saved cross-run initial/endpoint XML audits accept
+193 redundant OBJ mesh MIME omissions; this makes their raw hashes differ
+without an audited physics difference. Complete intermediate causal states
+were not retained, so exact physical agreement at every intermediate step
+is not established. Full-study validation remains pending. The next experiment
+is the separately registered clean-reference cohort specified below; another
+identical historical replay is not the next step.
 
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
 collection. Its first ArrangeTea reference matched simulator state, controller,
@@ -401,6 +407,88 @@ input mismatch was already present at step 288, but the earliest historical
 divergence remains unknown. The historical gate stays blocked; no parent is
 substituted and no new GPU rollout is warranted solely to repeat these checks.
 
+### Confirmed historical endpoint corruption and XML compatibility
+
+On 2026-10-13 the user supplied a screenshot of the exported endpoint camera
+panel. All three historical cameras show multicolored pixel/stripe corruption;
+both replay rows show coherent kitchen views. Together with the registered
+source-file integrity check and the inspection tool's direct, unscaled uint8
+RGB export, this establishes that the saved historical endpoint at environment
+step 304 contains corrupted camera observations. It is not merely a large
+pixel difference caused by a different robot pose. The source file still
+matches its registered bytes: file integrity does not certify image quality.
+
+The [supplied comparison screenshot](assets/xr1_timing_historical_endpoint_6cf_20261013.png)
+is preserved byte-for-byte (1212 x 1266 pixels; SHA-256
+`a91f1453ed1ed8e49c9b4fb1cddfa26d10967fcb34ff5b405ee7e4119c169662`).
+This repository artifact is a screenshot of the panel, not the original
+cluster PNG or a new simulator observation. The retained image-history panels
+have not been supplied for visual review.
+
+For both corresponding cohort/isolated attempts, all four saved XML audits
+(initial and endpoint for each attempt) report `strict_exact=false`,
+`compatible=true`, `compatibility_mode=mesh_obj_content_type_omission`, and
+193 allowed mesh content-type normalizations. The existing compatibility rule
+allows only omission of redundant `content_type="model/obj"` on an unchanged
+`.obj` mesh; other attributes and XML structure must agree. This explains a
+raw fingerprint difference at the saved states because those fingerprints
+include XML. It is separate from the historical pixel corruption. It does
+not establish that every intervening causal state was identical, and does
+not justify excluding arbitrary XML or physical-state differences from audits.
+
+The screenshot establishes corruption at the historical endpoint only. It
+does not date the onset, establish what images were encoded into the request
+at step 288, prove a particular CUDA/GC/destructor mechanism, or show that all
+historical parents are affected. Matching requests and responses across the
+tested current runs remain evidence of repeatability for those calls only.
+The 160-branch operator screen's recorded outcomes are preserved; image
+quality and the affected snapshot's use in that screen need review before
+treating its negative result as an operator-capability finding under clean
+camera inputs. One corrupted source does not invalidate every earlier result.
+
+### Next experiment: a separately registered clean-reference cohort
+
+Keep the original snapshots, registrations, failed audits, and 80 collected
+timing executions unchanged. Do not resume the old collector, waive historical
+source agreement, or replace only the failed parent. The existing collector
+is bound to the historical prefix-2 references and cannot implement this new
+cohort by changing an output path alone. The workflow below requires a new
+collector and registration; it has not yet been implemented or run.
+
+1. Freeze the same ten task/environment-seed/reset-index assignments, checkpoint,
+   policy configuration, target stages, and ordinary sampling seeds. Label this
+   as a new cohort using the previously selected seeds, not an independent
+   sample or a reconstruction of the historical trajectories. Retain early
+   CUDA initialization, separate renderer/server GPUs, and the corrected GC
+   guard through environment cleanup.
+2. Generate fresh nominal trajectories with fresh policy history. Capture the
+   actual reset-time simulator, controller, policy, global/environment RNG,
+   observation, and evaluation states. Capture the first eligible target-stage
+   inference boundary while the target is incomplete, using a frozen nominal
+   search budget. Do not restore the historical endpoint's corrupted images
+   or infer an earlier state from that endpoint. If a target is not reached,
+   record that outcome without replacing the seed or extending its budget
+   after inspecting outcomes.
+3. Repeat each nominal trajectory from its newly captured initial state in a
+   fresh environment. Preserve every consumed action, encoded request hash,
+   response hash, raw camera observation, and complete causal state sufficient
+   to audit any first difference. Require repeat agreement at the common entry
+   and throughout the recorded prefix. Audit any XML normalization explicitly
+   under the existing narrow rule rather than dropping XML from comparison.
+4. Review camera panels from reset through entry for all ten parents, alongside
+   the repeat audits. Do not certify health from RGB statistics alone. This
+   stage collects nominal reference trajectories and no intervention outcomes.
+   Any failed repeat or corrupted image blocks the timing comparison.
+5. Only after this preflight passes, register and run the paired timing grid
+   from the new common-entry states: continuation and the three existing
+   operators at delays 0/1/2, two continuation schedules, the same fixed task
+   budgets, and sentinel repeats. Report this as a new timing study; do not
+   merge its results into the unfinished original 220-execution registration.
+
+This preserves the scientific question of whether earlier intervention helps,
+while making valid current observations the experimental starting point.
+SAFE-triggered recovery remains deferred.
+
 ## Why this is the next experiment
 
 The completed 160-branch operator screen passed every engineering gate but
@@ -415,7 +503,12 @@ operators lack capability or whether useful intervention must occur earlier.
 The next experiment tests timing from a shared initial simulator-policy state.
 SAFE alarms remain outside this diagnostic.
 
-## Stage 0: provenance, predicate, and replay audit
+## Stage 0: provenance, predicate, and replay audit (original blocked protocol)
+
+The following stages document the frozen original protocol and implementation.
+They remain useful for interpreting preserved artifacts, but their historical
+source-replay requirement is blocked by the confirmed corrupted endpoint.
+Use the new-cohort specification above for subsequent implementation.
 
 Preserve the Phase 2, Phase 3B, and operator-screen roots unchanged. Inspect
 the current branch/snapshot results, source parent records, snapshot metadata,
@@ -1214,13 +1307,15 @@ for i, attempt in enumerate(report["comparison_with_cohort"]["attempts"]):
 PY
 ```
 
-The PNGs are cluster artifacts; they have not been visually inspected in the
-local Codex session. Obtain `endpoint_cameras.png` and `history_camera_1.png`
-(the right-camera history) from this directory for native image review before
-asserting a renderer defect or replacing any historical reference.
+The user subsequently supplied the endpoint panel screenshot, reviewed above:
+its historical camera row is corrupted. The original native cluster PNG and
+`history_camera_1.png` (the right-camera history) have not been reviewed locally.
+The screenshot does not justify changing the frozen reference or accepting
+the historical source-replay gate.
 
-For the initial RNG-only failure, pull the patch and start a new run using the
-same source operator screen. Do not resume the old registration:
+Historical command for the initial RNG-only failure, retained for provenance.
+Do not execute this launcher to restart the study after the confirmed source
+corruption; it still requires agreement with the old references:
 
 ```bash
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_20261012_192313/run.env
