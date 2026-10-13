@@ -5,6 +5,19 @@ the original timing study remains stopped at 80/220 executions; a new
 reference cohort is required before the timing comparison can proceed**.
 Read `docs/cluster_experiment_runbook.md` before any cluster operation.
 
+The user subsequently authorized a bounded exploratory amendment: exclude
+invalid parents before intervention and continue the fixed seed pool, rather
+than requiring all ten to qualify. The new
+[audit-and-exclude timing pilot](xr1_timing_audit_exclude_pilot.md) reuses the
+validated v4 pair, records the documented reset rejection, screens remaining
+seeds, and runs the complete paired timing grid on qualifying parents. It
+preserves the original registrations and results. Late branch errors remain
+reported by operator and block inference; ordinary unsuccessful robot
+rollouts remain outcomes. The historical no-exclusion instructions below
+describe the original protocols, not this newly authorized amendment.
+The new implementation's combined local suite ran 142 tests: 141 passed and
+one was skipped. It still needs live cluster validation.
+
 Latest fresh-reference result: **v4 accepted 1/10 pairs, then failed the next
 parent's live reset-observation check**. Run
 `xr1_timing_references_observer_v4_20261013_220743` on `r5n4` accepted ArrangeTea

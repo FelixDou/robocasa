@@ -6,6 +6,13 @@ accepted; inspect the saved reset audit before another collection**.
 Protocol: `xr1_fresh_common_entry_reference_cohort_v4`.
 Read [the cluster runbook](cluster_experiment_runbook.md) before any cluster operation.
 
+The user has now authorized continuing under a new
+[timing pilot with audited exclusions](xr1_timing_audit_exclude_pilot.md).
+Use that launcher to reuse the accepted v4 pair, retain the documented reset
+rejection, and screen the remaining seeds without aborting at each invalid
+parent. This document and its no-exclusion rules retain the historical v4
+contract; the failed v4 registration is not resumed or rewritten.
+
 The saved historical cameras for ArrangeTea parent `6cfb095ec52c00970abf8340`
 are corrupted. The original timing run remains stopped at 80/220 executions.
 This collector creates a new reference cohort from the same ten previously
