@@ -10,8 +10,11 @@ stopped on historical-source disagreement for ArrangeTea parent
 including all 305 observations, and the GC guard passed with zero collections.
 The originally failing parent also passed within this run on `r5n4`. The subsequent
 fresh-process check reproduced the source mismatch, so it does not require
-preceding parents. The next step inspects saved historical images and policy
-history offline. Full-study validation remains pending.
+preceding parents. Offline inspection found identical current request/response
+and observation traces across runs, a remaining cross-process causal-hash
+difference, and unusual historical color statistics. Visual inspection of the
+exported PNGs and the saved XML audit are next. Full-study validation remains
+pending.
 
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
 collection. Its first ArrangeTea reference matched simulator state, controller,
@@ -366,6 +369,37 @@ certify image health from statistics, change source eligibility, or collect new
 nominal/intervention trajectories. The historical first divergence remains
 unlocalized without a full historical nominal trace. Preserve the four accepted
 cohort records and both failed source comparisons.
+
+The offline run `xr1_timing_source_inspection_20261013_181125` accepted the
+registered source file integrity and verified 305 raw observations in each
+isolated attempt. Both corresponding cohort-versus-isolated comparisons had
+exact initial and endpoint state audits, identical 19-row request/response
+traces, and identical complete 305-row per-key observation traces. There were
+no identical-request/different-response pairs. However, each comparison first
+differed in `causal_environment_sha256` at progress row/action index 0. This
+opaque hash difference remains a limitation: it must not be discarded or
+represented as full causal-trace agreement. The saved initial/endpoint audit's
+`all_exact` permits the declared narrow XML compatibility rule; inspect its
+`model_xml_audit` before attributing the hash difference to serialization or
+physical state. The intervening complete causal states were not retained.
+
+Historical right-camera mean RGB was [156.08, 155.97, 156.22], with a mean
+absolute per-pixel red/green gap of 111.28 and zero percent exactly gray pixels.
+The historical wrist statistics were nearly identical: [156.10, 155.98, 156.23]
+and gap 111.29. Balanced channel averages therefore do not imply grayscale
+pixels. Replay right-camera mean RGB was [125.81, 124.54, 124.76], with gap 2.81
+and 22.15% exactly gray pixels; the replay left-camera gap was 2.55, compared
+with 87.17 historically. These unusual historical color distributions and
+similar camera summaries motivate visual inspection of `endpoint_cameras.png`
+and the retained history panels. They do not, by themselves, prove corruption,
+identical right/wrist frames, or which trajectory's images are correct.
+
+The latest source/replay requests both occurred at environment step 288,
+inference index 18, with sampling seed 6960018 and ordinary seed base 6960000.
+Their hashes differed as recorded above. Thus the latest observed historical
+input mismatch was already present at step 288, but the earliest historical
+divergence remains unknown. The historical gate stays blocked; no parent is
+substituted and no new GPU rollout is warranted solely to repeat these checks.
 
 ## Why this is the next experiment
 
@@ -1161,6 +1195,29 @@ count as agreement. The report's scope remains saved endpoints and retained
 queues, not identification of the first historical mismatch or proof of which
 trajectory is correct. Existing output roots and paths overlapping frozen inputs
 are rejected. This inspection leaves the historical replay gate blocked.
+
+For the completed inspection, show the saved XML compatibility details without
+rerunning any inspection or simulator:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_6cf_isolated_20261013_174013/run.env
+export XR1_SOURCE_INSPECT_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_source_inspection_20261013_181125"
+"$XR1_CLIENT_ENV/bin/python" - "$XR1_SOURCE_INSPECT_ROOT/report.json" <<'PY'
+import json, pathlib, sys
+report = json.loads(pathlib.Path(sys.argv[1]).read_text())
+for i, attempt in enumerate(report["comparison_with_cohort"]["attempts"]):
+    for name in ("initial_audit", "endpoint_audit"):
+        xml = attempt[name].get("model_xml_audit") or {}
+        print(i, name, {k: xml.get(k) for k in (
+            "strict_exact", "compatible", "compatibility_mode",
+            "allowed_mesh_content_type_normalizations")})
+PY
+```
+
+The PNGs are cluster artifacts; they have not been visually inspected in the
+local Codex session. Obtain `endpoint_cameras.png` and `history_camera_1.png`
+(the right-camera history) from this directory for native image review before
+asserting a renderer defect or replacing any historical reference.
 
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:
