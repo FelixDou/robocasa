@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import pickle
+import socket
 import sys
 import traceback
 from types import SimpleNamespace
@@ -437,6 +438,7 @@ def run(args, runtime=None):
     if window is not None or args.record_all_observations:
         paths.append(Path(__file__).with_name("diagnose_intervention_timing_observations.py"))
     device_assignment = {
+        "hostname": socket.gethostname(),
         "simulator_cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
         "policy_server_cuda_visible_devices": os.environ.get("XR1_REPLAY_SERVER_GPU"),
         "simulator_egl_device_id": os.environ.get("MUJOCO_EGL_DEVICE_ID"),

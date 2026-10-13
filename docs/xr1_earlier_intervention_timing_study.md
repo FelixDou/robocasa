@@ -6,8 +6,10 @@ Read `docs/cluster_experiment_runbook.md` before any cluster operation.
 
 Latest isolated check: **the failed ArrangeTea parent passed both historical
 source-prefix audits with automatic cyclic GC disabled**. Both 400-step repeats
-matched throughout. This is a successful workaround for one parent; the matched
-default-GC trace and full-study validation remain pending.
+matched throughout. The same-code default-GC control reproduced camera failure
+after a generation-2 collection. The runs used different cluster nodes. This
+supports the workaround for one parent; the all-parent replay audit and
+full-study validation remain pending.
 
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
 collection. Its first ArrangeTea reference matched simulator state, controller,
@@ -223,6 +225,32 @@ parent, not a completed timing study or a SAFE-trigger recovery result. The
 next check restores default GC with the same current diagnostic code, tracing
 and GPU layout. That matched control is required before attributing the
 successful replay specifically to suppressing automatic cyclic collection.
+
+The same-code default-mode run `xr1_timing_replay_gccontrol_20261013_155951`
+completed both 400-step attempts but failed both historical prefix audits.
+Initial repeat channels matched and both seeded first-request probes passed.
+Attempt 0 recorded a generation-2 collection of 17 objects during the progress
+callback labeled environment step 194. Its next returned camera observation,
+at environment step 195 (after action index 194), was the first repeat mismatch.
+The contemporaneous action, policy, request, environment RNG, and causal-state
+hashes still matched. Numeric state observations first differed at step 209.
+Camera mean RGB errors were 97.83 (left), 104.55 (right), and 83.93 (wrist),
+with almost all pixels changed. Attempt 1 had no generation-2 event in the
+displayed step-193--195 neighborhood. Total nominal collection stops were
+1,151 and 1,146. The onset moved earlier than previous controls, consistent
+with instrumentation changing collection timing; this is not a fixed-step
+task failure.
+
+Together with the zero-collection, two-repeat source acceptance under disabled
+GC, this strengthens the delayed cyclic-cleanup hypothesis and supports a
+bounded GC workaround. It does not identify the finalized object or prove the
+exact GL resource deletion mechanism. The disabled-GC result was pasted from
+`r2n5`, while the default-GC control came from `r5n4`: code/configuration were
+matched, but node hardware/runtime was not held fixed. New diagnostics record
+the client hostname so that this distinction stays visible. The next stage
+audits all ten original parents using the passing diagnostic lifecycle on the
+current allocation, before changing the frozen timing collector or collecting
+interventions.
 
 ## Why this is the next experiment
 
@@ -880,6 +908,66 @@ be applied to a separately registered timing collector and validated across the
 registered parents and intervention branches. Do not resume the old failed
 registration or treat this one-parent success as full-study completion.
 
+### Audit every registered parent with the guarded lifecycle
+
+Set `XR1_REPLAY_ALL_PARENTS=1` to run
+`audit_intervention_timing_parents.py` through the existing launcher. It requires
+the original ten unique parents, five per task, and validates their registered
+snapshot files and source identities. Each parent receives two fresh nominal
+policy/environment replays with early RNG-runtime initialization and automatic
+cyclic GC disabled through cleanup. The fixed raw-state window is cleared
+because source prefixes have different lengths; every returned observation is
+still retained and checked. No intervention trajectories or replacement source
+parents are collected, and the frozen timing execution modules stay unchanged.
+
+Each parent must pass both original source-prefix audits, complete initial and
+endpoint repeat audits, progress and per-key/raw observation comparisons,
+seeded-request probes, and the recorded GC/runtime policy. A repeatable pair
+that misses the historical source fails. Collection stops at the first failed
+parent and preserves its diagnostics and all preceding accepted parents.
+
+Run on the current two-GPU allocation, using the same source registration:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_gccontrol_20261013_155951/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_REPLAY_ALL_PARENTS=1
+export XR1_REPLAY_GC_MODE=disabled
+export XR1_REPLAY_RNG_RUNTIME_INIT=before_env
+export XR1_REPLAY_RECORD_ALL_OBSERVATIONS=1
+export XR1_REPLAY_GPU=0
+export XR1_REPLAY_SERVER_GPU=1
+unset XR1_REPLAY_OBS_WINDOW_START XR1_REPLAY_OBS_WINDOW_END
+export XR1_REPLAY_PORT=10326
+export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_parent_audit_$(date +%Y%m%d_%H%M%S)"
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+tail -n 50 "$XR1_REPLAY_LOG"
+```
+
+The cohort report lives at `$XR1_REPLAY_ROOT/diagnostic/report.json`. Success is
+`status: all_parents_pass`, with 10 parents, 20 nominal replays, five accepted
+parents per task, and every engineering gate true. The source-step total is
+printed during dry-run validation. Each parent retains two complete diagnostic
+attempts, raw images, source audits, GC events, and installed renderer source;
+the parent ledger binds reports by file hash and those reports transitively
+bind their artifacts. This is an engineering preflight, with zero scientific
+intervention trajectories and `full_timing_study_complete: false`.
+
+An interrupted audit without a recorded error can resume with the same saved
+`run.env` and `bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" resume`.
+The source/configuration/code and every completed parent's artifact hashes are
+revalidated; accepted parents are skipped, and an interrupted uncommitted
+attempt gets a separate new directory. Old files and logs are preserved.
+A recorded failure blocks automatic retry and requires diagnosis before a new
+root. An all-parent pass supports applying this bounded lifecycle to a new
+timing registration, followed by the sentinel and full branch audits. It does
+not resume or complete the old failed registration, or test SAFE-trigger
+recovery.
+
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:
 
@@ -897,7 +985,7 @@ Implementation: `intervention_timing.py`, `run_intervention_timing.py`, and
 `scripts/`. Local checks:
 
 ```bash
-.venv_video/bin/python -m unittest tests.test_intervention_timing_observation_diagnostic tests.test_intervention_timing_replay_diagnostic tests.test_intervention_timing tests.test_operator_screen tests.test_phase2_snapshot_replay tests.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
+.venv_video/bin/python -m unittest tests.test_intervention_timing_parent_audit tests.test_intervention_timing_observation_diagnostic tests.test_intervention_timing_replay_diagnostic tests.test_intervention_timing tests.test_operator_screen tests.test_phase2_snapshot_replay tests.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
 bash -n scripts/run_xr1_intervention_timing.sh
 bash -n scripts/diagnose_xr1_timing_replay.sh
 bash -n scripts/diagnose_xr1_timing_observations.sh

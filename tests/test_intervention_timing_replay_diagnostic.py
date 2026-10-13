@@ -69,8 +69,8 @@ class ReplayDiagnosticTest(unittest.TestCase):
 
     def test_launcher_scopes_server_gpu_without_changing_simulator_visibility(self):
         script = Path(__file__).resolve().parents[1]/"scripts/diagnose_xr1_timing_replay.sh"
-        for server_gpu in (None, "1"):
-            with self.subTest(server_gpu=server_gpu), tempfile.TemporaryDirectory() as directory:
+        for server_gpu, all_parents in ((None, False), ("1", False), ("1", True)):
+            with self.subTest(server_gpu=server_gpu, all_parents=all_parents), tempfile.TemporaryDirectory() as directory:
                 base = Path(directory)
                 for name in ("bin", "client/bin", "server/bin", "safe/deploy", "phase2", "source", "run", "robocasa_logs/eval"):
                     (base/name).mkdir(parents=True)
@@ -91,6 +91,7 @@ if cli[:2] == ["-u", "deploy/server.py"]:
     time.sleep(10)
 elif cli[:2] == ["-u", "-m"]:
     if "--dry-run" not in cli:
+        assignment["module"], assignment["arguments"] = cli[2], cli[3:]
         assignment["server_pid"] = os.environ.get("XR1_REPLAY_SERVER_PID")
         (root/"client.json").write_text(json.dumps(assignment))
 elif cli[0] == "-" and cli[1].isdigit():
@@ -118,6 +119,9 @@ else:
                        "XR1_REPLAY_RNG_RUNTIME_INIT": "before_env", "XR1_REPLAY_RECORD_ALL_OBSERVATIONS": "1",
                        "XR1_REPLAY_OBS_WINDOW_START": "232", "XR1_REPLAY_OBS_WINDOW_END": "236"}
                 env.pop("XR1_REPLAY_SERVER_GPU", None)
+                env["XR1_REPLAY_ALL_PARENTS"] = "1" if all_parents else "0"
+                if all_parents:
+                    env["XR1_REPLAY_OBS_WINDOW_START"] = env["XR1_REPLAY_OBS_WINDOW_END"] = ""
                 if server_gpu is not None:
                     env["XR1_REPLAY_SERVER_GPU"] = server_gpu
                 process = subprocess.run(["bash", str(script), "worker"], env=env,
@@ -129,6 +133,9 @@ else:
                 self.assertEqual(client["egl"], "0")
                 self.assertEqual(server["visible"], server_gpu or "0")
                 self.assertEqual(client["server_pid"], str(server["pid"]))
+                self.assertEqual(client["module"], "robocasa.recovery."+(
+                    "audit_intervention_timing_parents" if all_parents else "diagnose_intervention_timing_replay"))
+                self.assertEqual("--parent-id" in client["arguments"], not all_parents)
 
     def test_runtime_initialization_uses_rng_inspection_without_early_source_restore(self):
         with patch("robocasa.recovery.diagnose_intervention_timing_replay._capture_global_rng_state",
