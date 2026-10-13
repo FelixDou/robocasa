@@ -1,8 +1,8 @@
 # XR1 fresh common-entry reference cohort
 
-Implementation status: **v2 remains failed; saved data confirm wrapper counter
-shadows and step-one proprioceptive differences with exact camera pixels.
-V4 adds observation sampling/cache restoration; live validation is pending**.
+Implementation status: **v4 accepted the first ArrangeTea pair, then failed
+CuttingToolSelection's live reset-observation check. One of ten pairs is
+accepted; inspect the saved reset audit before another collection**.
 Protocol: `xr1_fresh_common_entry_reference_cohort_v4`.
 Read [the cluster runbook](cluster_experiment_runbook.md) before any cluster operation.
 
@@ -260,13 +260,77 @@ encoded requests/responses. There is no tolerance for small proprioceptive
 differences. V2 remains failed under its original, stricter gate; its artifacts
 and registration are not rewritten or reused as accepted v4 references.
 
-The next live experiment is this newly registered v4 cohort on the two GPUs.
-It stops at the first failed pair, preserving all states and the new sampler
-audit. All ten passing pairs plus separate image review are still required
-before a new timing grid. This is an engineering experiment with no
-interventions and no SAFE detector recovery claim.
+The v4 live experiment reported below stopped at the first failed pair,
+preserving all states and the new sampler audit. All ten passing pairs plus
+separate image review are still required before a new timing grid. This is
+an engineering experiment with no interventions and no SAFE detector recovery
+claim.
+
+## First v4 live result: one accepted pair, reset observation failure
+
+`xr1_timing_references_observer_v4_20261013_220743` on `r5n4` accepted
+ArrangeTea parent `58f0ab7314bd1b19d88ec731` (seed 950007, legacy parent
+`b1455183d9fabd7eeb4c4bf5`). Both nominal attempts reached entry at environment
+step 304 with 19 requests. The accepted pair passed the registered v4
+causal-state, observable-runtime, transition, encoded request/response,
+initial-restore, GC, and startup checks. This is the first accepted fresh
+nominal pair. It does not certify the full-controller exactness flag, which
+the pasted log did not include, or camera health by visual inspection.
+
+The next parent, CuttingToolSelection seed 950022, reset index 0,
+`a86aedada9ea0a3d7fd66354` (legacy parent `f56bbdc19d00beb376c8a1b3`), captured
+its first common entry at step zero. This is permitted by the registered entry
+definition; it used zero nominal requests. Its second attempt failed at reset
+with `New reset-state live observation differs; inspect initial_restore_audit.json`.
+The traceback places the failure after the simulator/controller/control/RNG
+restore phase and observer-runtime restoration, at the exact live observation
+comparison. The final complete reset-state/semantic audit and the nominal loop
+were not reached. The second attempt's saved `status: running` is a stale
+attempt marker; the enclosing `status: failed` and driver exit code 1 are
+authoritative. The cohort has **1/10 accepted pairs**, not a passing cohort.
+No interventions were collected and image review remains pending.
+
+The pasted log does not identify the differing observation keys, magnitudes,
+or camera pixels. It cannot distinguish stale sampled proprioception from a
+render mismatch or another observation path issue. A cached reset observation
+differing from a forced measurement is one possibility, not a proven cause.
+The rejection precedes nominal policy calls for this parent, so it is not a
+recorded divergence in a policy response or rollout action. Preserve this
+failed registration and its accepted first pair; do not skip the failed seed,
+relax observation tolerances, resume the failed run, or launch an identical
+cohort before inspection.
+
+Read the existing audit without a simulator, CUDA/RNG inspection, policy
+server, checkpoint loading, or artifact modification:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_references_observer_v4_20261013_220743/run.env
+export XR1_REFS_PAIR="$XR1_REFS_ROOT/references/parents/a86aedada9ea0a3d7fd66354/collection_m_ec8h1l"
+"$XR1_CLIENT_ENV/bin/python" - "$XR1_REFS_PAIR/attempt_1/initial_restore_audit.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+audit = json.loads(path.read_text())
+print("audit:", path)
+print("restore flags:", {k: v for k, v in audit.items() if k.endswith("_exact") or k == "valid"})
+print("live verification:", audit.get("observation_verification"))
+print("observation mismatches:", json.dumps(audit.get("observation_mismatches", []), indent=2))
+runtime = audit.get("observation_runtime_verification", {})
+saved = runtime.get("saved_sha256")
+print("sampler/cache restored:", saved is not None and saved == runtime.get("restored_sha256"))
+changes = runtime.get("forced_read_mismatches", [])
+print("forced-read runtime changes:", len(changes))
+print(json.dumps(changes[:12], indent=2))
+PY
+```
+
+Interpret the observation mismatch paths before selecting a repair. Sampler
+state changing during a forced read is expected and is separately restored;
+it is not by itself evidence of the cause of a live observation mismatch.
 
 ## Launch on the two-GPU allocation
+
+The following describes the launcher used for v4. The existing live v4 root
+is failed; diagnose the saved audit above before proposing a replacement run.
 
 The launcher uses the existing absolute client/server environment paths. It
 copies the registered model path under `/tmp/ut06746` from durable checkpoint
@@ -402,4 +466,6 @@ full-state diagnostics, including cohort/parent/ledger reporting when that
 buffer alone differs. A lifetime regression checks source caching does not
 retain closed simulators through sensor closures. The v4 combined suite ran
 128 tests: 127 passed and one was skipped. Shell syntax, Python compilation,
-and whitespace checks passed. Live v4 repeatability and camera health remain pending.
+and whitespace checks passed. Live v4 accepted one pair and then failed at the
+next parent's reset-observation check; cohort validation and camera review
+remain incomplete.

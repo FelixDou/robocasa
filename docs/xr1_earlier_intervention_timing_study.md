@@ -5,6 +5,31 @@ the original timing study remains stopped at 80/220 executions; a new
 reference cohort is required before the timing comparison can proceed**.
 Read `docs/cluster_experiment_runbook.md` before any cluster operation.
 
+Latest fresh-reference result: **v4 accepted 1/10 pairs, then failed the next
+parent's live reset-observation check**. Run
+`xr1_timing_references_observer_v4_20261013_220743` on `r5n4` accepted ArrangeTea
+parent `58f0ab7314bd1b19d88ec731`, seed 950007, after two 304-step nominal
+trajectories with 19 requests each. This establishes that pair's registered
+v4 repeatability checks, including observable runtime and the explicitly
+declared causal controller scope; it does not establish visual camera health
+or complete cohort validity. The full-controller exactness flag was not in
+the supplied output.
+
+CuttingToolSelection seed 950022/reset index 0, parent
+`a86aedada9ea0a3d7fd66354`, captured its first common entry at reset (step 0,
+zero nominal requests), then its second attempt failed with
+`New reset-state live observation differs`. The traceback reaches the exact
+live observation comparison after physical/control/RNG and observable-runtime
+restoration; the final complete initial-state/semantic audit and nominal loop
+were not reached. The top-level failed status and driver exit code 1 override
+the second attempt's stale `running` marker. No interventions were collected.
+The differing keys/pixels are absent from the pasted log, so the cause remains
+unlocalized. Read the preserved `initial_restore_audit.json` using the
+[CPU-only inspection command](xr1_fresh_timing_references.md) before changing
+restore semantics or launching a replacement cohort. The failed root and its
+accepted first pair remain preserved; the failed seed is not replaced or
+skipped. SAFE-triggered recovery remains deferred.
+
 Historical-source preflight: **the corrected GC-scope audit accepted 4/10 parents, then
 stopped on historical-source disagreement for ArrangeTea parent
 `6cfb095ec52c00970abf8340`**. Its two 304-step replays matched each other exactly,
