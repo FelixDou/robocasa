@@ -4,6 +4,11 @@ Status: **live 60-execution sentinel passed; full collection stopped at 80/220
 executions on a nominal source-replay mismatch; scientific analysis pending**.
 Read `docs/cluster_experiment_runbook.md` before any cluster operation.
 
+Latest isolated check: **the failed ArrangeTea parent passed both historical
+source-prefix audits with automatic cyclic GC disabled**. Both 400-step repeats
+matched throughout. This is a successful workaround for one parent; the matched
+default-GC trace and full-study validation remain pending.
+
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
 collection. Its first ArrangeTea reference matched simulator state, controller,
 policy state, observations, semantics, global RNG, counters, and XML exactly;
@@ -189,6 +194,35 @@ a plausible trigger, but it is not evidence that collection caused this
 incident or that the cluster's installed destructor matches upstream. The new
 diagnostic records the installed cleanup source and collection events, and can
 defer automatic cyclic collection until after environment cleanup.
+
+The GC-disabled run `xr1_timing_replay_gcdisabled_20261013_135416` completed
+two 400-step, 25-request attempts. **Both reported `prefix_replay_accepted:
+true`**, with no replay error and all 11 source endpoint channels accepted under
+the existing audit/XML compatibility contract. Both reached `mug_on_tray` at
+the expected inference boundary. Initial and endpoint repeat audits were exact,
+every progress field matched across both complete repeats, and all 401 returned
+observations matched by every key. Both first-request probes returned exact
+actions and full responses. The existing older-failed-trace comparison still
+reported a causal hash difference at action index 0; that comparison is separate
+from the two accepted historical endpoint audits and the exact current pair.
+
+Automatic GC was disabled at environment creation and through cleanup in both
+attempts. No nominal cyclic collection was observed, including explicit
+collections, and the caller's original enabled state was restored each time.
+The simulator stayed on GPU 0 and server on GPU 1, with early CUDA initialization
+confirmed before both environments. The installed renderer source was available
+at `robocasa_benchmark_repos/robosuite/robosuite/utils/binding_utils.py`, with
+SHA-256 `c8463cddb558f22247b1c8f202443ddeabe1469e5433b5b9d0eb7b938f32f480`.
+Its destructor calls `self.con.free()` before `self.gl_ctx.free()` and contains
+no call to make its own GL context current first. This is consistent with the
+delayed-cleanup hypothesis; the supplied evidence does not identify which
+object was finalized at the earlier camera failure.
+
+This is the first isolated two-repeat success against the failed historical
+parent, not a completed timing study or a SAFE-trigger recovery result. The
+next check restores default GC with the same current diagnostic code, tracing
+and GPU layout. That matched control is required before attributing the
+successful replay specifically to suppressing automatic cyclic collection.
 
 ## Why this is the next experiment
 
@@ -814,6 +848,37 @@ separated-GPU control did not log GC, so a matched `default`-mode trace and
 cleanup/source inspection remain necessary before claiming a mechanism.
 Both historical prefix audits still need to pass independently. The failed
 timing registration and all prior evidence remain preserved.
+
+### Confirm the GC effect with the matched default-mode control
+
+The disabled-GC pair above passed both historical prefix audits and matched
+throughout, while the earlier separated-GPU pair diverged. That earlier control
+did not have the current GC observer or installed-source inspection. Use the
+same current implementation and restore only the default GC mode in a new
+process/output root. No implementation change is needed:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_gcdisabled_20261013_135416/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_REPLAY_GC_MODE=default
+export XR1_REPLAY_PORT=10325
+export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_gccontrol_$(date +%Y%m%d_%H%M%S)"
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+```
+
+Inspect collection events near the first image mismatch and compare source
+acceptance and repeatability with the disabled-GC run. A reproduced failure
+associated with collection strengthens this hypothesis; it still does not
+identify a particular destructor call. If the default-mode pair also passes,
+the effect has not been reproduced under the matched instrumentation and needs
+further controlled evidence. Only after that check should a bounded GC policy
+be applied to a separately registered timing collector and validated across the
+registered parents and intervention branches. Do not resume the old failed
+registration or treat this one-parent success as full-study completion.
 
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:
