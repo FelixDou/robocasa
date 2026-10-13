@@ -452,8 +452,12 @@ Keep the original snapshots, registrations, failed audits, and 80 collected
 timing executions unchanged. Do not resume the old collector, waive historical
 source agreement, or replace only the failed parent. The existing collector
 is bound to the historical prefix-2 references and cannot implement this new
-cohort by changing an output path alone. The workflow below requires a new
-collector and registration; it has not yet been implemented or run.
+cohort by changing an output path alone. The new collector and registration
+implement the nominal-reference preflight in steps 1--4 below; live cluster
+validation is pending. Use the [fresh-reference run instructions](xr1_fresh_timing_references.md).
+It stops at `awaiting_image_review` after ten passing pairs. Integration of
+the timing grid in step 5 follows an accepted reference cohort; the old
+timing launcher cannot consume these new references.
 
 1. Freeze the same ten task/environment-seed/reset-index assignments, checkpoint,
    policy configuration, target stages, and ordinary sampling seeds. Label this

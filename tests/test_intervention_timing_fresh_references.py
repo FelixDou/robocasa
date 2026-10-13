@@ -1,0 +1,472 @@
+"""New references use real reset states, complete traces, and separate image review."""
+
+from contextlib import redirect_stdout
+from copy import deepcopy
+import gc
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+import numpy as np
+
+from tests.safe_import_helper import install_lightweight_robocasa_packages
+install_lightweight_robocasa_packages()
+from tests.test_intervention_timing import source_fixture, runtime
+from tests.test_operator_screen import XiaoEnvironment, make_policy
+from robocasa.recovery.intervention_timing import build_registration
+from robocasa.recovery.full_snapshot import load_full_snapshot, stable_digest
+from robocasa.recovery.phase3b_training_horizon import read_jsonl, sha256_file
+from robocasa.recovery.diagnose_intervention_timing_observations import load_state
+from robocasa.recovery.collect_intervention_timing_references import (
+    PROTOCOL, build_parser, run, review, validate_cohort_registration, validated_references, atomic_write_json,
+)
+
+
+MODULE = "robocasa.recovery.collect_intervention_timing_references"
+
+
+class FreshReferenceTest(unittest.TestCase):
+    def fixture(self, base, *, entry_at=3, done_at=None, env_type=None):
+        source = source_fixture(base)
+        plan = base/"phase2/plan.json"
+        plan.write_text(json.dumps({"policy_module": "fake:factory", "parent_horizon": 8}))
+        timing = base/"timing"
+        timing.mkdir()
+        (timing/"registration.json").write_text(json.dumps(build_registration(source)))
+        (timing/"errors.jsonl").write_text('{"error":"frozen old failure"}\n')
+        args = build_parser().parse_args(["--timing-run-dir", str(timing), "--output-dir", str(base/"new"),
+                                         "--model-path", "/checkpoint"])
+        policies, envs, restored = [], [], []
+        class Fresh(XiaoEnvironment):
+            def get_current_observation(self):
+                obs = super().get_current_observation()
+                for key in obs:
+                    if key.startswith("video."):
+                        obs[key][:] = [120, 110, 70]
+                return obs
+        def make_env(*_):
+            env = (env_type or Fresh)()
+            envs.append(env)
+            return env
+        def make(*_):
+            policy = make_policy()
+            setter = policy.set_state
+            def set_state(state):
+                # The only restored policy history may be a new actual reset.
+                self.assertEqual(state["environment_step"], 0)
+                self.assertEqual(state["state_queue"], [])
+                self.assertTrue(all(not q for q in state["image_queues"].values()))
+                restored.append(deepcopy(state))
+                setter(state)
+            policy.set_state = set_state
+            policies.append(policy)
+            return policy
+        rt = runtime(done_at=done_at)
+        def evaluate(env):
+            return {"task_success": False, "required_predicates": ["upstream", "mug_on_tray"],
+                "predicates": {"upstream": {"value": entry_at is not None and env.timestep >= entry_at},
+                               "mug_on_tray": {"value": False}}}
+        rt.update(make_env=make_env, call_factory=make, load_factory=lambda _: None, get_subtask_eval=evaluate)
+        protected = {str(p): sha256_file(p) for name in ("source", "phase2", "timing")
+                     for p in (base/name).rglob("*") if p.is_file()}
+        return args, rt, policies, envs, restored, protected
+
+    def setUp(self):
+        self.patches = [patch("robocasa.recovery.intervention_timing.validate_operator_registration"),
+                        patch(MODULE+"._validate_live_provenance")]
+        for item in self.patches:
+            item.start()
+            self.addCleanup(item.stop)
+
+    def test_ten_new_references_full_prefix_audits_fresh_history_no_source_mutation_and_image_review(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, policies, envs, restored, protected = self.fixture(Path(directory))
+            original_gc = gc.isenabled()
+            result = run(args, rt)
+            self.assertEqual(result["protocol"], PROTOCOL)
+            self.assertEqual(result["parents_by_task"], {"ArrangeTea": 5, "CuttingToolSelection": 5})
+            self.assertEqual(result["nominal_replays"], 20)
+            self.assertEqual(result["status"], "awaiting_image_review")
+            with self.assertRaisesRegex(ValueError, "accepted image review"):
+                validated_references(args.output_dir)
+            self.assertFalse(result["timing_ready"])
+            self.assertFalse(result["full_timing_study_complete"])
+            self.assertEqual(result["intervention_trajectories_collected"], 0)
+            self.assertFalse((args.output_dir/"branch_records.jsonl").exists())
+            self.assertEqual(len(policies), 20)
+            self.assertTrue(all(p.client.client.closed for p in policies))
+            self.assertTrue(all(e.closed for e in envs))
+            self.assertEqual(len(restored), 10)
+            self.assertEqual(gc.isenabled(), original_gc)
+            reg = validate_cohort_registration(args.output_dir)
+            for parent in reg["parents"]:
+                self.assertNotEqual(parent["parent_id"], parent["legacy_parent_id"])
+            rows = read_jsonl(args.output_dir/"reference_records.jsonl")
+            self.assertEqual(len(rows), 10)
+            row = rows[0]
+            self.assertEqual(row["entry_environment_step"], 4)  # first boundary after stage starts at step 3
+            entry = load_full_snapshot(args.output_dir/row["snapshot_path"])
+            self.assertEqual(entry.metadata["ordered_prefix"], ["upstream"])
+            self.assertFalse(entry.metadata["historical_endpoint_reconstructed"])
+            np.testing.assert_array_equal(entry.observation["video.robot0_agentview_left"][0, 0], [120, 110, 70])
+            folder = (args.output_dir/row["report_path"]).parent
+            audit = json.loads((folder/"repeat_audit.json").read_text())
+            self.assertTrue(audit["all_state_channels_exact"])
+            self.assertEqual(audit["state_counts"], [5, 5])
+            self.assertEqual(len(audit["state_audits"]), 5)
+            self.assertEqual(len(list((folder/"camera_panels").glob("*.png"))), 5)
+            requests = read_jsonl(folder/"attempt_0/requests.jsonl")
+            self.assertEqual([r["sampling_seed"] for r in requests], [100, 101])
+            payload = load_state(folder/"attempt_0"/requests[0]["payload_path"])
+            self.assertEqual(stable_digest(payload["request"]), requests[0]["request_sha256"])
+            self.assertEqual(stable_digest(payload["response"]), requests[0]["response_sha256"])
+            self.assertEqual(protected, {path: sha256_file(path) for path in protected})
+            # A human image assessment is required even with all engineering gates passing.
+            args.review_file = args.output_dir/"image_review_template.json"
+            with self.assertRaisesRegex(ValueError, "Explicit image assessment"):
+                review(args)
+            assessment = json.loads(args.review_file.read_text())
+            for parent in assessment["parents"]:
+                parent.update(images_acceptable=True, reviewed_all_frames=True)
+            args.review_file = Path(directory)/"human_review.json"
+            args.review_file.write_text(json.dumps(assessment))
+            def interrupted(path, value):
+                if path.name == "report.json":
+                    raise KeyboardInterrupt("interrupted between assessment and report commit")
+                return atomic_write_json(path, value)
+            with patch(MODULE+".atomic_write_json", side_effect=interrupted):
+                with self.assertRaises(KeyboardInterrupt):
+                    review(args)
+            self.assertTrue((args.output_dir/"image_review.json").exists())
+            accepted = review(args)
+            self.assertEqual(accepted["status"], "references_ready")
+            self.assertTrue(accepted["timing_ready"])
+            self.assertEqual(len(validated_references(args.output_dir)[1]), 10)
+            self.assertEqual(review(args), accepted)
+            assessment["parents"][0]["images_acceptable"] = False
+            args.review_file.write_text(json.dumps(assessment))
+            with self.assertRaisesRegex(FileExistsError, "already recorded"):
+                review(args)
+            self.assertFalse((args.output_dir/"branch_records.jsonl").exists())
+
+    def test_failed_reset_restore_stops_without_a_manufactured_repeat(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, policies, envs, _, _ = self.fixture(Path(directory))
+            with patch(MODULE+".restore_full_snapshot", return_value={"valid": False}):
+                with self.assertRaisesRegex(ValueError, "reset-state restore failed"):
+                    run(args, rt)
+            self.assertEqual(len(policies), 2)
+            self.assertTrue(all(e.closed for e in envs))
+            self.assertTrue(all(p.client.closed if not hasattr(p.client, "client") else p.client.client.closed for p in policies))
+            self.assertTrue((args.output_dir/"errors.jsonl").exists())
+            self.assertFalse((args.output_dir/"reference_records.jsonl").exists())
+
+    def test_unseeded_or_misaligned_nominal_requests_fail_before_certification(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, policies, _, _, _ = self.fixture(Path(directory))
+            factory = rt["call_factory"]
+            def wrong_seed(*a):
+                policy = factory(*a)
+                policy.sampling_seed_base += 1
+                return policy
+            rt["call_factory"] = wrong_seed
+            with self.assertRaisesRegex(ValueError, "seed schedule differs"):
+                run(args, rt)
+            self.assertEqual(len(policies), 1)
+            self.assertFalse((args.output_dir/"reference_records.jsonl").exists())
+
+    def test_dry_run_no_runtime_or_output_and_root_guards(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, policies, _, _, _ = self.fixture(Path(directory))
+            args.dry_run = True
+            with patch(MODULE+"._runtime", side_effect=AssertionError("no runtime")), \
+                 patch(MODULE+".initialize_rng_capture_runtime", side_effect=AssertionError("no CUDA")):
+                reg = run(args)
+            self.assertEqual(reg["nominal_search_budget_environment_steps"], 8)
+            self.assertFalse(args.output_dir.exists())
+            self.assertFalse(policies)
+            args.output_dir = args.timing_run_dir/"replacement"
+            with self.assertRaisesRegex(ValueError, "separate from all frozen"):
+                run(args, rt)
+            args.output_dir = Path("/gs/fs/tga-shinoda/felid/new-output")
+            with self.assertRaisesRegex(ValueError, "outside /gs/fs"):
+                run(args, rt)
+
+    def test_zero_step_entry_is_real_and_has_no_invented_request(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, policies, _, _, _ = self.fixture(Path(directory), entry_at=0)
+            result = run(args, rt)
+            self.assertTrue(result["engineering_all_pass"])
+            rows = read_jsonl(args.output_dir/"reference_records.jsonl")
+            self.assertTrue(all(r["entry_environment_step"] == 0 for r in rows))
+            self.assertTrue(all(p.client.calls == 0 for p in policies))
+
+    def test_unreachable_target_and_termination_keep_seed_and_fail_before_next_parent(self):
+        for done_at in (None, 2):
+            with self.subTest(done_at=done_at), tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+                args, rt, policies, envs, _, protected = self.fixture(Path(directory), entry_at=None, done_at=done_at)
+                with self.assertRaisesRegex(ValueError, "repeat gate failed"):
+                    run(args, rt)
+                self.assertEqual(len(policies), 2)
+                self.assertTrue(all(e.closed for e in envs))
+                failed = json.loads(next(args.output_dir.glob("parents/*/failed_parent.json")).read_text())
+                self.assertFalse(failed["engineering_gates"]["both_common_entries_captured"])
+                self.assertTrue(failed["engineering_gates"]["every_complete_state_repeats_exact"])
+                report = json.loads((args.output_dir/failed["report_path"]).read_text())
+                self.assertEqual(report["attempts"][0]["environment_steps"], 8 if done_at is None else 2)
+                self.assertEqual(protected, {path: sha256_file(path) for path in protected})
+                args.resume = True
+                with self.assertRaisesRegex(ValueError, "errors recorded"):
+                    run(args, rt)
+                self.assertEqual(len(policies), 2)
+
+    def test_pixel_divergence_localized_and_not_hidden_by_matching_physics(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, policies, _, _, _ = self.fixture(Path(directory))
+            ordinary, calls = rt["make_env"], []
+            def create(*a):
+                env = ordinary(*a)
+                calls.append(env)
+                if len(calls) == 2:
+                    step = env.step
+                    def different(action):
+                        obs, reward, done, info = step(action)
+                        if env.timestep >= 2:
+                            obs["video.robot0_agentview_left"][0, 0, 0] += 1
+                        return obs, reward, done, info
+                    env.step = different
+                return env
+            rt["make_env"] = create
+            with self.assertRaisesRegex(ValueError, "repeat gate failed"):
+                run(args, rt)
+            audit = json.loads(next(args.output_dir.glob("parents/*/collection_*/repeat_audit.json")).read_text())
+            first = audit["first_state_difference"]
+            self.assertEqual(first["environment_step"], 2)
+            self.assertFalse(first["audit"]["channels"]["observation"])
+            self.assertTrue(first["audit"]["channels"]["environment_state"])
+            self.assertEqual(len(policies), 2)
+
+    def test_per_step_xml_compatibility_allowed_but_physics_change_rejected(self):
+        class XML(XiaoEnvironment):
+            mime = True
+            def get_state(self):
+                hint = ' content_type="model/obj"' if self.mime else ''
+                return {**super().get_state(), "model": f'<mujoco><asset><mesh name="a" file="a.obj"{hint}/></asset></mujoco>'}
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, _, _, _, _ = self.fixture(Path(directory), env_type=XML)
+            ordinary, count = rt["make_env"], []
+            def create(*a):
+                env = ordinary(*a)
+                env.mime = len(count) % 2 == 0
+                count.append(env)
+                return env
+            rt["make_env"] = create
+            self.assertTrue(run(args, rt)["engineering_all_pass"])
+            audit = json.loads(next(args.output_dir.glob("parents/*/collection_*/repeat_audit.json")).read_text())
+            self.assertTrue(all(r["model_xml_audit"]["compatible"] for r in audit["state_audits"]))
+            self.assertTrue(any(not r["model_xml_audit"]["strict_exact"] for r in audit["state_audits"]))
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, _, _, _, _ = self.fixture(Path(directory))
+            ordinary, count = rt["make_env"], []
+            def create(*a):
+                env = ordinary(*a)
+                count.append(env)
+                if len(count) == 2:
+                    step = env.step
+                    def different(action):
+                        obs, reward, done, info = step(action)
+                        if env.timestep == 2:
+                            env.sim.data.qpos[:] += .01
+                        return obs, reward, done, info
+                    env.step = different
+                return env
+            rt["make_env"] = create
+            with self.assertRaisesRegex(ValueError, "repeat gate failed"):
+                run(args, rt)
+            audit = json.loads(next(args.output_dir.glob("parents/*/collection_*/repeat_audit.json")).read_text())
+            self.assertFalse(audit["first_state_difference"]["audit"]["channels"]["simulator_integration_state"])
+
+    def test_gc_collection_during_rollout_fails_but_reset_collection_is_visible_and_allowed(self):
+        for during_rollout in (False, True):
+            with self.subTest(during_rollout=during_rollout), tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+                args, rt, _, _, _, _ = self.fixture(Path(directory))
+                if during_rollout:
+                    ordinary = rt["step_fn"]
+                    def step(*a):
+                        gc.collect()
+                        return ordinary(*a)
+                    rt["step_fn"] = step
+                    with self.assertRaisesRegex(ValueError, "repeat gate failed"):
+                        run(args, rt)
+                else:
+                    ordinary = rt["make_env"]
+                    def create(*a):
+                        env = ordinary(*a)
+                        reset = env.reset
+                        def collecting(*a, **kw):
+                            gc.collect()
+                            return reset(*a, **kw)
+                        env.reset = collecting
+                        return env
+                    rt["make_env"] = create
+                    self.assertTrue(run(args, rt)["engineering_all_pass"])
+                trace = json.loads(next(args.output_dir.glob("parents/*/collection_*/attempt_0/gc_trace.json")).read_text())
+                self.assertEqual(trace["nominal_collection_stops"], 4 if during_rollout else 0)
+                if not during_rollout:
+                    self.assertEqual(trace["setup_collection_stops"], 1)
+
+    def test_interrupt_preserves_attempt_resume_recovers_marker_and_detects_artifact_or_config_changes(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, policies, _, _, protected = self.fixture(Path(directory))
+            original, count = rt["make_env"], []
+            def create(*a):
+                count.append(True)
+                if len(count) == 3:
+                    raise KeyboardInterrupt("allocation interrupted")
+                return original(*a)
+            rt["make_env"] = create
+            before = gc.isenabled()
+            with self.assertRaises(KeyboardInterrupt):
+                run(args, rt)
+            self.assertEqual(gc.isenabled(), before)
+            self.assertEqual(len(policies), 2)
+            self.assertFalse((args.output_dir/"errors.jsonl").exists())
+            partial = next(args.output_dir.glob("parents/*/collection_*/attempt_0/status.json"))
+            content = partial.read_bytes()
+            # Recover an append interrupted after a parent marker was committed.
+            (args.output_dir/"reference_records.jsonl").write_text("")
+            rt["make_env"] = original
+            args.resume = True
+            self.assertTrue(run(args, rt)["engineering_all_pass"])
+            self.assertEqual(len(policies), 20)
+            self.assertEqual(partial.read_bytes(), content)
+            self.assertEqual(len(list(args.output_dir.glob("parents/*/collection_*"))), 11)
+            self.assertEqual(protected, {path: sha256_file(path) for path in protected})
+            args.port += 1
+            with self.assertRaisesRegex(ValueError, "configuration changed"):
+                run(args, rt)
+            args.port -= 1
+            artifact = next(args.output_dir.glob("parents/*/collection_*/attempt_1/states/state_000002.pkl.gz"))
+            artifact.write_bytes(artifact.read_bytes()+b"changed")
+            with self.assertRaisesRegex(ValueError, "artifact changed"):
+                run(args, rt)
+            self.assertEqual(len(policies), 20)
+
+    def test_image_rejection_never_certifies_references_or_launches_branches(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, policies, _, _, _ = self.fixture(Path(directory), entry_at=0)
+            run(args, rt)
+            assessment = json.loads((args.output_dir/"image_review_template.json").read_text())
+            for row in assessment["parents"]:
+                row.update(images_acceptable=True, reviewed_all_frames=True)
+            assessment["parents"][0]["images_acceptable"] = False
+            args.review_file = Path(directory)/"review.json"
+            args.review_file.write_text(json.dumps(assessment))
+            result = review(args)
+            self.assertEqual(result["status"], "image_review_rejected")
+            self.assertFalse(result["timing_ready"])
+            self.assertEqual(len(policies), 20)
+            args.resume = True
+            self.assertEqual(run(args, rt)["status"], "image_review_rejected")
+
+    def test_launcher_status_handles_pre_registration_failures_and_pending_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            executable = base/"client/bin/python"
+            executable.parent.mkdir(parents=True)
+            executable.symlink_to(sys.executable)
+            script = Path(__file__).resolve().parents[1]/"scripts/collect_xr1_timing_references.sh"
+            env = {**os.environ, "XR1_CLIENT_ENV": str(executable.parents[1]), "XR1_REFS_ROOT": str(base/"run")}
+            process = subprocess.run(["bash", str(script), "status"], capture_output=True, text=True, env=env, timeout=10)
+            self.assertEqual(process.returncode, 0, process.stderr)
+            self.assertIn("starting", process.stdout)
+            (base/"run").mkdir()
+            (base/"run/driver_failure.json").write_text('{"exit_code": 1}')
+            process = subprocess.run(["bash", str(script), "status"], capture_output=True, text=True, env=env, timeout=10)
+            self.assertEqual(process.returncode, 0, process.stderr)
+            self.assertIn("driver status: failed", process.stdout)
+
+    def test_launcher_private_server_order_gpu_separation_failure_cleanup_and_occupied_port(self):
+        # Exercise the actual shell worker with tiny local stand-ins, not a
+        # model or simulator. The Python collector itself is tested above.
+        for failure in (None, "provenance", "client", "port"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                for path in (base/"client/bin", base/"server/bin", base/"safe/deploy", base/"run", base/"bin", base/"robocasa_logs/eval"):
+                    path.mkdir(parents=True)
+                client = base/"client/bin/python"
+                client.write_text('#!'+sys.executable+'\n'+'''import os, pathlib, shutil, socket, sys
+args = sys.argv[1:]
+events = pathlib.Path(os.environ["TEST_EVENTS"])
+def record(value):
+    with events.open("a") as stream: stream.write(value+"\\n")
+if args[:2] == ["-u", "-m"]:
+    if "--dry-run" in args:
+        record("provenance")
+        raise SystemExit(7 if os.environ.get("TEST_FAILURE") == "provenance" else 0)
+    os.kill(int(pathlib.Path(os.environ["TEST_PID"]).read_text()), 0)
+    record("client_gpu="+os.environ["CUDA_VISIBLE_DEVICES"])
+    raise SystemExit(8 if os.environ.get("TEST_FAILURE") == "client" else 0)
+if args[0] == "-":
+    source = sys.stdin.read()
+    if "shutil.disk_usage" in source:
+        shutil.disk_usage = lambda _: shutil._ntuple_diskusage(200*2**30, 0, 200*2**30)
+    if "connection.connect_ex" in source:
+        # Keep this subprocess test usable in sandboxes without loopback.
+        class Readiness:
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def connect_ex(self, _):
+                return 0 if pathlib.Path(os.environ["TEST_PID"]).exists() else 111
+        socket.socket = Readiness
+    sys.argv = args
+    exec(compile(source, "<launcher-test>", "exec"), {"__name__": "__main__"})
+else:
+    os.execv(sys.executable, [sys.executable, *args])
+''')
+                client.chmod(0o755)
+                (base/"server/bin/python").symlink_to(sys.executable)
+                (base/"safe/deploy/server.py").write_text('''import os, pathlib, time
+with pathlib.Path(os.environ["TEST_EVENTS"]).open("a") as stream:
+    stream.write("server_gpu="+os.environ["CUDA_VISIBLE_DEVICES"]+"\\n")
+print("Model loaded", flush=True)
+pathlib.Path(os.environ["TEST_PID"]).write_text(str(os.getpid()))
+while True: time.sleep(.1)
+''')
+                (base/"bin/flock").write_text('#!'+sys.executable+'\nimport fcntl\nfcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)\n')
+                (base/"bin/ss").write_text('#!'+sys.executable+'\nimport os\nprint("LISTEN 0 1 127.0.0.1:"+os.environ["XR1_REFS_PORT"] if os.environ.get("TEST_FAILURE")=="port" else "State Recv-Q Send-Q Local")\n')
+                (base/"bin/sleep").write_text('#!'+sys.executable+'\nimport time\ntime.sleep(.01)\n')
+                for path in (base/"bin").iterdir():
+                    path.chmod(0o755)
+                port = 20327  # readiness is stubbed; no actual network binding
+                script = Path(__file__).resolve().parents[1]/"scripts/collect_xr1_timing_references.sh"
+                env = {**os.environ, "PATH": str(base/"bin")+os.pathsep+os.environ["PATH"],
+                    "STORAGE_BS": str(base), "ROBOCASA_REPO": str(script.parents[1]),
+                    "XR1_CLIENT_ENV": str(base/"client"), "XR1_SERVER_ENV": str(base/"server"),
+                    "XR1_SAFE_REPO": str(base/"safe"), "XR1_REFS_MODEL": "/test-checkpoint",
+                    "XR1_REFS_ROOT": str(base/"run"), "XR1_REFS_SOURCE": str(base/"source"),
+                    "XR1_REFS_RESUME": "0", "XR1_REFS_GPU": "0", "XR1_REFS_SERVER_GPU": "1",
+                    "XR1_REFS_PORT": str(port), "XR1_REFS_LOG": str(base/"driver.log"),
+                    "TEST_EVENTS": str(base/"events"), "TEST_PID": str(base/"server.pid"),
+                    "TEST_FAILURE": failure or ""}
+                process = subprocess.run(["bash", str(script), "worker"], env=env, capture_output=True, text=True, timeout=30)
+                events = (base/"events").read_text().splitlines()
+                expected = ["provenance"] if failure in ("provenance", "port") else ["provenance", "server_gpu=1", "client_gpu=0"]
+                self.assertEqual(events, expected, process.stdout+process.stderr)
+                self.assertEqual(process.returncode == 0, failure is None, process.stdout+process.stderr)
+                if (base/"server.pid").exists():
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(int((base/"server.pid").read_text()), 0)
+                if failure:
+                    self.assertTrue((base/"run/driver_failure.json").exists())
+                    self.assertEqual(len(list((base/"run/driver_failures").glob("*.json"))), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
