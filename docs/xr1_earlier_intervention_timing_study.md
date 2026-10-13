@@ -5,7 +5,7 @@ the original timing study remains stopped at 80/220 executions; a new
 reference cohort is required before the timing comparison can proceed**.
 Read `docs/cluster_experiment_runbook.md` before any cluster operation.
 
-Latest preflight: **the corrected GC-scope audit accepted 4/10 parents, then
+Historical-source preflight: **the corrected GC-scope audit accepted 4/10 parents, then
 stopped on historical-source disagreement for ArrangeTea parent
 `6cfb095ec52c00970abf8340`**. Its two 304-step replays matched each other exactly,
 including all 305 observations, and the GC guard passed with zero collections.
@@ -30,6 +30,15 @@ health remains unreviewed. The new collector's v2 fix explicitly retrieves
 and checks live observations beneath wrappers and audits the complete reset
 state before continuation. It requires a new output root; see the
 [fresh-reference run instructions](xr1_fresh_timing_references.md).
+
+The v2 run `xr1_timing_references_obsfix_20261013_201241` completed both
+first-parent trajectories at step 304 with 19 requests each. Initial restore,
+complete initial-state equality, GC, and early-CUDA checks passed. Complete
+state, transition/inference, and encoded request/response repeatability gates
+failed, leaving zero accepted pairs and no interventions. The supplied status
+does not localize the first divergence. Inspect the saved `repeat_audit.json`
+and transition traces using the CPU-only command in the fresh-reference
+instructions before any additional collection; preserve the failed run.
 
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
 collection. Its first ArrangeTea reference matched simulator state, controller,

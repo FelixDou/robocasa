@@ -1,7 +1,7 @@
 # XR1 fresh common-entry reference cohort
 
-Implementation status: **the first v1 live run failed during repeat setup;
-the v2 wrapper fix is locally validated; live v2 validation is pending**.
+Implementation status: **v2 completed both first-parent nominal prefixes,
+but their repeatability gates failed; first-divergence inspection is pending**.
 Protocol: `xr1_fresh_common_entry_reference_cohort_v2`.
 Read [the cluster runbook](cluster_experiment_runbook.md) before any cluster operation.
 
@@ -66,7 +66,9 @@ audit after live observation retrieval and semantic evaluation must also pass
 before the second trajectory's first policy call. No observation gate is waived.
 
 Preserve the failed v1 root and its 304-step trace. Its registration binds the
-old protocol/code and is not resumable with this fix. Start a new v2 root:
+old protocol/code and is not resumable with this fix. The following historical
+launch command produced the v2 run examined below; inspect its saved audit
+before starting another collection:
 
 ```bash
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_references_20261013_192435/run.env
@@ -76,6 +78,64 @@ export XR1_REFS_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_referenc
 export XR1_REFS_PORT=10328
 bash "$ROBOCASA_REPO/scripts/collect_xr1_timing_references.sh" start
 ```
+
+## V2 first-parent repeat failure: inspect saved data next
+
+`xr1_timing_references_obsfix_20261013_201241` on `r5n4` completed both
+304-step, 19-request nominal trajectories for ArrangeTea seed 950007, v2
+parent `6c84f0411b020f6889786e66`. Both captured a common entry. The initial
+restore, complete initial-state audit, GC guard, and early-CUDA gates passed.
+The failed gates were `every_complete_state_repeats_exact`,
+`consumed_actions_and_inferences_repeat_exact`, and
+`encoded_requests_and_responses_repeat_exact`. The cohort stopped with zero
+accepted parent pairs and no intervention trajectories.
+
+This confirms the wrapper setup fix allowed the second trajectory to proceed.
+Equal lengths, request counts, and entry timing do not establish trajectory
+equality. The supplied status does not identify the first differing state
+channel, observation, request, response, or consumed action. It therefore does
+not establish a renderer mechanism, simulator nondeterminism, or a response
+difference for identical policy inputs. Retain the failed root and its strict
+gates. The next step reads the existing JSON audits; no simulator, policy
+server, checkpoint loading, or new GPU run is needed.
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_references_obsfix_20261013_201241/run.env
+export XR1_REFS_PAIR="$XR1_REFS_ROOT/references/parents/6c84f0411b020f6889786e66/collection_xmaaqmxz"
+"$XR1_CLIENT_ENV/bin/python" - "$XR1_REFS_PAIR" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+audit = json.loads((root/"repeat_audit.json").read_text())
+first = audit.get("first_state_difference")
+print("state support:", audit["state_support_exact"], audit["state_counts"])
+by_channel = {}
+for row in audit["state_audits"]:
+    for channel, exact in row["channels"].items():
+        if not exact:
+            by_channel.setdefault(channel, row["environment_step"])
+print("first difference by state channel:", by_channel)
+print("first differing state step:", first["environment_step"] if first else None)
+if first:
+    print("state channels:", first["audit"]["channels"])
+    for channel, rows in first["audit"]["mismatches"].items():
+        if rows:
+            print(channel, "mismatches:", len(rows), "sample:", rows[:3])
+    print("XML audit:", first["audit"].get("model_xml_audit"))
+print("request/response comparison:", audit["request_comparison"])
+traces = [[json.loads(line) for line in (root/f"attempt_{i}/transitions.jsonl").read_text().splitlines() if line.strip()]
+          for i in range(2)]
+print("transition row counts:", list(map(len, traces)))
+for key in ("action_sha256", "requests_sha256", "inference_sha256", "reward_sha256", "done", "info_sha256"):
+    different = next((a["step"] for a, b in zip(*traces) if a.get(key) != b.get(key)), None)
+    print("first transition difference", key, different)
+print("camera gallery:", root/"camera_review.html")
+PY
+```
+
+State steps are observations before the next action; transition step `s`
+applies the action from state `s` to state `s+1`. Request comparison rows are
+zero-based policy-call indices. This distinction matters when identifying
+whether a camera, policy response, or physical transition differed first.
 
 ## Launch on the two-GPU allocation
 
@@ -196,4 +256,5 @@ arrow navigation, and image paths were checked on the generated gallery.
 The v2 fix adds regression coverage for a non-forwarding Gym-style wrapper,
 live pixels differing after restore, and an unavailable live observation.
 The updated combined suite ran 120 tests: 119 passed and one was skipped.
-Live v2 collection remains pending.
+The v2 live cohort remains failed at its first pair; per-step divergence
+details are the next inspection, rather than another collection launch.
