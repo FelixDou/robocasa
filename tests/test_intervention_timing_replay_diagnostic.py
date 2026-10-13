@@ -22,7 +22,7 @@ from robocasa.recovery.intervention_timing import build_registration
 from robocasa.recovery.phase3b_training_horizon import sha256_file
 from robocasa.recovery.diagnose_intervention_timing_replay import (
     RequestProbe, diagnose_attempt, diagnostic_state, first_divergence, run, build_parser,
-    initialize_rng_capture_runtime,
+    initialize_rng_capture_runtime, compare_observation_windows,
 )
 
 
@@ -136,11 +136,16 @@ class ReplayDiagnosticTest(unittest.TestCase):
         ref = snapshot(step=4)
         ref.environment_step = 3  # diagnostic reaches a cached step, not a legal source boundary
         with tempfile.TemporaryDirectory() as directory:
-            report, _, endpoint, _ = diagnose_attempt(ref, XiaoEnvironment(), make_policy(), runtime(), Path(directory)/"attempt")
+            report, _, endpoint, _ = diagnose_attempt(ref, XiaoEnvironment(), make_policy(), runtime(), Path(directory)/"attempt",
+                                                      observation_window=(2, 3))
             self.assertFalse(report["final_at_inference_boundary"])
             self.assertFalse(endpoint["policy_state"]["at_inference_boundary"])
             self.assertTrue(endpoint["policy_state"]["action_plan"])
             self.assertFalse(report["prefix_replay_accepted"])
+            with gzip.open(Path(directory)/"attempt"/"observation_window"/"state_000003.pkl.gz", "rb") as stream:
+                raw = pickle.load(stream)
+            self.assertTrue(raw["policy_state"]["action_plan"])
+            self.assertFalse(raw["policy_state"]["at_inference_boundary"])
 
     def test_first_divergence_reports_channel_and_length(self):
         a = [{"step": 0, "action_sha256": "a"}, {"step": 1, "action_sha256": "b"}]
@@ -151,6 +156,76 @@ class ReplayDiagnosticTest(unittest.TestCase):
         self.assertEqual(result["step"], 1)
         self.assertEqual(result["fields"], ["action_sha256"])
         self.assertEqual(first_divergence(a, a[:1])["fields"], ["trace_length"])
+
+    def test_policy_loop_window_distinguishes_camera_state_observation_and_simulator(self):
+        for kind in ("camera", "state_observation", "simulator"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                ref, rt = snapshot(step=4), runtime()
+                diagnose_attempt(ref, XiaoEnvironment(), make_policy(), rt, root/"attempt_0",
+                                 observation_window=(2, 4))
+                ordinary = rt["step_fn"]
+                def changed(env, action):
+                    # No extra compressed state writes are permitted mid-prefix.
+                    self.assertFalse((root/"attempt_1"/"observation_window").exists())
+                    obs, reward, done, info = ordinary(env, action)
+                    if env.timestep == 3:
+                        if kind == "camera":
+                            obs["video.robot0_agentview_left"][0, 0, 0] += 1
+                        elif kind == "state_observation":
+                            obs["state.end_effector_position_relative"][0] += 1
+                        else:
+                            env.sim.data.qvel += 0.001
+                    return obs, reward, done, info
+                policy = make_policy()
+                report, _, _, rows = diagnose_attempt(ref, XiaoEnvironment(), policy,
+                    {**rt, "step_fn": changed}, root/"attempt_1", observation_window=(2, 4))
+                comparison = compare_observation_windows(root)
+                self.assertEqual(report["environment_steps"], 4)
+                self.assertEqual(report["nominal_requests"], 2)
+                self.assertEqual(len(policy.client.client.requests), 3)  # 2 nominal + existing endpoint probe
+                self.assertEqual(comparison["trace_rows"], [5, 5])
+                self.assertTrue(comparison["trace_step_support_exact"])
+                self.assertEqual(report["observation_window"]["captured_steps"], [2, 3, 4])
+                if kind == "simulator":
+                    self.assertEqual(comparison["first_difference_by_captured_state_channel"]["simulator_integration_state"], 3)
+                else:
+                    self.assertEqual(comparison["first_observation_difference_step"], 3)
+                    self.assertTrue(comparison["first_difference_raw_state_captured"])
+                    detail = comparison["first_observation_difference"]
+                    self.assertEqual(detail["after_action_index"], 2)
+                    self.assertTrue(all(exact for key, exact in detail["state_audit"]["channels"].items()
+                                        if key != "observation"), detail)
+                    key = ("video.robot0_agentview_left" if kind == "camera"
+                           else "state.end_effector_position_relative")
+                    self.assertEqual(comparison["first_difference_by_observation_key"], {key: 3})
+                    self.assertEqual(set(detail["changed_observation_keys"]), {key})
+                    if kind == "camera":
+                        self.assertEqual(detail["changed_observation_keys"][key]["changed_pixels"], 1)
+                with gzip.open(root/"attempt_1"/"observation_window"/"state_000003.pkl.gz", "rb") as stream:
+                    raw = pickle.load(stream)
+                self.assertEqual(stable_digest(raw["observation"]), rows[2]["next_observation_sha256"])
+                self.assertFalse((root/"attempt_1"/"entry.pkl.gz").exists())
+
+    def test_mismatch_outside_raw_window_remains_visible_without_claiming_state_agreement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ref, rt = snapshot(step=4), runtime()
+            diagnose_attempt(ref, XiaoEnvironment(), make_policy(), rt, root/"attempt_0",
+                             observation_window=(0, 1))
+            ordinary = rt["step_fn"]
+            def changed(env, action):
+                obs, reward, done, info = ordinary(env, action)
+                if env.timestep == 3:
+                    obs["video.robot0_agentview_left"][0, 0, 0] += 1
+                return obs, reward, done, info
+            diagnose_attempt(ref, XiaoEnvironment(), make_policy(), {**rt, "step_fn": changed},
+                             root/"attempt_1", observation_window=(0, 1))
+            comparison = compare_observation_windows(root)
+            self.assertEqual(comparison["first_observation_difference_step"], 3)
+            self.assertFalse(comparison["first_difference_raw_state_captured"])
+            self.assertIsNone(comparison["first_observation_difference"])
+            self.assertEqual([r["environment_step"] for r in comparison["captured_state_audits"]], [0, 1])
 
     def test_two_fresh_policy_replays_preserve_failed_source_and_dry_run_has_no_writes(self):
         with tempfile.TemporaryDirectory() as directory, patch("robocasa.recovery.intervention_timing.validate_operator_registration"):
@@ -193,6 +268,7 @@ class ReplayDiagnosticTest(unittest.TestCase):
             control_root = args.output_dir
             args.output_dir = base/"early_diagnostic"
             args.rng_runtime_init = "before_env"
+            args.observation_window = [1, 4]
             events = []
             make_env = rt["make_env"]
             def early():
@@ -219,12 +295,27 @@ class ReplayDiagnosticTest(unittest.TestCase):
             self.assertTrue(initialized["repeated_initial_state_audit"]["all_exact"])
             self.assertTrue(initialized["repeated_endpoint_audit"]["all_exact"])
             self.assertIsNone(initialized["first_repeat_divergence"])
+            window = initialized["observation_window_comparison"]
+            self.assertTrue(window["requested_window_complete"])
+            self.assertEqual(window["trace_rows"], [5, 5])
+            self.assertIsNone(window["first_observation_difference_step"])
+            self.assertTrue(all(r["all_exact"] for r in window["captured_state_audits"]))
+            self.assertIn("attempt_0/observation_window/state_000003.pkl.gz", initialized["artifact_hashes"])
             for index in range(2):
-                name = f"attempt_{index}/requests.jsonl"
-                self.assertEqual((control_root/name).read_text(), (args.output_dir/name).read_text())
+                for trace in ("requests.jsonl", "nominal_progress.jsonl"):
+                    name = f"attempt_{index}/{trace}"
+                    self.assertEqual((control_root/name).read_text(), (args.output_dir/name).read_text())
             self.assertEqual(before, {p.name: sha256_file(p) for p in source.iterdir()})
             self.assertEqual(len(policies), 4)
             self.assertTrue(all(p.client.client.closed for p in policies))
+            for invalid in ([-1, 1], [2, 1], [1, 5]):
+                args.observation_window = invalid
+                args.output_dir = base/"invalid_window"
+                with self.assertRaisesRegex(ValueError, "Observation window"):
+                    run(args, rt)
+                self.assertFalse(args.output_dir.exists())
+            args.observation_window = [1, 4]
+            args.output_dir = base/"early_diagnostic"
             # Both a reused output root and an overlapping source/output root fail closed.
             with patch("robocasa.recovery.diagnose_intervention_timing_replay._validate_live_provenance"):
                 with self.assertRaises(FileExistsError):

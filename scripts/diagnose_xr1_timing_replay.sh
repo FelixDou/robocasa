@@ -27,6 +27,19 @@ if (root/"report.json").exists():
     print("initial repeats:", data["repeated_initial_state_audit"]["channels"])
     print("endpoint repeats:", data["repeated_endpoint_audit"]["channels"])
     print("first repeat divergence:", data["first_repeat_divergence"])
+    window = data.get("observation_window_comparison")
+    if window is not None:
+        print("requested raw window complete:", window["requested_window_complete"])
+        print("observation trace rows:", window["trace_rows"])
+        print("first observation difference (environment step):", window["first_observation_difference_step"])
+        print("first difference by observation key:", window["first_difference_by_observation_key"])
+        print("first difference by captured state channel:", window["first_difference_by_captured_state_channel"])
+        print("first observation difference has raw state:", window["first_difference_raw_state_captured"])
+        details = window["first_observation_difference"]
+        if details is not None:
+            print("state channels at first observation difference:", details["state_audit"]["channels"])
+            print("observation differences:", details["changed_observation_keys"])
+        print("window camera statistics:", window["camera_statistics"])
     print("divergence from previous failed run:", data["first_divergence_from_failed_attempt"])
     print("report:", root/"report.json")
 PY
@@ -41,6 +54,13 @@ export XR1_REPLAY_SOURCE=${XR1_REPLAY_SOURCE:-${XR1_TIMING_ROOT:?Source the fail
 export XR1_REPLAY_PARENT=${XR1_REPLAY_PARENT:-f9cd6c2c907171c2f8fea437}
 export XR1_REPLAY_GPU=${XR1_REPLAY_GPU:-0} XR1_REPLAY_PORT=${XR1_REPLAY_PORT:-10319}
 export XR1_REPLAY_RNG_RUNTIME_INIT=${XR1_REPLAY_RNG_RUNTIME_INIT:-after_reset}
+export XR1_REPLAY_OBS_WINDOW_START=${XR1_REPLAY_OBS_WINDOW_START:-}
+export XR1_REPLAY_OBS_WINDOW_END=${XR1_REPLAY_OBS_WINDOW_END:-}
+if [[ -n "$XR1_REPLAY_OBS_WINDOW_START" || -n "$XR1_REPLAY_OBS_WINDOW_END" ]]; then
+  [[ "$XR1_REPLAY_OBS_WINDOW_START" =~ ^[0-9]+$ && "$XR1_REPLAY_OBS_WINDOW_END" =~ ^[0-9]+$ ]] || {
+    echo "Set both XR1_REPLAY_OBS_WINDOW_START and XR1_REPLAY_OBS_WINDOW_END to environment step numbers"; exit 1;
+  }
+fi
 case "$XR1_REPLAY_RNG_RUNTIME_INIT" in
   after_reset|before_env) ;;
   *) echo "XR1_REPLAY_RNG_RUNTIME_INIT must be after_reset or before_env"; exit 1 ;;
@@ -68,7 +88,7 @@ if root.exists():
 PY
   mkdir -p "$XR1_REPLAY_ROOT" "$STORAGE_BS/robocasa_logs/eval"
   export XR1_REPLAY_LOG="$STORAGE_BS/robocasa_logs/eval/$(basename "$XR1_REPLAY_ROOT")_driver.log"
-  for name in STORAGE_BS ROBOCASA_REPO XR1_REPLAY_SOURCE XR1_REPLAY_ROOT XR1_REPLAY_PARENT XR1_REPLAY_GPU XR1_REPLAY_PORT XR1_REPLAY_RNG_RUNTIME_INIT XR1_REPLAY_LOG XR1_CLIENT_ENV XR1_SERVER_ENV XR1_SAFE_REPO XR1_SAFE_CHECKPOINT; do
+  for name in STORAGE_BS ROBOCASA_REPO XR1_REPLAY_SOURCE XR1_REPLAY_ROOT XR1_REPLAY_PARENT XR1_REPLAY_GPU XR1_REPLAY_PORT XR1_REPLAY_RNG_RUNTIME_INIT XR1_REPLAY_OBS_WINDOW_START XR1_REPLAY_OBS_WINDOW_END XR1_REPLAY_LOG XR1_CLIENT_ENV XR1_SERVER_ENV XR1_SAFE_REPO XR1_SAFE_CHECKPOINT; do
     printf 'export %s=%q\n' "$name" "${!name}"
   done > "$XR1_REPLAY_ROOT/run.env"
   cp "$XR1_REPLAY_ROOT/run.env" "$latest"
@@ -109,6 +129,9 @@ fi
 common=(--timing-run-dir "$XR1_REPLAY_SOURCE" --parent-id "$XR1_REPLAY_PARENT"
         --output-dir "$XR1_REPLAY_ROOT/diagnostic" --model-path "$XR1_REPLAY_MODEL"
         --host 127.0.0.1 --port "$XR1_REPLAY_PORT" --rng-runtime-init "$XR1_REPLAY_RNG_RUNTIME_INIT")
+if [[ -n "$XR1_REPLAY_OBS_WINDOW_START" ]]; then
+  common+=(--observation-window "$XR1_REPLAY_OBS_WINDOW_START" "$XR1_REPLAY_OBS_WINDOW_END")
+fi
 "$XR1_CLIENT_ENV/bin/python" -u -m robocasa.recovery.diagnose_intervention_timing_replay "${common[@]}" --dry-run
 if ss -ltn | awk '{print $4}' | grep -Eq ":${XR1_REPLAY_PORT}$"; then
   echo "Port $XR1_REPLAY_PORT is occupied; choose a unique XR1_REPLAY_PORT"; exit 1

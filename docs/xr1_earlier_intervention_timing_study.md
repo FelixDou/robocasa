@@ -89,12 +89,26 @@ environment RNG, environment control state, and step counter. Both repeated
 first-request probes returned identical actions and full responses for seed
 6940000 and request hash
 `703480442efd9e874629c1bbc56113fb6d5e5f84a4e2d8ac1078cda36ddf7101`.
-Those probes cover only that tested input, not all 25 nominal requests. The
-pasted completion log does not contain the startup events, initial repeat
-audit, or first divergence. Inspect the saved report and per-step/request
-traces before selecting another GPU experiment. Historical replay remains
-unresolved; the earlier fixed-action startup-order result remains scoped to
-its controlled pair.
+The subsequent trace scan confirmed CUDA was initialized before **both**
+environment creations and all 11 initial repeat-audit channels matched.
+Both progress logs contain 400 rows and both request logs contain 25 rows.
+The first repeat difference was exclusively `next_observation_sha256` at
+action index 233: the returned observation at **environment step 234**.
+Observation-input and policy-state hashes first differed at action index 234;
+requests, actions, and causal-environment hashes first differed at index 240.
+Environment RNG hashes matched throughout. Ordered-stage labels first differed
+at index 308 and local inference counts at 320. Request and response hashes
+first differed at ordinary call index 15; all sampling seeds matched, and
+every paired matching request had a matching full response.
+
+Early initialization therefore did not remove this policy-driven observation
+divergence. There is no observed same-request/different-response pair in these
+tested calls, but that does not prove server determinism for untested inputs.
+The first differing observation key and underlying mechanism are still unknown.
+The next diagnostic below retains the policy loop and captures raw observations
+and complete audited state around environment step 234. Historical replay
+remains unresolved; the earlier fixed-action startup-order result remains
+scoped to its controlled pair.
 
 ## Why this is the next experiment
 
@@ -512,6 +526,68 @@ A repeatable trajectory that still misses the historical endpoint
 is a distinct outcome, not a passing source replay. Even a successful isolated
 replay leaves the failed full registration preserved and the timing study
 incomplete; it provides evidence for a separately registered collector change.
+
+### Capture the policy-driven observation boundary
+
+The early-initialized nominal pair still diverged after action index 233, at
+environment step 234. The prior early-initialized recorded-action pair matched
+through 400 steps. Capture the difference inside the policy-driven replay
+before drawing conclusions from another offline action replay.
+
+Set `XR1_REPLAY_OBS_WINDOW_START=232` and `XR1_REPLAY_OBS_WINDOW_END=236`.
+This optional instrumentation retains both original 400-step policy loops,
+all source-prefix gates, and the existing post-endpoint request probes. It adds
+per-key observation hashes at reset and after every action (401 rows per
+complete attempt). At the five selected environment steps it also captures
+raw observations, policy state including its real cache, simulator integration,
+controller, environment control, semantics, counters, and RNG. These captures
+occur after step evaluation and before the next observation is appended to
+policy history. Environment step 234 is immediately after action index 233.
+
+Extra hashes and raw states are buffered in memory and written/compressed only
+after that attempt's nominal endpoint is captured. There are no extra renders,
+policy requests, source restorations, or branch snapshots. The existing
+inspection RNG-idle guard remains active. CPU hashing and state inspection
+still add work and can affect reproduction of a timing-sensitive fault; a
+matching instrumented pair would not establish a fix.
+
+Run in a GPU allocation. The launcher starts and verifies a private server;
+the total remains 800 simulator steps, 50 nominal policy requests, and two
+post-endpoint request probes for this parent:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_earlycuda_20261013_073123/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_REPLAY_RNG_RUNTIME_INIT=before_env
+export XR1_REPLAY_OBS_WINDOW_START=232
+export XR1_REPLAY_OBS_WINDOW_END=236
+export XR1_REPLAY_GPU=0
+export XR1_REPLAY_PORT=10321
+export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_window_$(date +%Y%m%d_%H%M%S)"
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+tail -n 50 "$XR1_REPLAY_LOG"
+```
+
+Each attempt retains `observation_window/trace.jsonl` and five
+`observation_window/state_<step>.pkl.gz` diagnostic envelopes. The report's
+`observation_window_comparison` records the first difference by observation
+key over the full trace, exact state-channel audits throughout the raw window,
+per-camera color/darkness statistics, and pixel differences at the first
+observation mismatch when its raw state was captured. The artifact hash ledger
+includes these files. If the first mismatch moves outside the selected window,
+the full per-key trace still identifies it and the report explicitly marks its
+raw state unavailable; window state agreement cannot be extrapolated there.
+
+Camera-only observation differences with matching audited simulator/controller/
+RNG state localize the observed failure to the camera path. State-observation
+differences instead require investigating their construction or caches.
+Physical-state differences at the same boundary require revisiting simulation
+and state coverage. None of these diagnostic outcomes completes the timing
+study or tests SAFE-trigger recovery.
 
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:

@@ -92,6 +92,63 @@ def first_divergence(left, right):
     return None
 
 
+def observation_key_record(observation, step):
+    return {"environment_step": step, "after_action_index": step-1 if step else None,
+            "observation_sha256": stable_digest(observation),
+            "observation_key_sha256": {k: stable_digest(v) for k, v in observation.items()}}
+
+
+def compare_observation_windows(root):
+    """Compare saved policy-loop observations after both environments are closed."""
+    # Import only during postprocessing: the recorded-action diagnostic imports
+    # this module's protocol, and its pixel helpers need no renderer or policy.
+    from robocasa.recovery.diagnose_intervention_timing_observations import (
+        observation_difference, camera_statistics, load_state,
+    )
+    folders = [root/f"attempt_{i}"/"observation_window" for i in range(2)]
+    traces = [read_jsonl(p/"trace.jsonl") for p in folders]
+    steps = [[r["environment_step"] for r in trace] for trace in traces]
+    common = sorted(set(steps[0]) & set(steps[1]))
+    by_step = [{r["environment_step"]: r for r in trace} for trace in traces]
+    first, keys = None, {}
+    for step in common:
+        a, b = (trace[step] for trace in by_step)
+        for key in sorted(set(a["observation_key_sha256"]) | set(b["observation_key_sha256"])):
+            if a["observation_key_sha256"].get(key) != b["observation_key_sha256"].get(key):
+                keys.setdefault(key, step)
+        if first is None and a["observation_sha256"] != b["observation_sha256"]:
+            first = step
+    audits, state_differences, statistics = [], {}, []
+    details = None
+    captured = [sorted(p.name for p in folder.glob("state_*.pkl.gz")) for folder in folders]
+    for name in sorted(set(captured[0]) & set(captured[1])):
+        a, b = (load_state(folder/name) for folder in folders)
+        step = a["environment_step"]
+        if b["environment_step"] != step:
+            raise ValueError("Observation-window state steps differ")
+        audit = reference_audit(SimpleNamespace(**a), SimpleNamespace(**b))
+        audits.append({"environment_step": step, "channels": audit["channels"],
+                       "all_exact": audit["all_exact"]})
+        for key, exact in audit["channels"].items():
+            if not exact:
+                state_differences.setdefault(key, step)
+        statistics.append({"environment_step": step,
+                           "attempt_0": camera_statistics(a["observation"]),
+                           "attempt_1": camera_statistics(b["observation"])})
+        if step == first:
+            details = {"environment_step": step, "after_action_index": step-1 if step else None,
+                       "state_audit": audit,
+                       "changed_observation_keys": observation_difference(a["observation"], b["observation"])}
+    return {"trace_rows": [len(t) for t in traces], "trace_step_support_exact": steps[0] == steps[1],
+            "common_observations_compared": len(common), "first_observation_difference_step": first,
+            "first_difference_by_observation_key": keys,
+            "raw_state_step_support_exact": captured[0] == captured[1],
+            "first_difference_by_captured_state_channel": state_differences,
+            "captured_state_audits": audits, "camera_statistics": statistics,
+            "first_observation_difference": details,
+            "first_difference_raw_state_captured": details is not None if first is not None else None}
+
+
 class RequestProbe:
     """Record nominal calls, then repeat the first input after nominal replay."""
     def __init__(self, client, folder):
@@ -136,10 +193,11 @@ class RequestProbe:
         self.client.close()
 
 
-def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=None):
+def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=None, observation_window=None):
     folder.mkdir()
     rows, evaluations, actions, inferences = [], [], [], []
     state = {"step": 0, "observation": None, "initial": None}
+    observation_rows, captured_states = [], {}
     probe = RequestProbe(policy.client, folder)
     policy.client = probe
 
@@ -154,6 +212,10 @@ def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=Non
             record_startup_event(startup_log, f"{folder.name}:first_nominal_observation")
             state["initial"] = diagnostic_state(env, p, obs, evaluations[-1], 0)
             save_payload(folder/"initial_diagnostic_state.pkl.gz", state["initial"])
+            if observation_window is not None:
+                observation_rows.append(observation_key_record(obs, 0))
+                if observation_window[0] == 0:
+                    captured_states[0] = state["initial"]
         boundary = p.at_inference_boundary
         action = runtime["call_policy"](p, obs)
         actions.append(deepcopy(action))
@@ -170,6 +232,15 @@ def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=Non
     def progress(row):
         rows.append(row)
         append_jsonl(folder/"nominal_progress.jsonl", row)
+        if observation_window is not None:
+            step = state["step"]
+            record = observation_key_record(state["observation"], step)
+            if record["observation_sha256"] != row["next_observation_sha256"]:
+                raise ValueError("Captured observation differs from frozen replay progress")
+            observation_rows.append(record)
+            if observation_window[0] <= step <= observation_window[1]:
+                captured_states[step] = diagnostic_state(
+                    env, policy, state["observation"], evaluations[-1], step)
 
     error = None
     try:
@@ -185,6 +256,15 @@ def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=Non
     # its cache or manufacturing an eligible FullSnapshot.
     endpoint = diagnostic_state(env, policy, state["observation"], evaluations[-1], state["step"])
     save_payload(folder/"endpoint_diagnostic_state.pkl.gz", endpoint)
+    # Buffer the extra observations in memory. Compression and extra file I/O
+    # happen only after nominal replay and endpoint capture, with no rerenders.
+    if observation_window is not None:
+        window_folder = folder/"observation_window"
+        window_folder.mkdir()
+        for row in observation_rows:
+            append_jsonl(window_folder/"trace.jsonl", row)
+        for step, value in captured_states.items():
+            save_payload(window_folder/f"state_{step:06d}.pkl.gz", value)
     save_payload(folder/"nominal_replay.pkl.gz", {
         "actions": actions, "inferences": inferences, "subtask_evals": evaluations,
     })
@@ -209,6 +289,9 @@ def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=Non
         "final_ordered_stage": ordered_trace(evaluations)[-1]["ordered_current_subtask"],
         "final_at_inference_boundary": bool(policy.at_inference_boundary),
         "last_progress": rows[-1] if rows else None,
+        "observation_window": {"requested": observation_window,
+                               "captured_steps": sorted(captured_states),
+                               "observation_trace_rows": len(observation_rows)},
     }
     atomic_write_json(folder/"report.json", report)
     return report, initial, endpoint, rows
@@ -226,17 +309,22 @@ def run(args, runtime=None):
         Path(registration["phase2_run_dir"])/"snapshots"/f"{sid}.pkl.gz",
         expected_file_sha256=registration["phase2_registration"]["phase2_snapshot_file_sha256"][sid],
         expected_snapshot_id=sid, expected_parent_id=parent["parent_id"], expected_task_name=parent["task_name"])
+    window = args.observation_window
+    if window is not None and not (0 <= window[0] <= window[1] <= reference.environment_step):
+        raise ValueError("Observation window must satisfy 0 <= start <= end <= source environment step")
     plan = json.loads((Path(registration["phase2_run_dir"])/"plan.json").read_text())
     _validate_live_provenance(args, registration["phase2_registration"], plan)
     if args.dry_run:
         print(json.dumps({"protocol": PROTOCOL, "parent": parent, "replays": 2,
-                          "rng_runtime_init": args.rng_runtime_init}, indent=2))
+                          "rng_runtime_init": args.rng_runtime_init, "observation_window": window}, indent=2))
         return
     root = args.output_dir.resolve()
     if root == source or root.is_relative_to(source) or source.is_relative_to(root):
         raise ValueError("Diagnostic root must be separate from the frozen timing root")
     root.mkdir(parents=True, exist_ok=False)
     paths = [Path(__file__), Path(__file__).resolve().parents[2]/"scripts/diagnose_xr1_timing_replay.sh"]
+    if window is not None:
+        paths.append(Path(__file__).with_name("diagnose_intervention_timing_observations.py"))
     atomic_write_json(root/"registration.json", {
         "protocol": PROTOCOL, "created_at": utc_now(), "timing_run_dir": str(source),
         "timing_registration_sha256": registration["registration_sha256"],
@@ -244,6 +332,8 @@ def run(args, runtime=None):
         "code_hashes": {str(p.name): sha256_file(p) for p in paths},
         "policy_lifecycle": "fresh_policy_and_environment_per_attempt_like_original_phase2",
         "rng_runtime_init": args.rng_runtime_init,
+        "observation_window": window,
+        "observation_capture": "per_key_hashes_all_steps; raw_window_after_step_evaluation_before_next_policy_append; buffered_until_endpoint; no_extra_renders",
         "source_rng_restoration": "unchanged_in_frozen_nominal_replay_after_environment_reset",
         "request_probe": "repeat_first_explicitly_seeded_input_after_nominal_endpoint_capture",
         "scientific_trajectories_collected": 0,
@@ -279,7 +369,7 @@ def run(args, runtime=None):
             policy = runtime["call_factory"](factory, env, _policy_args(reference, args))
             record_startup_event(startup_log, f"attempt_{index}:after_policy_creation")
             attempts.append(diagnose_attempt(reference, env, policy, runtime, root/f"attempt_{index}",
-                                             startup_log=startup_log))
+                                             startup_log=startup_log, observation_window=window))
             report = attempts[-1][0]
             print(f"replay {index+1}/2: " + json.dumps({k: report[k] for k in (
                 "prefix_replay_accepted", "source_endpoint_channels", "final_ordered_stage", "request_repeat_probe")}), flush=True)
@@ -309,6 +399,18 @@ def run(args, runtime=None):
         "first_divergence_from_failed_attempt": first_divergence(read_jsonl(previous[-1]), attempts[0][3]) if previous else None,
         "full_study_remains_incomplete": True, "scientific_trajectories_collected": 0,
     }
+    if window is not None:
+        try:
+            comparison = compare_observation_windows(root)
+            comparison["requested_window"] = window
+            comparison["requested_window_complete"] = all(
+                a[0]["observation_window"]["captured_steps"] == list(range(window[0], window[1]+1))
+                for a in attempts)
+            report["observation_window_comparison"] = comparison
+        except Exception as exc:
+            atomic_write_json(root/"status.json", {"status": "failed", "stage": "observation_window_comparison",
+                              "error": str(exc), "traceback": traceback.format_exc(), "updated_at": utc_now()})
+            raise
     probes = [a[0]["request_repeat_probe"] for a in attempts]
     if any(p.get("actions_exact") is False for p in probes):
         report["finding"] = "identical_seeded_request_produced_different_actions"
@@ -343,6 +445,8 @@ def build_parser():
     parser.add_argument("--port", type=int, default=10319)
     parser.add_argument("--rng-runtime-init", choices=("after_reset", "before_env"), default="after_reset",
                         help="Optionally initialize RNG inspection before either environment is created")
+    parser.add_argument("--observation-window", nargs=2, type=int, metavar=("START", "END"),
+                        help="Save raw diagnostic state at inclusive environment steps START..END and per-key observation hashes at every step")
     parser.add_argument("--restore-atol", type=float, default=1e-8)
     parser.add_argument("--restore-rtol", type=float, default=1e-8)
     parser.add_argument("--dry-run", action="store_true")
