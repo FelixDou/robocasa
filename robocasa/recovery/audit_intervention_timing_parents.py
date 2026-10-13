@@ -18,7 +18,7 @@ from robocasa.recovery.phase3b_training_horizon import (
 from robocasa.recovery.run_phase2_snapshot_replay import append_jsonl, utc_now
 
 
-PROTOCOL = "xr1_gc_guarded_all_parent_replay_audit_v1"
+PROTOCOL = "xr1_gc_guarded_all_parent_replay_audit_v2"
 
 
 def parent_gates(report, steps):
@@ -44,9 +44,14 @@ def parent_gates(report, steps):
             all(a.get("request_repeat_probe", {}).get(k) is True for k in ("performed", "actions_exact", "response_exact"))
             for a in attempts),
         "gc_control_exercised_without_nominal_collections": collection.get("mode") == "disabled"
+            and collection.get("nominal_scope") == replay.GC_NOMINAL_SCOPE
             and len(traces) == 2 and all(t["mode"] == "disabled" and not t["enabled_at_environment_creation"]
+                and t.get("nominal_scope") == replay.GC_NOMINAL_SCOPE
                 and not t["enabled_at_end_of_cleanup"] and t["nominal_collection_stops"] == 0
-                and t["original_enabled_state_restored"] for t in traces),
+                and t["original_enabled_state_restored"]
+                and not any(e["nominal"] for e in t["events"] if e["event"] == "stop")
+                and all(e["automatic_gc_enabled"] is False for e in t["events"] if e["event"] == "stop")
+                for t in traces),
         "early_rng_runtime_initialized": report.get("rng_runtime_init") == "before_env"
             and early.get("source_rng_restored_early") is False
             and (not early.get("torch_cuda_available") or len(startup) == 2 and all(e["cuda_initialized"] for e in startup)),
@@ -88,6 +93,7 @@ def audit_inputs(args):
         "parents": parents, "source_environment_steps": endpoints,
         "replays_per_parent": 2, "expected_parents": 10,
         "gc_mode": args.gc_mode, "rng_runtime_init": args.rng_runtime_init,
+        "gc_nominal_scope": replay.GC_NOMINAL_SCOPE,
         "record_all_observations": True, "model_path": str(args.model_path),
         "host": args.host, "port": args.port,
         "restore_atol": args.restore_atol, "restore_rtol": args.restore_rtol,

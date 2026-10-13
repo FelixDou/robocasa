@@ -32,6 +32,33 @@ from robocasa.recovery.diagnose_intervention_timing_replay import (
 
 
 class ReplayDiagnosticTest(unittest.TestCase):
+    def test_post_reset_initial_evaluation_collection_counts_even_before_first_policy_call(self):
+        with tempfile.TemporaryDirectory() as directory:
+            reference = snapshot(step=4)
+            rt = runtime()
+            evaluate, calls = rt["get_subtask_eval"], []
+            def collect_in_initial_evaluation(env):
+                if not calls:
+                    gc.collect()
+                calls.append(env.timestep)
+                return evaluate(env)
+            rt["get_subtask_eval"] = collect_in_initial_evaluation
+            trace = GCTrace("disabled")
+            trace.start()
+            try:
+                report, _, _, _ = diagnose_attempt(reference, XiaoEnvironment(), make_policy(), rt,
+                    Path(directory)/"attempt_0", gc_trace=trace)
+            finally:
+                result = trace.finish()
+            self.assertTrue(report["prefix_replay_accepted"])
+            self.assertEqual(result["nominal_collection_stops"], 1)
+            self.assertEqual(result["setup_collection_stops"], 0)
+            stop = next(e for e in result["events"] if e["event"] == "stop")
+            self.assertTrue(stop["nominal"])
+            self.assertEqual(stop["phase"], "evaluation")
+            self.assertEqual(stop["environment_step"], 0)
+            self.assertFalse(stop["automatic_gc_enabled"])
+
     def test_gc_control_defers_cycles_restores_prior_mode_and_traces_explicit_collections(self):
         initial = gc.isenabled()
         destroyed = []

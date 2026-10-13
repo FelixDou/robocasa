@@ -4,14 +4,15 @@ Status: **live 60-execution sentinel passed; full collection stopped at 80/220
 executions on a nominal source-replay mismatch; scientific analysis pending**.
 Read `docs/cluster_experiment_runbook.md` before any cluster operation.
 
-Latest isolated check: **the failed ArrangeTea parent passed both historical
-source-prefix audits with automatic cyclic GC disabled**. Both 400-step repeats
-matched throughout. The same-code default-GC control reproduced camera failure
-after a generation-2 collection. The runs used different cluster nodes. This
-supports the workaround for one parent. The all-parent audit subsequently
-stopped on its first parent's GC-control gate, despite two exact source
-replays; the recorded collection phases require inspection. Full-study
-validation remains pending.
+Latest isolated checks: **two ArrangeTea parents each passed both historical
+source-prefix audits with automatic cyclic GC disabled**. The previously failed
+parent's two 400-step repeats matched throughout. The same-code default-GC
+control reproduced camera failure after a generation-2 collection; those runs
+used different cluster nodes. The all-parent audit then stopped on its first
+parent's GC-control gate, despite two exact 336-step replays. Saved events place
+its collections in reset/setup, which the diagnostic incorrectly counted as
+active replay. The scope correction is implemented; a new all-parent audit and
+full-study validation remain pending.
 
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
 collection. Its first ArrangeTea reference matched simulator state, controller,
@@ -264,16 +265,35 @@ automatic GC was disabled at environment creation and at the end of cleanup,
 with the caller's original setting restored afterward.
 
 The sole failed gate was `gc_control_exercised_without_nominal_collections`:
-each attempt recorded one collection stop during the currently labeled nominal
-scope. That scope begins at `nominal_setup`, before the frozen collector resets
-the environment, so the count alone does not locate the event within the active
-trajectory. The supplied status omitted events because the repeats had no
-divergence. Inspect the saved phase, step, generation, and enabled flag before
-deciding whether reset/setup was mislabeled or an explicit collection occurred
-during rollout. No gate is waived on the basis of repeatability; the cohort
-remains failed with zero accepted parents and zero intervention trajectories.
-Status now prints failed-parent gates and nominal collection stops even for
-matching repeats, without running a simulator or changing saved evidence.
+each attempt recorded one collection stop during the v1 nominal scope. That
+scope began at `nominal_setup`, before the frozen collector resets the
+environment. The initial status omitted events because the repeats had no
+divergence, so the count alone did not locate the event within the active
+trajectory. The status display was extended to show failed-parent gates and
+nominal collection stops even for matching repeats, without running a simulator
+or changing saved evidence. The original cohort remains failed with zero
+accepted parents and zero intervention trajectories.
+
+Subsequent saved-event inspection located both collection stops at
+`nominal_setup`, environment step 0, generation 2, with automatic GC disabled.
+They collected 6,186 and 7,617 objects respectively, with zero uncollectable
+objects. This phase precedes the first post-reset subtask evaluation: policy
+reset, environment reset, and source RNG setup run there. Neither trace
+contained a collection during the active trajectory. The v1 audit's zero-GC
+failure therefore came from including reset/setup in its nominal scope; it was
+not an observed repeatability or historical-source mismatch.
+
+The v2 all-parent audit records
+`gc_nominal_scope: first_post_reset_subtask_evaluation_through_source_endpoint_audit`
+in its registration and requires that scope in each child report and GC trace.
+Reset/setup events remain recorded and have a separate count; they are no
+longer counted as active-rollout collections. A collection during the initial
+post-reset evaluation or first action still fails, even at environment step 0.
+Every recorded collection must also show automatic GC disabled. Existing source,
+observation, request, and repeat gates are retained. The original failed audit,
+its recorded counts, and all artifacts stay unchanged; the correction requires
+a new root and does not retroactively accept its first parent. It does not
+change collection behavior, renderer code, or the frozen timing collector.
 
 ## Why this is the next experiment
 
@@ -863,9 +883,13 @@ the diagnostic logs those too. Reference-count destruction is not disabled.
 
 `gc_attempt_<index>.json` retains start/stop events with generation, replay
 phase, environment-step position, and the automatic-GC enabled flag. The report
-records nominal collection counts and restoration of the previous setting;
-status shows phase counts and events near the first mismatch, or the first 20
-nominal collection stops when there is no mismatch. An event during stepping
+records separate reset/setup and nominal collection counts, the explicit nominal
+scope, and restoration of the previous setting. Nominal tracing begins at the
+first subtask evaluation after reset/source RNG setup and ends after the frozen
+source endpoint audit. It includes the initial evaluation and first action at
+step 0. Status shows setup events, nominal phase counts, and events near the
+first mismatch, or the first 20 nominal collection stops when there is no mismatch.
+An event during stepping
 is labeled with the step before that action returns. `renderer_cleanup_source.json`
 records the installed binding file path, SHA-256, and renderer destructor source
 when available. Reading that source occurs before environment creation; no
@@ -946,14 +970,18 @@ parents are collected, and the frozen timing execution modules stay unchanged.
 
 Each parent must pass both original source-prefix audits, complete initial and
 endpoint repeat audits, progress and per-key/raw observation comparisons,
-seeded-request probes, and the recorded GC/runtime policy. A repeatable pair
-that misses the historical source fails. Collection stops at the first failed
+seeded-request probes, and the recorded GC/runtime policy. The v2 GC guard
+requires zero collections from the first post-reset subtask evaluation through
+the source endpoint audit, with automatic GC disabled during all recorded
+collections; explicit reset/setup collections remain visible separately.
+A repeatable pair that misses the historical source fails. Collection stops at the first failed
 parent and preserves its diagnostics and all preceding accepted parents.
 
-Run on the current two-GPU allocation, using the same source registration:
+Run on the current two-GPU allocation, using the same source registration and
+a new audit root for the corrected GC scope:
 
 ```bash
-source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_gccontrol_20261013_155951/run.env
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_parent_audit_20261013_164436/run.env
 cd "$ROBOCASA_REPO"
 git pull --ff-only origin main
 export XR1_REPLAY_ALL_PARENTS=1
@@ -963,8 +991,8 @@ export XR1_REPLAY_RECORD_ALL_OBSERVATIONS=1
 export XR1_REPLAY_GPU=0
 export XR1_REPLAY_SERVER_GPU=1
 unset XR1_REPLAY_OBS_WINDOW_START XR1_REPLAY_OBS_WINDOW_END
-export XR1_REPLAY_PORT=10326
-export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_parent_audit_$(date +%Y%m%d_%H%M%S)"
+export XR1_REPLAY_PORT=10327
+export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_parent_audit_gc_scope_$(date +%Y%m%d_%H%M%S)"
 bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
 
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env

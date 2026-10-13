@@ -34,6 +34,7 @@ from robocasa.recovery.run_phase3b_training_horizon_continuation import (
 
 
 PROTOCOL = "xr1_isolated_nominal_replay_diagnostic_v1"
+GC_NOMINAL_SCOPE = "first_post_reset_subtask_evaluation_through_source_endpoint_audit"
 TRACE_FIELDS = (
     "observation_sha256", "next_observation_sha256", "action_sha256",
     "policy_state_sha256", "environment_rng_sha256", "causal_environment_sha256",
@@ -70,10 +71,13 @@ class GCTrace:
         else:
             gc.disable()
         return {"mode": self.mode, "original_enabled": self.original_enabled,
+                "nominal_scope": GC_NOMINAL_SCOPE,
                 "enabled_at_environment_creation": self.replay_enabled,
                 "enabled_at_end_of_cleanup": end_enabled,
                 "original_enabled_state_restored": gc.isenabled() == self.original_enabled,
                 "nominal_collection_stops": sum(e["nominal"] and e["event"] == "stop" for e in self.events),
+                "setup_collection_stops": sum(e["phase"] == "nominal_setup" and e["event"] == "stop"
+                                              for e in self.events),
                 "events": self.events}
 
 
@@ -344,7 +348,11 @@ def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=Non
 
     error = None
     try:
-        position("nominal_setup")
+        # capture_entry resets the policy/environment and restores source RNG
+        # before its first evaluate() call. Trace that setup, but count active
+        # replay collections only from the post-reset initial evaluation onward.
+        # The evaluate() wrapper turns nominal tracing on even at step zero.
+        position("nominal_setup", nominal=False)
         capture_entry(reference, env, policy,
                       {**runtime, "get_subtask_eval": evaluate, "call_policy": call, "step_fn": step},
                       progress=progress)
@@ -452,6 +460,7 @@ def run(args, runtime=None):
         "policy_lifecycle": "fresh_policy_and_environment_per_attempt_like_original_phase2",
         "rng_runtime_init": args.rng_runtime_init,
         "gc_mode": args.gc_mode,
+        "gc_nominal_scope": GC_NOMINAL_SCOPE,
         "device_assignment": device_assignment,
         "observation_window": window,
         "record_all_observations": args.record_all_observations,
@@ -526,7 +535,7 @@ def run(args, runtime=None):
         "protocol": PROTOCOL, "status": "diagnostic_complete", "parent_id": parent["parent_id"],
         "rng_runtime_init": args.rng_runtime_init, "early_rng_runtime_initialization": early_initialization,
         "device_assignment": device_assignment,
-        "garbage_collection": {"mode": args.gc_mode, "attempts": gc_traces},
+        "garbage_collection": {"mode": args.gc_mode, "nominal_scope": GC_NOMINAL_SCOPE, "attempts": gc_traces},
         "startup_events": read_jsonl(startup_log),
         "attempts": [a[0] for a in attempts], "repeated_initial_state_audit": initial_audit,
         "repeated_endpoint_audit": endpoint_audit, "first_repeat_divergence": divergence,

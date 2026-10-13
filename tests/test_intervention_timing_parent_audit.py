@@ -1,6 +1,7 @@
 """The guarded all-parent preflight never collects intervention trajectories."""
 
 from contextlib import redirect_stdout
+from copy import deepcopy
 import gc
 import io
 import json
@@ -19,7 +20,8 @@ from tests.test_intervention_timing import source_fixture, runtime
 from tests.test_operator_screen import make_policy
 from robocasa.recovery.intervention_timing import build_registration
 from robocasa.recovery.phase3b_training_horizon import sha256_file
-from robocasa.recovery.audit_intervention_timing_parents import build_parser, parent_gates, run
+from robocasa.recovery.audit_intervention_timing_parents import build_parser, parent_gates, run, PROTOCOL
+from robocasa.recovery.diagnose_intervention_timing_replay import GC_NOMINAL_SCOPE
 
 
 class ParentReplayAuditTest(unittest.TestCase):
@@ -210,6 +212,58 @@ class ParentReplayAuditTest(unittest.TestCase):
             self.assertEqual(before, {str(p): sha256_file(p) for p in args.output_dir.rglob("*") if p.is_file()})
             self.assertEqual(protected, {path: sha256_file(path) for path in protected})
             self.assertEqual(len(policies), 2)
+
+    def test_reset_collections_remain_visible_and_all_parents_pass_only_under_registered_scope(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("robocasa.recovery.intervention_timing.validate_operator_registration"), \
+             patch("robocasa.recovery.diagnose_intervention_timing_replay._validate_live_provenance"), \
+             redirect_stdout(io.StringIO()):
+            args, rt, policies, environments, protected = self.fixture(Path(directory))
+            ordinary = rt["make_env"]
+            def create(*a):
+                env = ordinary(*a)
+                reset = env.reset
+                def reset_with_collection(*a, **kw):
+                    self.assertFalse(gc.isenabled())
+                    gc.collect()
+                    return reset(*a, **kw)
+                env.reset = reset_with_collection
+                return env
+            rt["make_env"] = create
+            before_gc = gc.isenabled()
+            result = run(args, rt)
+            self.assertEqual(result["protocol"], PROTOCOL)
+            self.assertTrue(result["engineering_all_pass"])
+            self.assertEqual(len(policies), 20)
+            self.assertEqual(gc.isenabled(), before_gc)
+            self.assertTrue(all(e.closed for e in environments))
+            registration = json.loads((args.output_dir/"registration.json").read_text())
+            self.assertEqual(registration["gc_nominal_scope"], GC_NOMINAL_SCOPE)
+            for parent in result["parent_reports"]:
+                report = json.loads((args.output_dir/parent["report_path"]).read_text())
+                for trace in report["garbage_collection"]["attempts"]:
+                    self.assertEqual(trace["setup_collection_stops"], 1)
+                    self.assertEqual(trace["nominal_collection_stops"], 0)
+                    self.assertEqual(trace["nominal_scope"], GC_NOMINAL_SCOPE)
+                    self.assertTrue(trace["original_enabled_state_restored"])
+                    stops = [e for e in trace["events"] if e["event"] == "stop"]
+                    self.assertEqual(len(stops), 1)
+                    self.assertEqual(stops[0]["phase"], "nominal_setup")
+                    self.assertEqual(stops[0]["environment_step"], 0)
+                    self.assertFalse(stops[0]["nominal"])
+                    self.assertFalse(stops[0]["automatic_gc_enabled"])
+                # Legacy reports are not silently reclassified, and a library
+                # re-enabling automatic GC during setup still fails the guard.
+                changed = deepcopy(report)
+                changed["garbage_collection"].pop("nominal_scope")
+                self.assertFalse(parent_gates(changed, 4)["gc_control_exercised_without_nominal_collections"])
+                changed = deepcopy(report)
+                changed["garbage_collection"]["attempts"][0]["events"][-1]["automatic_gc_enabled"] = True
+                self.assertFalse(parent_gates(changed, 4)["gc_control_exercised_without_nominal_collections"])
+            args.resume = True
+            self.assertTrue(run(args, rt)["engineering_all_pass"])
+            self.assertEqual(len(policies), 20)
+            self.assertEqual(protected, {path: sha256_file(path) for path in protected})
 
 
 if __name__ == "__main__":

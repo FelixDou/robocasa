@@ -31,7 +31,7 @@ if not report_path.exists() and status.get("failed_parent"):
             raise SystemExit("Failed-parent report escaped the audit root")
 if report_path.exists():
     data = json.loads(report_path.read_text())
-    if data.get("protocol") == "xr1_gc_guarded_all_parent_replay_audit_v1":
+    if data.get("protocol") in ("xr1_gc_guarded_all_parent_replay_audit_v1", "xr1_gc_guarded_all_parent_replay_audit_v2"):
         print("all-parent audit:", {k: data[k] for k in ("status", "parents", "expected_parents", "nominal_replays", "parents_by_task", "engineering_all_pass", "scientific_trajectories_collected", "full_timing_study_complete")})
         for row in data["parent_reports"]:
             print("parent", row["parent_id"], row["engineering_gates"])
@@ -43,12 +43,15 @@ if report_path.exists():
     collection = data.get("garbage_collection")
     if collection is not None:
         print("GC mode:", collection["mode"])
+        print("GC nominal scope:", collection.get("nominal_scope", "legacy_includes_reset_setup"))
         divergence = data.get("first_repeat_divergence") or {}
         boundary = divergence.get("step")
         for i, trace in enumerate(collection["attempts"]):
             print("GC attempt", i, {k: v for k, v in trace.items() if k != "events"})
             stops = [e for e in trace["events"] if e["nominal"] and e["event"] == "stop"]
             print("nominal GC stops by phase:", dict(Counter(e["phase"] for e in stops)))
+            setup = [e for e in trace["events"] if e["phase"] == "nominal_setup" and e["event"] == "stop"]
+            print("setup GC stop events (first 20):", setup[:20])
             if boundary is not None:
                 nearby = [e for e in trace["events"] if e["nominal"] and abs(e["environment_step"]-boundary) <= 1]
                 print("GC events near first difference:", nearby[:20])
