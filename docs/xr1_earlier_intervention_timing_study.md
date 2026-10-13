@@ -22,6 +22,15 @@ is not established. Full-study validation remains pending. The next experiment
 is the separately registered clean-reference cohort specified below; another
 identical historical replay is not the next step.
 
+The first fresh-reference run, `xr1_timing_references_20261013_192435`,
+captured its first nominal common entry at step 304 with 19 requests, but
+stopped before the second trajectory began: a generic observation helper
+returned `None` through the Gym wrapper. Zero parent pairs passed, and camera
+health remains unreviewed. The new collector's v2 fix explicitly retrieves
+and checks live observations beneath wrappers and audits the complete reset
+state before continuation. It requires a new output root; see the
+[fresh-reference run instructions](xr1_fresh_timing_references.md).
+
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
 collection. Its first ArrangeTea reference matched simulator state, controller,
 policy state, observations, semantics, global RNG, counters, and XML exactly;

@@ -22,7 +22,7 @@ from robocasa.recovery.diagnose_intervention_timing_replay import (
 from robocasa.recovery.diagnose_intervention_timing_observations import load_state
 from robocasa.recovery.full_snapshot import (
     capture_full_snapshot, load_full_snapshot, restore_full_snapshot,
-    save_full_snapshot, stable_digest,
+    save_full_snapshot, stable_digest, compare_structures, _environment_nodes,
 )
 from robocasa.recovery.inspect_intervention_timing_source import (
     request_trace_comparison, write_image_panel,
@@ -40,10 +40,7 @@ from robocasa.recovery.run_phase2_snapshot_replay import (
 from robocasa.recovery.run_phase3b_training_horizon_continuation import (
     _runtime_args, _validate_live_provenance,
 )
-from robocasa.recovery.recovery_rollout import _get_obs_after_state_change
-
-
-PROTOCOL = "xr1_fresh_common_entry_reference_cohort_v1"
+PROTOCOL = "xr1_fresh_common_entry_reference_cohort_v2"
 GC_SCOPE = "first_post_setup_subtask_evaluation_through_entry_capture"
 CAMERAS = ("video.robot0_agentview_left", "video.robot0_agentview_right", "video.robot0_eye_in_hand")
 
@@ -115,6 +112,7 @@ def inputs(args):
         "nominal_search_budget_environment_steps": budget,
         "entry_definition": "first_inference_boundary_in_target_stage_while_target_incomplete_before_termination",
         "repeat_initialization": "restore_new_actual_reset_snapshot_in_fresh_environment_and_policy",
+        "restore_observation_verification": "live_getter_resolved_through_environment_wrappers; no_snapshot_fallback",
         "sampling": "original_ordinary_K1_seed_bases; no_historical_mutable_policy_state",
         "gc_mode": "disabled", "gc_nominal_scope": GC_SCOPE, "rng_runtime_init": "before_env",
         "restore_atol": 0, "restore_rtol": 0,
@@ -154,10 +152,50 @@ class RequestRecorder:
 
 
 def camera_format(observation):
+    if not isinstance(observation, dict):
+        raise ValueError("Require a live observation dictionary, not an unavailable or cached fallback observation")
     for key in CAMERAS:
         frame = np.asarray(observation.get(key))
         if frame.ndim != 3 or frame.shape[-1] != 3 or frame.dtype != np.uint8:
             raise ValueError(f"Expected raw uint8 RGB camera observation: {key}")
+
+
+def live_observation(env):
+    """Find the real Gym adapter getter beneath non-forwarding wrappers."""
+    for path, node in _environment_nodes(env):
+        getter = getattr(node, "get_current_observation", None)
+        if callable(getter):
+            observation = getter()
+            camera_format(observation)
+            return observation, path+".get_current_observation"
+    raise ValueError("No live observation getter found through the environment wrappers; snapshot fallback is forbidden")
+
+
+def restore_initial(initial, env, policy, folder):
+    # The legacy generic observation helper can fall back to the saved image
+    # on Gym wrappers. Keep frozen helpers unchanged and independently require
+    # a real observation after all simulator/controller/RNG restoration.
+    audit = restore_full_snapshot(initial, env, policy, atol=0, rtol=0, verify_observation=False)
+    audit["observation_verification"] = {"performed": False, "snapshot_fallback_used": False}
+    audit["observation_exact"] = False  # no claim of equality before live verification
+    if not audit["valid"]:
+        atomic_write_json(folder/"initial_restore_audit.json", audit)
+        raise ValueError("New reset-state restore failed; inspect initial_restore_audit.json")
+    try:
+        observation, getter = live_observation(env)
+    except Exception as exc:
+        audit.update(valid=False, observation_exact=False)
+        audit["observation_verification"]["error"] = str(exc)
+        atomic_write_json(folder/"initial_restore_audit.json", audit)
+        raise
+    differences = compare_structures(initial.observation, observation, atol=0, rtol=0, path="observation")
+    audit.update(observation_exact=not differences, observation_mismatches=differences,
+                 valid=audit["valid"] and not differences)
+    audit["observation_verification"].update(performed=True, getter=getter)
+    atomic_write_json(folder/"initial_restore_audit.json", audit)
+    if not audit["valid"]:
+        raise ValueError("New reset-state live observation differs; inspect initial_restore_audit.json")
+    return observation, audit
 
 
 def metadata(parent, prefix=()):
@@ -193,11 +231,7 @@ def collect_attempt(parent, folder, registration, plan, args, runtime, factory, 
         obs, _ = _call_with_deterministic_environment_seed(seed, _reset_env, env, seed)
         policy.reset()
         if initial is not None:
-            restore = restore_full_snapshot(initial, env, policy, atol=0, rtol=0)
-            atomic_write_json(folder/"initial_restore_audit.json", restore)
-            if not restore["valid"]:
-                raise ValueError("New reset-state restore failed; inspect initial_restore_audit.json")
-            obs = _get_obs_after_state_change(env)
+            obs, restore = restore_initial(initial, env, policy, folder)
         else:
             state = policy.get_state()
             if (not policy.at_inference_boundary or state["environment_step"] != 0
@@ -218,6 +252,13 @@ def collect_attempt(parent, folder, registration, plan, args, runtime, factory, 
             task_name=parent["task_name"], trigger_name="fresh_reference_reset", environment_step=0,
             observation=obs, subtask_eval=evaluations[0], metadata=metadata(parent))
         save_full_snapshot(reset, folder/"initial.pkl.gz")
+        initial_audit = None
+        if initial is not None:
+            initial_audit = reference_audit(initial, reset)
+            initial_audit["reference_limit"] = "new_actual_reset_state_after_live_observation_and_semantic_evaluation"
+            atomic_write_json(folder/"initial_state_audit.json", initial_audit)
+            if not initial_audit["all_exact"]:
+                raise ValueError("New reset-state complete audit differs after live observation/evaluation")
         while True:
             guard.phase, guard.step = "state_capture", step
             camera_format(obs)
@@ -278,6 +319,7 @@ def collect_attempt(parent, folder, registration, plan, args, runtime, factory, 
         result = {"outcome": outcome, "environment_steps": step, "nominal_requests": recorder.calls,
                   "entry_snapshot_id": entry.snapshot_id if entry else None,
                   "initial_snapshot_id": reset.snapshot_id, "initial_restore_valid": restore["valid"] if restore else None,
+                  "initial_state_audit_all_exact": initial_audit["all_exact"] if initial_audit else None,
                   "execution_environment": {"hostname": socket.gethostname(), "simulator_pid": os.getpid(),
                       "policy_server_pid": os.environ.get("XR1_REFS_SERVER_PID"),
                       "gpu_assignment": registration["gpu_assignment"]}}
@@ -369,6 +411,7 @@ def collect_parent(parent, folder, registration, plan, args, runtime, factory):
     gates = {
         "both_common_entries_captured": all(r["outcome"] == "common_entry_captured" for r in (first, second)),
         "new_initial_restore_exact": second["initial_restore_valid"] is True,
+        "new_initial_full_audit_exact": second["initial_state_audit_all_exact"] is True,
         "every_complete_state_repeats_exact": comparison["all_state_channels_exact"],
         "consumed_actions_and_inferences_repeat_exact": comparison["transition_traces_exact"],
         "encoded_requests_and_responses_repeat_exact": comparison["request_comparison"]["first_difference"] is None,

@@ -1,7 +1,8 @@
 # XR1 fresh common-entry reference cohort
 
-Implementation status: **local validation only; live cluster collection pending**.
-Protocol: `xr1_fresh_common_entry_reference_cohort_v1`.
+Implementation status: **the first v1 live run failed during repeat setup;
+the v2 wrapper fix is locally validated; live v2 validation is pending**.
+Protocol: `xr1_fresh_common_entry_reference_cohort_v2`.
 Read [the cluster runbook](cluster_experiment_runbook.md) before any cluster operation.
 
 The saved historical cameras for ArrangeTea parent `6cfb095ec52c00970abf8340`
@@ -37,6 +38,44 @@ the first post-setup subtask evaluation through entry capture rejects the
 parent; the original GC setting is restored after cleanup. GPU mappings,
 hostname, process IDs, startup events, and installed renderer cleanup source
 are recorded. Only the launcher's private server is stopped on exit.
+
+## First live run and wrapper fix
+
+`xr1_timing_references_20261013_192435` stopped with zero completed parent
+pairs. Its first ArrangeTea trajectory (legacy parent
+`b1455183d9fabd7eeb4c4bf5`, v1 parent `6b7a52d961efd3a7eaccf53a`, seed 950007)
+captured the common entry at environment step 304 after 19 policy requests.
+The second attempt failed at step zero with
+`AttributeError: 'NoneType' object has no attribute 'get'` in `camera_format`.
+No repeat or image-health result was established for this parent, and no
+interventions were collected.
+
+The collector used the legacy `_get_obs_after_state_change` helper directly.
+That helper can reach its fallback through a non-forwarding Gym wrapper;
+called without a fallback, it returns `None`. The older snapshot restore
+helper also calls it with the saved observation as a fallback, so a reported
+observation match on this path does not independently verify live pixels.
+
+V2 leaves frozen helpers unchanged. It restores simulator/controller/policy/RNG
+state, then resolves the actual `get_current_observation` method through the
+environment wrapper graph and requires a live RGB observation dictionary.
+It compares this observation with the new reset snapshot at zero tolerance,
+records the getter path and `snapshot_fallback_used=false`, and rejects any
+missing getter, missing observation, or pixel mismatch. A complete reset-state
+audit after live observation retrieval and semantic evaluation must also pass
+before the second trajectory's first policy call. No observation gate is waived.
+
+Preserve the failed v1 root and its 304-step trace. Its registration binds the
+old protocol/code and is not resumable with this fix. Start a new v2 root:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_references_20261013_192435/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_REFS_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_references_obsfix_$(date +%Y%m%d_%H%M%S)"
+export XR1_REFS_PORT=10328
+bash "$ROBOCASA_REPO/scripts/collect_xr1_timing_references.sh" start
+```
 
 ## Launch on the two-GPU allocation
 
@@ -149,9 +188,12 @@ bash -n scripts/collect_xr1_timing_references.sh
 These are simulator-free tests and shell validation. They do not establish
 live renderer health, GPU repeatability, or intervention efficacy.
 
-On 2026-10-13 the combined suite ran 117 tests: 116 passed and one was skipped.
+The initial implementation's combined suite ran 117 tests: 116 passed and one was skipped.
 Launcher tests exercised provenance-before-server ordering, separate GPU
 exports, occupied-port rejection, and private-server cleanup using local
 stand-ins. A synthetic native RGB panel was visually inspected, and slider,
 arrow navigation, and image paths were checked on the generated gallery.
-Live cluster collection remains pending.
+The v2 fix adds regression coverage for a non-forwarding Gym-style wrapper,
+live pixels differing after restore, and an unavailable live observation.
+The updated combined suite ran 120 tests: 119 passed and one was skipped.
+Live v2 collection remains pending.

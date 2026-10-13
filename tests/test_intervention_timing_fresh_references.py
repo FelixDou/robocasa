@@ -31,6 +31,29 @@ from robocasa.recovery.collect_intervention_timing_references import (
 MODULE = "robocasa.recovery.collect_intervention_timing_references"
 
 
+class NonForwardingWrapper:
+    """Like a Gym checker: reset/step/close, but no observation API forwarding."""
+    def __init__(self):
+        self.env = XiaoEnvironment()
+
+    @property
+    def unwrapped(self):
+        return self.env
+
+    @property
+    def closed(self):
+        return self.env.closed
+
+    def reset(self, **kwargs):
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        return self.env.step(action)
+
+    def close(self):
+        self.env.close()
+
+
 class FreshReferenceTest(unittest.TestCase):
     def fixture(self, base, *, entry_at=3, done_at=None, env_type=None):
         source = source_fixture(base)
@@ -166,6 +189,84 @@ class FreshReferenceTest(unittest.TestCase):
             self.assertTrue(all(p.client.closed if not hasattr(p.client, "client") else p.client.client.closed for p in policies))
             self.assertTrue((args.output_dir/"errors.jsonl").exists())
             self.assertFalse((args.output_dir/"reference_records.jsonl").exists())
+
+    def test_nonforwarding_gym_wrapper_uses_live_inner_observation_and_exact_restore(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, policies, envs, _, protected = self.fixture(Path(directory), env_type=NonForwardingWrapper)
+            evaluate = rt["get_subtask_eval"]
+            rt["get_subtask_eval"] = lambda env: evaluate(env.unwrapped)
+            # Reproduce why the old generic helper silently returns its default.
+            from robocasa.recovery.recovery_rollout import _get_obs_after_state_change
+            probe = NonForwardingWrapper()
+            self.assertIsNone(_get_obs_after_state_change(probe))
+            probe.close()
+            self.assertTrue(run(args, rt)["engineering_all_pass"])
+            for path in args.output_dir.glob("parents/*/collection_*/attempt_1/initial_restore_audit.json"):
+                audit = json.loads(path.read_text())
+                self.assertTrue(audit["valid"])
+                self.assertTrue(audit["observation_exact"])
+                self.assertEqual(audit["observation_verification"], {
+                    "performed": True, "snapshot_fallback_used": False,
+                    "getter": "env.env.get_current_observation"})
+            self.assertEqual(len(policies), 20)
+            self.assertTrue(all(env.closed for env in envs))
+            self.assertEqual(protected, {path: sha256_file(path) for path in protected})
+
+    def test_wrapped_live_image_mismatch_is_rejected_without_saved_observation_fallback(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, policies, envs, _, _ = self.fixture(Path(directory), env_type=NonForwardingWrapper)
+            evaluate = rt["get_subtask_eval"]
+            rt["get_subtask_eval"] = lambda env: evaluate(env.unwrapped)
+            original = rt["make_env"]
+            def create(*a):
+                env = original(*a)
+                if len(envs) == 2:
+                    reset_to, getter = env.env.reset_to, env.env.get_current_observation
+                    changed = []
+                    def reset(state):
+                        result = reset_to(state)
+                        changed.append(True)
+                        return result
+                    def observation():
+                        obs = getter()
+                        if changed:
+                            obs["video.robot0_agentview_left"][0, 0, 0] = 99
+                        return obs
+                    env.env.reset_to, env.env.get_current_observation = reset, observation
+                return env
+            rt["make_env"] = create
+            with self.assertRaisesRegex(ValueError, "live observation differs"):
+                run(args, rt)
+            audit = json.loads(next(args.output_dir.glob("parents/*/collection_*/attempt_1/initial_restore_audit.json")).read_text())
+            self.assertFalse(audit["valid"])
+            self.assertFalse(audit["observation_exact"])
+            self.assertTrue(audit["observation_verification"]["performed"])
+            self.assertFalse(audit["observation_verification"]["snapshot_fallback_used"])
+            self.assertEqual(len(policies), 2)
+            self.assertEqual(policies[1].get_state()["environment_step"], 0)
+            self.assertFalse((args.output_dir/"reference_records.jsonl").exists())
+
+    def test_missing_live_observation_getter_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, policies, _, _, _ = self.fixture(Path(directory))
+            original = rt["make_env"]
+            def create(*a):
+                env = original(*a)
+                original_reset = env.reset
+                def reset(**kw):
+                    obs = original_reset(**kw)
+                    env.get_current_observation = lambda: None
+                    return obs
+                # Only the second attempt needs an unavailable live getter.
+                if len(policies) == 1:
+                    env.reset = reset
+                return env
+            rt["make_env"] = create
+            with self.assertRaisesRegex(ValueError, "live observation dictionary"):
+                run(args, rt)
+            audit = json.loads(next(args.output_dir.glob("parents/*/collection_*/attempt_1/initial_restore_audit.json")).read_text())
+            self.assertFalse(audit["valid"])
+            self.assertFalse(audit["observation_verification"]["snapshot_fallback_used"])
 
     def test_unseeded_or_misaligned_nominal_requests_fail_before_certification(self):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
