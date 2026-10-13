@@ -4,7 +4,10 @@ from contextlib import redirect_stdout
 import gc
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -170,6 +173,43 @@ class ParentReplayAuditTest(unittest.TestCase):
             self.assertFalse(failed["engineering_gates"]["both_source_prefix_audits_accepted"])
             self.assertFalse((args.output_dir/"parent_records.jsonl").exists())
             self.assertEqual(protected, {path: sha256_file(path) for path in protected})
+
+    def test_matching_source_pair_with_explicit_collection_fails_and_status_exposes_events_read_only(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("robocasa.recovery.intervention_timing.validate_operator_registration"), \
+             patch("robocasa.recovery.diagnose_intervention_timing_replay._validate_live_provenance"), \
+             redirect_stdout(io.StringIO()):
+            base = Path(directory)
+            args, rt, policies, _, protected = self.fixture(base)
+            args.output_dir /= "diagnostic"
+            ordinary = rt["step_fn"]
+            def collect_once(env, action):
+                if env.timestep == 0:
+                    gc.collect()
+                return ordinary(env, action)
+            rt["step_fn"] = collect_once
+            with self.assertRaisesRegex(ValueError, "Guarded parent replay audit failed"):
+                run(args, rt)
+            failed = json.loads(next(args.output_dir.glob("parents/*/failed_parent.json")).read_text())
+            self.assertEqual([k for k, accepted in failed["engineering_gates"].items() if not accepted],
+                             ["gc_control_exercised_without_nominal_collections"])
+            before = {str(p): sha256_file(p) for p in args.output_dir.rglob("*") if p.is_file()}
+            executable = base/"client/bin/python"
+            executable.parent.mkdir(parents=True)
+            executable.symlink_to(sys.executable)
+            script = Path(__file__).resolve().parents[1]/"scripts/diagnose_xr1_timing_replay.sh"
+            process = subprocess.run(["bash", str(script), "status"], capture_output=True, text=True,
+                timeout=10, env={**os.environ, "XR1_CLIENT_ENV": str(executable.parents[1]),
+                                 "XR1_REPLAY_ROOT": str(args.output_dir.parent)})
+            self.assertEqual(process.returncode, 0, process.stdout+process.stderr)
+            self.assertIn("failed gates: ['gc_control_exercised_without_nominal_collections']", process.stdout)
+            self.assertIn("finding: isolated_replays_reproduce_source_full_study_still_blocked", process.stdout)
+            self.assertEqual(process.stdout.count("nominal GC stops by phase: {'environment_step': 1}"), 2)
+            self.assertIn("'automatic_gc_enabled': False", process.stdout)
+            self.assertIn("'environment_step': 0", process.stdout)
+            self.assertEqual(before, {str(p): sha256_file(p) for p in args.output_dir.rglob("*") if p.is_file()})
+            self.assertEqual(protected, {path: sha256_file(path) for path in protected})
+            self.assertEqual(len(policies), 2)
 
 
 if __name__ == "__main__":

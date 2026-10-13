@@ -10,12 +10,27 @@ if [[ ( "$action" == status || "$action" == resume ) && -z "${XR1_REPLAY_ROOT:-}
 fi
 if [[ "$action" == status ]]; then
   "${XR1_CLIENT_ENV:-$STORAGE_BS/envs/xiaomi_robotics_1_robocasa365}/bin/python" - "$XR1_REPLAY_ROOT/diagnostic" <<'PY'
+from collections import Counter
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
+status = {}
 if (root/"status.json").exists():
-    print("status:", json.loads((root/"status.json").read_text()))
-if (root/"report.json").exists():
-    data = json.loads((root/"report.json").read_text())
+    status = json.loads((root/"status.json").read_text())
+    print("status:", status)
+report_path = root/"report.json"
+if not report_path.exists() and status.get("failed_parent"):
+    failed_path = (root/"parents"/status["failed_parent"]["parent_id"]/"failed_parent.json").resolve()
+    if not failed_path.is_relative_to(root.resolve()):
+        raise SystemExit("Failed-parent record escaped the audit root")
+    if failed_path.exists():
+        failed = json.loads(failed_path.read_text())
+        print("failed parent gates:", failed["engineering_gates"])
+        print("failed gates:", [k for k, accepted in failed["engineering_gates"].items() if not accepted])
+        report_path = (root/failed["report_path"]).resolve()
+        if not report_path.is_relative_to(root.resolve()):
+            raise SystemExit("Failed-parent report escaped the audit root")
+if report_path.exists():
+    data = json.loads(report_path.read_text())
     if data.get("protocol") == "xr1_gc_guarded_all_parent_replay_audit_v1":
         print("all-parent audit:", {k: data[k] for k in ("status", "parents", "expected_parents", "nominal_replays", "parents_by_task", "engineering_all_pass", "scientific_trajectories_collected", "full_timing_study_complete")})
         for row in data["parent_reports"]:
@@ -32,9 +47,13 @@ if (root/"report.json").exists():
         boundary = divergence.get("step")
         for i, trace in enumerate(collection["attempts"]):
             print("GC attempt", i, {k: v for k, v in trace.items() if k != "events"})
+            stops = [e for e in trace["events"] if e["nominal"] and e["event"] == "stop"]
+            print("nominal GC stops by phase:", dict(Counter(e["phase"] for e in stops)))
             if boundary is not None:
                 nearby = [e for e in trace["events"] if e["nominal"] and abs(e["environment_step"]-boundary) <= 1]
                 print("GC events near first difference:", nearby[:20])
+            elif stops:
+                print("nominal GC stop events (first 20):", stops[:20])
     if "startup_events" in data:
         print("startup events:", data["startup_events"])
     for i, attempt in enumerate(data["attempts"]):
@@ -62,7 +81,7 @@ if (root/"report.json").exists():
             print("first-difference camera statistics:", details.get("camera_statistics"))
         print("window camera statistics:", window["camera_statistics"])
     print("divergence from previous failed run:", data["first_divergence_from_failed_attempt"])
-    print("report:", root/"report.json")
+    print("report:", report_path)
 PY
   echo "driver log: ${XR1_REPLAY_LOG:-unknown}"
   exit 0

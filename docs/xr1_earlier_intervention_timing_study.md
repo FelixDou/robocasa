@@ -8,8 +8,10 @@ Latest isolated check: **the failed ArrangeTea parent passed both historical
 source-prefix audits with automatic cyclic GC disabled**. Both 400-step repeats
 matched throughout. The same-code default-GC control reproduced camera failure
 after a generation-2 collection. The runs used different cluster nodes. This
-supports the workaround for one parent; the all-parent replay audit and
-full-study validation remain pending.
+supports the workaround for one parent. The all-parent audit subsequently
+stopped on its first parent's GC-control gate, despite two exact source
+replays; the recorded collection phases require inspection. Full-study
+validation remains pending.
 
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
 collection. Its first ArrangeTea reference matched simulator state, controller,
@@ -251,6 +253,27 @@ the client hostname so that this distinction stays visible. The next stage
 audits all ten original parents using the passing diagnostic lifecycle on the
 current allocation, before changing the frozen timing collector or collecting
 interventions.
+
+The all-parent run `xr1_timing_parent_audit_20261013_164436` stopped on its first
+parent, `b1455183d9fabd7eeb4c4bf5` (ArrangeTea, seed 950007, reset index 0),
+on node `r5n4`. Both 336-step attempts passed the historical source-prefix
+audit, all 11 endpoint channels, initial/endpoint repeat audits, complete
+progress comparison, and both seeded full-response probes. All 337 observations
+matched by every key and raw hash. Early CUDA initialization was confirmed and
+automatic GC was disabled at environment creation and at the end of cleanup,
+with the caller's original setting restored afterward.
+
+The sole failed gate was `gc_control_exercised_without_nominal_collections`:
+each attempt recorded one collection stop during the currently labeled nominal
+scope. That scope begins at `nominal_setup`, before the frozen collector resets
+the environment, so the count alone does not locate the event within the active
+trajectory. The supplied status omitted events because the repeats had no
+divergence. Inspect the saved phase, step, generation, and enabled flag before
+deciding whether reset/setup was mislabeled or an explicit collection occurred
+during rollout. No gate is waived on the basis of repeatability; the cohort
+remains failed with zero accepted parents and zero intervention trajectories.
+Status now prints failed-parent gates and nominal collection stops even for
+matching repeats, without running a simulator or changing saved evidence.
 
 ## Why this is the next experiment
 
@@ -841,8 +864,9 @@ the diagnostic logs those too. Reference-count destruction is not disabled.
 `gc_attempt_<index>.json` retains start/stop events with generation, replay
 phase, environment-step position, and the automatic-GC enabled flag. The report
 records nominal collection counts and restoration of the previous setting;
-status shows events near the first mismatch. An event during stepping is labeled
-with the step before that action returns. `renderer_cleanup_source.json`
+status shows phase counts and events near the first mismatch, or the first 20
+nominal collection stops when there is no mismatch. An event during stepping
+is labeled with the step before that action returns. `renderer_cleanup_source.json`
 records the installed binding file path, SHA-256, and renderer destructor source
 when available. Reading that source occurs before environment creation; no
 dependency is edited. Both files enter the artifact hash ledger.
