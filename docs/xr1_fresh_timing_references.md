@@ -1,8 +1,8 @@
 # XR1 fresh common-entry reference cohort
 
-Implementation status: **v2 completed both first-parent nominal prefixes,
-but their repeatability gates failed; first-divergence inspection is pending**.
-Protocol: `xr1_fresh_common_entry_reference_cohort_v2`.
+Implementation status: **v2 failed repeatability after matching initial states;
+the v3 counter-alias fix is locally tested; observation-state diagnosis remains pending**.
+Protocol: `xr1_fresh_common_entry_reference_cohort_v3`.
 Read [the cluster runbook](cluster_experiment_runbook.md) before any cluster operation.
 
 The saved historical cameras for ArrangeTea parent `6cfb095ec52c00970abf8340`
@@ -137,6 +137,61 @@ applies the action from state `s` to state `s+1`. Request comparison rows are
 zero-based policy-call indices. This distinction matters when identifying
 whether a camera, policy response, or physical transition differed first.
 
+## Step-one divergence and counter ownership
+
+The subsequent saved-audit summary localized the first difference to state
+step 1: controller state, environment control state, and observations. Policy
+state first differed at step 2. Encoded requests and full responses first
+differed at policy-call row 1; consumed actions, request records, and inference
+records first differed at transition step 16. Environment state and simulator
+integration state first differed at state step 17, after that changed action.
+No identical-request/different-response pair was recorded; info hashes matched.
+
+At step 1 the supplied control samples were 1 versus 0 and 0.05 versus 0.0.
+The controller's `root[7].attributes.current` differed by approximately
+2.17e-19. Sample numeric observation errors were approximately 4.38e-7 for
+base rotation, 3.73e-5 for gripper qpos, and 2.65e-6 for relative end-effector
+position. The summary did not include the affected control object paths, the
+controller buffer's identity, or all camera-key comparisons. These numeric
+samples do not establish camera corruption or a physical-state difference
+at step 1. The declared physical channels remained equal through state 16.
+
+Source inspection and a local regression test found a concrete counter-restore
+defect. `RoboCasaGymEnv.__getattr__` forwards reads to its inner environment,
+while the legacy `_restore_environment_control_state` uses `setattr` on every
+captured object path. Setting a forwarded `timestep` or `cur_time` on the
+wrapper creates a separate stored value. Initial equality can still pass at
+zero, but the inner environment advances while the wrapper's copy stays zero.
+This reproduces the supplied counter pattern; the saved paths below are
+needed to identify the affected live objects. It does not establish the cause
+of the observation differences.
+
+V3 records which control attributes are declared by each instance/class and
+which are dynamically forwarded. It checks the ownership schema before
+restore, removes only new alias shadows created by the legacy setter, and
+re-audits values and ownership afterward. Real stored attributes, descriptors,
+and their independent values remain restored. Frozen shared snapshot helpers
+are unchanged. No numeric tolerance or repeatability gate is relaxed. New
+v3 snapshots retain this ownership metadata; future timing continuations must
+use the ownership-aware restore path rather than the legacy setter alone.
+
+Do not resume the failed v2 registration or launch another full cohort yet.
+Its saved states can resolve the remaining questions without simulation:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_references_obsfix_20261013_201241/run.env
+export XR1_REFS_PAIR="$XR1_REFS_ROOT/references/parents/6c84f0411b020f6889786e66/collection_xmaaqmxz"
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+"$XR1_CLIENT_ENV/bin/python" -u -m robocasa.recovery.inspect_intervention_timing_restore \
+  --pair-dir "$XR1_REFS_PAIR" --step 1
+```
+
+This reads trusted saved experiment dictionaries and the installed source
+file; it does not create an environment, load a checkpoint, query RNGs, or
+modify artifacts. An observation sampling/cache phase difference is a
+hypothesis to investigate, rather than an established renderer mechanism.
+
 ## Launch on the two-GPU allocation
 
 The launcher uses the existing absolute client/server environment paths. It
@@ -256,5 +311,12 @@ arrow navigation, and image paths were checked on the generated gallery.
 The v2 fix adds regression coverage for a non-forwarding Gym-style wrapper,
 live pixels differing after restore, and an unavailable live observation.
 The updated combined suite ran 120 tests: 119 passed and one was skipped.
-The v2 live cohort remains failed at its first pair; per-step divergence
-details are the next inspection, rather than another collection launch.
+The v3 ownership fix's combined suite ran 122 tests: 121 passed and one was
+skipped. Its regression reproduces stale forwarded counters under the legacy
+setter and checks transparent aliases, class-declared state, and descriptors
+under the corrected restore. The saved-state inspection command was checked
+on synthetic records without changing them or executing the inspected source.
+The v2 live cohort remains failed at its first pair. V3's wrapper-alias
+regressions pass locally; live v3 repeatability and observation-state diagnosis
+remain pending. The next inspection uses saved state-1 records and observable
+source code, rather than another collection launch.

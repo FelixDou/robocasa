@@ -5,6 +5,7 @@ from collections import Counter
 from copy import deepcopy
 import fcntl
 import html
+import inspect
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,7 @@ from robocasa.recovery.diagnose_intervention_timing_observations import load_sta
 from robocasa.recovery.full_snapshot import (
     capture_full_snapshot, load_full_snapshot, restore_full_snapshot,
     save_full_snapshot, stable_digest, compare_structures, _environment_nodes,
+    _capture_environment_control_state, _node_by_path,
 )
 from robocasa.recovery.inspect_intervention_timing_source import (
     request_trace_comparison, write_image_panel,
@@ -40,7 +42,7 @@ from robocasa.recovery.run_phase2_snapshot_replay import (
 from robocasa.recovery.run_phase3b_training_horizon_continuation import (
     _runtime_args, _validate_live_provenance,
 )
-PROTOCOL = "xr1_fresh_common_entry_reference_cohort_v2"
+PROTOCOL = "xr1_fresh_common_entry_reference_cohort_v3"
 GC_SCOPE = "first_post_setup_subtask_evaluation_through_entry_capture"
 CAMERAS = ("video.robot0_agentview_left", "video.robot0_agentview_right", "video.robot0_eye_in_hand")
 
@@ -113,6 +115,7 @@ def inputs(args):
         "entry_definition": "first_inference_boundary_in_target_stage_while_target_incomplete_before_termination",
         "repeat_initialization": "restore_new_actual_reset_snapshot_in_fresh_environment_and_policy",
         "restore_observation_verification": "live_getter_resolved_through_environment_wrappers; no_snapshot_fallback",
+        "control_restore_contract": "preserve_declared_attributes_and_forwarded_alias_ownership",
         "sampling": "original_ordinary_K1_seed_bases; no_historical_mutable_policy_state",
         "gc_mode": "disabled", "gc_nominal_scope": GC_SCOPE, "rng_runtime_init": "before_env",
         "restore_atol": 0, "restore_rtol": 0,
@@ -171,11 +174,58 @@ def live_observation(env):
     raise ValueError("No live observation getter found through the environment wrappers; snapshot fallback is forbidden")
 
 
+def control_ownership(env):
+    """Distinguish stored fields/descriptors from dynamic forwarded reads."""
+    result = []
+    for record in _capture_environment_control_state(env):
+        node = _node_by_path(env, record["object_path"])
+        try:
+            inspect.getattr_static(node, record["attribute"])
+            declared = True
+        except AttributeError:
+            declared = False
+        result.append({"object_path": record["object_path"], "attribute": record["attribute"],
+                       "declared": declared})
+    return result
+
+
+def restore_owned_snapshot(snapshot, env, policy):
+    """Keep dynamic wrapper aliases dynamic after the legacy full restore."""
+    expected = snapshot.metadata.get("environment_control_ownership")
+    if expected is None or control_ownership(env) != expected:
+        raise ValueError("New snapshot control-attribute ownership differs or is unavailable")
+    aliases = [r for r in expected if not r["declared"]]
+    removed = []
+    try:
+        audit = restore_full_snapshot(snapshot, env, policy, atol=0, rtol=0, verify_observation=False)
+    finally:
+        # Legacy restoration writes every captured alias with setattr(). On
+        # read-forwarding wrappers that creates an independent frozen copy.
+        # Remove only fields proven absent from the original instance/class;
+        # the actual owners were separately restored by the full restore.
+        for record in aliases:
+            node = _node_by_path(env, record["object_path"])
+            try:
+                attributes = object.__getattribute__(node, "__dict__")
+            except AttributeError:
+                continue
+            if record["attribute"] in attributes:
+                del attributes[record["attribute"]]
+                removed.append(record)
+    differences = compare_structures(snapshot.environment_control_state,
+        _capture_environment_control_state(env), atol=0, rtol=0, path="environment_control")
+    ownership_exact = control_ownership(env) == expected
+    audit.update(environment_control_exact=not differences, environment_control_mismatches=differences,
+                 valid=audit["valid"] and not differences and ownership_exact)
+    audit["control_attribute_ownership"] = {"exact": ownership_exact, "removed_forwarded_shadows": removed}
+    return audit
+
+
 def restore_initial(initial, env, policy, folder):
     # The legacy generic observation helper can fall back to the saved image
     # on Gym wrappers. Keep frozen helpers unchanged and independently require
     # a real observation after all simulator/controller/RNG restoration.
-    audit = restore_full_snapshot(initial, env, policy, atol=0, rtol=0, verify_observation=False)
+    audit = restore_owned_snapshot(initial, env, policy)
     audit["observation_verification"] = {"performed": False, "snapshot_fallback_used": False}
     audit["observation_exact"] = False  # no claim of equality before live verification
     if not audit["valid"]:
@@ -198,11 +248,12 @@ def restore_initial(initial, env, policy, folder):
     return observation, audit
 
 
-def metadata(parent, prefix=()):
+def metadata(parent, env, prefix=()):
     return {k: parent[k] for k in (
         "environment_seed", "environment_reset_index", "trigger_stage",
         "legacy_parent_id", "legacy_snapshot_id") } | {
         "reference_protocol": PROTOCOL, "historical_endpoint_reconstructed": False,
+        "environment_control_ownership": control_ownership(env),
         "local_inferences": 0, "ordered_prefix": list(prefix),
         "entry_definition": "first_eligible_target_stage_boundary_in_new_nominal_trajectory",
     }
@@ -250,7 +301,7 @@ def collect_attempt(parent, folder, registration, plan, args, runtime, factory, 
             raise ValueError("New reset-state semantic restore differs")
         reset = capture_full_snapshot(env, policy, parent_id=parent["parent_id"],
             task_name=parent["task_name"], trigger_name="fresh_reference_reset", environment_step=0,
-            observation=obs, subtask_eval=evaluations[0], metadata=metadata(parent))
+            observation=obs, subtask_eval=evaluations[0], metadata=metadata(parent, env))
         save_full_snapshot(reset, folder/"initial.pkl.gz")
         initial_audit = None
         if initial is not None:
@@ -276,7 +327,7 @@ def collect_attempt(parent, folder, registration, plan, args, runtime, factory, 
                 entry = capture_full_snapshot(env, policy, parent_id=parent["parent_id"],
                     task_name=parent["task_name"], trigger_name="fresh_timing_common_entry",
                     environment_step=step, observation=obs, subtask_eval=evaluations[-1],
-                    metadata=metadata(parent, stage["ordered_completed_subtasks"]))
+                    metadata=metadata(parent, env, stage["ordered_completed_subtasks"]))
                 save_full_snapshot(entry, folder/"entry.pkl.gz")
                 outcome = "common_entry_captured"
                 break

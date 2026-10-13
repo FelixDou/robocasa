@@ -20,7 +20,9 @@ install_lightweight_robocasa_packages()
 from tests.test_intervention_timing import source_fixture, runtime
 from tests.test_operator_screen import XiaoEnvironment, make_policy
 from robocasa.recovery.intervention_timing import build_registration
-from robocasa.recovery.full_snapshot import load_full_snapshot, stable_digest
+from robocasa.recovery.full_snapshot import (
+    load_full_snapshot, stable_digest, _capture_environment_control_state, _restore_environment_control_state,
+)
 from robocasa.recovery.phase3b_training_horizon import read_jsonl, sha256_file
 from robocasa.recovery.diagnose_intervention_timing_observations import load_state
 from robocasa.recovery.collect_intervention_timing_references import (
@@ -52,6 +54,36 @@ class NonForwardingWrapper:
 
     def close(self):
         self.env.close()
+
+
+class ClockedEnvironment(XiaoEnvironment):
+    done = False  # class-declared state must not be mistaken for forwarding
+
+    @property
+    def cur_time(self):
+        return self._clock
+
+    @cur_time.setter
+    def cur_time(self, value):
+        self._clock = value
+
+    def reset(self, **kwargs):
+        result = super().reset(**kwargs)
+        self._clock = 0.0
+        return result
+
+    def step(self, action):
+        result = super().step(action)
+        self._clock += .05
+        return result
+
+
+class ReadForwardingWrapper(NonForwardingWrapper):
+    def __init__(self):
+        self.env = ClockedEnvironment()
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
 
 
 class FreshReferenceTest(unittest.TestCase):
@@ -210,6 +242,43 @@ class FreshReferenceTest(unittest.TestCase):
                     "getter": "env.env.get_current_observation"})
             self.assertEqual(len(policies), 20)
             self.assertTrue(all(env.closed for env in envs))
+            self.assertEqual(protected, {path: sha256_file(path) for path in protected})
+
+    def test_legacy_control_setter_creates_stale_forwarded_clock_copies(self):
+        source, restored = ReadForwardingWrapper(), ReadForwardingWrapper()
+        source.reset(seed=1); restored.reset(seed=1)
+        self.assertNotIn("timestep", vars(restored))
+        _restore_environment_control_state(restored, _capture_environment_control_state(source))
+        self.assertIn("timestep", vars(restored))
+        source.step([0]); restored.step([0])
+        self.assertEqual(source.timestep, 1)
+        self.assertEqual(restored.timestep, 0)
+        self.assertEqual(source.cur_time, .05)
+        self.assertEqual(restored.cur_time, 0)
+        self.assertEqual(source.env.timestep, restored.env.timestep)
+        self.assertEqual(source.env.cur_time, restored.env.cur_time)
+        source.close(); restored.close()
+
+    def test_v3_restore_preserves_wrapper_aliases_descriptors_and_real_state_owners(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, policies, envs, _, protected = self.fixture(Path(directory), env_type=ReadForwardingWrapper)
+            self.assertTrue(run(args, rt)["engineering_all_pass"])
+            self.assertEqual(len(policies), 20)
+            for env in envs:
+                self.assertNotIn("timestep", vars(env))
+                self.assertNotIn("cur_time", vars(env))
+                self.assertEqual(env.timestep, 4)
+                self.assertEqual(env.cur_time, .2)
+                self.assertIsInstance(type(env.env).cur_time, property)
+            audits = list(args.output_dir.glob("parents/*/collection_*/attempt_1/initial_restore_audit.json"))
+            self.assertEqual(len(audits), 10)
+            for path in audits:
+                audit = json.loads(path.read_text())
+                self.assertTrue(audit["control_attribute_ownership"]["exact"])
+                removed = audit["control_attribute_ownership"]["removed_forwarded_shadows"]
+                self.assertEqual({r["attribute"] for r in removed}, {"_elapsed_steps", "timestep", "cur_time", "done"})
+                self.assertTrue(all(r["object_path"] == "env" for r in removed))
+                self.assertTrue(audit["valid"])
             self.assertEqual(protected, {path: sha256_file(path) for path in protected})
 
     def test_wrapped_live_image_mismatch_is_rejected_without_saved_observation_fallback(self):

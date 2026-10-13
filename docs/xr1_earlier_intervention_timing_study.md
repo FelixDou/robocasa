@@ -40,6 +40,17 @@ does not localize the first divergence. Inspect the saved `repeat_audit.json`
 and transition traces using the CPU-only command in the fresh-reference
 instructions before any additional collection; preserve the failed run.
 
+The saved audit subsequently localized differences to controller/control and
+observation state at step 1, policy state at step 2, request/response call row 1,
+consumed actions at transition 16, and declared physical state at step 17.
+No identical-request/different-response pair was observed. Counter samples
+showed 1 versus 0 and 0.05 versus 0.0. A local regression reproduced stale
+counter aliases created when the legacy setter writes forwarded wrapper
+attributes. The new collector's v3 fix preserves control-attribute ownership;
+it does not establish or fix the remaining observation-state discrepancy.
+Inspect the saved control paths, controller-buffer identity, all camera keys,
+and observable implementation before another GPU run.
+
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
 collection. Its first ArrangeTea reference matched simulator state, controller,
 policy state, observations, semantics, global RNG, counters, and XML exactly;
