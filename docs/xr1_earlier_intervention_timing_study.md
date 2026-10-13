@@ -110,6 +110,33 @@ and complete audited state around environment step 234. Historical replay
 remains unresolved; the earlier fixed-action startup-order result remains
 scoped to its controlled pair.
 
+The instrumented run `xr1_timing_replay_window_20261013_121357` completed
+another two 400-step, 25-request replays with CUDA initialized before both
+environments and all initial repeat channels matching. Both failed the
+historical prefix and ended at `kettle_on_tray`. Their final subtask evaluations
+matched each other, while environment, integration, controller, policy, and
+observation state did not. Both repeated first-request probes passed.
+
+The first within-pair difference moved to action index 246 (environment step
+247), exclusively in the returned observation hash. All three camera keys
+first differed at environment step 247. The five numeric state-observation
+keys first differed at 257. At the first image mismatch the recorded action,
+policy-state, request, environment RNG, and causal-environment hashes still
+matched. This localizes the first observed discrepancy to camera output under
+matching recorded causal-state fingerprints; it does not identify a renderer
+mechanism or exclude unrecorded state. The older failed-run comparison instead
+reported a causal hash difference at action index 0; that separate cross-run
+comparison must not be confused with this pair's step-247 onset.
+
+The two full per-key traces each contain 401 observations. Complete raw states
+were retained only at steps 232--236, where all audited channels and camera
+statistics matched and the images had normal color. The first mismatch at
+247 lies outside that window: its raw pixels and full state audit are absent.
+Exact state audits at 232--236 cannot be extrapolated to 247. The next capture
+retains raw observations over the entire trace, so another shift in onset will
+not prevent measuring the first image difference. Full state capture remains
+separately scoped to the requested window.
+
 ## Why this is the next experiment
 
 The completed 160-branch operator screen passed every engineering gate but
@@ -588,6 +615,55 @@ differences instead require investigating their construction or caches.
 Physical-state differences at the same boundary require revisiting simulation
 and state coverage. None of these diagnostic outcomes completes the timing
 study or tests SAFE-trigger recovery.
+
+### Retain raw observations when the first mismatch moves
+
+The 232--236 window missed the next pair's first camera difference at step 247.
+Set `XR1_REPLAY_RECORD_ALL_OBSERVATIONS=1` to retain every returned observation
+at reset and after all 400 actions. This uses the private copies already made
+by the diagnostic step wrapper, retaining them in host memory without another
+copy, renderer call, or simulator-state getter. The requested full-state window
+can stay at 232--236. Pixel capture no longer depends on that window.
+
+After each nominal endpoint is captured, the diagnostic writes
+`observation_window/all_observations.pkl.gz`. Postprocessing validates every
+saved observation against the complete per-step hash trace and computes pixel
+counts, bounding boxes, RGB errors, and camera color/darkness statistics at the
+first differing observation anywhere in the trace. The existing progress
+channels at the corresponding action index are compared separately. Outside
+the full-state window, `state_audit` remains explicitly unavailable; matching
+causal fingerprints exclude only the declared downstream controller caches and
+are not promoted to a full state-channel audit. The report distinguishes raw
+pixel availability from full raw-state availability.
+
+The option defaults off. It can also run without a full-state window. Each
+complete attempt retains 401 raw observations; the attempt report records their
+count and array bytes. Compression and additional file writes happen after the
+nominal endpoint, and the source-prefix gates, action/request schedule, cache,
+and post-endpoint probes remain unchanged. Retaining extra host memory and
+instrumentation can still affect whether the incident recurs.
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_window_20261013_121357/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_REPLAY_RNG_RUNTIME_INIT=before_env
+export XR1_REPLAY_RECORD_ALL_OBSERVATIONS=1
+export XR1_REPLAY_OBS_WINDOW_START=232
+export XR1_REPLAY_OBS_WINDOW_END=236
+export XR1_REPLAY_GPU=0
+export XR1_REPLAY_PORT=10322
+export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_raw_$(date +%Y%m%d_%H%M%S)"
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+```
+
+This remains two 400-step policy-driven replays and the existing two
+post-endpoint request probes. A matching instrumented pair means the observed
+failure was not reproduced; it does not certify historical prefix replay or
+complete the timing study.
 
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:
