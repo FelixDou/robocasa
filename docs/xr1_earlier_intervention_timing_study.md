@@ -79,6 +79,23 @@ mechanism or establish that the historical policy-driven prefix is reproducible.
 The next check below keeps all source-replay gates intact and runs that
 policy-driven replay with early initialization.
 
+The nominal run `xr1_timing_replay_earlycuda_20261013_073123`, launched with
+early initialization requested, completed two 400-step replays with 25 nominal
+requests each. Neither passed the historical source-prefix audit. The first
+ended at `kettle_on_tray`; the second ended at `mug_on_tray` and matched source
+subtask evaluation, but still differed in simulator/environment state,
+controller, policy, and observations. Both matched source global RNG,
+environment RNG, environment control state, and step counter. Both repeated
+first-request probes returned identical actions and full responses for seed
+6940000 and request hash
+`703480442efd9e874629c1bbc56113fb6d5e5f84a4e2d8ac1078cda36ddf7101`.
+Those probes cover only that tested input, not all 25 nominal requests. The
+pasted completion log does not contain the startup events, initial repeat
+audit, or first divergence. Inspect the saved report and per-step/request
+traces before selecting another GPU experiment. Historical replay remains
+unresolved; the earlier fixed-action startup-order result remains scoped to
+its controlled pair.
+
 ## Why this is the next experiment
 
 The completed 160-branch operator screen passed every engineering gate but
