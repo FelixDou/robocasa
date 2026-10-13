@@ -1,8 +1,9 @@
 # XR1 fresh common-entry reference cohort
 
-Implementation status: **v2 failed repeatability after matching initial states;
-the v3 counter-alias fix is locally tested; observation-state diagnosis remains pending**.
-Protocol: `xr1_fresh_common_entry_reference_cohort_v3`.
+Implementation status: **v2 remains failed; saved data confirm wrapper counter
+shadows and step-one proprioceptive differences with exact camera pixels.
+V4 adds observation sampling/cache restoration; live validation is pending**.
+Protocol: `xr1_fresh_common_entry_reference_cohort_v4`.
 Read [the cluster runbook](cluster_experiment_runbook.md) before any cluster operation.
 
 The saved historical cameras for ArrangeTea parent `6cfb095ec52c00970abf8340`
@@ -25,11 +26,13 @@ cohort, and does not cause seed replacement or a longer search.
 Each parent has two fresh environment/policy instances. The second restores
 the first's new reset snapshot, including actual global and environment RNG
 streams. Complete declared simulator, integration, controller, control, RNG,
-policy, semantic, and raw observation states are saved at **every environment
+policy, semantic, raw observation, and observable sampling/cache states are saved at **every environment
 step**, including reset and entry. Consumed actions, inference records, full
 encoded requests/responses, and their hashes are retained. Per-step state
 audits apply the existing narrow OBJ MIME compatibility rule explicitly; raw
 state hashes are retained but are not substituted for portable comparisons.
+V4 retains the full controller comparison and separately gates its existing
+declared causal scope, as detailed below. No numeric tolerance is introduced.
 
 CUDA RNG inspection is initialized before environment creation. Automatic
 cyclic GC is disabled before each creation until both environment and policy
@@ -175,8 +178,8 @@ are unchanged. No numeric tolerance or repeatability gate is relaxed. New
 v3 snapshots retain this ownership metadata; future timing continuations must
 use the ownership-aware restore path rather than the legacy setter alone.
 
-Do not resume the failed v2 registration or launch another full cohort yet.
-Its saved states can resolve the remaining questions without simulation:
+The following read-only inspection was run on the failed v2 data. It resolved
+the control paths, controller-buffer identity, and per-key observation differences:
 
 ```bash
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_references_obsfix_20261013_201241/run.env
@@ -189,8 +192,79 @@ git pull --ff-only origin main
 
 This reads trusted saved experiment dictionaries and the installed source
 file; it does not create an environment, load a checkpoint, query RNGs, or
-modify artifacts. An observation sampling/cache phase difference is a
-hypothesis to investigate, rather than an established renderer mechanism.
+modify artifacts.
+
+## Saved-state inspection and v4 observation runtime
+
+The supplied state-1 inspection confirms `env.unwrapped` was shadowing
+`timestep`/`cur_time`: attempt 0 reports 1/0.05, attempt 1 reports 0/0,
+while both actual inner environments (`env.unwrapped.env`) report 1/0.05.
+The v3 ownership repair remains included in v4; v3 has not been separately
+validated live.
+
+All three 256x256x3 cameras are **byte-exact at state 1**. All five numeric
+proprioceptive keys differ; maximum absolute errors are:
+
+| Observation | Maximum absolute difference |
+|---|---:|
+| Base position | 3.5762786865234375e-7 |
+| Base rotation | 4.38201823271811e-7 |
+| Relative end-effector position | 2.652406692504883e-6 |
+| Relative end-effector rotation | 3.6656856536865234e-6 |
+| Gripper qpos | 3.730505704879761e-5 |
+
+This localizes the first observed input difference to proprioception. It does
+not establish image health at later steps or identify the exact unrecorded
+sampling phase retrospectively. The installed `observables.py` SHA-256 is
+`83e7bc67745477d207c09c4a5eb86e280909b06531ab7346595a45a84200dcfd`.
+Its supplied `Observable.update` increments `_time_since_last_sample` even
+with `force=True`, changes `_sampled`, resamples `_current_delay`, and updates
+both `_current_observed_value` and the dependency cache. Its supplied `reset`
+does not explicitly reset `_sampled`. The frozen FullSnapshot implementation
+captures none of these observable/cache fields. Consequently the v2 forced
+live verification can pass at reset while changing later sample timing.
+This is a concrete missing-state mechanism; its causal contribution to the
+failed live pair still requires the new run.
+
+V4 records the four mutable sampling fields, all other plain observable
+configuration, callback/class source identities, and each actual owner's
+`_obs_cache` in reset/entry metadata and every diagnostic state. Forwarded
+aliases are not separate owners. Restoration keeps the new simulator's live
+sensor functions. It rejects changed topology/configuration, missing runtime
+state, non-plain state, callable objects, and unsupported stateful filter/
+corruption/delay closures. It restores sampling/cache state before live reset
+verification, verifies actual pixels and proprioception at zero tolerance,
+then restores that sampling/cache state and both RNG families again before
+the next action. It returns the verified live observation; no saved-image
+fallback is introduced. The complete initial audit includes observer runtime
+and must still be fully exact before any nominal request. The verification
+audit retains before/after-forced-read/restored hashes and differences so that
+the phase perturbation is directly inspectable. Nominal rollout steps gain no
+extra sensor reads. Future timing executors must restore this metadata too;
+the frozen snapshot helper alone is insufficient.
+
+The tiny controller difference is record 7,
+`robots[0].recent_ee_forcetorques['right']`, a DeltaBuffer with approximately
+2.1684e-19 difference. `full_snapshot.py` already explicitly excludes
+`.recent_ee_forcetorques[` from its causal transition fingerprint. V4 applies
+that **pre-existing, named exclusion prospectively** to repeat acceptance,
+with a new registration and parent identities. `repeat_audit.json` still
+retains full `controller_state` comparisons, `all_state_channels_exact`, and
+the first full mismatch; it separately records causal acceptance and the
+first causal mismatch. A passing v4 pair can therefore have
+`all_state_channels_exact=false` solely for this named downstream buffer.
+The new gate is `every_declared_causal_state_repeats_exact`. Every other
+controller, physical, observation, observable-runtime, policy, semantic,
+counter, and RNG channel remains exact, as do consumed actions and full
+encoded requests/responses. There is no tolerance for small proprioceptive
+differences. V2 remains failed under its original, stricter gate; its artifacts
+and registration are not rewritten or reused as accepted v4 references.
+
+The next live experiment is this newly registered v4 cohort on the two GPUs.
+It stops at the first failed pair, preserving all states and the new sampler
+audit. All ten passing pairs plus separate image review are still required
+before a new timing grid. This is an engineering experiment with no
+interventions and no SAFE detector recovery claim.
 
 ## Launch on the two-GPU allocation
 
@@ -207,8 +281,8 @@ git pull --ff-only origin main
 export XR1_REFS_SOURCE=/gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_rngfix_20261012_194551/full
 export XR1_REFS_GPU=0
 export XR1_REFS_SERVER_GPU=1
-export XR1_REFS_PORT=10327
-export XR1_REFS_ROOT=/gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_references_$(date +%Y%m%d_%H%M%S)
+export XR1_REFS_PORT=10331
+export XR1_REFS_ROOT=/gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_references_observer_v4_$(date +%Y%m%d_%H%M%S)
 
 bash scripts/collect_xr1_timing_references.sh start
 ```
@@ -316,7 +390,16 @@ skipped. Its regression reproduces stale forwarded counters under the legacy
 setter and checks transparent aliases, class-declared state, and descriptors
 under the corrected restore. The saved-state inspection command was checked
 on synthetic records without changing them or executing the inspected source.
-The v2 live cohort remains failed at its first pair. V3's wrapper-alias
-regressions pass locally; live v3 repeatability and observation-state diagnosis
-remain pending. The next inspection uses saved state-1 records and observable
-source code, rather than another collection launch.
+V4 adds a faithful sampler regression showing that a forced read can leave
+reset observations and physics exact while changing the next proprioceptive
+sample. Restoring sampler/cache state repairs that difference. The paired
+cohort test also exercises a delayer consuming global NumPy RNG and checks
+complete sampler/cache/RNG equality after verification. Negative cases reject
+changed sampler phases, dependency caches, tiny proprioceptive errors, causal
+controller changes, missing observer ownership, changed configuration, and
+unsupported callbacks. The force/torque exception is tested separately from
+full-state diagnostics, including cohort/parent/ledger reporting when that
+buffer alone differs. A lifetime regression checks source caching does not
+retain closed simulators through sensor closures. The v4 combined suite ran
+128 tests: 127 passed and one was skipped. Shell syntax, Python compilation,
+and whitespace checks passed. Live v4 repeatability and camera health remain pending.

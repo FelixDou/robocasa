@@ -7,10 +7,12 @@ import io
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 import sys
 import tempfile
 import unittest
+import weakref
 from unittest.mock import patch
 
 import numpy as np
@@ -27,6 +29,10 @@ from robocasa.recovery.phase3b_training_horizon import read_jsonl, sha256_file
 from robocasa.recovery.diagnose_intervention_timing_observations import load_state
 from robocasa.recovery.collect_intervention_timing_references import (
     PROTOCOL, build_parser, run, review, validate_cohort_registration, validated_references, atomic_write_json,
+    fresh_state_audit,
+)
+from robocasa.recovery.intervention_timing_observation_state import (
+    capture_observation_runtime, restore_observation_runtime,
 )
 
 
@@ -86,6 +92,65 @@ class ReadForwardingWrapper(NonForwardingWrapper):
         return getattr(self.env, name)
 
 
+class SampledObservable:
+    """Faithful sampler logic from the supplied installed Observable.update."""
+    def __init__(self, env):
+        self._sensor = lambda cache: np.asarray([env.value], dtype=np.float64)
+        self._filter = lambda value: value
+        self._corrupter = lambda value: value
+        self._delayer = lambda: float(np.random.uniform(0.0, 0.0))
+        self._enabled, self._sampling_timestep = True, .05
+        self._time_since_last_sample, self._current_delay = 0.0, 0.0
+        self._sampled, self._current_observed_value = False, np.zeros(1)
+
+    def update(self, timestep, obs_cache, force=False):
+        if self._enabled:
+            self._time_since_last_sample += timestep
+            if (not self._sampled and self._sampling_timestep - self._current_delay >= self._time_since_last_sample) or force:
+                self._current_observed_value = np.array(self._filter(self._corrupter(self._sensor(obs_cache))))
+                obs_cache["proprio"] = self._current_observed_value.copy()
+                self._sampled = True
+                self._current_delay = self._delayer()
+            if self._time_since_last_sample >= self._sampling_timestep:
+                if not self._sampled:
+                    self._current_observed_value = np.array(self._filter(self._corrupter(self._sensor(obs_cache))))
+                    obs_cache["proprio"] = self._current_observed_value.copy()
+                    self._current_delay = self._delayer()
+                self._time_since_last_sample %= self._sampling_timestep
+                self._sampled = False
+
+
+class SampledEnvironment(XiaoEnvironment):
+    def __init__(self):
+        super().__init__()
+        self._observables = {"proprio": SampledObservable(self)}
+        self._obs_cache = {}
+        self._resetting = self._stepping = False
+
+    def reset(self, **kwargs):
+        self._observables = {"proprio": SampledObservable(self)}
+        self._obs_cache = {}
+        self._resetting = True
+        try:
+            return super().reset(**kwargs)
+        finally:
+            self._resetting = False
+
+    def get_current_observation(self):
+        observation = super().get_current_observation()
+        self._observables["proprio"].update(.05 if self._resetting else .01,
+                                          self._obs_cache, force=not self._stepping)
+        observation["state.end_effector_position_relative"][0] = self._observables["proprio"]._current_observed_value[0]
+        return observation
+
+    def step(self, action):
+        self._stepping = True
+        try:
+            return super().step(action)
+        finally:
+            self._stepping = False
+
+
 class FreshReferenceTest(unittest.TestCase):
     def fixture(self, base, *, entry_at=3, done_at=None, env_type=None):
         source = source_fixture(base)
@@ -107,6 +172,11 @@ class FreshReferenceTest(unittest.TestCase):
                 return obs
         def make_env(*_):
             env = (env_type or Fresh)()
+            owner = env
+            while hasattr(owner, "env"):
+                owner = owner.env
+            if not hasattr(owner, "_observables"):
+                owner._observables, owner._obs_cache = {}, {}
             envs.append(env)
             return env
         def make(*_):
@@ -281,6 +351,139 @@ class FreshReferenceTest(unittest.TestCase):
                 self.assertTrue(audit["valid"])
             self.assertEqual(protected, {path: sha256_file(path) for path in protected})
 
+    def test_force_read_changes_next_proprioception_without_changing_initial_pixels_or_physics(self):
+        source, legacy, fixed = (SampledEnvironment() for _ in range(3))
+        observations = [env.reset(seed=1)[0] for env in (source, legacy, fixed)]
+        saved = capture_observation_runtime(source)
+        self.assertEqual(stable_digest(saved), stable_digest(capture_observation_runtime(legacy)))
+        verified = legacy.get_current_observation()
+        self.assertEqual(stable_digest(observations[0]), stable_digest(verified))
+        self.assertNotEqual(stable_digest(saved), stable_digest(capture_observation_runtime(legacy)))
+        fixed.get_current_observation()
+        callbacks = tuple(fixed._observables["proprio"].__dict__[k] for k in ("_sensor", "_filter", "_delayer"))
+        restore_observation_runtime(fixed, saved)
+        self.assertEqual(callbacks, tuple(fixed._observables["proprio"].__dict__[k] for k in ("_sensor", "_filter", "_delayer")))
+        next_observations = [env.step([.2])[0] for env in (source, legacy, fixed)]
+        self.assertEqual(source.value, legacy.value)
+        self.assertEqual(source.value, fixed.value)
+        for key in next_observations[0]:
+            if key.startswith("video."):
+                np.testing.assert_array_equal(next_observations[0][key], next_observations[1][key])
+        self.assertNotEqual(stable_digest(next_observations[0]), stable_digest(next_observations[1]))
+        self.assertEqual(stable_digest(next_observations[0]), stable_digest(next_observations[2]))
+        # Source dependency caches are copies, not aliases to the restored env.
+        fixed._obs_cache["proprio"][:] = 100
+        self.assertNotEqual(stable_digest(saved["owners"][0]["obs_cache"]), stable_digest(fixed._obs_cache))
+        for env in (source, legacy, fixed):
+            env.close()
+
+    def test_v4_preserves_sampling_caches_and_rng_through_forced_live_verification(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, _, _, _, protected = self.fixture(Path(directory), env_type=SampledEnvironment)
+            self.assertTrue(run(args, rt)["engineering_all_pass"])
+            reg = validate_cohort_registration(args.output_dir)
+            self.assertEqual(reg["observation_runtime_contract"]["sampling_fields"], [
+                "_time_since_last_sample", "_sampled", "_current_delay", "_current_observed_value"])
+            for path in args.output_dir.glob("parents/*/collection_*/repeat_audit.json"):
+                audit = json.loads(path.read_text())
+                self.assertTrue(audit["all_state_channels_exact"])
+                self.assertTrue(audit["all_causal_state_channels_exact"])
+                self.assertTrue(all(row["channels"]["observation_runtime_state"] for row in audit["state_audits"]))
+                self.assertTrue(all(row["channels"]["global_rng_state"] for row in audit["state_audits"]))
+                state = load_state(path.parent/"attempt_0/states/state_000001.pkl.gz")
+                self.assertEqual(state["observation_runtime_state"]["owners"][0]["object_path"], "env")
+                entry = load_full_snapshot(path.parent/"attempt_0/entry.pkl.gz")
+                self.assertIn("observation_runtime_state", entry.metadata)
+                restored = json.loads((path.parent/"attempt_1/initial_restore_audit.json").read_text())
+                self.assertTrue(restored["observation_runtime_restored_after_verification"])
+                witness = restored["observation_runtime_verification"]
+                self.assertNotEqual(witness["saved_sha256"], witness["after_forced_read_sha256"])
+                self.assertEqual(witness["saved_sha256"], witness["restored_sha256"])
+                self.assertTrue(witness["forced_read_mismatches"])
+            self.assertEqual(protected, {path: sha256_file(path) for path in protected})
+
+    def test_v4_runtime_and_causal_controller_gate_rejects_all_other_differences(self):
+        from robocasa.recovery.diagnose_intervention_timing_replay import diagnostic_state
+        env, policy = SampledEnvironment(), make_policy()
+        obs, _ = env.reset(seed=1)
+        state = diagnostic_state(env, policy, obs, {}, 0)
+        state["observation_runtime_state"] = capture_observation_runtime(env)
+        path = "robots[0].recent_ee_forcetorques['right']"
+        state["controller_state"].append({"object_path": path, "attributes": {"current": np.zeros(1)}})
+        other = deepcopy(state)
+        other["controller_state"][-1]["attributes"]["current"][0] = 2.168404344971009e-19
+        audit = fresh_state_audit(SimpleNamespace(**state), SimpleNamespace(**other))
+        self.assertFalse(audit["all_exact"])
+        self.assertTrue(audit["acceptance_exact"])
+        for changed in ("observation", "sampler", "cache", "causal_controller"):
+            with self.subTest(changed=changed):
+                bad = deepcopy(other)
+                if changed == "observation":
+                    bad["observation"]["state.end_effector_position_relative"][0] += 1e-7
+                elif changed == "sampler":
+                    bad["observation_runtime_state"]["owners"][0]["observables"][0]["sampling_state"]["_sampled"] = True
+                elif changed == "cache":
+                    bad["observation_runtime_state"]["owners"][0]["obs_cache"]["proprio"][0] += 1e-9
+                else:
+                    bad["controller_state"][0]["attributes"]["unexpected_causal_field"] = 1e-19
+                self.assertFalse(fresh_state_audit(SimpleNamespace(**state), SimpleNamespace(**bad))["acceptance_exact"])
+        env.close(); policy.close()
+
+    def test_missing_or_unsupported_observable_runtime_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "No owned RoboSuite"):
+            capture_observation_runtime(XiaoEnvironment())
+        env = SampledEnvironment()
+        env.reset(seed=1)
+        saved = capture_observation_runtime(env)
+        env._observables["proprio"]._sampling_timestep = .04
+        with self.assertRaisesRegex(ValueError, "topology/configuration"):
+            restore_observation_runtime(env, saved)
+        env._observables["proprio"]._filter = SimpleNamespace()
+        with self.assertRaisesRegex(ValueError, "Unsupported observation callback"):
+            capture_observation_runtime(env)
+        history = []
+        env._observables["proprio"]._filter = lambda value: history.append(value) or value
+        with self.assertRaisesRegex(ValueError, "stateful observation callback closure"):
+            capture_observation_runtime(env)
+        env.close()
+
+    def test_observable_source_cache_does_not_keep_closed_simulators_alive(self):
+        env = SampledEnvironment()
+        env.reset(seed=1)
+        capture_observation_runtime(env)
+        reference = weakref.ref(env)
+        env.close()
+        del env
+        gc.collect()
+        self.assertIsNone(reference())
+
+    def test_v4_cohort_keeps_full_state_failure_visible_when_only_declared_buffer_differs(self):
+        from robocasa.recovery.diagnose_intervention_timing_replay import diagnostic_state
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            args, rt, _, envs, _, _ = self.fixture(Path(directory))
+            def capture(*a):
+                state = diagnostic_state(*a)
+                delta = 2.168404344971009e-19 if len(envs) % 2 == 0 and a[-1] > 0 else 0.0
+                state["controller_state"].append({"object_path": "robots[0].recent_ee_forcetorques['right']",
+                    "attributes": {"current": np.asarray([delta])}})
+                return state
+            with patch(MODULE+".diagnostic_state", side_effect=capture):
+                result = run(args, rt)
+            self.assertTrue(result["engineering_all_pass"])
+            self.assertFalse(result["full_state_channels_exact"])
+            self.assertEqual(result["status"], "awaiting_image_review")
+            for row in read_jsonl(args.output_dir/"reference_records.jsonl"):
+                self.assertFalse(row["full_state_channels_exact"])
+                folder = (args.output_dir/row["report_path"]).parent
+                report = json.loads((folder/"report.json").read_text())
+                self.assertFalse(report["full_state_channels_exact"])
+                self.assertTrue(report["engineering_gates"]["every_declared_causal_state_repeats_exact"])
+                audit = json.loads((folder/"repeat_audit.json").read_text())
+                self.assertFalse(audit["all_state_channels_exact"])
+                self.assertTrue(audit["all_causal_state_channels_exact"])
+                self.assertEqual(audit["first_state_difference"]["environment_step"], 1)
+                self.assertIsNone(audit["first_causal_state_difference"])
+
     def test_wrapped_live_image_mismatch_is_rejected_without_saved_observation_fallback(self):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
             args, rt, policies, envs, _, _ = self.fixture(Path(directory), env_type=NonForwardingWrapper)
@@ -387,7 +590,7 @@ class FreshReferenceTest(unittest.TestCase):
                 self.assertTrue(all(e.closed for e in envs))
                 failed = json.loads(next(args.output_dir.glob("parents/*/failed_parent.json")).read_text())
                 self.assertFalse(failed["engineering_gates"]["both_common_entries_captured"])
-                self.assertTrue(failed["engineering_gates"]["every_complete_state_repeats_exact"])
+                self.assertTrue(failed["engineering_gates"]["every_declared_causal_state_repeats_exact"])
                 report = json.loads((args.output_dir/failed["report_path"]).read_text())
                 self.assertEqual(report["attempts"][0]["environment_steps"], 8 if done_at is None else 2)
                 self.assertEqual(protected, {path: sha256_file(path) for path in protected})

@@ -48,8 +48,50 @@ showed 1 versus 0 and 0.05 versus 0.0. A local regression reproduced stale
 counter aliases created when the legacy setter writes forwarded wrapper
 attributes. The new collector's v3 fix preserves control-attribute ownership;
 it does not establish or fix the remaining observation-state discrepancy.
-Inspect the saved control paths, controller-buffer identity, all camera keys,
-and observable implementation before another GPU run.
+The saved-state inspection below resolved the control paths, controller-buffer
+identity, and camera-key comparison. The next run uses the new v4 registration.
+
+The supplied state-1 inspection confirms the wrapper counters were shadowed:
+`env.unwrapped` reads 1/0.05 versus 0/0 for timestep/time, while both actual
+inner environments read 1/0.05. All three cameras are byte-exact at this step;
+all five proprioceptive keys differ (maximum errors range from about 3.58e-7
+to 3.73e-5). The controller difference of 2.1684e-19 is specifically the
+`robots[0].recent_ee_forcetorques['right']` DeltaBuffer. These findings localize
+the first observed policy-input difference to proprioception, and do not
+certify later camera images.
+
+The supplied installed `Observable.update` source (file SHA-256
+`83e7bc67745477d207c09c4a5eb86e280909b06531ab7346595a45a84200dcfd`)
+advances its sampling timer even on a forced read, and updates its sampled
+flag, delay, value, and shared dependency cache. Those fields are missing
+from the frozen snapshot implementation. V2's live forced reset verification
+can therefore match the reset observation while changing the next sampling
+phase. A faithful local sampler regression reproduces this pattern with
+equal physical state and cameras. It establishes the missing-state mechanism,
+but the failed v2 data did not save the observable runtime, so the exact live
+phase discrepancy cannot be reconstructed retrospectively.
+
+V4 captures observer sampling/cache state in new reset/entry snapshots and
+every nominal diagnostic state. It restores this state before live reset
+verification and restores it and both RNG families again afterward. The
+verified live observation is retained, and the complete initial audit remains
+strictly exact. Sensor callbacks remain bound to the new simulator; unsupported
+runtime/configuration is rejected. Sampling perturbations from verification
+are recorded by before/after/restored hashes and mismatch details.
+
+V4 prospectively uses the repository's already-declared causal controller
+scope: only `.recent_ee_forcetorques[` is excluded from repeat acceptance.
+Full controller differences and the full-state exactness flag remain visible.
+All other controllers, physical state, sampler/cache state, proprioception,
+pixels, RNGs, policy, counters, and semantics must match at zero tolerance;
+consumed actions and complete encoded requests/responses must also match.
+This is an explicit new registration and gate, not a retroactive v2 pass.
+V1/v2 failed roots remain preserved. Live v4 validation, image review, and
+the subsequent timing comparison remain pending; no SAFE-triggered recovery
+or intervention efficacy is established. See the
+[v4 launch and monitoring commands](xr1_fresh_timing_references.md).
+The combined local regression suite ran 128 tests: 127 passed, one skipped.
+These simulator-free checks do not establish live GPU repeatability.
 
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
 collection. Its first ArrangeTea reference matched simulator state, controller,

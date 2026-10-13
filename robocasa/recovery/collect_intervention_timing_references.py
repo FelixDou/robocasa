@@ -25,6 +25,11 @@ from robocasa.recovery.full_snapshot import (
     capture_full_snapshot, load_full_snapshot, restore_full_snapshot,
     save_full_snapshot, stable_digest, compare_structures, _environment_nodes,
     _capture_environment_control_state, _node_by_path,
+    _restore_global_rng_state, _restore_environment_rng_state,
+    causal_transition_fingerprint, NON_CAUSAL_CONTROLLER_PATH_FRAGMENTS,
+)
+from robocasa.recovery.intervention_timing_observation_state import (
+    capture_observation_runtime, restore_observation_runtime, MUTABLE_FIELDS,
 )
 from robocasa.recovery.inspect_intervention_timing_source import (
     request_trace_comparison, write_image_panel,
@@ -42,7 +47,7 @@ from robocasa.recovery.run_phase2_snapshot_replay import (
 from robocasa.recovery.run_phase3b_training_horizon_continuation import (
     _runtime_args, _validate_live_provenance,
 )
-PROTOCOL = "xr1_fresh_common_entry_reference_cohort_v3"
+PROTOCOL = "xr1_fresh_common_entry_reference_cohort_v4"
 GC_SCOPE = "first_post_setup_subtask_evaluation_through_entry_capture"
 CAMERAS = ("video.robot0_agentview_left", "video.robot0_agentview_right", "video.robot0_eye_in_hand")
 
@@ -51,6 +56,7 @@ def code_hashes(timing):
     root = Path(__file__).resolve().parents[2]
     names = (
         "robocasa/recovery/collect_intervention_timing_references.py",
+        "robocasa/recovery/intervention_timing_observation_state.py",
         "robocasa/recovery/diagnose_intervention_timing_replay.py",
         "robocasa/recovery/diagnose_intervention_timing_observations.py",
         "robocasa/recovery/inspect_intervention_timing_source.py",
@@ -116,6 +122,18 @@ def inputs(args):
         "repeat_initialization": "restore_new_actual_reset_snapshot_in_fresh_environment_and_policy",
         "restore_observation_verification": "live_getter_resolved_through_environment_wrappers; no_snapshot_fallback",
         "control_restore_contract": "preserve_declared_attributes_and_forwarded_alias_ownership",
+        "observation_runtime_contract": {
+            "sampling_fields": list(MUTABLE_FIELDS), "shared_obs_cache": True,
+            "live_sensor_callbacks_retained": True,
+            "verification": "live_forced_reset_observation_then_restore_sampling_cache_and_RNG; full_initial_audit",
+        },
+        "repeat_state_acceptance": {
+            "numeric_tolerance": 0,
+            "controller_exclusions": list(NON_CAUSAL_CONTROLLER_PATH_FRAGMENTS),
+            "scope": "existing_declared_causal_transition_fields_plus_complete_observation_runtime",
+            "full_controller_audit_retained": True,
+            "old_registrations_unchanged": True,
+        },
         "sampling": "original_ordinary_K1_seed_bases; no_historical_mutable_policy_state",
         "gc_mode": "disabled", "gc_nominal_scope": GC_SCOPE, "rng_runtime_init": "before_env",
         "restore_atol": 0, "restore_rtol": 0,
@@ -232,7 +250,22 @@ def restore_initial(initial, env, policy, folder):
         atomic_write_json(folder/"initial_restore_audit.json", audit)
         raise ValueError("New reset-state restore failed; inspect initial_restore_audit.json")
     try:
+        saved_runtime = initial.metadata["observation_runtime_state"]
+        restore_observation_runtime(env, saved_runtime)
         observation, getter = live_observation(env)
+        sampled_runtime = capture_observation_runtime(env)
+        audit["observation_runtime_verification"] = {
+            "saved_sha256": stable_digest(saved_runtime),
+            "after_forced_read_sha256": stable_digest(sampled_runtime),
+            "forced_read_mismatches": compare_structures(saved_runtime, sampled_runtime),
+        }
+        # A forced verification samples sensors and advances the sample clock.
+        # It must not change the next nominal action's observation schedule or
+        # random streams. Never replace the verified observation with saved pixels.
+        restore_observation_runtime(env, saved_runtime)
+        _restore_environment_rng_state(env, initial.environment_rng_state)
+        _restore_global_rng_state(initial.global_rng_state)
+        audit["observation_runtime_verification"]["restored_sha256"] = stable_digest(capture_observation_runtime(env))
     except Exception as exc:
         audit.update(valid=False, observation_exact=False)
         audit["observation_verification"]["error"] = str(exc)
@@ -242,6 +275,7 @@ def restore_initial(initial, env, policy, folder):
     audit.update(observation_exact=not differences, observation_mismatches=differences,
                  valid=audit["valid"] and not differences)
     audit["observation_verification"].update(performed=True, getter=getter)
+    audit["observation_runtime_restored_after_verification"] = True
     atomic_write_json(folder/"initial_restore_audit.json", audit)
     if not audit["valid"]:
         raise ValueError("New reset-state live observation differs; inspect initial_restore_audit.json")
@@ -254,9 +288,38 @@ def metadata(parent, env, prefix=()):
         "legacy_parent_id", "legacy_snapshot_id") } | {
         "reference_protocol": PROTOCOL, "historical_endpoint_reconstructed": False,
         "environment_control_ownership": control_ownership(env),
+        "observation_runtime_state": capture_observation_runtime(env),
         "local_inferences": 0, "ordered_prefix": list(prefix),
         "entry_definition": "first_eligible_target_stage_boundary_in_new_nominal_trajectory",
     }
+
+
+def fresh_state_audit(left, right):
+    """Retain full diagnostics; v4 acceptance uses the existing causal scope.
+
+    The force/torque cache exclusion was already declared by full_snapshot.
+    V1-v3's stricter full-controller gate is not reinterpreted retroactively.
+    All images, proprioception, sampler phases/caches and other state stay exact.
+    """
+    result = reference_audit(left, right)
+    def runtime(state):
+        if hasattr(state, "observation_runtime_state"):
+            return state.observation_runtime_state
+        return state.metadata["observation_runtime_state"]
+    differences = compare_structures(runtime(left), runtime(right))
+    result["channels"]["observation_runtime_state"] = not differences
+    if differences:
+        result["mismatches"]["observation_runtime_state"] = differences
+    result["all_exact"] = all(result["channels"].values())
+    controllers = [causal_transition_fingerprint({"controller_state": state.controller_state})["controller_state"]
+                   for state in (left, right)]
+    causal_differences = compare_structures(*controllers)
+    result["causal_controller_exact"] = not causal_differences
+    result["causal_controller_mismatches"] = causal_differences
+    result["controller_exclusion_paths"] = list(NON_CAUSAL_CONTROLLER_PATH_FRAGMENTS)
+    result["acceptance_exact"] = not causal_differences and all(
+        exact for channel, exact in result["channels"].items() if channel != "controller_state")
+    return result
 
 
 def collect_attempt(parent, folder, registration, plan, args, runtime, factory, initial=None):
@@ -305,7 +368,7 @@ def collect_attempt(parent, folder, registration, plan, args, runtime, factory, 
         save_full_snapshot(reset, folder/"initial.pkl.gz")
         initial_audit = None
         if initial is not None:
-            initial_audit = reference_audit(initial, reset)
+            initial_audit = fresh_state_audit(initial, reset)
             initial_audit["reference_limit"] = "new_actual_reset_state_after_live_observation_and_semantic_evaluation"
             atomic_write_json(folder/"initial_state_audit.json", initial_audit)
             if not initial_audit["all_exact"]:
@@ -314,6 +377,7 @@ def collect_attempt(parent, folder, registration, plan, args, runtime, factory, 
             guard.phase, guard.step = "state_capture", step
             camera_format(obs)
             current = diagnostic_state(env, policy, obs, evaluations[-1], step)
+            current["observation_runtime_state"] = capture_observation_runtime(env)
             save_payload(folder/f"states/state_{step:06d}.pkl.gz", current, compresslevel=1)
             stage = ordered_trace(evaluations)[-1]
             at_entry = (stage["ordered_current_subtask"] == predicate and policy.at_inference_boundary
@@ -397,23 +461,30 @@ def compare_attempts(folder):
     traces = [read_jsonl(folder/f"attempt_{i}/states.jsonl") for i in range(2)]
     support = [[r["environment_step"] for r in t] for t in traces]
     exact_support = support[0] == support[1] == list(range(len(traces[0])))
-    audits, first = [], None
+    audits, first, first_causal = [], None, None
     for step in sorted(set(support[0]) & set(support[1])):
         states = [load_state(folder/f"attempt_{i}/states/state_{step:06d}.pkl.gz") for i in range(2)]
         if any(stable_digest(s) != traces[i][step]["state_sha256"] for i, s in enumerate(states)):
             raise ValueError("Stored nominal state differs from its trace")
-        audit = reference_audit(*[SimpleNamespace(**s) for s in states])
+        audit = fresh_state_audit(*[SimpleNamespace(**s) for s in states])
         audit["reference_limit"] = "complete_new_nominal_states_saved_at_every_environment_step"
         audits.append({"environment_step": step, "channels": audit["channels"],
-                       "all_exact": audit["all_exact"], "model_xml_audit": audit["model_xml_audit"]})
+                       "all_exact": audit["all_exact"], "acceptance_exact": audit["acceptance_exact"],
+                       "causal_controller_exact": audit["causal_controller_exact"],
+                       "model_xml_audit": audit["model_xml_audit"]})
         if not audit["all_exact"] and first is None:
             first = {"environment_step": step, "audit": audit}
+        if not audit["acceptance_exact"] and first_causal is None:
+            first_causal = {"environment_step": step, "audit": audit}
     transitions = [read_jsonl(folder/f"attempt_{i}/transitions.jsonl") for i in range(2)]
     request_comparison = request_trace_comparison(*[
         read_jsonl(folder/f"attempt_{i}/requests.jsonl") for i in range(2)])
     result = {"state_support_exact": exact_support, "state_counts": list(map(len, traces)),
               "all_state_channels_exact": exact_support and first is None,
+              "all_causal_state_channels_exact": exact_support and first_causal is None,
               "state_audits": audits, "first_state_difference": first,
+              "first_causal_state_difference": first_causal,
+              "controller_exclusion_paths": list(NON_CAUSAL_CONTROLLER_PATH_FRAGMENTS),
               "transition_traces_exact": transitions[0] == transitions[1],
               "request_comparison": request_comparison}
     atomic_write_json(folder/"repeat_audit.json", result)
@@ -463,7 +534,7 @@ def collect_parent(parent, folder, registration, plan, args, runtime, factory):
         "both_common_entries_captured": all(r["outcome"] == "common_entry_captured" for r in (first, second)),
         "new_initial_restore_exact": second["initial_restore_valid"] is True,
         "new_initial_full_audit_exact": second["initial_state_audit_all_exact"] is True,
-        "every_complete_state_repeats_exact": comparison["all_state_channels_exact"],
+        "every_declared_causal_state_repeats_exact": comparison["all_causal_state_channels_exact"],
         "consumed_actions_and_inferences_repeat_exact": comparison["transition_traces_exact"],
         "encoded_requests_and_responses_repeat_exact": comparison["request_comparison"]["first_difference"] is None,
         "gc_guard_passed_through_cleanup": all(gc_pass(r["gc_guard"]) for r in (first, second)),
@@ -471,6 +542,8 @@ def collect_parent(parent, folder, registration, plan, args, runtime, factory):
     }
     result = {"protocol": PROTOCOL, "parent": parent, "engineering_gates": gates,
               "engineering_all_pass": all(gates.values()), "attempts": [first, second],
+              "full_state_channels_exact": comparison["all_state_channels_exact"],
+              "repeat_state_acceptance": registration["repeat_state_acceptance"],
               "camera_review": "camera_review.html", "image_health": "pending_human_review",
               "intervention_trajectories_collected": 0, "historical_endpoint_reconstructed": False}
     atomic_write_json(folder/"report.json", result)
@@ -581,6 +654,7 @@ def run(args, runtime=None):
                     raise ValueError(f"Fresh-reference repeat gate failed: {pid}; inspect {attempt}")
                 snapshot = load_full_snapshot(attempt/"attempt_0/entry.pkl.gz")
                 row = {"parent_id": pid, "parent": parent, "engineering_all_pass": True,
+                       "full_state_channels_exact": report["full_state_channels_exact"],
                        "registration_sha256": registration["registration_sha256"],
                        "snapshot_path": str((attempt/"attempt_0/entry.pkl.gz").relative_to(root)),
                        "snapshot_id": snapshot.snapshot_id, "entry_environment_step": snapshot.environment_step,
@@ -604,6 +678,8 @@ def run(args, runtime=None):
                   "nominal_environment_steps": 2*sum(r["entry_environment_step"] for r in completed.values()),
                   "parents_by_task": dict(Counter(r["parent"]["task_name"] for r in completed.values())),
                   "engineering_all_pass": len(completed) == 10, "image_health": "pending_human_review",
+                  "full_state_channels_exact": all(r["full_state_channels_exact"] for r in completed.values()),
+                  "repeat_state_acceptance": registration["repeat_state_acceptance"],
                   "timing_ready": False, "full_timing_study_complete": False,
                   "intervention_trajectories_collected": 0, "registration_sha256": registration["registration_sha256"],
                   "reference_ledger_sha256": sha256_file(root/"reference_records.jsonl"), "updated_at": utc_now()}
