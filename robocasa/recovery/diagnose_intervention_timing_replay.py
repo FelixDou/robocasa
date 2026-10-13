@@ -2,7 +2,9 @@
 
 import argparse
 from copy import deepcopy
+import gc
 import gzip
+import inspect
 import json
 import os
 from pathlib import Path
@@ -36,6 +38,56 @@ TRACE_FIELDS = (
     "policy_state_sha256", "environment_rng_sha256", "causal_environment_sha256",
     "request_sha256", "request_seeds", "target_stage", "local_inferences",
 )
+
+
+class GCTrace:
+    """Observe cyclic collections; optionally defer automatic GC through cleanup."""
+    def __init__(self, mode):
+        self.mode = mode
+        self.events = []
+        self.phase, self.step, self.nominal = "environment_creation", 0, False
+
+    def record(self, event, info):
+        self.events.append({"event": event, "generation": info["generation"],
+                            "collected": info.get("collected"), "uncollectable": info.get("uncollectable"),
+                            "phase": self.phase, "environment_step": self.step, "nominal": self.nominal,
+                            "automatic_gc_enabled": gc.isenabled()})
+
+    def start(self):
+        self.original_enabled = gc.isenabled()
+        gc.callbacks.append(self.record)
+        if self.mode == "disabled":
+            gc.disable()
+        self.replay_enabled = gc.isenabled()
+
+    def finish(self):
+        end_enabled = gc.isenabled()
+        gc.callbacks.remove(self.record)
+        # This is called only after both environment and policy close attempts.
+        if self.original_enabled:
+            gc.enable()
+        else:
+            gc.disable()
+        return {"mode": self.mode, "original_enabled": self.original_enabled,
+                "enabled_at_environment_creation": self.replay_enabled,
+                "enabled_at_end_of_cleanup": end_enabled,
+                "original_enabled_state_restored": gc.isenabled() == self.original_enabled,
+                "nominal_collection_stops": sum(e["nominal"] and e["event"] == "stop" for e in self.events),
+                "events": self.events}
+
+
+def renderer_cleanup_source():
+    """Record installed renderer cleanup code without importing a new runtime."""
+    module = sys.modules.get("robosuite.utils.binding_utils")
+    renderer = getattr(module, "MjRenderContext", None)
+    if renderer is None:
+        return {"available": False}
+    try:
+        path = Path(inspect.getfile(renderer))
+        return {"available": True, "path": str(path), "file_sha256": sha256_file(path),
+                "destructor_source": inspect.getsource(renderer.__del__)}
+    except (OSError, TypeError, AttributeError) as exc:
+        return {"available": False, "error": str(exc)}
 
 
 def save_payload(path, value, *, compresslevel=9):
@@ -223,7 +275,7 @@ class RequestProbe:
 
 
 def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=None, observation_window=None,
-                     record_all_observations=False):
+                     record_all_observations=False, gc_trace=None):
     folder.mkdir()
     rows, evaluations, actions, inferences = [], [], [], []
     state = {"step": 0, "observation": None, "initial": None}
@@ -233,12 +285,18 @@ def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=Non
     probe = RequestProbe(policy.client, folder)
     policy.client = probe
 
+    def position(phase, nominal=True):
+        if gc_trace is not None:
+            gc_trace.phase, gc_trace.step, gc_trace.nominal = phase, state["step"], nominal
+
     def evaluate(e):
+        position("evaluation")
         value = deepcopy(runtime["get_subtask_eval"](e))
         evaluations.append(value)
         return value
 
     def call(p, obs):
+        position("policy_call")
         state["observation"] = deepcopy(obs)
         if state["initial"] is None:
             record_startup_event(startup_log, f"{folder.name}:first_nominal_observation")
@@ -258,12 +316,15 @@ def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=Non
         return action
 
     def step(e, action):
+        position("environment_step")
         result = runtime["step_fn"](e, action)
         state["observation"] = deepcopy(result[0])
         state["step"] += 1
+        position("after_environment_step")
         return result
 
     def progress(row):
+        position("progress_callback")
         rows.append(row)
         append_jsonl(folder/"nominal_progress.jsonl", row)
         if capture_observations:
@@ -282,11 +343,13 @@ def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=Non
 
     error = None
     try:
+        position("nominal_setup")
         capture_entry(reference, env, policy,
                       {**runtime, "get_subtask_eval": evaluate, "call_policy": call, "step_fn": step},
                       progress=progress)
     except Exception as exc:
         error = {"message": str(exc), "traceback": traceback.format_exc()}
+    position("endpoint_capture", nominal=False)
     if state["observation"] is None or not evaluations:
         atomic_write_json(folder/"failure.json", error or {"message": "No replay observation"})
         raise ValueError(f"Replay failed before initial-state capture; inspect {folder}")
@@ -318,6 +381,7 @@ def diagnose_attempt(reference, env, policy, runtime, folder, *, startup_log=Non
     # Extra server calls occur only after the endpoint is captured. They are
     # explicitly excluded from the nominal request/action schedule.
     try:
+        position("request_repeat_probe", nominal=False)
         request_probe = probe.repeat_first()
     except Exception as exc:
         request_probe = {"performed": False, "error": str(exc), "traceback": traceback.format_exc()}
@@ -362,7 +426,8 @@ def run(args, runtime=None):
     if args.dry_run:
         print(json.dumps({"protocol": PROTOCOL, "parent": parent, "replays": 2,
                           "rng_runtime_init": args.rng_runtime_init, "observation_window": window,
-                          "record_all_observations": args.record_all_observations}, indent=2))
+                          "record_all_observations": args.record_all_observations,
+                          "gc_mode": args.gc_mode}, indent=2))
         return
     root = args.output_dir.resolve()
     if root == source or root.is_relative_to(source) or source.is_relative_to(root):
@@ -384,6 +449,7 @@ def run(args, runtime=None):
         "code_hashes": {str(p.name): sha256_file(p) for p in paths},
         "policy_lifecycle": "fresh_policy_and_environment_per_attempt_like_original_phase2",
         "rng_runtime_init": args.rng_runtime_init,
+        "gc_mode": args.gc_mode,
         "device_assignment": device_assignment,
         "observation_window": window,
         "record_all_observations": args.record_all_observations,
@@ -404,27 +470,31 @@ def run(args, runtime=None):
         config = _runtime_args(args, plan)
         runtime = runtime or _runtime()
         factory = runtime["load_factory"](plan["policy_module"])
+        atomic_write_json(root/"renderer_cleanup_source.json", renderer_cleanup_source())
     except Exception as exc:
         atomic_write_json(root/"status.json", {"status": "failed", "error": str(exc),
                           "traceback": traceback.format_exc(), "updated_at": utc_now()})
         raise
-    attempts = []
+    attempts, gc_traces = [], []
     for index in range(2):
         atomic_write_json(root/"status.json", {"status": "running", "attempt": index,
                           "updated_at": utc_now()})
         env = policy = None
+        gc_trace = GCTrace(args.gc_mode)
+        gc_trace.start()
         try:
             seed = int(reference.metadata["environment_seed"])
             record_startup_event(startup_log, f"attempt_{index}:before_environment_creation")
             env = _call_with_deterministic_environment_seed(seed, runtime["make_env"],
                 reference.task_name, config.env_interface, config.split, seed, True)
             record_startup_event(startup_log, f"attempt_{index}:after_environment_creation")
+            gc_trace.phase = "policy_creation"
             _configure_phase2_environment(env, config)
             policy = runtime["call_factory"](factory, env, _policy_args(reference, args))
             record_startup_event(startup_log, f"attempt_{index}:after_policy_creation")
             attempts.append(diagnose_attempt(reference, env, policy, runtime, root/f"attempt_{index}",
                                              startup_log=startup_log, observation_window=window,
-                                             record_all_observations=args.record_all_observations))
+                                             record_all_observations=args.record_all_observations, gc_trace=gc_trace))
             report = attempts[-1][0]
             print(f"replay {index+1}/2: " + json.dumps({k: report[k] for k in (
                 "prefix_replay_accepted", "source_endpoint_channels", "final_ordered_stage", "request_repeat_probe")}), flush=True)
@@ -433,12 +503,18 @@ def run(args, runtime=None):
                               "traceback": traceback.format_exc(), "updated_at": utc_now()})
             raise
         finally:
+            gc_trace.phase, gc_trace.nominal = "cleanup", False
             try:
                 if env is not None:
                     _close_branch_environment(env)
             finally:
-                if policy is not None:
-                    policy.close()
+                try:
+                    if policy is not None:
+                        policy.close()
+                finally:
+                    trace = gc_trace.finish()
+                    gc_traces.append(trace)
+                    atomic_write_json(root/f"gc_attempt_{index}.json", trace)
     initial_audit = reference_audit(SimpleNamespace(**attempts[0][1]), SimpleNamespace(**attempts[1][1]))
     endpoint_audit = reference_audit(SimpleNamespace(**attempts[0][2]), SimpleNamespace(**attempts[1][2]))
     divergence = first_divergence(attempts[0][3], attempts[1][3])
@@ -448,6 +524,7 @@ def run(args, runtime=None):
         "protocol": PROTOCOL, "status": "diagnostic_complete", "parent_id": parent["parent_id"],
         "rng_runtime_init": args.rng_runtime_init, "early_rng_runtime_initialization": early_initialization,
         "device_assignment": device_assignment,
+        "garbage_collection": {"mode": args.gc_mode, "attempts": gc_traces},
         "startup_events": read_jsonl(startup_log),
         "attempts": [a[0] for a in attempts], "repeated_initial_state_audit": initial_audit,
         "repeated_endpoint_audit": endpoint_audit, "first_repeat_divergence": divergence,
@@ -505,6 +582,8 @@ def build_parser():
                         help="Save raw diagnostic state at inclusive environment steps START..END and per-key observation hashes at every step")
     parser.add_argument("--record-all-observations", action="store_true",
                         help="Buffer every returned raw observation and write it after the endpoint, covering a moving divergence boundary")
+    parser.add_argument("--gc-mode", choices=("default", "disabled"), default="default",
+                        help="Trace cyclic collections, optionally disabling automatic GC from environment creation through cleanup")
     parser.add_argument("--restore-atol", type=float, default=1e-8)
     parser.add_argument("--restore-rtol", type=float, default=1e-8)
     parser.add_argument("--dry-run", action="store_true")

@@ -19,6 +19,16 @@ if (root/"report.json").exists():
     print("finding:", data["finding"])
     print("RNG runtime initialization:", data.get("rng_runtime_init", "after_reset"))
     print("GPU assignment:", data.get("device_assignment"))
+    collection = data.get("garbage_collection")
+    if collection is not None:
+        print("GC mode:", collection["mode"])
+        divergence = data.get("first_repeat_divergence") or {}
+        boundary = divergence.get("step")
+        for i, trace in enumerate(collection["attempts"]):
+            print("GC attempt", i, {k: v for k, v in trace.items() if k != "events"})
+            if boundary is not None:
+                nearby = [e for e in trace["events"] if e["nominal"] and abs(e["environment_step"]-boundary) <= 1]
+                print("GC events near first difference:", nearby[:20])
     if "startup_events" in data:
         print("startup events:", data["startup_events"])
     for i, attempt in enumerate(data["attempts"]):
@@ -60,6 +70,11 @@ export XR1_REPLAY_PARENT=${XR1_REPLAY_PARENT:-f9cd6c2c907171c2f8fea437}
 export XR1_REPLAY_GPU=${XR1_REPLAY_GPU:-0} XR1_REPLAY_PORT=${XR1_REPLAY_PORT:-10319}
 export XR1_REPLAY_SERVER_GPU=${XR1_REPLAY_SERVER_GPU:-$XR1_REPLAY_GPU}
 export XR1_REPLAY_RNG_RUNTIME_INIT=${XR1_REPLAY_RNG_RUNTIME_INIT:-after_reset}
+export XR1_REPLAY_GC_MODE=${XR1_REPLAY_GC_MODE:-default}
+case "$XR1_REPLAY_GC_MODE" in
+  default|disabled) ;;
+  *) echo "XR1_REPLAY_GC_MODE must be default or disabled"; exit 1 ;;
+esac
 export XR1_REPLAY_RECORD_ALL_OBSERVATIONS=${XR1_REPLAY_RECORD_ALL_OBSERVATIONS:-0}
 [[ "$XR1_REPLAY_RECORD_ALL_OBSERVATIONS" =~ ^[01]$ ]] || {
   echo "XR1_REPLAY_RECORD_ALL_OBSERVATIONS must be 0 or 1"; exit 1;
@@ -98,7 +113,7 @@ if root.exists():
 PY
   mkdir -p "$XR1_REPLAY_ROOT" "$STORAGE_BS/robocasa_logs/eval"
   export XR1_REPLAY_LOG="$STORAGE_BS/robocasa_logs/eval/$(basename "$XR1_REPLAY_ROOT")_driver.log"
-  for name in STORAGE_BS ROBOCASA_REPO XR1_REPLAY_SOURCE XR1_REPLAY_ROOT XR1_REPLAY_PARENT XR1_REPLAY_GPU XR1_REPLAY_SERVER_GPU XR1_REPLAY_PORT XR1_REPLAY_RNG_RUNTIME_INIT XR1_REPLAY_RECORD_ALL_OBSERVATIONS XR1_REPLAY_OBS_WINDOW_START XR1_REPLAY_OBS_WINDOW_END XR1_REPLAY_LOG XR1_CLIENT_ENV XR1_SERVER_ENV XR1_SAFE_REPO XR1_SAFE_CHECKPOINT; do
+  for name in STORAGE_BS ROBOCASA_REPO XR1_REPLAY_SOURCE XR1_REPLAY_ROOT XR1_REPLAY_PARENT XR1_REPLAY_GPU XR1_REPLAY_SERVER_GPU XR1_REPLAY_PORT XR1_REPLAY_RNG_RUNTIME_INIT XR1_REPLAY_GC_MODE XR1_REPLAY_RECORD_ALL_OBSERVATIONS XR1_REPLAY_OBS_WINDOW_START XR1_REPLAY_OBS_WINDOW_END XR1_REPLAY_LOG XR1_CLIENT_ENV XR1_SERVER_ENV XR1_SAFE_REPO XR1_SAFE_CHECKPOINT; do
     printf 'export %s=%q\n' "$name" "${!name}"
   done > "$XR1_REPLAY_ROOT/run.env"
   cp "$XR1_REPLAY_ROOT/run.env" "$latest"
@@ -138,7 +153,8 @@ if [[ "$XR1_REPLAY_MODEL" == /tmp/ut06746/* ]]; then
 fi
 common=(--timing-run-dir "$XR1_REPLAY_SOURCE" --parent-id "$XR1_REPLAY_PARENT"
         --output-dir "$XR1_REPLAY_ROOT/diagnostic" --model-path "$XR1_REPLAY_MODEL"
-        --host 127.0.0.1 --port "$XR1_REPLAY_PORT" --rng-runtime-init "$XR1_REPLAY_RNG_RUNTIME_INIT")
+        --host 127.0.0.1 --port "$XR1_REPLAY_PORT" --rng-runtime-init "$XR1_REPLAY_RNG_RUNTIME_INIT"
+        --gc-mode "$XR1_REPLAY_GC_MODE")
 if [[ -n "$XR1_REPLAY_OBS_WINDOW_START" ]]; then
   common+=(--observation-window "$XR1_REPLAY_OBS_WINDOW_START" "$XR1_REPLAY_OBS_WINDOW_END")
 fi

@@ -2,6 +2,7 @@
 
 from contextlib import redirect_stdout
 from copy import deepcopy
+import gc
 import gzip
 import io
 import json
@@ -12,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import weakref
 from unittest.mock import patch
 
 from tests.safe_import_helper import install_lightweight_robocasa_packages
@@ -25,11 +27,46 @@ from robocasa.recovery.intervention_timing import build_registration
 from robocasa.recovery.phase3b_training_horizon import sha256_file
 from robocasa.recovery.diagnose_intervention_timing_replay import (
     RequestProbe, diagnose_attempt, diagnostic_state, first_divergence, run, build_parser,
-    initialize_rng_capture_runtime, compare_observation_windows, save_payload,
+    initialize_rng_capture_runtime, compare_observation_windows, save_payload, GCTrace,
 )
 
 
 class ReplayDiagnosticTest(unittest.TestCase):
+    def test_gc_control_defers_cycles_restores_prior_mode_and_traces_explicit_collections(self):
+        initial = gc.isenabled()
+        destroyed = []
+        class Cycle:
+            def __init__(self):
+                self.cycle = self
+            def __del__(self):
+                destroyed.append(True)
+        try:
+            for enabled in (True, False):
+                gc.enable() if enabled else gc.disable()
+                callbacks = list(gc.callbacks)
+                trace = GCTrace("disabled")
+                trace.start()
+                self.assertFalse(gc.isenabled())
+                value = Cycle()
+                weak = weakref.ref(value)
+                del value
+                self.assertIsNotNone(weak())
+                trace.phase, trace.step, trace.nominal = "environment_step", 236, True
+                # Explicit collection remains possible even with automatic GC
+                # disabled, and must be visible rather than reported as absent.
+                gc.collect()
+                self.assertIsNone(weak())
+                result = trace.finish()
+                self.assertTrue(result["original_enabled_state_restored"])
+                self.assertEqual(gc.isenabled(), enabled)
+                self.assertEqual(gc.callbacks, callbacks)
+                self.assertEqual(result["nominal_collection_stops"], 1)
+                self.assertFalse(result["events"][-1]["automatic_gc_enabled"])
+                self.assertEqual(result["events"][-1]["environment_step"], 236)
+            self.assertEqual(len(destroyed), 2)
+        finally:
+            gc.enable() if initial else gc.disable()
+
     def test_launcher_scopes_server_gpu_without_changing_simulator_visibility(self):
         script = Path(__file__).resolve().parents[1]/"scripts/diagnose_xr1_timing_replay.sh"
         for server_gpu in (None, "1"):
@@ -381,6 +418,7 @@ else:
             args.rng_runtime_init = "before_env"
             args.observation_window = [1, 4]
             args.record_all_observations = True
+            args.gc_mode = "disabled"
             events = []
             make_env = rt["make_env"]
             def early():
@@ -405,6 +443,11 @@ else:
                 warm.assert_called_once_with()
             self.assertEqual(events, ["initialize_rng_runtime", "load_factory", "make_env", "make_env"])
             self.assertEqual(initialized["rng_runtime_init"], "before_env")
+            self.assertEqual(initialized["garbage_collection"]["mode"], "disabled")
+            for trace in initialized["garbage_collection"]["attempts"]:
+                self.assertFalse(trace["enabled_at_environment_creation"])
+                self.assertTrue(trace["original_enabled_state_restored"])
+                self.assertEqual(trace["nominal_collection_stops"], 0)
             assignment = initialized["device_assignment"]
             self.assertEqual(assignment["simulator_cuda_visible_devices"], "0")
             self.assertEqual(assignment["policy_server_cuda_visible_devices"], "1")
@@ -453,6 +496,19 @@ else:
             self.assertEqual(json.loads((args.output_dir/"status.json").read_text())["status"], "failed")
             self.assertTrue((args.output_dir/"registration.json").exists())
             self.assertEqual(events.count("make_env"), 2)
+            args.output_dir = base/"failed_environment_creation"
+            before_gc, before_callbacks = gc.isenabled(), list(gc.callbacks)
+            def fail_environment(*_):
+                self.assertFalse(gc.isenabled())
+                raise RuntimeError("environment creation failed")
+            with patch(module+"._validate_live_provenance"), \
+                 patch(module+".initialize_rng_capture_runtime", return_value={}):
+                with self.assertRaisesRegex(RuntimeError, "environment creation failed"):
+                    run(args, {**rt, "make_env": fail_environment})
+            self.assertEqual(gc.isenabled(), before_gc)
+            self.assertEqual(gc.callbacks, before_callbacks)
+            self.assertTrue(json.loads((args.output_dir/"gc_attempt_0.json").read_text())["original_enabled_state_restored"])
+            self.assertEqual(json.loads((args.output_dir/"status.json").read_text())["status"], "failed")
             reg["code_hashes"] = {}
             (source/"registration.json").write_text(json.dumps(reg))
             with self.assertRaisesRegex(ValueError, "checksum"):

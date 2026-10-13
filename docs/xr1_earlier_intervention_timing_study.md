@@ -163,6 +163,33 @@ keeps rendering on GPU 0 and moves only the policy server to GPU 1 to test
 whether sharing a GPU contributes. The user confirmed a two-GPU allocation is
 available. Historical replay remains unresolved.
 
+The separated-GPU run `xr1_timing_replay_splitgpu_20261013_130517` confirmed
+server visibility `1`, simulator visibility `0`, and EGL device `0`, with CUDA
+initialized before both environments. Both 400-step, 25-request attempts
+failed historical prefix replay; the first ended at `kettle_on_tray`, the
+second at `mug_on_tray`. Both first-request probes passed and all initial repeat
+channels matched. The first within-pair discrepancy remained the returned
+camera observations at environment step 237, after action index 236. Every
+other progress channel still matched there; numeric state observations first
+differed at 241. All pixels in all three frames changed, with mean RGB errors
+88.16 (left), 85.74 (right), and 85.96 (wrist). Attempt 1's complete step-237
+observation hash exactly matched the healthy attempt-1 observation from the
+same-GPU run; attempt 0's corrupted image hashes differed between the runs.
+Thus separating the model server from rendering did not eliminate the failure
+in this test. It does not rule out every CUDA/GL interaction inside the simulator
+process, which still initializes and inspects CUDA RNG.
+
+The next hypothesis concerns delayed renderer cleanup in the simulator process.
+The local gym-wrapper constructor resets its underlying environment before
+the nominal replay performs another seeded reset. Upstream robosuite's
+[`MjRenderContext`](https://raw.githubusercontent.com/ARISE-Initiative/robosuite/master/robosuite/utils/binding_utils.py)
+holds a simulator reference, registers itself with that simulator, and frees
+graphics resources in its destructor. This makes cleanup of unreachable cycles
+a plausible trigger, but it is not evidence that collection caused this
+incident or that the cluster's installed destructor matches upstream. The new
+diagnostic records the installed cleanup source and collection events, and can
+defer automatic cyclic collection until after environment cleanup.
+
 ## Why this is the next experiment
 
 The completed 160-branch operator screen passed every engineering gate but
@@ -737,6 +764,56 @@ changes to GPU sharing, since the model server now runs on another device.
 Repeatability and acceptance against the historical source remain separate:
 both source-prefix audits must pass to claim historical replay, and even an
 isolated success leaves the failed timing registration preserved.
+
+### Test delayed cyclic cleanup during replay
+
+`XR1_REPLAY_GC_MODE=disabled` disables automatic cyclic garbage collection before
+each fresh environment is constructed and restores its previous enabled state
+only after the environment and policy close attempts. It does not force a
+collection, change source restoration, or modify renderer code. The default
+mode traces collections while preserving the caller's GC setting. As described
+in [Python's GC documentation](https://docs.python.org/3.11/library/gc.html),
+disabling automatic collection does not prevent explicit `gc.collect()` calls;
+the diagnostic logs those too. Reference-count destruction is not disabled.
+
+`gc_attempt_<index>.json` retains start/stop events with generation, replay
+phase, environment-step position, and the automatic-GC enabled flag. The report
+records nominal collection counts and restoration of the previous setting;
+status shows events near the first mismatch. An event during stepping is labeled
+with the step before that action returns. `renderer_cleanup_source.json`
+records the installed binding file path, SHA-256, and renderer destructor source
+when available. Reading that source occurs before environment creation; no
+dependency is edited. Both files enter the artifact hash ledger.
+
+Keep the tested separated-GPU layout and all raw-observation capture:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_splitgpu_20261013_130517/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_REPLAY_GPU=0
+export XR1_REPLAY_SERVER_GPU=1
+export XR1_REPLAY_GC_MODE=disabled
+export XR1_REPLAY_RNG_RUNTIME_INIT=before_env
+export XR1_REPLAY_RECORD_ALL_OBSERVATIONS=1
+export XR1_REPLAY_PORT=10324
+export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_gcdisabled_$(date +%Y%m%d_%H%M%S)"
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+```
+
+This still performs two 400-step replays and the existing seeded-request probes.
+Confirm automatic GC was disabled and inspect any nominal collection events.
+If no nominal collections occur and image corruption persists, automatic cyclic
+collection is not necessary to produce the failure in that case. If explicit
+collections occur, the broader cleanup hypothesis was not fully suppressed.
+If both repeats match, this supports a diagnostic workaround; the prior
+separated-GPU control did not log GC, so a matched `default`-mode trace and
+cleanup/source inspection remain necessary before claiming a mechanism.
+Both historical prefix audits still need to pass independently. The failed
+timing registration and all prior evidence remain preserved.
 
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:
