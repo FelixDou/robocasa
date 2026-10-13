@@ -8,9 +8,10 @@ Latest preflight: **the corrected GC-scope audit accepted 4/10 parents, then
 stopped on historical-source disagreement for ArrangeTea parent
 `6cfb095ec52c00970abf8340`**. Its two 304-step replays matched each other exactly,
 including all 305 observations, and the GC guard passed with zero collections.
-The originally failing parent also passed within this run on `r5n4`. The next
-check replays the newly failing parent alone in fresh simulator/server processes
-to test dependence on preceding parents. Full-study validation remains pending.
+The originally failing parent also passed within this run on `r5n4`. The subsequent
+fresh-process check reproduced the source mismatch, so it does not require
+preceding parents. The next step inspects saved historical images and policy
+history offline. Full-study validation remains pending.
 
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
 collection. Its first ArrangeTea reference matched simulator state, controller,
@@ -329,6 +330,42 @@ tests dependence on prior execution history in the client and/or server; it
 does not by itself isolate one process or establish a specific cause. Status
 now displays bounded samples from the saved source-endpoint mismatches and
 latest policy-record mismatches when a source audit fails.
+
+The isolated run `xr1_timing_replay_6cf_isolated_20261013_174013` completed on
+the same node, `r5n4`, using fresh simulator and policy-server processes. Both
+304-step, 19-request attempts again failed historical source agreement while
+matching each other in every initial/endpoint channel, complete progress, and
+all 305 per-key/raw observations. Both first-request probes passed. Early CUDA
+initialization preceded both environments, and neither setup nor active replay
+recorded a collection. The mismatch therefore does not require running the
+four preceding parents in the current process. Exact cross-run trace comparison
+with the cohort remains an offline check, rather than an inference from equal
+endpoint error magnitudes.
+
+Both isolated attempts reported historical endpoint qpos error 0.4411556,
+qvel error 0.4923724, control-input error 78.33905, and qacc-warmstart error
+22.01044. Base-position and base-rotation observation errors were approximately
+0.08606 and 0.17164. Retained camera arrays differed by up to 255 intensity
+levels. Latest inferred actions differed by 1.99609375 and features by 13.75,
+but their request hashes also differed: historical
+`3ed58e0a76c0f1fa788b6f26185089430fac5ccbd0ecd3d144f78e38d75da81c`, replay
+`3a54bbe5f32c4f7da014ba140f81699896ce37bce19921cc8f599ee34e94604b`.
+These are substantial state/trajectory differences. The action/feature mismatch
+does not demonstrate nondeterministic responses to identical historical inputs.
+A maximum pixel error alone cannot distinguish graphics corruption from a
+different physical scene or viewpoint.
+
+The next check uses only saved data: verify the diagnostic artifacts and frozen
+source file, compare the complete current cohort/isolated traces, and inspect
+historical endpoint cameras and retained image queues beside replay images.
+`inspect_intervention_timing_source.py` performs this CPU-only inspection,
+exports native RGB comparison panels and per-frame statistics, and reports
+saved latest request/inference identities. It does not reconstruct a historical
+encoded request from later endpoint queues, infer unavailable frame timestamps,
+certify image health from statistics, change source eligibility, or collect new
+nominal/intervention trajectories. The historical first divergence remains
+unlocalized without a full historical nominal trace. Preserve the four accepted
+cohort records and both failed source comparisons.
 
 ## Why this is the next experiment
 
@@ -1089,6 +1126,42 @@ reopen the current-run repeatability investigation. All outcomes leave the full
 timing study incomplete; this check collects no interventions and does not make
 the old failed cohort resumable.
 
+### Inspect the saved historical source without a GPU run
+
+This command reads the isolated diagnostic and the failed cohort child. It
+checks every registered diagnostic artifact hash before unpickling, validates
+the frozen timing registration and source identity/file hash, and verifies
+complete raw-observation support and hashes. It compares both corresponding
+current attempts' initial states, endpoints, progress, request/response hashes,
+and all observation hashes across runs. No policy-model loading, simulator,
+policy server, CUDA RNG inspection, or network connection is required.
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_6cf_isolated_20261013_174013/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_SOURCE_INSPECT_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_source_inspection_$(date +%Y%m%d_%H%M%S)"
+set -o pipefail
+"$XR1_CLIENT_ENV/bin/python" -u -m robocasa.recovery.inspect_intervention_timing_source \
+  --diagnostic-dir "$XR1_REPLAY_ROOT/diagnostic" \
+  --comparison-diagnostic-dir /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_parent_audit_gc_scope_20261013_171134/diagnostic/parents/6cfb095ec52c00970abf8340/attempt_g9lwwpxh/diagnostic \
+  --output-dir "$XR1_SOURCE_INSPECT_ROOT" \
+  2>&1 | tee "$STORAGE_BS/robocasa_logs/eval/$(basename "$XR1_SOURCE_INSPECT_ROOT").log"
+```
+
+The new output directory contains `report.json`, `endpoint_cameras.png`, and
+one `history_camera_<index>.png` per camera. Rows distinguish historical source
+and both replay attempts; labels identify actual saved queue indices. Pixels
+are exported without resizing or recoloring. History panels show at most eight
+representative frames per row, while statistics retain every saved queue frame.
+Console output summarizes source/replay camera statistics, latest policy records,
+and cohort comparisons. PNG hashes are stored in the report. Comparison results
+must be read together with exact step-support/row counts; missing rows do not
+count as agreement. The report's scope remains saved endpoints and retained
+queues, not identification of the first historical mismatch or proof of which
+trajectory is correct. Existing output roots and paths overlapping frozen inputs
+are rejected. This inspection leaves the historical replay gate blocked.
+
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:
 
@@ -1106,7 +1179,7 @@ Implementation: `intervention_timing.py`, `run_intervention_timing.py`, and
 `scripts/`. Local checks:
 
 ```bash
-.venv_video/bin/python -m unittest tests.test_intervention_timing_parent_audit tests.test_intervention_timing_observation_diagnostic tests.test_intervention_timing_replay_diagnostic tests.test_intervention_timing tests.test_operator_screen tests.test_phase2_snapshot_replay tests.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
+.venv_video/bin/python -m unittest tests.test_intervention_timing_source_inspection tests.test_intervention_timing_parent_audit tests.test_intervention_timing_observation_diagnostic tests.test_intervention_timing_replay_diagnostic tests.test_intervention_timing tests.test_operator_screen tests.test_phase2_snapshot_replay tests.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
 bash -n scripts/run_xr1_intervention_timing.sh
 bash -n scripts/diagnose_xr1_timing_replay.sh
 bash -n scripts/diagnose_xr1_timing_observations.sh
