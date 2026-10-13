@@ -63,6 +63,17 @@ if report_path.exists():
         print("attempt", i, {k: attempt[k] for k in ("prefix_replay_accepted", "environment_steps", "source_endpoint_channels", "final_ordered_stage", "final_at_inference_boundary", "request_repeat_probe")})
         print("initial XML:", {k: attempt["initial_model_xml_audit"][k] for k in ("available", "compatible")})
         print("replay error:", attempt["replay_error"]["message"] if attempt["replay_error"] else None)
+        audit_path = report_path.parent/f"attempt_{i}"/"source_endpoint_audit.json"
+        if not attempt["prefix_replay_accepted"] and audit_path.exists():
+            audit = json.loads(audit_path.read_text())
+            print("source endpoint mismatches:", {k: {"count": len(rows),
+                "sample": sorted(rows, key=lambda r: r["path"])[:3]}
+                for k, rows in audit["mismatches"].items() if rows})
+            latest = [r for r in audit["mismatches"].get("policy_state", [])
+                      if ".latest_request_records" in r["path"] or ".latest_inference_record" in r["path"]]
+            print("source latest policy record mismatches:", sorted(latest, key=lambda r: r["path"])[:8])
+            print("source comparison limit:", audit.get("reference_limit"))
+            print("source endpoint audit:", audit_path)
     print("initial repeats:", data["repeated_initial_state_audit"]["channels"])
     print("endpoint repeats:", data["repeated_endpoint_audit"]["channels"])
     print("first repeat divergence:", data["first_repeat_divergence"])

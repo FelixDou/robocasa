@@ -4,15 +4,13 @@ Status: **live 60-execution sentinel passed; full collection stopped at 80/220
 executions on a nominal source-replay mismatch; scientific analysis pending**.
 Read `docs/cluster_experiment_runbook.md` before any cluster operation.
 
-Latest isolated checks: **two ArrangeTea parents each passed both historical
-source-prefix audits with automatic cyclic GC disabled**. The previously failed
-parent's two 400-step repeats matched throughout. The same-code default-GC
-control reproduced camera failure after a generation-2 collection; those runs
-used different cluster nodes. The all-parent audit then stopped on its first
-parent's GC-control gate, despite two exact 336-step replays. Saved events place
-its collections in reset/setup, which the diagnostic incorrectly counted as
-active replay. The scope correction is implemented; a new all-parent audit and
-full-study validation remain pending.
+Latest preflight: **the corrected GC-scope audit accepted 4/10 parents, then
+stopped on historical-source disagreement for ArrangeTea parent
+`6cfb095ec52c00970abf8340`**. Its two 304-step replays matched each other exactly,
+including all 305 observations, and the GC guard passed with zero collections.
+The originally failing parent also passed within this run on `r5n4`. The next
+check replays the newly failing parent alone in fresh simulator/server processes
+to test dependence on preceding parents. Full-study validation remains pending.
 
 The first live attempt, `xr1_timing_20261012_192313`, stopped before intervention
 collection. Its first ArrangeTea reference matched simulator state, controller,
@@ -294,6 +292,43 @@ observation, request, and repeat gates are retained. The original failed audit,
 its recorded counts, and all artifacts stay unchanged; the correction requires
 a new root and does not retroactively accept its first parent. It does not
 change collection behavior, renderer code, or the frozen timing collector.
+
+The corrected run `xr1_timing_parent_audit_gc_scope_20261013_171134` accepted
+four parents on `r5n4`: ArrangeTea `b1455183d9fabd7eeb4c4bf5`,
+CuttingToolSelection `f56bbdc19d00beb376c8a1b3`, ArrangeTea
+`3094d859730a906172f552ef`, and the previously failing ArrangeTea
+`f9cd6c2c907171c2f8fea437`. Each accepted parent passed both source-prefix
+audits and all repeat, observation, request-probe, runtime, and GC gates.
+This confirms acceptance of the previously failing parent on the same node as
+the earlier default-GC failure, while the exact renderer mechanism remains
+unproven.
+
+The fifth attempted parent, `6cfb095ec52c00970abf8340` (ArrangeTea, seed 950012,
+reset index 5, snapshot `64a6f92ef6c5730f2856e421`), failed only
+`both_source_prefix_audits_accepted`. Both attempts completed 304 steps and 19
+nominal requests, reached `mug_on_tray` at the required inference boundary,
+and reported no replay exception. Initial and endpoint repeats matched in all
+11 channels; complete progress and all 305 per-key/raw observations were exact.
+Both seeded first-request probes passed. No reset/setup or active-rollout
+collections occurred, and early CUDA initialization was confirmed. Relative to
+the historical source, both endpoints differed in environment state, simulator
+integration state, controller state, policy state, and observation. Semantics,
+RNG, control state, tracker state, and the step counter matched. The supplied
+status contains channel flags but no numeric mismatch magnitudes.
+
+This is a repeatable current trajectory that misses the historical reference,
+not a collection-scope failure. Keep the four accepted records and the failed
+child artifacts unchanged; do not drop this parent, relax exact source gates,
+or resume the failed cohort. Historical snapshots store the endpoint and latest
+policy records, not the complete nominal request/action history, so the first
+historical divergence cannot be localized from this output. The next
+608-step check runs only this parent twice in a new simulator process with a
+fresh private policy server, retaining the same seeds, checkpoint, GPU mapping,
+early initialization, GC policy, and full observation capture. Its outcome
+tests dependence on prior execution history in the client and/or server; it
+does not by itself isolate one process or establish a specific cause. Status
+now displays bounded samples from the saved source-endpoint mismatches and
+latest policy-record mismatches when a source audit fails.
 
 ## Why this is the next experiment
 
@@ -1019,6 +1054,40 @@ root. An all-parent pass supports applying this bounded lifecycle to a new
 timing registration, followed by the sentinel and full branch audits. It does
 not resume or complete the old failed registration, or test SAFE-trigger
 recovery.
+
+### Isolate the repeatable historical mismatch after four accepted parents
+
+The existing single-parent launcher starts a fresh simulator process and its
+own fresh private policy server. No execution-module change is needed. Keep the
+current allocation/node if available so that process history is the intended
+changed factor; the reported hostname makes a node change visible.
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_parent_audit_gc_scope_20261013_171134/run.env
+cd "$ROBOCASA_REPO"
+git pull --ff-only origin main
+export XR1_REPLAY_ALL_PARENTS=0
+export XR1_REPLAY_PARENT=6cfb095ec52c00970abf8340
+export XR1_REPLAY_PORT=10328
+export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_6cf_isolated_$(date +%Y%m%d_%H%M%S)"
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
+bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+tail -n 50 "$XR1_REPLAY_LOG"
+```
+
+For a passing pair, require both `prefix_replay_accepted` values true, exact
+initial/endpoint/progress/observation repeats, exact seeded request probes, and
+zero active-rollout collections under the registered scope. A fresh-process
+pass would show that the mismatch was not invariant to the preceding execution
+history; compare against the preserved cohort trace before changing lifecycle.
+A repeatable source mismatch again would require inspecting saved source audit
+details, latest request/inference records, and raw observations. It would not
+certify that the historical source is defective. A divergent fresh pair would
+reopen the current-run repeatability investigation. All outcomes leave the full
+timing study incomplete; this check collects no interventions and does not make
+the old failed cohort resumable.
 
 For the initial RNG-only failure, pull the patch and start a new run using the
 same source operator screen. Do not resume the old registration:
