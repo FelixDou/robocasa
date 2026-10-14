@@ -1,7 +1,9 @@
 # XR1 timing pilot with audited parent exclusions
 
 Protocol: `xr1_common_entry_timing_audit_and_exclude_pilot_v1`.
-Implementation and local regression checks are complete; live cluster validation is pending.
+First live pilot: **72/72 assigned executions collected, all engineering gates
+passed, zero timing errors; nominal image review is pending. Only three
+CuttingToolSelection parents qualified; no ArrangeTea parents qualified.**
 Read [the cluster runbook](cluster_experiment_runbook.md) before cluster operations.
 
 The user authorized continuing timing research with engineering exclusions,
@@ -11,6 +13,62 @@ and existing registrations remain unchanged. Historical timing outcomes are
 not merged into this new sample. The accepted v4 reference pair is reusable
 because its complete engineering evidence is validated, copied and bound by
 hash before the new run starts.
+
+## First live pilot result
+
+Run: `/gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_pilot_20261013_233646/pilot`
+on `r5n4`. Collection finished at `2026-10-13T15:58:16.456292+00:00`
+(2026-10-14 00:58 JST), with status
+`timing_complete_awaiting_image_review`.
+
+| Task | Attempted parents | Eligible parents | Excluded parents | Timing engineering passed |
+|---|---:|---:|---:|---:|
+| ArrangeTea | 5 | 0 | 5 | 0 |
+| CuttingToolSelection | 5 | 3 | 2 | 3 |
+| Total | 10 | 3 | 7 | 3 |
+
+All 72 assigned executions completed: 60 primary trajectories (three parents,
+ten cells, two continuation schedules) and 12 engineering repeats. Every
+retained parent's engineering gates passed, with zero timing errors and no
+saved prequalification controls belonging to excluded parents. The status
+field `successful_assigned_branches=72` counts completed executions, not
+successful robot tasks. The pasted status contains no recovery efficacy
+estimates.
+
+Four parents were excluded during reference screening for live reset
+observation mismatch: ArrangeTea seeds 950010 and 950012, and
+CuttingToolSelection seeds 950022 (the reused v4 rejection) and 950025.
+Three additional ArrangeTea parents, seeds 950007, 950011 and 950013, failed
+the common-entry sampled-observation/runtime/semantic restore check before
+any successful control suffix was recorded. These are distinct gate failures;
+the status alone does not identify every differing channel or establish that
+all seven exclusions share the historical camera-corruption cause. In
+particular, seed 950007's accepted v4 nominal reference pair did not guarantee
+that its entry snapshot would pass the separate timing restore check.
+
+The audit-and-exclude pipeline therefore completed on its eligible assignments,
+but attrition was 70%, and an entire task was lost. This is not evidence of
+rare sample corruption or a completed two-task timing comparison.
+`timing_collection_complete=true` and `engineering_all_pass=true` coexist
+with `pilot_scientific_analysis_ready=false` and
+`full_timing_study_complete=false`. SAFE-triggered recovery was not tested.
+
+Next, inspect every nominal camera frame of the three eligible parents and
+record the image review using the commands below. If all three pass, review
+will emit paired descriptive outcomes for CuttingToolSelection only, with
+status `complete_limited_coverage` and decision
+`insufficient_valid_task_coverage`. It will not emit the registered two-task
+bootstrap or a passing operator recommendation. Read these existing results
+before allocating more GPU time or expanding the fixed seed pool. The absent
+ArrangeTea task cannot be repaired by silently replacing seeds, weakening a
+restore gate, or labeling an observed-task average as a two-task average.
+
+Evidence identifiers:
+
+- Registration SHA-256: `137cfd263d7847ef572133fed4e6572ffdf3531dbc90c965fb51ba8bb8f8e604`.
+- Assignment SHA-256: `ac4561076711d85d7d7bdcec275ac29c915f1e22653771527239f223b7e8924b`.
+- Branch-ledger SHA-256: `c4ba3cf6a2f64fc8fdb1921efe7ec41afe1853eba2e8d579a7ea358942baa0af`.
+- Driver log: `/gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_timing_pilot_20261013_233646_driver_20261013_233647_3496843.log`.
 
 ## Fixed pool and eligibility
 
@@ -180,6 +238,45 @@ image excludes that parent from paired analysis using pre-treatment evidence;
 its collected trajectories remain on disk and in coverage reporting. The
 review does not certify every suffix camera frame. Full encoded requests and
 responses are retained for later inspection, and suffix errors stay explicit.
+
+For the completed first pilot, use its saved environment rather than whichever
+run the latest environment file may subsequently identify:
+
+```bash
+source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_pilot_20261013_233646/run.env
+cp -n "$XR1_PILOT_ROOT/pilot/image_review_template.json" "$XR1_PILOT_ROOT/completed_image_review.json"
+nano "$XR1_PILOT_ROOT/completed_image_review.json"
+# After inspecting every frame, fill each parent's two booleans and notes.
+bash "$ROBOCASA_REPO/scripts/run_xr1_timing_pilot.sh" review "$XR1_PILOT_ROOT/completed_image_review.json"
+bash "$ROBOCASA_REPO/scripts/run_xr1_timing_pilot.sh" status
+```
+
+The top-level gallery links to each eligible reference's gallery under
+`references/`. When transferring it to another computer, preserve these
+relative paths and each linked gallery's `camera_panels/` directory. Snapshot
+pickles and recovery branch payloads are not needed for viewing the galleries.
+Set `reviewed_all_frames=true` only after reviewing that parent's complete
+slider; set `images_acceptable=false` and explain the issue if any frame is
+corrupted. Preserve the protocol and three binding hashes.
+
+After review, print the available descriptive cell outcomes without treating
+missing-task coverage as a passing scientific gate:
+
+```bash
+"$XR1_CLIENT_ENV/bin/python" - "$XR1_PILOT_ROOT/pilot/scientific_analysis.json" <<'PY'
+import json, pathlib, sys
+data = json.loads(pathlib.Path(sys.argv[1]).read_text())
+print("decision:", data["decision"])
+print("parents by task:", data["parents_by_task"])
+print("analysis ready:", data["pilot_scientific_analysis_ready"])
+for task, cells in data.get("tasks", {}).items():
+    print("\n", task, "(descriptive, engineering/image-qualified parents only)")
+    for cell, values in cells.items():
+        print(cell, {key: values[key] for key in (
+            "completion", "durable_completion", "ordered_prefix_regression",
+            "safety", "task_success", "intervention_executed")})
+PY
+```
 
 At least two valid parents per task are required for the two-task summary and
 parent bootstrap. This minimum avoids a single-parent resampling calculation;

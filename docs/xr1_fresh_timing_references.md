@@ -13,6 +13,19 @@ rejection, and screen the remaining seeds without aborting at each invalid
 parent. This document and its no-exclusion rules retain the historical v4
 contract; the failed v4 registration is not resumed or rewritten.
 
+The first amended pilot, `xr1_timing_pilot_20261013_233646`, has now finished
+72/72 timing executions on three CuttingToolSelection parents, with zero
+timing errors and all retained-parent engineering gates passing. Seven of
+ten parents were excluded: four at reference reset-observation screening and
+three ArrangeTea parents at the separate common-entry restore check. The
+reused, accepted ArrangeTea v4 reference pair was among the latter; nominal
+reference repeatability did not guarantee timing entry restorability. No
+ArrangeTea parents remain. Image review is pending, and the missing task
+blocks the registered two-task analysis. The
+[pilot result and review commands](xr1_timing_audit_exclude_pilot.md#first-live-pilot-result)
+are the current next step; another identical v4 collection is not required
+to summarize the three retained parents.
+
 The saved historical cameras for ArrangeTea parent `6cfb095ec52c00970abf8340`
 are corrupted. The original timing run remains stopped at 80/220 executions.
 This collector creates a new reference cohort from the same ten previously

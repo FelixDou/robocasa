@@ -16,9 +16,17 @@ reported by operator and block inference; ordinary unsuccessful robot
 rollouts remain outcomes. The historical no-exclusion instructions below
 describe the original protocols, not this newly authorized amendment.
 The new implementation's combined local suite ran 142 tests: 141 passed and
-one was skipped. It still needs live cluster validation.
+one was skipped. Its first live pilot, `xr1_timing_pilot_20261013_233646`,
+subsequently collected **72/72 assigned executions with all engineering gates
+passing and zero timing errors**. Only three CuttingToolSelection parents
+qualified; all five ArrangeTea parents and two CuttingToolSelection parents
+were excluded before intervention. Nominal image review is pending. This is
+70% attrition and no ArrangeTea coverage, so the original two-task study is
+not complete. After image review, the existing pilot can provide descriptive
+CuttingToolSelection outcomes only; it cannot pass the registered two-task
+coverage gate. See the pilot report for exclusion stages and review commands.
 
-Latest fresh-reference result: **v4 accepted 1/10 pairs, then failed the next
+Earlier fresh-reference result: **v4 accepted 1/10 pairs, then failed the next
 parent's live reset-observation check**. Run
 `xr1_timing_references_observer_v4_20261013_220743` on `r5n4` accepted ArrangeTea
 parent `58f0ab7314bd1b19d88ec731`, seed 950007, after two 304-step nominal
