@@ -208,6 +208,39 @@ class MockRuntime:
         return policy
 
 
+class GymnasiumLikeWrapper:
+    """Forwards only reset/step/close, like gymnasium>=1.0 wrappers."""
+
+    def __init__(self, env):
+        self.env = env
+
+    def reset(self, **kwargs):
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        return self.env.step(action)
+
+    def close(self):
+        return self.env.close()
+
+
+class WrappedRuntime(MockRuntime):
+    def __init__(self, horizon=40):
+        super().__init__(horizon)
+        self.env_instructions = []
+
+    def make_env(self, task_name, seed):
+        env = super().make_env(task_name, seed)
+        setter = env.set_task_description
+
+        def record(text):
+            self.env_instructions.append(text)
+            setter(text)
+
+        env.set_task_description = record
+        return GymnasiumLikeWrapper(GymnasiumLikeWrapper(env))
+
+
 def mock_config(**overrides):
     config = {
         "tasks": ["MockTask"],
@@ -380,6 +413,32 @@ class CollectionTest(unittest.TestCase):
         self.assertEqual(p_success(0, "resample_continue", "detection"), 1.0)
         world = [b for b in branches if b["rung"] == "world_reset"]
         self.assertTrue(all(b["anchor_restore_residual"] == 0.0 for b in world))
+
+    def test_branches_get_live_observations_through_non_forwarding_wrappers(self):
+        collect(self.root / "plain")
+        runtime = WrappedRuntime()
+        status = ladder.run_collection(mock_config(), self.root / "wrapped", runtime=runtime, log=lambda *_: None)
+        self.assertEqual(status["num_errors"], 0)
+        outcome = lambda rows: sorted((b["parent_id"], b["rung"], b["anchor"], b["k"], b["success"], b["steps_used"]) for b in rows)
+        plain = ladder.read_jsonl(self.root / "plain" / ladder.BRANCHES_NAME)
+        wrapped = ladder.read_jsonl(self.root / "wrapped" / ladder.BRANCHES_NAME)
+        self.assertEqual(len(wrapped), 3 * 6 * 2)
+        self.assertEqual(outcome(wrapped), outcome(plain))
+        # The reprompt reaches the adapter's language override beneath the wrappers.
+        reprompts = {b["reprompt_instruction"] for b in wrapped if b["reprompt_instruction"]}
+        self.assertEqual(reprompts, {"Move the object."})
+        self.assertEqual(set(runtime.env_instructions), reprompts)
+        self.assertTrue(all(env.override is None for env in runtime.envs))
+
+    def test_live_observation_refuses_missing_getter(self):
+        class Opaque:
+            env = None
+
+        with self.assertRaises(RuntimeError):
+            ladder.live_observation(Opaque())
+        inner = MockEnv()
+        inner.reset(seed=0)
+        self.assertEqual(ladder.live_observation(GymnasiumLikeWrapper(inner))["state"].tolist(), [0.0] * 4)
 
     def test_reprompt_uses_subtask_instruction_then_task_instruction(self):
         runtime, _ = collect(self.root)

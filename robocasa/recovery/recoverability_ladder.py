@@ -49,7 +49,6 @@ from robocasa.recovery.recovery_rollout import (
     _is_task_success,
     _refresh_sim_visuals,
     _resolve_recovery_target,
-    _set_env_instruction,
     _step_env,
     _subtask_is_complete,
     apply_recovery_mode,
@@ -332,6 +331,49 @@ def restore_robot(env, snapshot):
     )
 
 
+def _wrapper_chain(env):
+    seen = set()
+    node = env
+    while node is not None and id(node) not in seen:
+        seen.add(id(node))
+        yield node
+        node = getattr(node, "env", None)
+
+
+def _env_method(env, name):
+    """First callable ``name`` on the wrapper chain (gymnasium does not forward)."""
+    for node in _wrapper_chain(env):
+        method = getattr(node, name, None)
+        if callable(method):
+            return method
+    return None
+
+
+def set_env_instruction(env, instruction):
+    setter = _env_method(env, "set_task_description")
+    if setter is not None:
+        setter(instruction)
+
+
+def live_observation(env):
+    """Fresh observation after a restore, from the Gym adapter beneath wrappers.
+
+    ``_get_obs_after_state_change`` looks only one level down, so through
+    non-forwarding gymnasium wrappers it returns its fallback. Feeding the
+    policy a missing or pre-restore observation would bias the first branch
+    inference, so this fails loudly instead.
+    """
+    getter = _env_method(env, "get_current_observation")
+    if getter is not None:
+        observation = getter()
+        if isinstance(observation, dict):
+            return observation
+    observation = _get_obs_after_state_change(env, fallback_obs=None)
+    if not isinstance(observation, dict):
+        raise RuntimeError("No live observation getter found beneath the environment wrappers")
+    return observation
+
+
 def inference_boundary(policy, step, stride):
     flag = getattr(policy, "at_inference_boundary", None)
     if flag is not None and not callable(flag):
@@ -362,8 +404,8 @@ def reset_policy(policy):
 
 
 def clear_env_instruction(env):
-    clear = getattr(env, "clear_task_description", None)
-    if callable(clear):
+    clear = _env_method(env, "clear_task_description")
+    if clear is not None:
         clear()
 
 
@@ -373,8 +415,8 @@ def env_instruction(env, obs):
             value = obs.get(key)
             if isinstance(value, str) and value:
                 return value
-    get_ep_meta = getattr(env, "get_ep_meta", None)
-    if callable(get_ep_meta):
+    get_ep_meta = _env_method(env, "get_ep_meta")
+    if get_ep_meta is not None:
         try:
             return get_ep_meta().get("lang") or None
         except Exception:
@@ -391,8 +433,8 @@ def model_xml_and_meta(env):
         except Exception:
             xml = None
     meta = None
-    get_ep_meta = getattr(env, "get_ep_meta", None)
-    if callable(get_ep_meta):
+    get_ep_meta = _env_method(env, "get_ep_meta")
+    if get_ep_meta is not None:
         try:
             meta = get_ep_meta()
         except Exception:
@@ -614,7 +656,7 @@ def run_branch(env, policy, *, parent, rollout, cell, k, budget, config, task_na
     elif rung == "robot_reset":
         restore_robot(env, anchor_snap)
     _refresh_sim_visuals(env, num_forwards=3)
-    obs = _get_obs_after_state_change(env, fallback_obs=None)
+    obs = live_observation(env)
 
     task_instruction = rollout["instruction"] or env_instruction(env, obs)
     tracker = OrderedProgress(rollout["required_subtasks"], count=start_count)
@@ -657,7 +699,7 @@ def run_branch(env, policy, *, parent, rollout, cell, k, budget, config, task_na
     if collect_features is not None:
         policy.collect_safe_features = False
     if reprompt_active:
-        _set_env_instruction(env, reprompt_instruction)
+        set_env_instruction(env, reprompt_instruction)
     try:
         for step in range(int(budget)):
             instruction = reprompt_instruction if reprompt_active else task_instruction
