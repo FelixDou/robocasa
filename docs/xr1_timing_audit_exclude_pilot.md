@@ -6,10 +6,60 @@
 > registrations must be resumed or reviewed from commit `4d65b542`.
 
 Protocol: `xr1_common_entry_timing_audit_and_exclude_pilot_v1`.
-First live pilot: **72/72 assigned executions collected, all engineering gates
-passed, zero timing errors; nominal image review is pending. Only three
-CuttingToolSelection parents qualified; no ArrangeTea parents qualified.**
+Final status (16 October 2026): **`complete_limited_coverage`, decision
+`insufficient_valid_task_coverage`. All 60 primary trajectories on the three
+CuttingToolSelection parents had zero stage completion in every cell,
+including `continue`.** See [Final result](#final-result-16-october-2026).
 Read [the cluster runbook](cluster_experiment_runbook.md) before cluster operations.
+
+## Final result (16 October 2026)
+
+The nominal image review was recorded on the cluster. Each of the three
+eligible parents (`46f15852ffef49d3aec9136c`, `d432d6f99888d5e2f0aef502`,
+`b629f2e5e94535d671b4b179`) has a single nominal frame, because the common
+entry for CuttingToolSelection's first target stage (`OpenDrawer_1`) is the
+reset state at environment step 0. All six panels were clean and identical
+across attempts in every parent, so no parent was image-excluded. Image review
+SHA-256: `49798f96bde8a4eb2ed8d410b6165641bae1f407aaf5cba4cd81e2b209abe0cf`.
+
+| | Value |
+|---|---|
+| Status | `complete_limited_coverage` |
+| Decision | `insufficient_valid_task_coverage` |
+| Parents analyzed | 3 (CuttingToolSelection only; ArrangeTea 0/5) |
+| Primary trajectories | 60 (10 cells × 2 schedules × 3 parents); 12 repeats |
+| Timing errors / engineering | 0 / all pass |
+| `pilot_scientific_analysis_ready` | false |
+
+Descriptive task-macro outcomes, all ten cells:
+
+| Cell | Completion | Durable | Task success | Safety | Any-predicate regression | Policy calls |
+|---|---:|---:|---:|---:|---:|---:|
+| `continue` | 0.0 | 0.0 | 0.0 | 0.0 | 0.167 | 16 |
+| `history_reset_replan` d0 / d1 / d2 | 0.0 | 0.0 | 0.0 | 0.0 | 0.167 / 0.0 / 0.167 | 16 |
+| `stage_retry` d0 / d1 / d2 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 16 |
+| `retreat_reset_replan` d0 / d1 / d2 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 15 |
+
+Every completion, durable-completion and task-success contrast against
+`continue`, and every earlier-minus-later contrast, is exactly zero. The
+reported `best_observed_cell` of `continue` is a tie-break, not an effect.
+
+**Interpretation.** This pilot carries no information about recovery timing:
+
+- The intervention point is the episode start, before any robot progress, so
+  "earlier" and "later" differ by at most two inferences from reset.
+- The registered 256-step suffix budget (16 policy calls) is far below
+  CuttingToolSelection's 1,200-step task horizon. XR-1 succeeded in 22 of 50
+  selected full-horizon rollouts of this task
+  ([safe_xiaomi_dense_subtask.md](safe_xiaomi_dense_subtask.md)), so zero
+  drawer openings in 256 steps is most likely a floor effect of the budget,
+  not evidence about any operator.
+- The predicate-regression differences are one trajectory in six (0.167) and
+  are not interpretable.
+
+The exact-replay track is closed with this result. Its successor is the
+recoverability-ladder study ([recoverability_ladder.md](recoverability_ladder.md)),
+which branches from detected failures with a budget of half the task horizon.
 
 The user authorized continuing timing research with engineering exclusions,
 instead of requiring every selected seed to pass. This is a new registered

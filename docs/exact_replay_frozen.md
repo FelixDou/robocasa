@@ -1,8 +1,9 @@
 # Exact-replay track: frozen (16 October 2026)
 
-The exact complete-snapshot replay track is **frozen**. Do not extend it, add
-diagnostics to it, collect new parents with it, or resume its registrations
-except to close out the timing pilot image review below.
+The exact complete-snapshot replay track is **frozen and closed**. Do not
+extend it, add diagnostics to it, collect new parents with it, or resume its
+registrations. Its last open item, the timing pilot image review, was recorded
+on 16 October 2026 (status `complete_limited_coverage`).
 
 ## What is frozen
 
@@ -13,7 +14,7 @@ except to close out the timing pilot image review below.
 | Phase 3B training-horizon continuation | [xr1_phase3b_training_horizon.md](xr1_phase3b_training_horizon.md) | 1/20 mixed snapshots; oracle-minus-random 0.0125 |
 | Higher-level operator screen | [xr1_operator_screen.md](xr1_operator_screen.md) | Continue 22.5% vs 17.5% for every intervention; zero routing gain |
 | Common-entry timing study and references | [xr1_earlier_intervention_timing_study.md](xr1_earlier_intervention_timing_study.md), [xr1_fresh_timing_references.md](xr1_fresh_timing_references.md) | Stopped at 80/220; replaced by the pilot |
-| Audit-and-exclude timing pilot | [xr1_timing_audit_exclude_pilot.md](xr1_timing_audit_exclude_pilot.md) | 72/72 executions on 3 CuttingToolSelection parents; 7/10 parents excluded; no ArrangeTea |
+| Audit-and-exclude timing pilot | [xr1_timing_audit_exclude_pilot.md](xr1_timing_audit_exclude_pilot.md) | `complete_limited_coverage`: 3 CuttingToolSelection parents, 0% completion in all 10 cells (256-step budget from reset); 7/10 parents excluded; no ArrangeTea |
 
 ## Why it is frozen
 
@@ -49,18 +50,12 @@ git worktree add /gs/fs/tga-shinoda/felid/robocasa_exact_replay_frozen 4d65b542
 export ROBOCASA_REPO=/gs/fs/tga-shinoda/felid/robocasa_exact_replay_frozen
 ```
 
-## Final close-out: timing pilot image review
+## Final close-out: timing pilot image review (done)
 
-This is the only remaining action on the track. It is CPU-only and records the
-pilot as `complete_limited_coverage` with decision
-`insufficient_valid_task_coverage` (only CuttingToolSelection qualified).
-The commands are in
-[xr1_timing_audit_exclude_pilot.md](xr1_timing_audit_exclude_pilot.md#image-review-and-scientific-interpretation);
-run them with `ROBOCASA_REPO` pointing at the frozen checkout above, and
-`scripts/run_xr1_timing_pilot.sh` (the frozen path) rather than
-`scripts/exact_replay/run_xr1_timing_pilot.sh`.
-
-The `images_acceptable` judgement must come from actually viewing every
-nominal frame in `camera_review.html`; do not fill it in without that review.
-After recording it, append the final status and the per-cell descriptive
-outcomes to the pilot doc and close this track.
+Recorded on 16 October 2026 from the pre-move cluster checkout. All three eligible
+parents passed image review (each has a single reset-state frame). The pilot
+ended `complete_limited_coverage` with decision
+`insufficient_valid_task_coverage` and zero completion in every cell. It is
+uninformative about timing because the entry point is the episode start and
+the 256-step budget is a floor effect. Full numbers are in
+[xr1_timing_audit_exclude_pilot.md](xr1_timing_audit_exclude_pilot.md#final-result-16-october-2026).
