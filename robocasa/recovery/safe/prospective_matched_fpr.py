@@ -15,6 +15,10 @@ import numpy as np
 
 
 DETECTORS = ("safe_only", "staged_safe_time", "time_only")
+# Two-source OR detectors.  ``fused_safe_time`` is an unstaged ablation in which
+# both sources are eligible for the whole rollout; it is not a frozen
+# prospective detector and therefore is not listed in ``DETECTORS``.
+TWO_SOURCE_DETECTORS = ("staged_safe_time", "fused_safe_time")
 
 
 def validate_stage_windows(safe_end=0.25, time_start=0.50):
@@ -49,6 +53,8 @@ def _window(record, detector, safe_end, time_start):
             "early_safe": (steps[steps <= safe_stop], safe[steps <= safe_stop]),
             "late_time": (steps[steps >= time_begin], time[steps >= time_begin]),
         }
+    if detector == "fused_safe_time":
+        return {"early_safe": (steps, safe), "late_time": (steps, time)}
     raise ValueError(f"Unknown detector {detector!r}")
 
 
@@ -64,7 +70,7 @@ def _candidates(values):
 def first_alert(record, detector, thresholds, safe_end=0.25, time_start=0.50):
     safe_end, time_start = validate_stage_windows(safe_end, time_start)
     view = _window(record, detector, safe_end, time_start)
-    if detector != "staged_safe_time":
+    if detector not in TWO_SOURCE_DETECTORS:
         steps, values = view
         threshold = float(thresholds[detector])
         crossings = np.flatnonzero(values >= threshold)
@@ -96,7 +102,7 @@ def first_alert(record, detector, thresholds, safe_end=0.25, time_start=0.50):
 
 def _maximum(record, detector, safe_end, time_start):
     view = _window(record, detector, safe_end, time_start)
-    if detector != "staged_safe_time":
+    if detector not in TWO_SOURCE_DETECTORS:
         return float(np.max(view[1]))
     values = [
         float(np.max(stage_values))
@@ -166,7 +172,7 @@ def event_metrics(
         for landmark in recalls:
             recalls[landmark] += int(fraction <= landmark + 1e-12)
     failures = int(np.sum(labels == 1))
-    if detector == "staged_safe_time":
+    if detector in TWO_SOURCE_DETECTORS:
         event_scores = []
         for row in records:
             view = _window(row, detector, safe_end, time_start)
@@ -254,11 +260,14 @@ def select_staged_thresholds(
     target_fpr=0.05,
     safe_end=0.25,
     time_start=0.50,
+    detector="staged_safe_time",
 ):
+    if detector not in TWO_SOURCE_DETECTORS:
+        raise ValueError("Joint threshold selection requires a two-source detector")
     early_values = []
     late_values = []
     for row in records:
-        view = _window(row, "staged_safe_time", safe_end, time_start)
+        view = _window(row, detector, safe_end, time_start)
         early_values.append(
             float(np.max(view["early_safe"][1]))
             if len(view["early_safe"][1])
@@ -281,7 +290,7 @@ def select_staged_thresholds(
             }
             metrics = event_metrics(
                 records,
-                "staged_safe_time",
+                detector,
                 thresholds,
                 safe_end=safe_end,
                 time_start=time_start,
@@ -296,7 +305,7 @@ def select_staged_thresholds(
                 )
                 feasible.append((rank, thresholds, metrics))
     if not feasible:
-        raise ValueError("No staged threshold pair satisfies the FPR cap")
+        raise ValueError(f"No {detector} threshold pair satisfies the FPR cap")
     _, thresholds, metrics = max(feasible, key=lambda item: item[0])
     return {
         "thresholds": thresholds,

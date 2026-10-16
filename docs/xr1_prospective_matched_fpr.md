@@ -521,3 +521,13 @@ Because collection stops when both outcome quotas are reached, this secondary
 stream documents stopping cost and sensitivity but is not an unbiased estimate
 of deployment prevalence.
 Do not tune or rerun thresholds based on either result.
+
+## 7. Offline baseline suite
+
+[`xr1_offline_detector_baselines.md`](xr1_offline_detector_baselines.md) adds
+success-only embedding baselines (Mahalanobis, cosine k-NN, PCA-KMeans, RND),
+the official STAC-Single action-consistency baseline, an unstaged SAFE/time
+fusion ablation, and every baseline inside the frozen staged wrapper. It reuses
+the recorded exports and this protocol's frozen bundle. It must reproduce the
+frozen thresholds and the published prospective results exactly before
+reporting any baseline.
