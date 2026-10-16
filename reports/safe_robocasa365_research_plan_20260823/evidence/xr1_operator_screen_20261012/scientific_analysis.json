@@ -1,0 +1,243 @@
+{
+  "best_fixed_operator": "continue",
+  "bootstrap": {
+    "history_reset_replan_minus_continue": {
+      "ci95": [
+        -0.15000000000000002,
+        0.0
+      ],
+      "estimate_mean": -0.05002500000000001
+    },
+    "oracle_routing_minus_best_fixed": {
+      "ci95": [
+        0.0,
+        0.0
+      ],
+      "estimate_mean": 0.0
+    },
+    "retreat_reset_replan_minus_continue": {
+      "ci95": [
+        -0.125,
+        0.0
+      ],
+      "estimate_mean": -0.05115000000000001
+    },
+    "stage_retry_minus_continue": {
+      "ci95": [
+        -0.15000000000000002,
+        0.0
+      ],
+      "estimate_mean": -0.05002500000000001
+    }
+  },
+  "bootstrap_design": "fixed_two_tasks_parent_then_snapshot_paired_all_arms_and_both_seeds",
+  "contrasts_vs_continue": {
+    "continue": {
+      "completion": 0.0,
+      "durable_completion": 0.0,
+      "policy_calls": 0.0,
+      "regression": 0.0,
+      "safety": 0.0,
+      "task_success": 0.0,
+      "wall_seconds": 0.0
+    },
+    "history_reset_replan": {
+      "completion": -0.05000000000000002,
+      "durable_completion": -0.025000000000000022,
+      "policy_calls": 0.0,
+      "regression": 0.0,
+      "safety": 0.0,
+      "task_success": 0.0,
+      "wall_seconds": -0.18353738925652152
+    },
+    "retreat_reset_replan": {
+      "completion": -0.05000000000000002,
+      "durable_completion": -0.05000000000000002,
+      "policy_calls": -1.0,
+      "regression": -0.025000000000000022,
+      "safety": 0.0,
+      "task_success": 0.0,
+      "wall_seconds": -0.08873690298059955
+    },
+    "stage_retry": {
+      "completion": -0.05000000000000002,
+      "durable_completion": -0.025000000000000022,
+      "policy_calls": 0.0,
+      "regression": -0.07499999999999996,
+      "safety": 0.0,
+      "task_success": 0.0,
+      "wall_seconds": -0.13296195076545558
+    }
+  },
+  "decision": "mechanism_redesign_or_earlier_snapshot_study",
+  "eventual_success_control_harm_estimable": false,
+  "evidence_type": "development_operator_capability_screen_fixed_supervisor_subgoals",
+  "macro": {
+    "continue": {
+      "completion": 0.225,
+      "durable_completion": 0.2,
+      "policy_calls": 23.0,
+      "regression": 0.6,
+      "safety": 0.0,
+      "task_success": 0.0,
+      "wall_seconds": 39.97438227004604
+    },
+    "history_reset_replan": {
+      "completion": 0.175,
+      "durable_completion": 0.175,
+      "policy_calls": 23.0,
+      "regression": 0.6,
+      "safety": 0.0,
+      "task_success": 0.0,
+      "wall_seconds": 39.79084488078952
+    },
+    "retreat_reset_replan": {
+      "completion": 0.175,
+      "durable_completion": 0.15,
+      "policy_calls": 22.0,
+      "regression": 0.575,
+      "safety": 0.0,
+      "task_success": 0.0,
+      "wall_seconds": 39.88564536706544
+    },
+    "stage_retry": {
+      "completion": 0.175,
+      "durable_completion": 0.175,
+      "policy_calls": 23.0,
+      "regression": 0.525,
+      "safety": 0.0,
+      "task_success": 0.0,
+      "wall_seconds": 39.84142031928059
+    }
+  },
+  "operator_gates": {
+    "history_reset_replan": {
+      "benefiting_parents": 0,
+      "gates": {
+        "benefit_in_multiple_parents": false,
+        "completion_gain": false,
+        "durable_gain": false,
+        "positive_in_both_tasks": false,
+        "regression_guardrail": true,
+        "zero_declared_safety_events": true
+      },
+      "passed": false
+    },
+    "retreat_reset_replan": {
+      "benefiting_parents": 0,
+      "gates": {
+        "benefit_in_multiple_parents": false,
+        "completion_gain": false,
+        "durable_gain": false,
+        "positive_in_both_tasks": false,
+        "regression_guardrail": true,
+        "zero_declared_safety_events": true
+      },
+      "passed": false
+    },
+    "stage_retry": {
+      "benefiting_parents": 0,
+      "gates": {
+        "benefit_in_multiple_parents": false,
+        "completion_gain": false,
+        "durable_gain": false,
+        "positive_in_both_tasks": false,
+        "regression_guardrail": true,
+        "zero_declared_safety_events": true
+      },
+      "passed": false
+    }
+  },
+  "oracle_rewind": [],
+  "oracle_routing_completion": 0.225,
+  "oracle_routing_is_optimistic_finite_seed_headroom": true,
+  "oracle_routing_minus_best_fixed": 0.0,
+  "parents": 10,
+  "promising_operators": [],
+  "protocol": "xr1_higher_level_operator_screen_v1",
+  "recommended_fixed_operator": null,
+  "routing_gates": null,
+  "scientific_gate_estimable": true,
+  "scope": "full",
+  "snapshots": 20,
+  "source_ledger_sha256": "85ddb0ed862005af77f3f0728a56602d5044cffd79b508edcf174ebdfa38b98e",
+  "tasks": {
+    "ArrangeTea": {
+      "continue": {
+        "completion": 0.45,
+        "durable_completion": 0.4,
+        "policy_calls": 30.0,
+        "regression": 1.0,
+        "safety": 0.0,
+        "task_success": 0.0,
+        "wall_seconds": 52.734435117430984
+      },
+      "history_reset_replan": {
+        "completion": 0.35,
+        "durable_completion": 0.35,
+        "policy_calls": 30.0,
+        "regression": 0.95,
+        "safety": 0.0,
+        "task_success": 0.0,
+        "wall_seconds": 52.30902175351512
+      },
+      "retreat_reset_replan": {
+        "completion": 0.35,
+        "durable_completion": 0.3,
+        "policy_calls": 29.0,
+        "regression": 0.95,
+        "safety": 0.0,
+        "task_success": 0.0,
+        "wall_seconds": 52.83021359934937
+      },
+      "stage_retry": {
+        "completion": 0.35,
+        "durable_completion": 0.35,
+        "policy_calls": 30.0,
+        "regression": 0.9,
+        "safety": 0.0,
+        "task_success": 0.0,
+        "wall_seconds": 52.70787268194836
+      }
+    },
+    "CuttingToolSelection": {
+      "continue": {
+        "completion": 0.0,
+        "durable_completion": 0.0,
+        "policy_calls": 16.0,
+        "regression": 0.2,
+        "safety": 0.0,
+        "task_success": 0.0,
+        "wall_seconds": 27.214329422661102
+      },
+      "history_reset_replan": {
+        "completion": 0.0,
+        "durable_completion": 0.0,
+        "policy_calls": 16.0,
+        "regression": 0.25,
+        "safety": 0.0,
+        "task_success": 0.0,
+        "wall_seconds": 27.27266800806392
+      },
+      "retreat_reset_replan": {
+        "completion": 0.0,
+        "durable_completion": 0.0,
+        "policy_calls": 15.0,
+        "regression": 0.2,
+        "safety": 0.0,
+        "task_success": 0.0,
+        "wall_seconds": 26.941077134781516
+      },
+      "stage_retry": {
+        "completion": 0.0,
+        "durable_completion": 0.0,
+        "policy_calls": 16.0,
+        "regression": 0.15,
+        "safety": 0.0,
+        "task_success": 0.0,
+        "wall_seconds": 26.97496795661282
+      }
+    }
+  },
+  "uncertainty_scope": "developmental_and_conditional_on_these_two_tasks_not_population_or_confirmation"
+}

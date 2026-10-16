@@ -7,7 +7,8 @@ The report should use sequential gates rather than treating every endpoint as in
 \begin{enumerate}
   \item frozen stage-aware ranking transfers to new parents;
   \item complete snapshot replay makes counterfactual branches valid;
-  \item candidate/operator sets contain recovery headroom;
+  \item a four-snapshot engineering sentinel validates long-horizon continuation, after which the full 20-snapshot screen determines whether local candidates contain operational headroom;
+  \item candidate or higher-level operator sets contain recovery headroom over both random or fixed selection and nominal continuation;
   \item a recovery-value critic ranks candidate utility on sealed data;
   \item critic selection works prospectively under a fixed trigger;
   \item the complete utility system improves final task success;
@@ -39,6 +40,7 @@ For successful-parent maximum scores $Z_1,\ldots,Z_n$ and target $\alpha$, a spl
 \end{equation}
 If $k>n$, place the threshold above the observed maximum and label the operating point unresolved. Zero empirical FPR with too few calibration successes is not evidence of precise control.
 
+\pagebreak[3]
 Calibration requirements are:
 \begin{itemize}
   \item successful parent is the calibration unit;
@@ -71,6 +73,20 @@ For detector comparisons on identical parents:
   \item recompute the complete metric and paired method contrast.
 \end{enumerate}
 For candidate studies, snapshots are nested within parents and candidate branches remain paired within snapshot. Three neural initialization seeds measure fitting instability and do not replace task or parent uncertainty.
+
+\subsection{Opportunity-screen interpretation}
+
+Phase~3B-0 was an engineering sentinel with no scientific efficacy stop rule. Phase~3B-1 used 20 snapshots nested within 10 parents and two tasks; task--parent--snapshot resampling and raw task signs governed interpretation. Candidate seeds and continuation seeds were frozen and logged separately. The completed screen found one mixed snapshot from one ArrangeTea parent, task-macro oracle-minus-random of 0.0125, oracle-minus-nominal of 0.0500, and zero full-task success. The corresponding hierarchical bootstrap intervals were $[0,0.05]$ for oracle-minus-random and $[0,0.20]$ for oracle-minus-nominal. These cohort-specific estimates fail the registered continuation thresholds and do not justify a five-task candidate screen.
+
+Oracle-best-of-$K$ is a finite-seed upper bound with maximization optimism. Report oracle-minus-random and oracle-minus-nominal together: oracle superiority to random establishes rankable variation, while superiority to nominal establishes operational headroom. A case-control screen estimates conditional opportunity, not natural failure prevalence, intervention burden, or population task success.
+
+Stage completion, next-stage durability, full-task success, prior-stage regression, and safety termination are distinct outcomes. A generic progress score can diagnose mechanism but cannot be promoted to the primary endpoint after a completion gate fails. Likewise, differences between independently sampled early and late states do not identify a causal effect of intervention delay; the common-stage-entry dynamic-regime construction in Phase~4 is required for the ``earlier intervention is easier'' claim.
+
+\subsection{Completed operator screen and proposed timing diagnostic}
+
+The 160-suffix operator screen averaged two seeds within each of 20 snapshots, weighted its two tasks equally, and used a fixed-task parent-then-snapshot paired bootstrap. Point completion differences were $-0.05$ for every intervention; intervals were $[-0.15,0]$ for history reset and stage retry and $[-0.125,0]$ for retreat. These intervals include zero and do not establish a general harmful effect. Oracle routing gain was zero with a degenerate $[0,0]$ resampling interval on the observed finite support; this does not bound unseen-seed or population routing value. No parent had positive mean intervention completion gain.
+
+The proposed timing diagnostic has one common base per parent, two seeds, three operators, and three application times, plus one shared continuation per seed: 200 unique trajectories. Preserve all timings, operators, and seeds together when resampling parents within each fixed task. Shared or repeated controls do not multiply the sample size. Freeze common absolute endpoints and retain assignments that become ineligible before intervention. Selecting among nine timing/operator cells is development model selection on already opened parents and requires a fresh-parent confirmation. The old screen must not be pooled as matched late controls because its endpoints and seed schedules differ.
 
 \subsection{Power and sample size}
 
@@ -116,7 +132,7 @@ Selective attrition & Freeze exclusion/retry rules; preserve partial manifests a
 
 Declare one primary contrast per phase and one final primary contrast: full utility system versus strongest frozen non-oracle baseline on final task success. Test secondary families in a frozen hierarchy or use Holm correction. Per-task, per-stage, per-delay, and failure-type analyses remain descriptive unless explicitly powered and adjusted. Report effect sizes and intervals even when gates fail.
 
-\cautionnote{Gate interpretation.}{Pilot thresholds such as 20\% mixed snapshots, 15-point oracle headroom, pairwise ROC 0.65, or a 10-point critic gain are proposed continuation gates. They protect compute and scientific focus; they are not universal statistical truths.}
+\cautionnote{Gate interpretation.}{Pilot thresholds such as 20\% mixed snapshots, 15-point oracle-over-random headroom, 10-point oracle-over-nominal headroom, pairwise ROC 0.65, or a 10-point learned-selection gain are proposed continuation gates. They protect compute and scientific focus; they are not universal statistical truths or venue requirements.}
 
 \subsection{Claim ledger}
 
@@ -134,8 +150,8 @@ Xiaomi SAFE modestly improves matched-FPR classification. & Supported in frozen 
 Xiaomi SAFE provides reliable overall early warning. & Rejected by timing interval and early recall. & New representation plus untouched prospective timing cohort. \\
 Full-parent stage conditioning improves early ranking. & Rejected as a general five-task claim: 0.696 development ROC fell to 0.489 in frozen identity-disjoint confirmation. & Preserve task/stage heterogeneity as diagnostic evidence; do not refit on confirmation. \\
 Proprioceptive state context improves early stage ranking. & Unsupported: context reached 0.566 on the retrospective 85-parent holdout versus stage 0.584 and time 0.500. & A new untouched cohort would be required for a context claim, but it is not the current priority. \\
-SAFE ranks useful action chunks. & Engineering path only. & Phase 3 opportunity and Phase 6 prospective selection. \\
-Recovery-value critic predicts causal utility. & Planned. & Phase 5 sealed evaluation and Phase 6 prospective result. \\
+SAFE ranks useful action chunks. & Unsupported for the frozen local proposal family: Phase~3B oracle-best-of-four exceeded random choice by only 0.0125, mixed support occurred in $1/20$ snapshots, and full-task success was zero. & A materially different proposal mechanism would need new oracle headroom before any SAFE ranking test; the current route is closed. \\
+Recovery-value critic or router predicts causal utility. & Blocked by the negative candidate and operator screens; oracle operator routing gain was zero. & First establish operator/timing value on fresh parents; then Phase~5 sealed evaluation and Phase~6 prospective fixed-trigger benefit. \\
 Utility triggering improves task success. & Unsupported. & Phase 7 randomized closed-loop trial. \\
 Flow guidance improves recovery. & Unsupported. & Phase 8 model-side, matched-compute execution. \\
 Method generalizes to unseen tasks or policies. & Unsupported. & Phase 9 with identities unseen to critic development and separate policy calibration. \\

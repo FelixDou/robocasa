@@ -2443,3 +2443,61 @@ checksums passed. It predates the Xiaomi 39-task experiment. Xiaomi's durable
 cluster roots listed in Section 13 are therefore the authoritative locations
 for its manifests, metrics, runtime bundles, figures, and score trajectories;
 they should be added to the next packaged report snapshot.
+
+## 18. Completed higher-level recovery operator screen (12 October 2026)
+
+Following the negative short- and training-horizon candidate screens, the
+operator screen reused 10 parents and 20 exact snapshots from ArrangeTea and
+CuttingToolSelection. Four operators and two paired continuation-seed
+schedules produced **160 scientific suffixes**. The full engineering export
+reports 160/160 branches, zero errors, and every gate passing. This is a
+developmental capability screen at fixed snapshots, not SAFE-triggered
+recovery or prospective deployment evidence.
+
+| Operator | Task-macro stage completion | Retained at endpoint | Gain vs continuation |
+|---|---:|---:|---:|
+| Continue | **22.5%** | **20.0%** | Reference |
+| History reset + replan | 17.5% | 17.5% | -5.0 pp |
+| Stage retry | 17.5% | 17.5% | -5.0 pp |
+| Retreat + reset + replan | 17.5% | 15.0% | -5.0 pp |
+
+ArrangeTea completion was 45% under continuation and 35% under every
+intervention; CuttingToolSelection had no completions. Full-task success was
+zero for every arm. None of the interventions benefited a parent on average.
+Finite-seed oracle routing reached 22.5%, matching the best fixed operator,
+continuation, with zero routing advantage. No operator passed the scientific
+gate; the registered decision is
+`mechanism_redesign_or_earlier_snapshot_study`.
+
+The conditional paired-bootstrap completion-gain intervals were [-15.0, 0.0]
+percentage points for history reset and stage retry and [-12.5, 0.0] for
+retreat. These include zero and do not establish a general harmful effect.
+Oracle routing's [0, 0] interval reflects the observed two-seed support, not
+a population bound. No declared safety events were recorded. The high
+predicate-regression flag rates require inspection: an initially true
+relational predicate becoming false is not necessarily loss of an ordered
+completed stage.
+
+History reset replaced the redundant cache-only flush because the captured
+action caches were empty. Stage retry used fixed supervisor-supplied goals;
+a deployable stage estimator was not tested. No genuine earlier complete
+rewind anchors existed, so no oracle-rewind branches were run and the earlier
+180-suffix proposal was not executed.
+
+The supplied cluster engineering/scientific exports and provenance are saved
+in [the report evidence directory](../reports/safe_robocasa365_research_plan_20260823/evidence/xr1_operator_screen_20261012/).
+The source branch-ledger SHA-256 is
+`85ddb0ed862005af77f3f0728a56602d5044cffd79b508edcf174ebdfa38b98e`.
+Raw cluster payloads were not independently reaudited locally and the exact
+operator-run directory was not included in the pasted export.
+
+**Next experiment:** a separately registered common-stage-entry timing
+diagnostic, using intervention after zero, one, or two genuine inferences and
+a common absolute endpoint. On the same 10 development parents and two
+seeds, one shared continuation plus three operators at three times gives
+**200 unique scientific trajectories**. This tests whether useful intervention
+value exists earlier; the completed screen does not establish that timing
+caused failure. See the [proposed protocol](xr1_earlier_intervention_timing_study.md).
+The timing collector and analyzer still need implementation. Candidate/router
+training, broad surfaces, and SAFE-triggered recovery remain unsupported or
+deferred until a useful executor is established.

@@ -1,5 +1,10 @@
 # XR1 Phase 3B training-horizon continuation
 
+> **Frozen 2026-10-16.** This track is closed and must not be extended; see
+> [exact_replay_frozen.md](exact_replay_frozen.md). Code moved to
+> `robocasa/recovery/exact_replay/` and `scripts/exact_replay/`; existing
+> registrations must be resumed or reviewed from commit `4d65b542`.
+
 This protocol extends the already validated Phase 2 branches without changing
 parents, snapshots, candidate seeds, nominal seeds, policy, checkpoint, runtime
 bundle, or the original first 64 environment steps. Read
@@ -13,6 +18,37 @@ The execution order is fixed:
 3. run the complete 20-snapshot screen even if sentinel recovery outcomes are
    all zero;
 4. analyze the full result and follow its registered routing decision.
+
+## Completed result (12 October 2026)
+
+The corrected engineering sentinel and full run completed successfully. The
+full artifact is:
+
+```text
+/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_phase3b_terminal_camera_v7_full20_20261012_091253
+```
+
+The engineering audit covered 10 parents, 20 snapshots, 140 long-horizon
+branches, and 140 same-runtime prefix references with zero errors. Every
+engineering gate passed. The scientific gate was estimable and failed:
+
+- mixed candidate outcomes occurred in 1/20 snapshots and one ArrangeTea
+  parent only;
+- task-macro random-of-four stage completion was 0.2375 and oracle-best-of-four
+  was 0.2500, for 0.0125 oracle headroom over random;
+- nominal stage completion was 0.2000, so oracle-minus-nominal was 0.0500;
+- candidate full-task success and safety termination were both 0.0000;
+- CuttingToolSelection had no stage completions at its 256-step horizon.
+
+The frozen routing decision is `higher_level_operator_screen`. Do not increase
+candidate count, train a local candidate critic, or launch the formal five-task
+candidate screen from this proposal family. Its higher-level follow-up has
+now also completed: 160 scientific suffixes passed engineering, but
+continuation reached 22.5% completion versus 17.5% for every intervention,
+with zero oracle routing gain. See `docs/xr1_operator_screen.md` for the
+completed result and `docs/xr1_earlier_intervention_timing_study.md` for the
+next proposed common-stage-entry timing diagnostic. No oracle rewind anchors
+were available, so the earlier 180-suffix proposal was not executed.
 
 The sentinel is not a scientific stopping screen. It can block the full run
 only for provenance, support, replay-prefix, repeat, restore, or artifact
@@ -156,7 +192,7 @@ export XR1_PHASE3B_SENTINEL_LOG="$XR1_LOG_ROOT/$(basename "$XR1_PHASE3B_SENTINEL
 cd "$ROBOCASA_REPO"
 CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
 nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
-  robocasa.recovery.run_phase3b_training_horizon_continuation \
+  robocasa.recovery.exact_replay.run_phase3b_training_horizon_continuation \
   --phase2-run-dir "$XR1_PHASE2_ROOT" \
   --output-dir "$XR1_PHASE3B_SENTINEL" \
   --scope sentinel \
@@ -186,14 +222,14 @@ while kill -0 "$XR1_PHASE3B_SENTINEL_PID" 2>/dev/null; do
   clear
   date
   "$XR1_CLIENT_ENV/bin/python" -m \
-    robocasa.recovery.print_phase3b_training_horizon \
+    robocasa.recovery.exact_replay.print_phase3b_training_horizon \
     --run-dir "$XR1_PHASE3B_SENTINEL"
   tail -n 20 "$XR1_PHASE3B_SENTINEL_LOG"
   sleep 30
 done
 
 "$XR1_CLIENT_ENV/bin/python" -m \
-  robocasa.recovery.print_phase3b_training_horizon \
+  robocasa.recovery.exact_replay.print_phase3b_training_horizon \
   --run-dir "$XR1_PHASE3B_SENTINEL"
 ```
 
@@ -201,7 +237,7 @@ After engineering validity passes, freeze the sentinel diagnostic analysis:
 
 ```bash
 "$XR1_CLIENT_ENV/bin/python" -m \
-  robocasa.recovery.analyze_phase3b_training_horizon \
+  robocasa.recovery.exact_replay.analyze_phase3b_training_horizon \
   --run-dir "$XR1_PHASE3B_SENTINEL" \
   --bootstrap-replicates 2000 \
   --bootstrap-seed 0
@@ -219,7 +255,7 @@ export XR1_PHASE3B_FULL_LOG="$XR1_LOG_ROOT/$(basename "$XR1_PHASE3B_FULL").log"
 cd "$ROBOCASA_REPO"
 CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
 nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
-  robocasa.recovery.run_phase3b_training_horizon_continuation \
+  robocasa.recovery.exact_replay.run_phase3b_training_horizon_continuation \
   --phase2-run-dir "$XR1_PHASE2_ROOT" \
   --output-dir "$XR1_PHASE3B_FULL" \
   --scope full \
@@ -242,7 +278,7 @@ all 140 long-horizon branches pass the engineering audit:
 
 ```bash
 "$XR1_CLIENT_ENV/bin/python" -m \
-  robocasa.recovery.analyze_phase3b_training_horizon \
+  robocasa.recovery.exact_replay.analyze_phase3b_training_horizon \
   --run-dir "$XR1_PHASE3B_FULL" \
   --bootstrap-replicates 2000 \
   --bootstrap-seed 0
@@ -250,9 +286,10 @@ all 140 long-horizon branches pass the engineering audit:
 
 The analysis writes `scientific_analysis.json`, snapshot/candidate JSONL, CSV,
 task-macro estimands, genuine-replan completion curves, continuation gates,
-and one registered routing decision. A critic is unlocked only if every full-
-screen critic gate passes; otherwise the next registered route is a fresh
-replan or higher-level operator screen.
+and one registered routing decision. The completed candidate gate failed and
+routed to the higher-level operator screen, which subsequently also failed.
+Its results and the next proposed timing diagnostic are linked in the
+completed-result section above; neither critic nor router training is unlocked.
 
 ## Resume
 

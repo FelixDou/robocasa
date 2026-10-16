@@ -16,10 +16,11 @@ Phase & Current reusable code & Proposed implementation \\
 0 & SAFE schema/dataset validators; cluster runbook; frozen stage runner. & Experiment contract, allocation validator, and cross-manifest identity audit. \\
 1 & \path{run_stage_aware_parent_safe.py}; \path{stage_aware_parent_safe.py}; frozen documentation and tests. & Confirmation count/support validator; CI criterion in the frozen gate; deliberate CI-failure test. \\
 2 & \path{full_snapshot.py}; \path{counterfactual_branch.py}; Xiaomi policy \code{get\_state/set\_state}; exact replay runner, printer, combined audit, and focused tests. & Conditional task/platform extensions only; the bounded two-task gate has passed. \\
-3 & Phase~2 candidate payloads; frozen terminal SAFE scorer; ordered subtask evaluator; \path{analyze_phase3_candidate_opportunity.py} and tests. & Conditional five-task collection plan, support validator, and opportunity-video sampler after the bounded pilot gate. \\
-4 & Recovery modes, ordered progress/regression trace, policy-pluggable benchmark. & Operator API, delay-grid collector, common-randomness provenance, and recoverability-surface analysis. \\
-5 & Raw action-token features; proprioceptive state history; stage-aware weighting ideas. & Candidate-specific critic dataset/model/runner and causal stage tracker. \\
-6 & Deterministic random/lowest/highest candidate selection and mock tests. & Recovery-value scorer interface, sealed-snapshot arm runner, and matched candidate-set audit. \\
+3 & Phase~2 candidate payloads; frozen terminal SAFE scorer; ordered subtask evaluator; \path{analyze_phase3_candidate_opportunity.py} and tests. & Completed negative short-horizon analysis; no additional Phase~3 implementation. \\
+3B/3B-R & Immutable training-horizon runner/analyzer; implemented \path{operator_screen.py}, \path{run_operator_screen.py}, \path{analyze_operator_screen.py}, launcher and tests; completed negative 140-branch candidate and 160-suffix operator results. & Common-stage-entry nominal replay and earlier-state capture; paired dynamic-regime runner, shared control and common-endpoint audit; timing analyzer. These additions remain proposed. \\
+4 & Recovery modes, ordered progress/regression trace, policy-pluggable benchmark. & Operator API, common-stage-entry dynamic-regime collector, risk-set and common-endpoint audit, and staged recoverability-surface analysis. \\
+5 & Raw action-token features; proprioceptive state history; stage-aware weighting ideas. & Evidence-selected candidate critic, operator router, or fixed utility gate plus causal stage tracker. \\
+6 & Deterministic random/lowest/highest candidate selection and mock tests. & Route-specific fixed-trigger arm runner and matched candidate/operator-set audit. \\
 7 & Genuine-inference feature records and post-failure recovery hooks. & Pre-action Xiaomi monitor, utility gate/router, intervention budget, and online randomized evaluator. \\
 8 & Detached pre-output hidden feature and client-side no-gradient scoring. & New model/server patch for noise-step critic and differentiable flow guidance. \\
 9 & RLDX raw feature adapter and separate official recovery path. & Second-policy snapshot/session restoration, frozen shift wrappers, and external physical safety infrastructure. \\
@@ -30,14 +31,16 @@ The current Xiaomi ``observation context'' is flattened proprioceptive state his
 
 \subsection{Execution order}
 
-Phase 1 is complete and failed its frozen confirmation gate. Phase 2 is complete and passed all bounded exact-replay gates. Phase 3 is now active, beginning with a read-only opportunity analysis of the validated two-task branches. No simulator server or new collection is required for this first step. Critic training must not begin until Phase~3 establishes causal candidate/operator headroom; when it does begin, validation and test parents remain sealed.
+Phase~1 failed confirmation; Phase~2 passed exact replay; Phase~3 failed the short-suffix opportunity gate. Phase~3B passed engineering but found only 0.0125 oracle-over-random headroom and no full-task success. The subsequent 160-suffix higher-level operator screen also passed engineering but failed scientifically: continuation reached 22.5\% completion versus 17.5\% for each intervention and oracle routing gain was zero. The next proposed experiment is the 200-trajectory common-stage-entry timing diagnostic in Section~\ref{sec:next-timing-study}. Candidate-critic and operator-router training, broad surfaces, flow guidance, and end-to-end SAFE-triggered recovery remain blocked or deferred.
 
 The following dependencies must remain sequential:
 \begin{enumerate}
   \item exact snapshot replay before counterfactual scale;
-  \item oracle opportunity before critic training;
-  \item sealed offline critic gate before prospective reranking;
-  \item prospective reranking before differentiable guidance;
+  \item the completed engineering sentinel before the completed full training-horizon screen, with no efficacy stop based on four outcomes;
+  \item preserve both completed negative local-candidate and operator screens before the single proposed timing diagnostic;
+  \item operator-over-continuation and routing-over-best-fixed opportunity before critic or router training;
+  \item sealed offline model gate before prospective fixed-trigger selection;
+  \item prospective fixed-trigger benefit before differentiable guidance;
   \item development freeze before every fresh confirmation or final trial;
   \item healthy ordinary-policy positive control before second-policy failure collection.
 \end{enumerate}
@@ -57,7 +60,7 @@ Source code lives under \path{/gs/fs/tga-shinoda/felid}; environments, checkpoin
 \toprule
 Venue & Competitive package & Main risk \\
 \midrule
-CoRL & Causal benchmark; learned utility gate; held-out tasks/scenes; prospective closed-loop gain; preferably second policy or physical evidence. & Five-task detector or oracle-heavy recovery appears incremental beside CheckVLA and B2FF. \\
+CoRL & Causal benchmark; learned or demonstrably sufficient fixed utility mechanism; held-out tasks/scenes; prospective closed-loop gain; preferably second policy or physical evidence. & Five-task detector or oracle-heavy recovery appears incremental beside CheckVLA, B2FF, and recent critic-guided flow work. \\
 RSS & Exceptionally clean exact-state causal design, deadline/latency and safety analysis, strong physical-system evidence, and direct comparison to the closest recovery systems. & Broad benchmark tables without a crisp robotics mechanism. \\
 ICRA & Complete integrated system, broad RoboCasa365 simulation, runtime/safety analysis, strong component ablations, and several physical multi-stage tasks where feasible. & Simulator-only one-backbone evaluation may look incomplete. \\
 CVPR/ICCV & Recoverability as a visual/action representation contribution, multiple encoders, held-out camera/object/scene shifts, and closed-loop control validating the vision method. & A primarily trigger/control paper is a scope mismatch. \\
@@ -71,23 +74,22 @@ WACV & Reproducible causal benchmark/application, public code/data, rigorous neg
 \begin{enumerate}
   \item We introduce intervention-specific recoverability curves for long-horizon VLA execution, measured through exact-prefix counterfactual branches over task stages, delays, and recovery operators.
   \item We show that terminal failure likelihood is not equivalent to causal intervention value or remaining recovery time.
-  \item We learn a stage-aware utility gate and candidate critic that improve prospective task success while controlling unnecessary and harmful intervention.
+  \item Conditional on causal headroom, we learn the simplest justified decision mechanism---candidate critic, operator router, or utility gate---and test its prospective task-success benefit while controlling unnecessary and harmful intervention.
 \end{enumerate}
 
-Critic-guided flow is a fourth contribution only if Phase 8 passes matched-compute and held-out safety tests. Otherwise, discrete critic reranking is the final executor.
+Critic-guided flow is a fourth contribution only if Phase~8 passes matched-compute and held-out safety tests. It cannot be the core novelty because closely related VLA guidance has already been demonstrated~\cite{qvgm,guidedactionflow}. Otherwise, retain the simpler Phase~6 executor.
 
 \subsection{Immediate next actions}
 
 \begin{enumerate}
-  \item Preserve the failed Phase~1 bundles and the passing Phase~2 root, plan, branch payloads, hashes, and error ledger as immutable evidence.
-  \item Run \path{analyze_phase3_candidate_opportunity.py} on the existing 20 snapshots and 80 candidate branches; optionally score the identical sets with the frozen independent SAFE ensemble.
-  \item Inspect task/stage support, mixed outcomes, oracle headroom, successful-control harm, numerical ties, and hierarchical intervals without changing any Phase~2 artifact.
-  \item If either bounded pilot criterion fails, stop critic work and predeclare one redesign of proposal diversity, timing, horizon, or operator.
-  \item If both estimable criteria pass, freeze and collect the five-task Phase~3 opportunity screen needed to evaluate the formal three-of-five-task gate.
-  \item Scale recovery surfaces only if the formal oracle-headroom and support gates pass.
-  \item Train simple recovery-value probes before any broad neural sweep.
-  \item Run the 200-rollout fixed-trigger critic-selection pilot.
-  \item Power the primary Phase 7 comparison, then consider flow guidance and external validation.
+  \item Preserve the completed Phase~1--3B results and the 160-suffix operator screen, registrations, payloads, hashes, analyses, and error history. The local report contains supplied JSON exports and explicitly records that raw cluster payloads were not independently reaudited here.
+  \item Inspect matched predicate traces and nominal parent provenance, including the high ArrangeTea predicate-regression flag rate; distinguish valid relational changes from loss of ordered completed-stage progress.
+  \item Implement and engineering-test common-stage-entry replay and capture for the same 10 development parents. Audit reproduction of the original prefix-2 reference; do not manufacture earlier states.
+  \item Register three application times (zero, one, or two genuine inferences), three unchanged interventions, two paired seed schedules, a shared continuation per parent/seed, common absolute endpoints, and the 200-trajectory allocation.
+  \item Pass a two-parent engineering sentinel, then collect the full registered support regardless of sentinel efficacy. Report all nine cells, durability, task signs, parent support, harm, cost, and timing contrasts.
+  \item If one operator/timing cell passes the practical gate, freeze it for fresh-parent validation. If none helps, redesign the recovery executor or scope the paper to the negative causal benchmark; do not repeat sweeps on these parents.
+  \item Only after fresh-parent operator benefit is established should broad recoverability surfaces, route-specific modeling, and prospective fixed-trigger pilots be reconsidered.
+  \item Keep the SAFE-triggered end-to-end trial deferred until a useful executor exists; it remains a separate scientific question from the completed detector shadow tests.
 \end{enumerate}
 
-\cautionnote{First research priority.}{Do not launch another detector sweep, train a candidate critic, or scale to the approximately 1,000-suffix formal screen first. Exact replay has passed. The highest-value next evidence is the inexpensive, frozen two-task oracle-opportunity analysis of branches already collected.}
+\cautionnote{First research priority.}{The highest-value next experiment is the bounded common-stage-entry timing diagnostic, not another detector sweep or operator-router fit. The completed operator screen found no useful fixed intervention and zero routing gain. The proposed timing collector and analyzer are not yet implemented; the current operator launcher only reruns the existing frozen snapshot support.}

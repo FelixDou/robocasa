@@ -1,5 +1,10 @@
 # XR1 Phase 3 counterfactual candidate-opportunity screen
 
+> **Frozen 2026-10-16.** This track is closed and must not be extended; see
+> [exact_replay_frozen.md](exact_replay_frozen.md). Code moved to
+> `robocasa/recovery/exact_replay/` and `scripts/exact_replay/`; existing
+> registrations must be resumed or reviewed from commit `4d65b542`.
+
 Phase 3 starts with a read-only analysis of the validated Phase 2 branch set.
 It asks a prerequisite question before any critic is trained: did the four
 explicitly seeded Xiaomi candidates from the same complete snapshot produce
@@ -74,7 +79,7 @@ operator before recollection.
 The command is read-only with respect to the Phase 2 source:
 
 ```bash
-python -u -m robocasa.recovery.analyze_phase3_candidate_opportunity \
+python -u -m robocasa.recovery.exact_replay.analyze_phase3_candidate_opportunity \
   --phase2-run-dir "$XR1_PHASE2_ROOT" \
   --output-dir "$XR1_PHASE3_ROOT" \
   --bootstrap-replicates 2000 \

@@ -168,3 +168,18 @@ robocasa/scripts/taskgen/task_prompting/outputs/
 
 # Always ignore macOS junk
 **/.DS_Store
+
+# Local research scratch and generated artifacts (not source)
+.venv_video/
+tmp/
+demos/
+assets/figures/
+output/presentations/
+output/visual_bundles/
+output/*.tar.gz
+# Generated decks/reports; keep small analysis evidence the research plan cites
+outputs/*
+!outputs/manual-20260513-robocasa-recovery/
+!outputs/manual-20260603-recovery-results/
+!outputs/recovery_failure_dataset_1500_analysis/
+*.pptx.inspect.ndjson

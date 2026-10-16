@@ -1,6 +1,6 @@
 """Create figures, videos, and evidence for XR1 matched-FPR calibration."""
 
-import csv, hashlib, json, math, shutil, sys, zipfile
+import csv, hashlib, json, shutil, sys, zipfile
 from pathlib import Path
 
 import matplotlib
@@ -8,11 +8,26 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+try:
+    from .xr1_matched_fpr_video import (
+        alert_fraction as matched_alert_fraction,
+        first_alert as matched_first_alert,
+        render_matched_fpr_video,
+    )
+except ImportError:
+    from xr1_matched_fpr_video import (
+        alert_fraction as matched_alert_fraction,
+        first_alert as matched_first_alert,
+        render_matched_fpr_video,
+    )
+
 analysis, matched, out, zip_path = map(lambda x: Path(x).resolve(), sys.argv[1:])
 fig_dir, video_dir, data_dir = out / "figures", out / "videos", out / "data"
+raw_video_dir = video_dir / "raw"
+annotated_video_dir = video_dir / "annotated"
 if out.exists() and any(out.iterdir()):
     raise SystemExit(f"STOP: output is not empty: {out}")
-for path in (fig_dir, video_dir, data_dir):
+for path in (fig_dir, raw_video_dir, annotated_video_dir, data_dir):
     path.mkdir(parents=True, exist_ok=True)
 
 def read_json(path): return json.loads(path.read_text())
@@ -35,6 +50,7 @@ sources = {
     "threshold_curves.json": analysis / "threshold_curves.json",
     "calibration_predictions.jsonl": analysis / "calibration_predictions.jsonl",
     "status.json": analysis / "status.json",
+    "manifest.jsonl": matched / "calibration_collection" / "merged_all_retained" / "manifest.jsonl",
 }
 missing = [str(p) for p in sources.values() if not p.is_file()]
 if missing: raise SystemExit("STOP: missing:\n" + "\n".join(missing))
@@ -57,25 +73,9 @@ safe_end = bundle["safe_eligibility_end_fraction"]
 time_start = bundle["time_eligibility_start_fraction"]
 
 def first_alert(row, name):
-    safe, time = np.asarray(row["safe_scores"]), np.asarray(row["time_scores"])
-    step = np.arange(1, len(safe) + 1)
-    if name == "safe_only":
-        hit = np.flatnonzero(safe >= thr[name][name]); source = name
-    elif name == "time_only":
-        hit = np.flatnonzero(time >= thr[name][name]); source = name
-    else:
-        early = np.flatnonzero((step <= math.ceil(safe_end * row["horizon"])) & (safe >= thr[name]["early_safe"]))
-        late = np.flatnonzero((step >= math.ceil(time_start * row["horizon"])) & (time >= thr[name]["late_time"]))
-        candidates = []
-        if len(early): candidates.append((early[0], "early_safe"))
-        if len(late): candidates.append((late[0], "late_time"))
-        if not candidates: return None
-        index, source = min(candidates)
-        return {"step": int(index + 1), "source": source}
-    return None if not len(hit) else {"step": int(hit[0] + 1), "source": source}
+    return matched_first_alert(row, name, thr, safe_end, time_start)
 def fraction(row, name, miss=None):
-    alert = first_alert(row, name)
-    return miss if alert is None else min(1.0, alert["step"] / row["horizon"])
+    return matched_alert_fraction(row, name, thr, safe_end, time_start, miss)
 
 # Compact event table.
 event_rows = []
@@ -138,6 +138,7 @@ fig,ax=plt.subplots(figsize=(10.5,12.5)); y=np.arange(len(support)); s=np.array(
 ax.barh(y,s,color="#56B4E9",label="Successes"); ax.barh(y,f,left=s,color="#D55E00",label="Failures"); ax.set_yticks(y,[r["task_name"] for r in support],fontsize=8); ax.set_xlabel("All retained calibration rollouts"); ax.set_title("Calibration support and quota overshoot",weight="bold"); ax.legend(frameon=False); ax.grid(axis="x",alpha=.2); fig.tight_layout(); save(fig,"05_per_task_collection_support")
 
 # Representative video selection: two strongest staged gains, one loss, one tie, one staged FP, one all-detector TN.
+manifest_by_id = {row["rollout_id"]: row for row in read_jsonl(sources["manifest.jsonl"])}
 available=[r for r in rows if r.get("video_path") and Path(r["video_path"]).is_file()]
 ff=[r for r in available if r["failed"]]; ss=[r for r in available if not r["failed"]]
 if len(ff)<4 or len(ss)<2: raise SystemExit(f"STOP: too few source videos: failures={len(ff)} successes={len(ss)}")
@@ -156,8 +157,25 @@ add("all_detectors_true_negative",[r for r in ss if all(first_alert(r,n) is None
 if len(chosen)<6: add("fallback",sorted(available,key=lambda r:r["rollout_id"]),6-len(chosen))
 chosen=chosen[:6]; index=[]
 for i,(reason,r) in enumerate(chosen,1):
-    src=Path(r["video_path"]); dst=video_dir/f"{i:02d}_{r['task_name']}_{reason}_{r['rollout_id']}.mp4"; shutil.copy2(src,dst)
-    p={"selection_reason":reason,"rollout_id":r["rollout_id"],"task_name":r["task_name"],"failed":r["failed"],"video_file":f"videos/{dst.name}","source_video":str(src)}
+    metadata = manifest_by_id.get(r["rollout_id"])
+    if metadata is None:
+        raise SystemExit(f"STOP: rollout missing from collection manifest: {r['rollout_id']}")
+    stride = int(metadata.get("video_frame_stride") or 1)
+    src=Path(r["video_path"])
+    basename=f"{i:02d}_{r['task_name']}_{reason}_{r['rollout_id']}"
+    raw_dst=raw_video_dir/f"{basename}.mp4"; shutil.copy2(src,raw_dst)
+    annotated_dst=annotated_video_dir/f"{basename}_annotated.mp4"
+    render_info = render_matched_fpr_video(
+        {**r, "replan_steps": metadata.get("replan_steps", 16)},
+        src,
+        annotated_dst,
+        thr,
+        safe_end,
+        time_start,
+        video_frame_stride=stride,
+        reason=reason,
+    )
+    p={"selection_reason":reason,"rollout_id":r["rollout_id"],"task_name":r["task_name"],"failed":r["failed"],"video_file":f"videos/annotated/{annotated_dst.name}","annotated_video_file":f"videos/annotated/{annotated_dst.name}","raw_video_file":f"videos/raw/{raw_dst.name}","source_video":str(src),"video_frame_stride":stride,"annotated_frames":render_info["frames"],"annotated_fps":render_info["fps"]}
     for n in names:p[f"{n}_alert_fraction"]="" if first_alert(r,n) is None else fraction(r,n)
     index.append(p)
 write_csv(data_dir/"representative_video_index.csv",index)
@@ -174,13 +192,13 @@ axes[0].legend(frameon=False,ncol=3,fontsize=8); axes[-1].set_xlabel("Training-d
 
 # Copy compact evidence and build checksummed ZIP.
 for name,path in sources.items(): shutil.copy2(path,data_dir/name)
-for path in [matched/"frozen_tasks.json",matched/"tasks_shard0.txt",matched/"tasks_shard1.txt",matched/"calibration_collection"/"merged_all_retained"/"manifest.jsonl",matched/"calibration_collection"/"official_safe_all_retained"/"conversion_report.json"]:
+for path in [matched/"frozen_tasks.json",matched/"tasks_shard0.txt",matched/"tasks_shard1.txt",matched/"calibration_collection"/"official_safe_all_retained"/"conversion_report.json"]:
     if path.is_file(): shutil.copy2(path,data_dir/path.name)
 for seed in (0,1,2):
     path=matched/"calibration_collection"/"frozen_mlp_scores"/f"seed{seed}"/"provenance.json"
     if path.is_file(): shutil.copy2(path,data_dir/f"seed{seed}_score_provenance.json")
 (data_dir/"visualization_manifest.json").write_text(json.dumps({"scope":"completed matched-FPR calibration only","prospective_test_included":False,"source_analysis":str(analysis),"source_collection":str(matched/"calibration_collection"),"retained_rollouts":len(all_rows),"primary_rollouts":len(rows),"primary_successes":114,"primary_failures":114,"thresholds":thr},indent=2,sort_keys=True)+"\n")
-(out/"README.md").write_text(f"""# Xiaomi matched-FPR calibration visuals\n\nCalibration only; no prospective-test claim. Primary cohort: 228 (114/114); retained: 454. All selected detectors have FPR {metrics['time_only']['false_positive_rate']:.6f}. Figures are PNG/PDF. Videos are unmodified representative policy rollouts; `data/representative_video_index.csv` links them to alarm times and `06_representative_score_trajectories` shows their causal score traces. Misses are assigned fraction 1.0.\n""")
+(out/"README.md").write_text(f"""# Xiaomi matched-FPR calibration visuals\n\nCalibration only; no prospective-test claim. Primary cohort: 228 (114/114); retained: 454. All selected detectors have FPR {metrics['time_only']['false_positive_rate']:.6f}. Figures are PNG/PDF. `videos/raw/` contains the six unmodified representative policy rollouts. `videos/annotated/` contains synchronized 1280x720 videos with the normalized SAFE ensemble score, task-conditioned time risk, frozen thresholds, causal stage windows, moving inference cursor, and first-alarm status. Exact environment-step synchronization uses each rollout's recorded `inference_environment_steps` and `video_frame_stride`. `data/representative_video_index.csv` links both versions to alarm times. Misses are assigned fraction 1.0.\n""")
 files=[p for p in out.rglob("*") if p.is_file()]
 (out/"SHA256SUMS").write_text("\n".join(f"{sha(p)}  {p.relative_to(out)}" for p in sorted(files))+"\n")
 zip_path.parent.mkdir(parents=True,exist_ok=True)
@@ -188,4 +206,4 @@ with zipfile.ZipFile(zip_path,"w",zipfile.ZIP_DEFLATED,allowZip64=True) as z:
     for p in sorted(x for x in out.rglob("*") if x.is_file()): z.write(p,Path(out.name)/p.relative_to(out))
 with zipfile.ZipFile(zip_path) as z:
     if z.testzip() is not None: raise SystemExit("STOP: ZIP CRC validation failed")
-print("VISUAL BUNDLE: VALID"); print("figures:",len(list(fig_dir.glob("*.png"))),"PNG +",len(list(fig_dir.glob("*.pdf"))),"PDF"); print("videos:",len(list(video_dir.glob("*.mp4")))); print("zip:",zip_path); print("zip_sha256:",sha(zip_path)); print("zip_size_bytes:",zip_path.stat().st_size)
+print("VISUAL BUNDLE: VALID"); print("figures:",len(list(fig_dir.glob("*.png"))),"PNG +",len(list(fig_dir.glob("*.pdf"))),"PDF"); print("raw videos:",len(list(raw_video_dir.glob("*.mp4")))); print("annotated videos:",len(list(annotated_video_dir.glob("*.mp4")))); print("zip:",zip_path); print("zip_sha256:",sha(zip_path)); print("zip_size_bytes:",zip_path.stat().st_size)

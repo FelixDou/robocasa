@@ -1,5 +1,10 @@
 # XR1 Phase 2: complete simulator-policy snapshot replay
 
+> **Frozen 2026-10-16.** This track is closed and must not be extended; see
+> [exact_replay_frozen.md](exact_replay_frozen.md). Code moved to
+> `robocasa/recovery/exact_replay/` and `scripts/exact_replay/`; existing
+> registrations must be resumed or reviewed from commit `4d65b542`.
+
 This experiment validates the identification layer required before collecting
 counterfactual recovery data. It does **not** measure recovery quality. A branch
 is admissible only when the simulator, wrapper episode counters, environment
@@ -59,11 +64,11 @@ about this early stage and not the unreachable placement stage.
   exact restore and tolerance audit.
 - `robocasa/recovery/xiaomi_robotics_1_policy.py`: explicit policy
   `get_state()` / `set_state()`, one-shot inference seeds, and request hashes.
-- `robocasa/recovery/counterfactual_branch.py`: paired branch executor and
+- `robocasa/recovery/exact_replay/counterfactual_branch.py`: paired branch executor and
   preregistered engineering gates.
-- `robocasa/recovery/run_phase2_snapshot_replay.py`: task/stage planner,
+- `robocasa/recovery/exact_replay/run_phase2_snapshot_replay.py`: task/stage planner,
   collector, branch runner, evidence ledger, and final analysis.
-- `robocasa/recovery/print_phase2_snapshot_replay.py`: safe running/final
+- `robocasa/recovery/exact_replay/print_phase2_snapshot_replay.py`: safe running/final
   status printer; a failed scientific gate does not terminate the shell.
 
 Snapshot and branch payloads use pickle and must only be loaded from trusted
@@ -182,7 +187,7 @@ export XR1_PHASE2_DRY="$STORAGE_BS/robocasa_checkpoints/safe/xr1_phase2_snapshot
 cd "$ROBOCASA_REPO"
 
 "$XR1_CLIENT_ENV/bin/python" -u -m \
-  robocasa.recovery.run_phase2_snapshot_replay \
+  robocasa.recovery.exact_replay.run_phase2_snapshot_replay \
   --output-dir "$XR1_PHASE2_DRY" \
   --runtime-bundle "$XR1_STAGE_RUNTIME" \
   --tasks ArrangeTea CuttingToolSelection \
@@ -211,7 +216,7 @@ cd "$ROBOCASA_REPO"
 
 CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
 "$XR1_CLIENT_ENV/bin/python" -u -m \
-  robocasa.recovery.run_phase2_snapshot_replay \
+  robocasa.recovery.exact_replay.run_phase2_snapshot_replay \
   --output-dir "$XR1_PHASE2_SMOKE" \
   --runtime-bundle "$XR1_STAGE_RUNTIME" \
   --tasks ArrangeTea \
@@ -230,7 +235,7 @@ CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
   2>&1 | tee "$XR1_PHASE2_SMOKE_LOG"
 
 "$XR1_CLIENT_ENV/bin/python" -m \
-  robocasa.recovery.print_phase2_snapshot_replay \
+  robocasa.recovery.exact_replay.print_phase2_snapshot_replay \
   --run-dir "$XR1_PHASE2_SMOKE"
 ```
 
@@ -250,7 +255,7 @@ uniqueness, and reruns all engineering gates without copying raw artifacts.
 export XR1_PHASE2_COMBINED="$STORAGE_BS/robocasa_checkpoints/safe/xr1_phase2_combined_$(date +%Y%m%d_%H%M%S)"
 
 "$XR1_CLIENT_ENV/bin/python" -u -m \
-  robocasa.recovery.audit_combined_phase2_snapshot_replay \
+  robocasa.recovery.exact_replay.audit_combined_phase2_snapshot_replay \
   --source "ArrangeTea=$XR1_PHASE2_ARRANGE_ROOT" \
   --source "CuttingToolSelection=$XR1_PHASE2_CUTTING_ROOT" \
   --parents-per-task 5 \
@@ -277,7 +282,7 @@ cd "$ROBOCASA_REPO"
 
 CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
 nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
-  robocasa.recovery.run_phase2_snapshot_replay \
+  robocasa.recovery.exact_replay.run_phase2_snapshot_replay \
   --output-dir "$XR1_PHASE2_ROOT" \
   --runtime-bundle "$XR1_STAGE_RUNTIME" \
   --tasks ArrangeTea CuttingToolSelection \
@@ -312,14 +317,14 @@ while kill -0 "$XR1_PHASE2_PID" 2>/dev/null; do
   clear
   date
   "$XR1_CLIENT_ENV/bin/python" -m \
-    robocasa.recovery.print_phase2_snapshot_replay \
+    robocasa.recovery.exact_replay.print_phase2_snapshot_replay \
     --run-dir "$XR1_PHASE2_ROOT"
   tail -n 20 "$XR1_PHASE2_LOG"
   sleep 30
 done
 
 "$XR1_CLIENT_ENV/bin/python" -m \
-  robocasa.recovery.print_phase2_snapshot_replay \
+  robocasa.recovery.exact_replay.print_phase2_snapshot_replay \
   --run-dir "$XR1_PHASE2_ROOT"
 ```
 
@@ -333,7 +338,7 @@ frozen output root:
 cd "$ROBOCASA_REPO"
 CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 \
 nohup "$XR1_CLIENT_ENV/bin/python" -u -m \
-  robocasa.recovery.run_phase2_snapshot_replay \
+  robocasa.recovery.exact_replay.run_phase2_snapshot_replay \
   --output-dir "$XR1_PHASE2_ROOT" \
   --runtime-bundle "$XR1_STAGE_RUNTIME" \
   --tasks ArrangeTea CuttingToolSelection \

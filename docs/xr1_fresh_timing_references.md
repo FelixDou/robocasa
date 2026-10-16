@@ -1,5 +1,10 @@
 # XR1 fresh common-entry reference cohort
 
+> **Frozen 2026-10-16.** This track is closed and must not be extended; see
+> [exact_replay_frozen.md](exact_replay_frozen.md). Code moved to
+> `robocasa/recovery/exact_replay/` and `scripts/exact_replay/`; existing
+> registrations must be resumed or reviewed from commit `4d65b542`.
+
 Implementation status: **v4 accepted the first ArrangeTea pair, then failed
 CuttingToolSelection's live reset-observation check. One of ten pairs is
 accepted; inspect the saved reset audit before another collection**.
@@ -99,7 +104,7 @@ cd "$ROBOCASA_REPO"
 git pull --ff-only origin main
 export XR1_REFS_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_references_obsfix_$(date +%Y%m%d_%H%M%S)"
 export XR1_REFS_PORT=10328
-bash "$ROBOCASA_REPO/scripts/collect_xr1_timing_references.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/collect_xr1_timing_references.sh" start
 ```
 
 ## V2 first-parent repeat failure: inspect saved data next
@@ -206,7 +211,7 @@ source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_references
 export XR1_REFS_PAIR="$XR1_REFS_ROOT/references/parents/6c84f0411b020f6889786e66/collection_xmaaqmxz"
 cd "$ROBOCASA_REPO"
 git pull --ff-only origin main
-"$XR1_CLIENT_ENV/bin/python" -u -m robocasa.recovery.inspect_intervention_timing_restore \
+"$XR1_CLIENT_ENV/bin/python" -u -m robocasa.recovery.exact_replay.inspect_intervention_timing_restore \
   --pair-dir "$XR1_REFS_PAIR" --step 1
 ```
 
@@ -368,7 +373,7 @@ export XR1_REFS_SERVER_GPU=1
 export XR1_REFS_PORT=10331
 export XR1_REFS_ROOT=/gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_references_observer_v4_$(date +%Y%m%d_%H%M%S)
 
-bash scripts/collect_xr1_timing_references.sh start
+bash scripts/exact_replay/collect_xr1_timing_references.sh start
 ```
 
 Choose another unused port for concurrent work. The launcher requires separate
@@ -382,7 +387,7 @@ In another terminal on the allocation:
 
 ```bash
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_references_latest.env
-bash "$ROBOCASA_REPO/scripts/collect_xr1_timing_references.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/collect_xr1_timing_references.sh" status
 tail -n 60 "$XR1_REFS_LOG"
 ```
 
@@ -408,7 +413,7 @@ Resume an interrupted, unfailed run with the same code and configuration:
 
 ```bash
 source /path/to/this/reference_run/run.env
-bash "$ROBOCASA_REPO/scripts/collect_xr1_timing_references.sh" resume
+bash "$ROBOCASA_REPO/scripts/exact_replay/collect_xr1_timing_references.sh" resume
 ```
 
 Resume verifies the registration, every committed parent's artifact hashes,
@@ -436,7 +441,7 @@ The default null/false template is intentionally not an accepted assessment.
 
 ```bash
 source /path/to/this/reference_run/run.env
-bash "$ROBOCASA_REPO/scripts/collect_xr1_timing_references.sh" review /path/to/completed_image_review.json
+bash "$ROBOCASA_REPO/scripts/exact_replay/collect_xr1_timing_references.sh" review /path/to/completed_image_review.json
 ```
 
 Recording the review is CPU-only: it checks the cohort and artifact hashes and
@@ -454,8 +459,8 @@ SAFE-triggered recovery remains deferred.
 ## Local validation
 
 ```bash
-.venv_video/bin/python -m unittest tests.test_intervention_timing_fresh_references tests.test_intervention_timing_source_inspection tests.test_intervention_timing_parent_audit tests.test_intervention_timing_observation_diagnostic tests.test_intervention_timing_replay_diagnostic tests.test_intervention_timing tests.test_operator_screen tests.test_phase2_snapshot_replay tests.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
-bash -n scripts/collect_xr1_timing_references.sh
+.venv_video/bin/python -m unittest tests.exact_replay.test_intervention_timing_fresh_references tests.exact_replay.test_intervention_timing_source_inspection tests.exact_replay.test_intervention_timing_parent_audit tests.exact_replay.test_intervention_timing_observation_diagnostic tests.exact_replay.test_intervention_timing_replay_diagnostic tests.exact_replay.test_intervention_timing tests.exact_replay.test_operator_screen tests.exact_replay.test_phase2_snapshot_replay tests.exact_replay.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
+bash -n scripts/exact_replay/collect_xr1_timing_references.sh
 ```
 
 These are simulator-free tests and shell validation. They do not establish

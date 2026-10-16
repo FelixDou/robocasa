@@ -1,0 +1,66 @@
+\phaseheader{3B-R}{Completed higher-level operator screen and next timing diagnostic}{\textbf{Completed negative developmental result.} All 160 scientific suffixes passed the engineering audit, but continuation outperformed every intervention and finite-seed oracle routing added no completion gain. The next proposed experiment is a small common-stage-entry timing study; model training and broad recovery scaling remain blocked.}
+\label{sec:operator-screen}
+
+\subsection{Executed design and provenance}
+
+The screen reused the 10 parents, 20 complete snapshots, and two tasks from Phase~2. It executed four operators under two paired continuation-seed schedules: $20\times4\times2=160$ scientific suffixes, following an engineering-only sentinel. The full audit reports 160 unique branches, zero errors, and passing snapshot, restore, request-alignment, seed-pairing, budget, sentinel-repeat, history-reset, and retreat-controller gates. Sentinel outcomes did not determine whether the full screen ran.
+
+The executed interventions were \path{continue}, \path{history_reset_replan}, \path{stage_retry}, and \path{retreat_reset_replan}. History reset replaced the originally proposed cache-only flush because the snapshots were already at inference boundaries with an empty cache. Stage retry used a fixed \emph{supervisor-supplied} task-specific goal for 64 steps; it did not validate a deployable stage estimator. Retreat used eight zero-arm/open-gripper steps followed by 16 normalized vertical/open-gripper steps, then context reset. The common budgets were 480 steps for ArrangeTea and 256 for CuttingToolSelection, including scripted retreat actions.
+
+No earlier complete rewind anchors were available: \path{oracle_rewind} is empty. The executed allocation was therefore \textbf{160, not the earlier proposed 180}. There is no oracle-rewind outcome or upper-bound claim. SAFE alarms did not initiate these interventions.
+
+The engineering and scientific JSON exports were supplied by the user from the cluster on 12 October 2026 and are preserved under \path{evidence/xr1_operator_screen_20261012/}. Their provenance file records hashes and implementation commit \code{cf0b1024}. The scientific export identifies source ledger
+\begin{quote}\raggedright\small
+\path{85ddb0ed862005af77f3f0728a56602d5044cffd79b508edcf174ebdfa38b98e}.
+\end{quote}
+Raw cluster payloads and the exact operator-run directory were not supplied locally; this report records the exported audit rather than claiming an independent local replay audit.
+
+\subsection{Observed scientific results}
+
+Table~\ref{tab:operator-results} uses equal task weighting after averaging both continuation seeds within each snapshot. Completion means the frozen active predicate became true at some point within the budget. Durable completion means it remained true at the branch endpoint, not that the next stage or full task completed.
+
+\begin{table}[H]
+\centering\small
+\caption{Completed operator screen. All values are percentages; gains are percentage points relative to continuation. The intervals are conditional developmental paired-bootstrap intervals.}
+\label{tab:operator-results}
+\begin{tabularx}{\textwidth}{Y r r r P{0.19\textwidth}}
+\toprule
+Operator & Complete & Retained & Gain & Gain 95\% interval \\
+\midrule
+Continue & \textbf{22.5} & \textbf{20.0} & 0.0 & Reference \\
+History reset + replan & 17.5 & 17.5 & $-5.0$ & $[-15.0,0.0]$ \\
+Stage retry & 17.5 & 17.5 & $-5.0$ & $[-15.0,0.0]$ \\
+Retreat + reset + replan & 17.5 & 15.0 & $-5.0$ & $[-12.5,0.0]$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+ArrangeTea completion was 45\% for continuation and 35\% for each intervention; retained completion was 40\%, 35\%, 35\%, and 30\%, respectively. CuttingToolSelection completion and retained completion were zero in all four arms. Full-task success was zero throughout. None of the three interventions produced positive mean completion advantage in any parent, and none passed the registered scientific gate.
+
+After averaging the two seeds, oracle selection of the best operator per snapshot reached 22.5\%, exactly matching continuation. Oracle-routing-minus-best-fixed was zero, with bootstrap interval $[0,0]$. This means no snapshot in the observed two-seed support had a positive mean completion gain from an intervention. The degenerate resampling interval reflects the observed finite support; it is not proof of zero routing value across unseen seeds, parents, or tasks.
+
+The exported predicate-regression rates were 60\% for continuation, 60\% for history reset, 52.5\% for stage retry, and 57.5\% for retreat. In ArrangeTea, continuation's flag rate was 100\%. The implemented flag detects an initially true predicate becoming false; without predicate-level inspection it must not be equated with irreversible loss of an ordered completed stage. Some relational predicates may normally change during legitimate progress. Declared safety events were zero in every arm, which is a recorded endpoint rather than a comprehensive collision-safety certification. Mean policy calls were 23 for continuation, history reset, and stage retry and 22 for retreat; mean suffix execution times were approximately 39.8--40.0 seconds across arms.
+
+\negativeresult{The registered decision is \path{mechanism_redesign_or_earlier_snapshot_study}. Continuation is the best fixed operator; no operator is recommended and the promising-operator set is empty. Preserve this screen, stop scaling its operator/snapshot combination, and do not train an operator router, reopen local candidate reranking, or claim SAFE-triggered recovery benefit. The small two-task result does not establish that recovery in general is ineffective or that timing caused the failure.}
+
+\subsection{Next proposed experiment: common-stage-entry timing diagnostic}
+
+\label{sec:next-timing-study}
+Test whether these bounded interventions help before the existing stage boundary, which follows two genuine policy inferences. Use the same 10 parents as a \emph{development-only} diagnostic, not as a new confirmation set. First replay each original nominal parent using its frozen environment and policy sampling provenance, capture a genuine complete simulator-policy state at the first eligible inference boundary of the relevant target-stage visit, and audit the original prefix-2 reference. A matching task name or reset seed alone does not establish reproduction. Missing states must be recollected; an existing late snapshot cannot be relabeled as earlier.
+
+From each common stage-entry state, freeze two nominal continuation-seed schedules. For each seed, compare the three interventions applied immediately, after one genuine policy inference, or after two genuine policy inferences. Every delayed arm follows the identical paired nominal prefix before intervention. Use one shared continuation trajectory per parent and seed; it is the control for all three timings. This gives
+\[
+10\text{ parents}\times2\text{ seeds}\times
+\bigl(1\text{ continuation}+3\text{ operators}\times3\text{ timings}\bigr)
+=\boxed{200\text{ unique scientific trajectories}}.
+\]
+An implementation that repeats the control in every timing cell allocates 240 runs, but those repeated controls are not independent evidence. Exact sentinel repeats are additional engineering executions.
+
+All regimes end at the \emph{same absolute environment-step endpoint from stage entry}: 480 steps for ArrangeTea and 256 for CuttingToolSelection. Waiting and scripted retreat consume that budget. Do not reuse the old prefix-2 suffix outcomes as matched late controls, since their endpoints and seed schedules differ. Freeze per-request seeds by the common nominal/request schedule before collection, and log timing eligibility, intervention execution, stage transitions, full-task success, and errors. If a target completes before a delayed intervention or the regime becomes ineligible, keep that assignment and use a frozen no-intervention fallback; do not drop it from the analysis.
+
+The primary contrast is each operator/timing regime minus its paired continuation control. The timing contrast compares the \emph{same} operator at early and delayed application from the shared base and endpoint. Report active-predicate completion, endpoint retention, full-task success, audited ordered-prefix regression, declared safety, calls, and latency separately. Keep tasks fixed in the paired parent bootstrap, retain all regimes and seeds from each sampled parent, and label the estimates exploratory.
+
+\paragraph{Engineering gate and decision.}
+Run a two-parent sentinel, one parent per task, to validate stage-entry replay, complete-state restoration, pre-intervention prefix equality, seed accounting, timing eligibility, shared controls, common endpoints, and exact repeats. If it passes, collect all 10 parents regardless of sentinel efficacy. A timing/operator cell is a candidate for \emph{fresh-parent validation} only if it passes the existing practical gain and harm guardrails, including at least 10 percentage points of completion and retention gain, positive task signs, and at least three benefiting parents. Choosing among nine cells is development selection, not confirmation. If useful intervention value is still absent, redesign the executor or scope the work to the negative causal benchmark; do not run another timing or detector sweep on these parents.
+
+\implementationnote{Implementation status.}{The completed operator collector and analyzer are implemented. This timing study is a proposed protocol, documented in \path{docs/xr1_earlier_intervention_timing_study.md}; a common-stage-entry replay collector and dynamic-regime analyzer still need implementation and engineering validation. The existing \path{run_xr1_operator_screen.sh} launcher reuses the frozen late snapshots and cannot run this design.}

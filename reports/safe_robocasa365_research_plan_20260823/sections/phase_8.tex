@@ -1,8 +1,10 @@
 \phaseheader{8}{Add differentiable recovery-value guidance to the flow policy}{Attempt an algorithmic efficiency extension only after discrete critic reranking proves prospective actionability. Test whether a noise-step-conditioned critic can guide one action-generation trajectory as effectively as sampling and ranking four complete candidates.}
 
+\cautionnote{Current status.}{This phase remains conditional and has not been run. The completed candidate and operator screens provide no useful executor or selection headroom at the studied states. Resolve the bounded timing/operator capability question and validate any selected mechanism on fresh parents before proceeding. SAFE-triggered recovery benefit has not been tested.}
+
 \subsection{Scientific hypothesis and relation to prior work}
 
-Failure-informed or critic-guided diffusion/flow improvement is already an active area~\cite{afil,rover,qvgm,checkvla}. Therefore, ``using a critic to guide flow'' is not by itself a sufficient novelty claim. Within this project, guidance is valuable if it uses the causal recovery-value target in Equation~\eqref{eq:advantage}, operates only when the utility gate identifies a recoverable state, and achieves the same or better embodied recovery with lower matched cost.
+Failure-informed or critic-guided diffusion/flow improvement is already an active area~\cite{afil,rover,qvgm,checkvla,guidedactionflow}. In particular, Guided Action Flow directly studies test-time action-gradient guidance for a frozen flow-matching VLA. Therefore, ``using a critic to guide flow'' or ``SAFE plus a critic'' is not by itself a sufficient novelty claim. Within this project, guidance is valuable only as a conditional efficiency extension: it must use the causal recovery-value target in Equation~\eqref{eq:advantage}, operate only when the utility gate identifies a recoverable state, and achieve the same or better embodied recovery with lower matched cost.
 
 Let $z_{\tau}$ be the noisy action latent and $v_{\theta}(z_{\tau},h_t,\tau)$ the frozen policy velocity. A generic guided form is
 \begin{equation}
@@ -47,7 +49,7 @@ Primary outcomes are active-stage recovery and full-task success. Secondary outc
 
 \positiveresult{Guided $K=1$ matches or exceeds critic-reranked $K=4$ within a frozen statistical margin, uses meaningfully less inference cost or latency, and does not increase collision, saturation, oscillation, or completed-stage regression. The frozen guidance setting transfers from the two development tasks to held-out tasks.}
 
-\negativeresult{Retain critic reranking as the recovery executor. Do not present guidance as successful if it raises the critic score but not executed task outcomes, if a shuffled gradient performs similarly, or if matched-compute comparisons remove the benefit. Phase 8 is optional; the causal recoverability paper does not require it to pass.}
+\negativeresult{Retain the Phase~6 executor, whether a critic, router, or fixed operator. Do not present guidance as successful if it raises the critic score but not executed task outcomes, if a shuffled gradient performs similarly, or if matched-compute comparisons remove the benefit. Phase~8 is optional; the causal recoverability paper does not require it to pass.}
 
 \subsection{Required outputs}
 

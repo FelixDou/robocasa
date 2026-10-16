@@ -1,0 +1,31 @@
+mode,instruction,target_key,attempts,success,fail,success_rate
+continue_from_failure,Open drawer.,drawer_open,20,0,20,0.0
+continue_from_failure,Pick pan.,pan_grasped,13,1,12,0.07692307692307693
+continue_from_failure,Pick object.,object_grasped,12,0,12,0.0
+continue_from_failure,Turn on water.,water_on,12,0,12,0.0
+continue_from_failure,Open cabinet.,cabinet_open,9,0,9,0.0
+continue_from_failure,Pick mug.,mug_grasped,9,1,8,0.1111111111111111
+continue_from_failure,Open fridge.,fridge_open,8,1,7,0.125
+continue_from_failure,Close toaster oven.,toaster_oven_closed,5,0,5,0.0
+continue_from_failure,Group glasses.,glasses_clustered,5,0,5,0.0
+continue_from_failure,Group plastic bottles.,plastic_bottles_clustered,5,0,5,0.0
+eef_to_last_good,Open drawer.,drawer_open,17,0,17,0.0
+eef_to_last_good,Pick pan.,pan_grasped,14,2,12,0.14285714285714285
+eef_to_last_good,Open fridge.,fridge_open,11,0,11,0.0
+eef_to_last_good,Pick object.,object_grasped,11,0,11,0.0
+eef_to_last_good,Pick mug.,mug_grasped,9,1,8,0.1111111111111111
+eef_to_last_good,Open cabinet.,cabinet_open,8,1,7,0.125
+eef_to_last_good,Turn on water.,water_on,8,1,7,0.125
+eef_to_last_good,Group glasses.,glasses_clustered,5,0,5,0.0
+eef_to_last_good,Group plastic bottles.,plastic_bottles_clustered,5,0,5,0.0
+eef_to_last_good,Move blender lid onto blender.,blender_lid_on_blender,5,0,5,0.0
+env_to_last_good,Open drawer.,drawer_open,18,0,18,0.0
+env_to_last_good,Move mug under coffee dispenser.,mug_under_dispenser,10,1,9,0.1
+env_to_last_good,Open fridge.,fridge_open,11,3,8,0.2727272727272727
+env_to_last_good,Open cabinet.,cabinet_open,9,3,6,0.3333333333333333
+env_to_last_good,Turn on water.,water_on,10,5,5,0.5
+env_to_last_good,Group glasses.,glasses_clustered,5,0,5,0.0
+env_to_last_good,Group plastic bottles.,plastic_bottles_clustered,5,0,5,0.0
+env_to_last_good,Move blender lid onto blender.,blender_lid_on_blender,5,0,5,0.0
+env_to_last_good,Move robot to target.,at_target_position,5,0,5,0.0
+env_to_last_good,Open freezer.,freezer_open,5,0,5,0.0

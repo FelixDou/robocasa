@@ -1,0 +1,4 @@
+mode,rollouts,hl_success,hl_success_rate,hl_tried_subtasks_completed,hl_tried_subtasks_total,hl_tried_subtask_accuracy,failed_hl_rollouts,avg_successful_subtasks_before_failure,recovery_attempts,recovery_success,recovery_success_rate_per_attempt,recovery_success_rate_all_trials,failure_recovery_failed,failure_recovery_failed_rate_all_trials,attempts_with_prior_progress,recovery_success_with_prior_progress,recovery_success_with_prior_progress_rate
+continue_from_failure,250,30,0.12,201,421,0.47743467933491684,220,0.4954545454545455,220,5,0.022727272727272728,0.02,215,0.86,76,4,0.05263157894736842
+eef_to_last_good,250,37,0.148,199,410,0.4853658536585366,213,0.5070422535211268,213,12,0.056338028169014086,0.048,201,0.804,71,8,0.11267605633802817
+env_to_last_good,250,32,0.128,192,410,0.4682926829268293,218,0.46788990825688076,218,40,0.1834862385321101,0.16,178,0.712,74,16,0.21621621621621623

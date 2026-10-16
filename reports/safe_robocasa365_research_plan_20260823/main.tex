@@ -87,6 +87,24 @@
 
 \newcommand{\proposedfile}[1]{\path{#1}\textsuperscript{new}}
 
+\makeatletter
+\renewcommand*\l@section[2]{%
+  \ifnum \c@tocdepth >\z@
+    \addpenalty\@secpenalty
+    \addvspace{0.45em \@plus\p@}%
+    \setlength\@tempdima{1.5em}%
+    \begingroup
+      \parindent \z@ \rightskip \@pnumwidth
+      \parfillskip -\@pnumwidth
+      \leavevmode \bfseries
+      \advance\leftskip\@tempdima
+      \hskip -\leftskip
+      #1\nobreak\hfil\nobreak\hb@xt@\@pnumwidth{\hss #2}\par
+    \endgroup
+  \fi}
+\renewcommand*\l@subsection{\@dottedtocline{2}{1.5em}{3.2em}}
+\makeatother
+
 \begin{document}
 \pagenumbering{roman}
 \hypersetup{pageanchor=false}
@@ -106,20 +124,25 @@ Natural alternative: & ICRA \\
 Stretch target: & RSS \\
 Conditional vision route: & CVPR / ICCV / WACV \\
 Primary policy: & Xiaomi-Robotics-1 on RoboCasa365 \\
-Report date: & 26 August 2026 \\
+Report date: & 12 October 2026 \\
 \end{tabular}
 
 \vfill
 \begin{minipage}{0.9\textwidth}
-\small
-This document starts from the verified SAFE and recovery evidence already present in the repository. It incorporates the completed Phase~1 five-task frozen confirmation, the subsequent state-context development study, and the passing Phase~2 exact snapshot-replay validation. Phase~3 is now active as a bounded read-only candidate-opportunity analysis. The plan separates development evidence, retrospective analysis, frozen prospective shadow evaluation, simulator-oracle recovery, prospective intervention, and real-robot evidence. Every phase specifies the scientific hypothesis, the implementation required, the evaluation estimand, the statistical unit, the result that would count as positive, and the scientific meaning of a failed gate.
+\footnotesize
+This document starts from the SAFE and recovery evidence in the repository and incorporates results through 12 October 2026. Phase~1 frozen confirmation failed; Phase~2 complete snapshot replay passed; Phases~3 and 3B found negligible local-candidate selection headroom. The subsequent 160-suffix higher-level operator screen also passed engineering but failed its scientific gate: continuation reached 22.5\% stage completion versus 17.5\% for every intervention, with zero oracle routing gain and zero full-task success. The next proposed experiment is a bounded common-stage-entry timing diagnostic, not model training or broad recovery scaling. Completed results, supplied cluster exports, proposed protocols, supervisor-conditioned operators, and deployable intervention evidence remain explicitly distinct.
 \end{minipage}
 \vfill
 {\small Felix Doublet --- Shinoda Laboratory}
 \end{titlepage}
 \hypersetup{pageanchor=true}
 
+\begingroup
+\small
+\linespread{0.96}\selectfont
+\setlength{\parskip}{0pt}
 \tableofcontents
+\endgroup
 \clearpage
 \pagenumbering{arabic}
 
@@ -129,6 +152,8 @@ This document starts from the verified SAFE and recovery evidence already presen
 \input{sections/phase_1}
 \input{sections/phase_2}
 \input{sections/phase_3}
+\input{sections/phase_3b}
+\input{sections/phase_3br}
 \input{sections/phase_4}
 \input{sections/phase_5}
 \input{sections/phase_6}

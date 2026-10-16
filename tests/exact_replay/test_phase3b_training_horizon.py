@@ -1,0 +1,750 @@
+import gzip
+import hashlib
+import json
+from copy import deepcopy
+from pathlib import Path
+import pickle
+import tempfile
+import unittest
+from unittest.mock import patch
+
+import numpy as np
+
+from robocasa.recovery.exact_replay.phase3b_training_horizon import (
+    PHASE3B_TASK_HORIZONS,
+    build_registration,
+    completion_event,
+    first64_equality_audit,
+    load_registered_phase2_snapshot,
+    qualify_legacy_phase2_prefix,
+    route_phase3b,
+    sha256_file,
+    two_pass_first64_audit,
+    validate_registration_source,
+)
+from robocasa.recovery.full_snapshot import (
+    FULL_SNAPSHOT_PROTOCOL,
+    FULL_SNAPSHOT_SCHEMA_VERSION,
+    FullSnapshot,
+    load_full_snapshot,
+    save_full_snapshot,
+    stable_digest,
+)
+from robocasa.recovery.exact_replay.run_phase3b_training_horizon_continuation import main
+
+
+TASKS = ("ArrangeTea", "CuttingToolSelection")
+
+
+def _snapshot(path: Path):
+    snapshot = FullSnapshot(
+        schema_version=FULL_SNAPSHOT_SCHEMA_VERSION,
+        protocol=FULL_SNAPSHOT_PROTOCOL,
+        snapshot_id="",
+        parent_id="parent",
+        task_name="ArrangeTea",
+        trigger_name="prefix",
+        environment_step=16,
+        captured_at="2026-08-30T00:00:00+00:00",
+        environment_state={"state": [1, 2]},
+        simulator_integration_state={},
+        controller_state=[],
+        policy_state={"at_inference_boundary": True},
+        observation={"state": [3, 4]},
+        subtask_eval={},
+        tracker_state=None,
+        global_rng_state={},
+        environment_rng_state=[],
+        environment_control_state=[],
+        metadata={},
+        payload_sha256="",
+    )
+    snapshot.payload_sha256 = stable_digest(snapshot.payload())
+    snapshot.snapshot_id = hashlib.sha256(
+        f"{snapshot.parent_id}:{snapshot.trigger_name}:"
+        f"{snapshot.environment_step}:{snapshot.payload_sha256}".encode()
+    ).hexdigest()[:24]
+    save_full_snapshot(snapshot, path)
+    return snapshot
+
+
+def _write_phase2_source(root: Path):
+    candidate_parents = []
+    parent_rows = []
+    branch_rows = []
+    snapshot_index = 0
+    for task_index, task in enumerate(TASKS):
+        # Reverse reset order in the ledger so deterministic selection must use
+        # the frozen identity, not file order.
+        for reset_index in (4, 3, 2, 1, 0):
+            parent_id = f"{task}-parent-{reset_index}"
+            candidate_parents.append(
+                {
+                    "parent_id": parent_id,
+                    "task_name": task,
+                    "environment_seed": 1000 + task_index * 10 + reset_index,
+                    "environment_reset_index": reset_index,
+                }
+            )
+            captured = {}
+            for boundary in ("prefix", "landmark"):
+                snapshot_id = f"snapshot-{snapshot_index:02d}"
+                snapshot_index += 1
+                captured[boundary] = snapshot_id
+                snapshot_path = root / "snapshots" / f"{snapshot_id}.pkl.gz"
+                snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+                snapshot_path.write_bytes(f"snapshot:{snapshot_id}".encode())
+                specifications = [
+                    ("same_seed_repeat", 5000 + snapshot_index, 0),
+                    ("same_seed_repeat", 5000 + snapshot_index, 1),
+                    *[
+                        ("candidate", 7000 + snapshot_index * 10 + index, None)
+                        for index in range(4)
+                    ],
+                    ("environment_only", 5000 + snapshot_index, None),
+                ]
+                for branch_number, (kind, seed, repeat) in enumerate(specifications):
+                    branch_id = f"{snapshot_id}-{branch_number}"
+                    payload_path = root / "branches" / f"{branch_id}.pkl.gz"
+                    payload_path.parent.mkdir(parents=True, exist_ok=True)
+                    payload_path.write_bytes(f"payload:{branch_id}".encode())
+                    branch_rows.append(
+                        {
+                            "branch_id": branch_id,
+                            "snapshot_id": snapshot_id,
+                            "parent_id": parent_id,
+                            "task_name": task,
+                            "kind": kind,
+                            "repeat_index": repeat,
+                            "sampling_seed": seed,
+                            "payload_path": str(payload_path.relative_to(root)),
+                            "payload_sha256": f"embedded-{branch_id}",
+                            "payload_file_sha256": sha256_file(payload_path),
+                        }
+                    )
+            parent_rows.append(
+                {
+                    "parent_id": parent_id,
+                    "task_name": task,
+                    "captured": captured,
+                    "valid": True,
+                }
+            )
+
+    plan = {
+        "protocol": "phase2_complete_snapshot_replay",
+        "tasks": list(TASKS),
+        "target_stages": {task: f"{task}::target" for task in TASKS},
+        "trigger_stages": {task: f"{task}::trigger" for task in TASKS},
+        "branch_policy_connection_mode": "shared_restored",
+        "candidate_count": 4,
+        "suffix_steps": 64,
+        "expected_total_branches": 140,
+        "candidate_parents": candidate_parents,
+        "runtime_bundle_sha256": "runtime",
+        "checkpoint_provenance_sha256": "checkpoint",
+        "robocasa_commit": "robocasa",
+        "server_repository_commit": "server",
+    }
+    (root / "plan.json").write_text(json.dumps(plan))
+    (root / "analysis.json").write_text(json.dumps({"all_pass": True, "errors": 0}))
+    (root / "errors.jsonl").write_text("")
+    with (root / "parent_records.jsonl").open("w") as stream:
+        for row in parent_rows:
+            stream.write(json.dumps(row) + "\n")
+    with (root / "branch_records.jsonl").open("w") as stream:
+        for row in branch_rows:
+            stream.write(json.dumps(row) + "\n")
+
+
+class Phase3BTrainingHorizonTest(unittest.TestCase):
+    def test_object_array_digest_is_logical_not_pointer_based(self):
+        self.assertEqual(
+            stable_digest(np.array(None, dtype=object)),
+            "249d6a9e15a23e77a11a1651941401dfb18fe6aa155522f52d1e645fee49787f",
+        )
+        self.assertEqual(
+            stable_digest(np.array([None, "ready", 3], dtype=object)),
+            "4942b51deace0f32acf57ee7dbedadb34944bd8fd66954c8402ffd8fde0341b8",
+        )
+
+    def test_early_cli_failure_finalizes_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "run"
+            output.mkdir()
+            with patch(
+                "robocasa.recovery.exact_replay.run_phase3b_training_horizon_continuation.run",
+                side_effect=ValueError("snapshot rejected"),
+            ):
+                with self.assertRaisesRegex(SystemExit, "snapshot rejected"):
+                    main(
+                        [
+                            "--phase2-run-dir",
+                            str(Path(directory) / "phase2"),
+                            "--output-dir",
+                            str(output),
+                            "--scope",
+                            "sentinel",
+                            "--model-path",
+                            str(Path(directory) / "model"),
+                        ]
+                    )
+            status = json.loads((output / "status.json").read_text())
+            self.assertEqual(status["status"], "failed")
+            self.assertEqual(status["error_type"], "ValueError")
+            self.assertEqual(status["error"], "snapshot rejected")
+
+    def test_registered_snapshot_loader_keeps_general_loader_strict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.pkl.gz"
+            expected = _snapshot(path)
+
+            loaded, audit = load_registered_phase2_snapshot(
+                path,
+                expected_file_sha256=sha256_file(path),
+                expected_snapshot_id=expected.snapshot_id,
+                expected_parent_id=expected.parent_id,
+                expected_task_name=expected.task_name,
+            )
+
+            self.assertEqual(loaded.snapshot_id, expected.snapshot_id)
+            self.assertTrue(audit["strict_internal_checksums_exact"])
+            self.assertIn("strict_internal_checksums", audit["loading_mode"])
+
+    def test_registered_snapshot_loader_anchors_legacy_fallback_to_file_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.pkl.gz"
+            expected = _snapshot(path)
+            with gzip.open(path, "rb") as stream:
+                envelope = pickle.load(stream)
+            envelope["snapshot"].metadata["legacy_process_local_value"] = "changed"
+            with gzip.open(path, "wb") as stream:
+                pickle.dump(envelope, stream, protocol=5)
+            frozen_file_sha256 = sha256_file(path)
+
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                load_full_snapshot(path)
+
+            loaded, audit = load_registered_phase2_snapshot(
+                path,
+                expected_file_sha256=frozen_file_sha256,
+                expected_snapshot_id=expected.snapshot_id,
+                expected_parent_id=expected.parent_id,
+                expected_task_name=expected.task_name,
+            )
+
+            self.assertEqual(loaded.snapshot_id, expected.snapshot_id)
+            self.assertFalse(audit["strict_internal_checksums_exact"])
+            self.assertEqual(
+                audit["loading_mode"],
+                "legacy_schema5_registered_file_sha256_and_embedded_identity",
+            )
+            with self.assertRaisesRegex(ValueError, "file changed"):
+                load_registered_phase2_snapshot(
+                    path,
+                    expected_file_sha256="0" * 64,
+                    expected_snapshot_id=expected.snapshot_id,
+                    expected_parent_id=expected.parent_id,
+                    expected_task_name=expected.task_name,
+                )
+
+    def test_sentinel_selection_and_registered_horizons_are_deterministic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "phase2"
+            root.mkdir()
+            _write_phase2_source(root)
+
+            registration = build_registration(root, scope="sentinel")
+
+            self.assertEqual(registration["expected_parents"], 2)
+            self.assertEqual(registration["expected_snapshots"], 4)
+            self.assertEqual(registration["expected_branches"], 28)
+            self.assertEqual(registration["expected_scientific_branches"], 16)
+            self.assertEqual(
+                {
+                    row["environment_reset_index"]
+                    for row in registration["selected_snapshots"]
+                },
+                {0},
+            )
+            self.assertEqual(
+                {
+                    row["task_name"]: row["horizon_environment_steps"]
+                    for row in registration["selected_snapshots"]
+                },
+                PHASE3B_TASK_HORIZONS,
+            )
+            self.assertFalse(
+                registration["scientific_outcomes_may_stop_full_progression"]
+            )
+            source_rows = {
+                json.loads(line)["branch_id"]: json.loads(line)
+                for line in (root / "branch_records.jsonl").read_text().splitlines()
+            }
+            self.assertTrue(
+                all(
+                    row["sampling_seed"]
+                    == source_rows[row["source_branch_id"]]["sampling_seed"]
+                    for row in registration["registered_branches"]
+                )
+            )
+            validate_registration_source(registration)
+
+            (root / "analysis.json").write_text(
+                json.dumps({"all_pass": True, "errors": 0, "changed": True})
+            )
+            with self.assertRaisesRegex(ValueError, "source artifacts changed"):
+                validate_registration_source(registration)
+
+    def test_full_registration_requires_matching_all_pass_sentinel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "phase2"
+            sentinel = Path(directory) / "sentinel"
+            root.mkdir()
+            sentinel.mkdir()
+            _write_phase2_source(root)
+            sentinel_registration = build_registration(root, scope="sentinel")
+            (sentinel / "registration.json").write_text(
+                json.dumps(sentinel_registration)
+            )
+            (sentinel / "analysis.json").write_text(
+                json.dumps({"engineering_all_pass": True})
+            )
+
+            full = build_registration(root, scope="full", sentinel_run_dir=sentinel)
+
+            self.assertEqual(full["expected_parents"], 10)
+            self.assertEqual(full["expected_snapshots"], 20)
+            self.assertEqual(full["expected_branches"], 140)
+            self.assertEqual(full["expected_scientific_branches"], 80)
+
+    def test_first64_audit_reports_any_mismatched_channel(self):
+        action = [f"a-{index}" for index in range(64)]
+        observations = [f"o-{index}" for index in range(65)]
+        environment = [f"e-{index}" for index in range(64)]
+        requests = [f"r-{index}" for index in range(4)]
+        trace = [{"step": index} for index in range(65)]
+        source_record = {
+            "branch_id": "source",
+            "sampling_seed": 17,
+            "num_steps": 64,
+            "num_policy_requests": 4,
+            "suffix_action_sha256": action,
+            "suffix_observation_sha256": observations,
+            "suffix_environment_sha256": environment,
+            "suffix_request_sha256": requests,
+        }
+        source_payload = {"subtask_trace": trace}
+        result = {
+            "summary": {
+                "branch_id": "continued",
+                "sampling_seed": 17,
+                "num_steps": 480,
+                "suffix_action_sha256": action + ["later"],
+                "suffix_observation_sha256": observations + ["later"],
+                "suffix_environment_sha256": environment + ["later"],
+                "suffix_request_sha256": requests + ["later"],
+            },
+            "payload": {"subtask_trace": trace + [{"step": 65}]},
+        }
+        self.assertTrue(
+            first64_equality_audit(source_record, source_payload, result)["all_exact"]
+        )
+        result["summary"]["suffix_action_sha256"][10] = "mismatch"
+        audit = first64_equality_audit(source_record, source_payload, result)
+        self.assertFalse(audit["all_exact"])
+        self.assertFalse(audit["channels"]["actions"])
+        self.assertEqual(audit["sequence_mismatch_indices"], {"actions": [10]})
+        self.assertTrue(audit["first_causal_transition_structure_exact"])
+        self.assertEqual(audit["first_causal_transition_structure_mismatches"], [])
+
+    def test_two_pass_audit_qualifies_only_complete_legacy_hash_signature(self):
+        actions = [f"a-{index}" for index in range(64)]
+        observations = [f"o-{index}" for index in range(65)]
+        portable_environment = [f"new-e-{index}" for index in range(64)]
+        legacy_environment = [f"old-e-{index}" for index in range(64)]
+        requests = [f"r-{index}" for index in range(4)]
+        trace = [{"step": index} for index in range(65)]
+        fingerprint = {"controller_state": np.array(None, dtype=object)}
+        source_record = {
+            "branch_id": "source",
+            "sampling_seed": 17,
+            "num_steps": 64,
+            "num_policy_requests": 4,
+            "suffix_action_sha256": actions,
+            "suffix_observation_sha256": observations,
+            "suffix_environment_sha256": legacy_environment,
+            "suffix_request_sha256": requests,
+        }
+        source_payload = {
+            "subtask_trace": trace,
+            "first_causal_transition_fingerprint": fingerprint,
+        }
+        reference = {
+            "summary": {
+                **source_record,
+                "branch_id": "reference",
+                "stable_digest_schema_version": 2,
+                "suffix_environment_sha256": portable_environment,
+            },
+            "payload": {
+                "subtask_trace": trace,
+                "first_causal_transition_fingerprint": fingerprint,
+            },
+        }
+        continued = {
+            "summary": {
+                **reference["summary"],
+                "branch_id": "continued",
+                "num_steps": 480,
+                "suffix_action_sha256": actions + ["later"],
+                "suffix_observation_sha256": observations + ["later"],
+                "suffix_environment_sha256": portable_environment + ["later"],
+                "suffix_request_sha256": requests + ["later"],
+            },
+            "payload": {
+                "subtask_trace": trace + [{"step": 65}],
+                "first_causal_transition_fingerprint": fingerprint,
+            },
+        }
+
+        audit = two_pass_first64_audit(
+            source_record, source_payload, reference, continued
+        )
+        self.assertTrue(audit["legacy_phase2_qualification"]["qualified"])
+        self.assertEqual(
+            audit["legacy_phase2_qualification"]["mode"],
+            "legacy_object_array_hash_replaced_by_two_pass_reference",
+        )
+        self.assertTrue(audit["reference_to_continuation"]["all_exact"])
+        self.assertTrue(
+            audit["reference_to_continuation"]["channels"]["stable_digest_schema"]
+        )
+        self.assertTrue(audit["all_exact"])
+
+        reference["summary"]["suffix_environment_sha256"][0] = legacy_environment[0]
+        partial = first64_equality_audit(source_record, source_payload, reference)
+        self.assertFalse(qualify_legacy_phase2_prefix(partial)["qualified"])
+
+    def test_environment_only_legacy_terminal_camera_observation_qualification(self):
+        camera_keys = (
+            "video.robot0_agentview_left",
+            "video.robot0_agentview_right",
+            "video.robot0_eye_in_hand",
+        )
+        actions = [f"a-{index}" for index in range(64)]
+        observations = [f"o-{index}" for index in range(65)]
+        legacy_environment = [f"old-e-{index}" for index in range(64)]
+        current_environment = [f"new-e-{index}" for index in range(64)]
+        requests = [f"r-{index}" for index in range(4)]
+        trace = [{"step": index} for index in range(65)]
+        components = [
+            {
+                "state": f"state-{index}",
+                **{key: f"camera-{index}" for key in camera_keys},
+            }
+            for index in range(65)
+        ]
+        reference_components = deepcopy(components)
+        for key in camera_keys:
+            reference_components[64][key] = f"reference-{key}"
+        source_record = {
+            "branch_id": "source-environment-only",
+            "kind": "environment_only",
+            "sampling_seed": 17,
+            "num_steps": 64,
+            "num_policy_requests": 4,
+            "suffix_action_sha256": actions,
+            "suffix_observation_sha256": observations,
+            "suffix_observation_component_sha256": components,
+            "suffix_environment_sha256": legacy_environment,
+            "suffix_request_sha256": requests,
+        }
+        source_payload = {
+            "subtask_trace": trace,
+            "first_causal_transition_fingerprint": {"state": "exact"},
+        }
+        reference = {
+            "summary": {
+                **source_record,
+                "branch_id": "reference",
+                "stable_digest_schema_version": 2,
+                "suffix_observation_sha256": observations[:64]
+                + ["reference-terminal-observation"],
+                "suffix_observation_component_sha256": reference_components,
+                "suffix_environment_sha256": current_environment,
+            },
+            "payload": {
+                "subtask_trace": trace,
+                "first_causal_transition_fingerprint": {"state": "exact"},
+            },
+        }
+
+        audit = first64_equality_audit(source_record, source_payload, reference)
+        qualification = qualify_legacy_phase2_prefix(audit)
+
+        self.assertFalse(audit["channels"]["observations"])
+        self.assertEqual(audit["sequence_mismatch_indices"]["observations"], [64])
+        self.assertEqual(
+            audit["observation_component_mismatches"],
+            [{"index": 64, "components": sorted(camera_keys)}],
+        )
+        self.assertTrue(qualification["qualified"], qualification)
+        self.assertTrue(qualification["terminal_camera_observation_qualified"])
+        self.assertEqual(
+            qualification["mode"],
+            "legacy_environment_only_terminal_camera_observation_"
+            "replaced_by_two_pass_reference",
+        )
+
+        candidate_source = {**source_record, "kind": "candidate"}
+        candidate_audit = first64_equality_audit(
+            candidate_source, source_payload, reference
+        )
+        self.assertFalse(qualify_legacy_phase2_prefix(candidate_audit)["qualified"])
+
+        non_camera_reference = deepcopy(reference)
+        non_camera_reference["summary"]["suffix_observation_component_sha256"][64][
+            "state"
+        ] = "different-state"
+        non_camera_audit = first64_equality_audit(
+            source_record, source_payload, non_camera_reference
+        )
+        self.assertFalse(qualify_legacy_phase2_prefix(non_camera_audit)["qualified"])
+
+        early_reference = deepcopy(reference)
+        early_reference["summary"]["suffix_observation_sha256"][63] = "early"
+        early_reference["summary"]["suffix_observation_component_sha256"][63][
+            camera_keys[0]
+        ] = "early"
+        early_audit = first64_equality_audit(
+            source_record, source_payload, early_reference
+        )
+        self.assertFalse(qualify_legacy_phase2_prefix(early_audit)["qualified"])
+
+        continued = deepcopy(reference)
+        continued["summary"]["branch_id"] = "continued"
+        continued["summary"]["num_steps"] = 480
+        continued["summary"]["suffix_action_sha256"] = actions + ["later"]
+        continued["summary"]["suffix_observation_sha256"] = reference["summary"][
+            "suffix_observation_sha256"
+        ] + ["later"]
+        continued["summary"][
+            "suffix_observation_component_sha256"
+        ] = reference_components + [{"state": "later"}]
+        continued["summary"]["suffix_environment_sha256"] = current_environment + [
+            "later"
+        ]
+        continued["summary"]["suffix_request_sha256"] = requests + ["later"]
+        continued["payload"]["subtask_trace"] = trace + [{"step": 65}]
+        two_pass = two_pass_first64_audit(
+            source_record, source_payload, reference, continued
+        )
+        self.assertTrue(two_pass["all_exact"], two_pass)
+
+        continued["summary"]["suffix_observation_sha256"][64] = "not-exact"
+        continued["summary"]["suffix_observation_component_sha256"][64][
+            camera_keys[0]
+        ] = "not-exact"
+        failed_two_pass = two_pass_first64_audit(
+            source_record, source_payload, reference, continued
+        )
+        self.assertFalse(failed_two_pass["all_exact"])
+        self.assertFalse(
+            failed_two_pass["reference_to_continuation"]["channels"]["observations"]
+        )
+
+    def test_legacy_qualification_accepts_only_obj_mesh_mime_xml_roundtrip(self):
+        actions = [f"a-{index}" for index in range(64)]
+        observations = [f"o-{index}" for index in range(65)]
+        requests = [f"r-{index}" for index in range(4)]
+        legacy_environment = [f"old-e-{index}" for index in range(64)]
+        current_environment = [f"new-e-{index}" for index in range(64)]
+        trace = [{"step": index} for index in range(65)]
+        legacy_model = (
+            '<mujoco><asset><mesh name="window" content_type="model/obj" '
+            'file="window.obj" scale="1 1 1"/></asset></mujoco>'
+        )
+        current_model = legacy_model.replace(' content_type="model/obj"', "")
+
+        source_record = {
+            "branch_id": "source",
+            "sampling_seed": 17,
+            "num_steps": 64,
+            "num_policy_requests": 4,
+            "suffix_action_sha256": actions,
+            "suffix_observation_sha256": observations,
+            "suffix_environment_sha256": legacy_environment,
+            "suffix_request_sha256": requests,
+        }
+        source_payload = {
+            "subtask_trace": trace,
+            "first_causal_transition_fingerprint": {
+                "simulator_state": {
+                    "environment_state": {
+                        "model": legacy_model,
+                        "states": np.array([1.0, 2.0]),
+                    }
+                }
+            },
+        }
+        reference = {
+            "summary": {
+                **source_record,
+                "branch_id": "reference",
+                "suffix_environment_sha256": current_environment,
+            },
+            "payload": {
+                "subtask_trace": trace,
+                "first_causal_transition_fingerprint": {
+                    "simulator_state": {
+                        "environment_state": {
+                            "model": current_model,
+                            "states": np.array([1.0, 2.0]),
+                        }
+                    }
+                },
+            },
+        }
+
+        audit = first64_equality_audit(source_record, source_payload, reference)
+        qualification = qualify_legacy_phase2_prefix(audit)
+
+        self.assertTrue(audit["first_causal_transition_structure_exact"])
+        self.assertEqual(
+            audit["first_causal_transition_model_xml_audit"]["compatibility_mode"],
+            "mesh_obj_content_type_omission",
+        )
+        self.assertTrue(qualification["qualified"])
+        self.assertTrue(qualification["first_causal_transition_model_xml_compatible"])
+
+        reference["payload"]["first_causal_transition_fingerprint"]["simulator_state"][
+            "environment_state"
+        ]["model"] = current_model.replace('scale="1 1 1"', 'scale="2 1 1"')
+        changed = first64_equality_audit(source_record, source_payload, reference)
+        self.assertFalse(changed["all_exact"])
+        self.assertFalse(changed["first_causal_transition_structure_exact"])
+        self.assertFalse(qualify_legacy_phase2_prefix(changed)["qualified"])
+
+    def test_legacy_qualification_accepts_obj_mesh_mime_insertion(self):
+        actions = [f"a-{index}" for index in range(64)]
+        observations = [f"o-{index}" for index in range(65)]
+        requests = [f"r-{index}" for index in range(4)]
+        trace = [{"step": index} for index in range(65)]
+        legacy_model = (
+            '<mujoco><asset><mesh name="paper" file="paper.obj"/>'
+            '</asset></mujoco>'
+        )
+        current_model = legacy_model.replace(
+            ' name="paper"', ' name="paper" content_type="model/obj"'
+        )
+        source_record = {
+            "branch_id": "source",
+            "sampling_seed": 17,
+            "num_steps": 64,
+            "num_policy_requests": 4,
+            "suffix_action_sha256": actions,
+            "suffix_observation_sha256": observations,
+            "suffix_environment_sha256": [f"old-e-{index}" for index in range(64)],
+            "suffix_request_sha256": requests,
+        }
+        source_payload = {
+            "subtask_trace": trace,
+            "first_causal_transition_fingerprint": {
+                "simulator_state": {
+                    "environment_state": {
+                        "model": legacy_model,
+                        "states": np.array([1.0, 2.0]),
+                    }
+                }
+            },
+        }
+        reference = {
+            "summary": {
+                **source_record,
+                "branch_id": "reference",
+                "suffix_environment_sha256": [
+                    f"new-e-{index}" for index in range(64)
+                ],
+            },
+            "payload": {
+                "subtask_trace": trace,
+                "first_causal_transition_fingerprint": {
+                    "simulator_state": {
+                        "environment_state": {
+                            "model": current_model,
+                            "states": np.array([1.0, 2.0]),
+                        }
+                    }
+                },
+            },
+        }
+
+        audit = first64_equality_audit(source_record, source_payload, reference)
+        qualification = qualify_legacy_phase2_prefix(audit)
+
+        self.assertTrue(audit["first_causal_transition_structure_exact"])
+        self.assertEqual(
+            audit["first_causal_transition_model_xml_audit"]["compatibility_mode"],
+            "mesh_obj_content_type_insertion",
+        )
+        self.assertTrue(qualification["qualified"])
+
+    def test_routing_only_unlocks_critic_when_all_registered_gates_pass(self):
+        tasks = {
+            task: {
+                "mixed_outcome_fraction": 0.5,
+                "random_minus_nominal": 0.1,
+            }
+            for task in TASKS
+        }
+        macro = {"mixed_outcome_fraction": 0.5, "oracle_minus_nominal": 0.2}
+        gates = {"support": True, "headroom": True}
+        self.assertEqual(
+            route_phase3b(tasks, macro, gates),
+            "candidate_critic_formal_five_task_screen",
+        )
+        gates["headroom"] = False
+        self.assertEqual(
+            route_phase3b(tasks, macro, gates), "higher_level_operator_screen"
+        )
+
+        homogeneous = {
+            task: {
+                "mixed_outcome_fraction": 0.0,
+                "random_minus_nominal": 0.25,
+            }
+            for task in TASKS
+        }
+        self.assertEqual(
+            route_phase3b(homogeneous, macro, {"support": False}),
+            "fresh_replan_without_candidate_ranking",
+        )
+        self.assertEqual(
+            route_phase3b(
+                tasks,
+                {"mixed_outcome_fraction": 0.5, "oracle_minus_nominal": 0.0},
+                {"support": False},
+            ),
+            "do_not_train_candidate_critic",
+        )
+
+    def test_completion_event_uses_genuine_request_indices_and_checks_durability(self):
+        payload = {
+            "summary": {"request_environment_step_indices": [0, 16, 32, 48]},
+            "subtask_evals": [
+                {"predicates": {"trigger": {"value": False}}} for _ in range(34)
+            ],
+        }
+        payload["subtask_evals"][33]["predicates"]["trigger"]["value"] = True
+
+        event = completion_event(payload, "trigger")
+
+        self.assertTrue(event["completed"])
+        self.assertEqual(event["first_completion_environment_step"], 32)
+        self.assertEqual(event["first_completion_replan"], 3)
+        self.assertTrue(event["durable_to_branch_end"])
+
+
+if __name__ == "__main__":
+    unittest.main()

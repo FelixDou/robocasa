@@ -1,0 +1,14 @@
+{
+  "cluster_run_directory": null,
+  "engineering_export_note": "Transcribed from the user-pasted engineering JSON; repeat_audits is empty in full scope, while sentinel_repeats_exact is true.",
+  "export_sha256": {
+    "engineering_analysis.json": "47d6a3318e2dea604f24726852c404d86153a42259bdec00a3216998440d4b3d",
+    "scientific_analysis.json": "5ce178ae717b0441d18945e6b9af34ae405bfd8a745d820907c1c3d75d459c1a"
+  },
+  "implementation_commit": "cf0b1024ea0872e2ff27ac12a8dff94a7fb51f9c",
+  "raw_cluster_payloads_independently_reaudited_locally": false,
+  "received_date": "2026-10-12",
+  "scientific_attachment_sha256": "48fb2435e7e7fbd09163b387f7d1428e4793c7c54347625de01453f1f379a0ac",
+  "source": "User-pasted cluster full-screen engineering and scientific analysis exports in this chat",
+  "source_branch_ledger_sha256": "85ddb0ed862005af77f3f0728a56602d5044cffd79b508edcf174ebdfa38b98e"
+}

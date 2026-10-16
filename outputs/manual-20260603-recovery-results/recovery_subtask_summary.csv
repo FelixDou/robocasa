@@ -1,0 +1,156 @@
+mode,instruction,target_key,attempts,success,fail,success_rate
+continue_from_failure,Move blender lid onto blender.,blender_lid_on_blender,5,0,5,0.0
+continue_from_failure,Close fridge.,fridge_closed,2,0,2,0.0
+continue_from_failure,Close toaster oven.,toaster_oven_closed,5,0,5,0.0
+continue_from_failure,Pick mug.,mug_grasped,9,1,8,0.1111111111111111
+continue_from_failure,Move robot to target.,at_target_position,5,0,5,0.0
+continue_from_failure,Open cabinet.,cabinet_open,9,0,9,0.0
+continue_from_failure,Open drawer.,drawer_open,20,0,20,0.0
+continue_from_failure,Open stand mixer head.,stand_mixer_head_open,4,0,4,0.0
+continue_from_failure,Pick object.,object_grasped,12,0,12,0.0
+continue_from_failure,Slide dishwasher rack.,dishwasher_rack_slid,2,0,2,0.0
+continue_from_failure,Turn off burner.,burner_off,5,0,5,0.0
+continue_from_failure,Turn on electric kettle.,electric_kettle_on,3,0,3,0.0
+continue_from_failure,Start microwave.,microwave_started,5,0,5,0.0
+continue_from_failure,Turn on water.,water_on,12,0,12,0.0
+continue_from_failure,Start toaster.,toaster_started,5,0,5,0.0
+continue_from_failure,Pick kettle.,kettle_grasped,5,1,4,0.2
+continue_from_failure,Pick dishes.,dishes_grasped,5,0,5,0.0
+continue_from_failure,Open fridge.,fridge_open,8,1,7,0.125
+continue_from_failure,Move meat to first tupperware.,tupperware0_has_one_meat,2,0,2,0.0
+continue_from_failure,Move vegetable to first tupperware.,tupperware0_has_one_vegetable,2,1,1,0.5
+continue_from_failure,Move pan to sink.,pan_in_sink,1,0,1,0.0
+continue_from_failure,Pick pan.,pan_grasped,13,1,12,0.07692307692307693
+continue_from_failure,Rinse left basin.,left_basin_rinsed,1,0,1,0.0
+continue_from_failure,Rinse right basin.,right_basin_rinsed,1,0,1,0.0
+continue_from_failure,Pick sponge.,sponge_grasped,2,0,2,0.0
+continue_from_failure,Move larger bowl to cabinet.,larger_bowl_in_cabinet,4,0,4,0.0
+continue_from_failure,Move vegetable to bowl.,vegetable_in_bowl,4,0,4,0.0
+continue_from_failure,Move bowl to microwave.,bowl_in_microwave,1,0,1,0.0
+continue_from_failure,Move second vegetable to pot.,vegetable2_in_pot,2,0,2,0.0
+continue_from_failure,Move first vegetable to pot.,vegetable1_in_pot,3,0,3,0.0
+continue_from_failure,Move chicken to bowl.,chicken_in_bowl,5,0,5,0.0
+continue_from_failure,Move bread to basket.,bread_in_basket,1,0,1,0.0
+continue_from_failure,Move kettle to tray.,kettle_on_tray,5,0,5,0.0
+continue_from_failure,Move croissant to cutting board.,croissant_on_cutting_board,4,0,4,0.0
+continue_from_failure,Move jam to cutting board.,jam_on_cutting_board,1,0,1,0.0
+continue_from_failure,Move bottle to cabinet.,bottle_in_cabinet,2,0,2,0.0
+continue_from_failure,Move shaker to cabinet.,shaker_in_cabinet,2,0,2,0.0
+continue_from_failure,Pick strawberry.,strawberry_grasped,2,0,2,0.0
+continue_from_failure,Group glasses.,glasses_clustered,5,0,5,0.0
+continue_from_failure,Move kebab to toaster oven.,kebab_in_toaster_oven,5,0,5,0.0
+continue_from_failure,Pick lemon wedge.,lemon_grasped,1,0,1,0.0
+continue_from_failure,Move sausage to first plate.,plate1_has_one_sausage,1,0,1,0.0
+continue_from_failure,Move bun to first plate.,plate1_has_one_bun,4,0,4,0.0
+continue_from_failure,Group plastic bottles.,plastic_bottles_clustered,5,0,5,0.0
+continue_from_failure,Open freezer.,freezer_open,5,0,5,0.0
+continue_from_failure,Open microwave.,microwave_open,5,0,5,0.0
+continue_from_failure,Move colander to sink.,colander_in_sink,5,0,5,0.0
+continue_from_failure,Pick packaged food.,packaged_food_grasped,5,0,5,0.0
+eef_to_last_good,Move blender lid onto blender.,blender_lid_on_blender,5,0,5,0.0
+eef_to_last_good,Close fridge.,fridge_closed,2,0,2,0.0
+eef_to_last_good,Close toaster oven.,toaster_oven_closed,4,0,4,0.0
+eef_to_last_good,Pick mug.,mug_grasped,9,1,8,0.1111111111111111
+eef_to_last_good,Move robot to target.,at_target_position,5,0,5,0.0
+eef_to_last_good,Open cabinet.,cabinet_open,8,1,7,0.125
+eef_to_last_good,Open drawer.,drawer_open,17,0,17,0.0
+eef_to_last_good,Open stand mixer head.,stand_mixer_head_open,4,0,4,0.0
+eef_to_last_good,Pick object.,object_grasped,11,0,11,0.0
+eef_to_last_good,Move object to cabinet.,object_in_cabinet,1,0,1,0.0
+eef_to_last_good,Slide dishwasher rack.,dishwasher_rack_slid,1,0,1,0.0
+eef_to_last_good,Turn off burner.,burner_off,5,0,5,0.0
+eef_to_last_good,Turn on electric kettle.,electric_kettle_on,3,0,3,0.0
+eef_to_last_good,Start microwave.,microwave_started,5,0,5,0.0
+eef_to_last_good,Turn on water.,water_on,8,1,7,0.125
+eef_to_last_good,Start toaster.,toaster_started,5,0,5,0.0
+eef_to_last_good,Pick kettle.,kettle_grasped,4,2,2,0.5
+eef_to_last_good,Turn on burner.,burner_on,1,0,1,0.0
+eef_to_last_good,Pick dishes.,dishes_grasped,5,1,4,0.2
+eef_to_last_good,Move meat to first tupperware.,tupperware0_has_one_meat,1,0,1,0.0
+eef_to_last_good,Open fridge.,fridge_open,11,0,11,0.0
+eef_to_last_good,Move meat to second tupperware.,tupperware1_has_one_meat,1,0,1,0.0
+eef_to_last_good,Move vegetable to first tupperware.,tupperware0_has_one_vegetable,2,1,1,0.5
+eef_to_last_good,Pick pan.,pan_grasped,14,2,12,0.14285714285714285
+eef_to_last_good,Rinse left basin.,left_basin_rinsed,2,0,2,0.0
+eef_to_last_good,Rinse center basin.,center_basin_rinsed,1,0,1,0.0
+eef_to_last_good,Pick sponge.,sponge_grasped,2,0,2,0.0
+eef_to_last_good,Move larger bowl to cabinet.,larger_bowl_in_cabinet,3,0,3,0.0
+eef_to_last_good,Move vegetable to bowl.,vegetable_in_bowl,5,0,5,0.0
+eef_to_last_good,Move second vegetable to pot.,vegetable2_in_pot,1,0,1,0.0
+eef_to_last_good,Move first vegetable to pot.,vegetable1_in_pot,4,0,4,0.0
+eef_to_last_good,Move chicken to bowl.,chicken_in_bowl,5,0,5,0.0
+eef_to_last_good,Move basket to dining counter.,basket_on_dining_counter,1,0,1,0.0
+eef_to_last_good,Move bread to basket.,bread_in_basket,1,0,1,0.0
+eef_to_last_good,Move kettle to tray.,kettle_on_tray,5,0,5,0.0
+eef_to_last_good,Move jam to cutting board.,jam_on_cutting_board,2,0,2,0.0
+eef_to_last_good,Move croissant to cutting board.,croissant_on_cutting_board,3,1,2,0.3333333333333333
+eef_to_last_good,Move bottle to cabinet.,bottle_in_cabinet,3,0,3,0.0
+eef_to_last_good,Move shaker to cabinet.,shaker_in_cabinet,2,0,2,0.0
+eef_to_last_good,Group glasses.,glasses_clustered,5,0,5,0.0
+eef_to_last_good,Move kebab to toaster oven.,kebab_in_toaster_oven,5,0,5,0.0
+eef_to_last_good,Avoid touching food.,robot_did_not_touch_food,1,0,1,0.0
+eef_to_last_good,Move sausage to first plate.,plate1_has_one_sausage,1,0,1,0.0
+eef_to_last_good,Move bun to first plate.,plate1_has_one_bun,4,0,4,0.0
+eef_to_last_good,Group plastic bottles.,plastic_bottles_clustered,5,0,5,0.0
+eef_to_last_good,Open freezer.,freezer_open,5,0,5,0.0
+eef_to_last_good,Open microwave.,microwave_open,5,1,4,0.2
+eef_to_last_good,Move colander to sink.,colander_in_sink,5,1,4,0.2
+eef_to_last_good,Pick packaged food.,packaged_food_grasped,5,0,5,0.0
+env_to_last_good,Move blender lid onto blender.,blender_lid_on_blender,5,0,5,0.0
+env_to_last_good,Close fridge.,fridge_closed,4,0,4,0.0
+env_to_last_good,Close toaster oven.,toaster_oven_closed,4,1,3,0.25
+env_to_last_good,Move mug under coffee dispenser.,mug_under_dispenser,10,1,9,0.1
+env_to_last_good,Move robot to target.,at_target_position,5,0,5,0.0
+env_to_last_good,Open cabinet.,cabinet_open,9,3,6,0.3333333333333333
+env_to_last_good,Open drawer.,drawer_open,18,0,18,0.0
+env_to_last_good,Open stand mixer head.,stand_mixer_head_open,3,0,3,0.0
+env_to_last_good,Pick object.,object_grasped,5,0,5,0.0
+env_to_last_good,Move object to cabinet.,object_in_cabinet,2,0,2,0.0
+env_to_last_good,Move object to pan.,object_in_pan,2,1,1,0.5
+env_to_last_good,Move object to plate.,object_on_plate,2,0,2,0.0
+env_to_last_good,Slide dishwasher rack.,dishwasher_rack_slid,2,0,2,0.0
+env_to_last_good,Turn off burner.,burner_off,5,0,5,0.0
+env_to_last_good,Turn on electric kettle.,electric_kettle_on,3,1,2,0.3333333333333333
+env_to_last_good,Start microwave.,microwave_started,4,0,4,0.0
+env_to_last_good,Turn on water.,water_on,10,5,5,0.5
+env_to_last_good,Start toaster.,toaster_started,5,1,4,0.2
+env_to_last_good,Move kettle to stove burner.,kettle_on_burner,3,1,2,0.3333333333333333
+env_to_last_good,Turn on burner.,burner_on,2,0,2,0.0
+env_to_last_good,Move dishes to dishwasher rack.,dishes_on_rack,4,0,4,0.0
+env_to_last_good,Pick dishes.,dishes_grasped,1,1,0,1.0
+env_to_last_good,Open fridge.,fridge_open,11,3,8,0.2727272727272727
+env_to_last_good,Move meat to first tupperware.,tupperware0_has_one_meat,1,0,1,0.0
+env_to_last_good,Move vegetable to first tupperware.,tupperware0_has_one_vegetable,3,0,3,0.0
+env_to_last_good,Pick sponge.,sponge_grasped,4,4,0,1.0
+env_to_last_good,Pick pan.,pan_grasped,7,4,3,0.5714285714285714
+env_to_last_good,Rinse left basin.,left_basin_rinsed,2,1,1,0.5
+env_to_last_good,Press sponge on cutting board.,board_contact_count_reached,2,0,2,0.0
+env_to_last_good,Move pan to target burner.,pan_on_target_burner,3,0,3,0.0
+env_to_last_good,Move larger bowl to cabinet.,larger_bowl_in_cabinet,4,0,4,0.0
+env_to_last_good,Move bowl to microwave.,bowl_in_microwave,3,0,3,0.0
+env_to_last_good,Move vegetable to bowl.,vegetable_in_bowl,3,0,3,0.0
+env_to_last_good,Move second vegetable to pot.,vegetable2_in_pot,2,1,1,0.5
+env_to_last_good,Move first vegetable to pot.,vegetable1_in_pot,3,1,2,0.3333333333333333
+env_to_last_good,Move chicken to bowl.,chicken_in_bowl,5,1,4,0.2
+env_to_last_good,Move lettuce under water.,lettuce_under_water,1,0,1,0.0
+env_to_last_good,Move basket to dining counter.,basket_on_dining_counter,1,0,1,0.0
+env_to_last_good,Move kettle to tray.,kettle_on_tray,4,0,4,0.0
+env_to_last_good,Move mug to tray.,mug_on_tray,1,0,1,0.0
+env_to_last_good,Move jam to cutting board.,jam_on_cutting_board,2,0,2,0.0
+env_to_last_good,Move croissant to cutting board.,croissant_on_cutting_board,3,1,2,0.3333333333333333
+env_to_last_good,Move bottle to cabinet.,bottle_in_cabinet,2,0,2,0.0
+env_to_last_good,Move shaker to cabinet.,shaker_in_cabinet,2,1,1,0.5
+env_to_last_good,Group glasses.,glasses_clustered,5,0,5,0.0
+env_to_last_good,Move kebab to toaster oven.,kebab_in_toaster_oven,4,0,4,0.0
+env_to_last_good,Move baguette to toaster oven.,baguette_in_toaster_oven,1,0,1,0.0
+env_to_last_good,Release pan.,gripper_released,2,2,0,1.0
+env_to_last_good,Move sausage to first plate.,plate1_has_one_sausage,2,0,2,0.0
+env_to_last_good,Move bun to first plate.,plate1_has_one_bun,3,0,3,0.0
+env_to_last_good,Group plastic bottles.,plastic_bottles_clustered,5,0,5,0.0
+env_to_last_good,Open freezer.,freezer_open,5,0,5,0.0
+env_to_last_good,Open microwave.,microwave_open,4,3,1,0.75
+env_to_last_good,Move colander to sink.,colander_in_sink,4,1,3,0.25
+env_to_last_good,Move fruit to colander.,fruit_in_colander,1,1,0,1.0
+env_to_last_good,Pick packaged food.,packaged_food_grasped,3,1,2,0.3333333333333333
+env_to_last_good,Move packaged food to scale.,packaged_food_on_scale,1,0,1,0.0
+env_to_last_good,Orient packaged food upright.,packaged_food_upright,1,0,1,0.0

@@ -1,9 +1,63 @@
 # XR1 higher-level recovery-operator screen
 
+> **Frozen 2026-10-16.** This track is closed and must not be extended; see
+> [exact_replay_frozen.md](exact_replay_frozen.md). Code moved to
+> `robocasa/recovery/exact_replay/` and `scripts/exact_replay/`; existing
+> registrations must be resumed or reviewed from commit `4d65b542`.
+
 Read `docs/cluster_experiment_runbook.md` first. This protocol implements the
 operator fallback after the completed negative Phase 3B candidate screen.
 It reuses the same 20 exact snapshots, 10 parents and two tasks. It does not
 modify or resume any Phase 2/3B source directory.
+
+## Completed result (12 October 2026)
+
+The full screen completed **160/160 scientific branches**, with zero errors
+and every engineering gate passing, including snapshot/restore integrity,
+request alignment, paired schedules, budgets, sentinel repeats, the changed
+history-reset request, and retreat-controller compatibility. The scientific
+gate failed.
+
+| Operator | Task-macro stage completion | Retained at endpoint | Completion gain vs continue | Paired bootstrap 95% interval |
+|---|---:|---:|---:|---:|
+| `continue` | 22.5% | 20.0% | Reference | Reference |
+| `history_reset_replan` | 17.5% | 17.5% | -5.0 pp | [-15.0, 0.0] pp |
+| `stage_retry` | 17.5% | 17.5% | -5.0 pp | [-15.0, 0.0] pp |
+| `retreat_reset_replan` | 17.5% | 15.0% | -5.0 pp | [-12.5, 0.0] pp |
+
+ArrangeTea completion was 45% for continuation and 35% for every
+intervention. CuttingToolSelection completion was zero throughout. Full-task
+success was zero in every arm. No parent had a positive mean intervention
+completion advantage. Oracle per-snapshot selection after averaging both
+seeds reached 22.5%, with zero advantage over the best fixed operator,
+`continue`. Its [0, 0] bootstrap interval describes this finite observed
+support; it does not establish population or unseen-seed impossibility.
+
+The registered decision was `mechanism_redesign_or_earlier_snapshot_study`,
+with no promising operator and no recommended fixed intervention. There is
+no evidence here supporting router training or broad operator scaling. SAFE
+alarms did not trigger interventions.
+
+The predicate-regression flag rates were 60.0% for continuation, 60.0% for
+history reset, 52.5% for stage retry, and 57.5% for retreat. The flag records
+an initially true predicate becoming false and requires semantic inspection
+before interpretation as lost ordered-stage progress. No declared safety
+events were recorded. Genuine oracle rewind anchors were unavailable, so
+no rewind branches were executed and the allocation was 160 rather than
+the originally proposed 180.
+
+The user-supplied engineering and scientific exports, source-ledger hash,
+and provenance limits are preserved under
+`reports/safe_robocasa365_research_plan_20260823/evidence/xr1_operator_screen_20261012/`.
+Raw cluster payloads were not independently reaudited locally, and the pasted
+export did not identify the exact operator-run directory.
+
+The next proposed experiment is the
+[common-stage-entry timing diagnostic](xr1_earlier_intervention_timing_study.md).
+It compares zero-, one-, and two-inference intervention delays from a shared
+base with a common absolute endpoint. Its collector and analyzer still need
+implementation; the launcher below reruns the completed frozen-snapshot
+screen and does not execute that timing protocol.
 
 ## Allocation and evidence boundary
 
@@ -83,7 +137,7 @@ cd /gs/fs/tga-shinoda/felid/robocasa
 git pull --ff-only origin main
 
 # Default GPU 0, new Xiaomi server on port 10316, unique durable output root.
-bash scripts/run_xr1_operator_screen.sh start
+bash scripts/exact_replay/run_xr1_operator_screen.sh start
 ```
 
 To use a custom bounded specification, set `XR1_OPERATOR_SPEC` to a JSON file
@@ -103,7 +157,7 @@ For a second allocation or GPU, set the GPU and an unused port before starting:
 ```bash
 export XR1_OPERATOR_GPU=1
 export XR1_OPERATOR_PORT=10317
-bash scripts/run_xr1_operator_screen.sh start
+bash scripts/exact_replay/run_xr1_operator_screen.sh start
 ```
 
 An already running server may be reused only after verifying that it serves the
@@ -112,7 +166,7 @@ frozen checkpoint with the frozen server entrypoint:
 ```bash
 export XR1_OPERATOR_PORT=10306
 export XR1_OPERATOR_REUSE_SERVER=1
-bash scripts/run_xr1_operator_screen.sh start
+bash scripts/exact_replay/run_xr1_operator_screen.sh start
 ```
 
 Owned servers are stopped when the driver finishes or fails; reused servers
@@ -125,7 +179,7 @@ Monitor from a new shell:
 export STORAGE_BS=/gs/bs/tga-shinoda/felid
 source "$STORAGE_BS/robocasa_rollouts/recovery/xr1_operator_latest.env"
 cd "$ROBOCASA_REPO"
-bash scripts/run_xr1_operator_screen.sh status
+bash scripts/exact_replay/run_xr1_operator_screen.sh status
 tail -f "$XR1_OPERATOR_LOG"
 ```
 
@@ -133,7 +187,7 @@ After an allocation ends, request a new GPU allocation and resume:
 
 ```bash
 cd /gs/fs/tga-shinoda/felid/robocasa
-bash scripts/run_xr1_operator_screen.sh resume
+bash scripts/exact_replay/run_xr1_operator_screen.sh resume
 ```
 
 For concurrent jobs, select the desired root explicitly with
@@ -172,7 +226,7 @@ gates, not powered confirmatory tests.
 ```bash
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_operator_latest.env
 cd "$ROBOCASA_REPO"
-"$XR1_CLIENT_ENV/bin/python" -u -m robocasa.recovery.analyze_operator_screen \
+"$XR1_CLIENT_ENV/bin/python" -u -m robocasa.recovery.exact_replay.analyze_operator_screen \
   --run-dir "$XR1_OPERATOR_ROOT/full" \
   --bootstrap-replicates 2000 --bootstrap-seed 0
 ```
@@ -214,11 +268,11 @@ or inferred from the available Phase 2 snapshots.
 
 ```bash
 .venv_video/bin/python -m unittest \
-  tests.test_operator_screen \
-  tests.test_phase2_snapshot_replay \
-  tests.test_phase3b_training_horizon \
+  tests.exact_replay.test_operator_screen \
+  tests.exact_replay.test_phase2_snapshot_replay \
+  tests.exact_replay.test_phase3b_training_horizon \
   tests.test_safe_xiaomi_policy
-bash -n scripts/run_xr1_operator_screen.sh
+bash -n scripts/exact_replay/run_xr1_operator_screen.sh
 ```
 
 These verify protocol logic and mocked execution. Actual Xiaomi/MuJoCo/EGL

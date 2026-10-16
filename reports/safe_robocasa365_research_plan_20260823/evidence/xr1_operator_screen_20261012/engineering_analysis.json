@@ -1,0 +1,24 @@
+{
+  "branches": 160,
+  "engineering_all_pass": true,
+  "engineering_gates": {
+    "all_payload_hashes_and_embedded_records_exact": true,
+    "all_request_alignment_valid": true,
+    "all_restores_valid": true,
+    "all_snapshot_integrity_accepted": true,
+    "common_step_budgets_valid": true,
+    "complete_unique_branch_support": true,
+    "history_reset_changes_request": true,
+    "paired_continuation_schedules_exact": true,
+    "retreat_controller_validated": true,
+    "sentinel_repeats_exact": true,
+    "snapshot_integrity_coverage": true,
+    "zero_errors": true
+  },
+  "errors": 0,
+  "expected_branches": 160,
+  "protocol": "xr1_higher_level_operator_screen_v1",
+  "repeat_audits": [],
+  "scientific_outcomes_used_as_engineering_gate": false,
+  "scope": "full"
+}

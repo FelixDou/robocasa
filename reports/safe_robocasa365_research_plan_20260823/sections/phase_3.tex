@@ -1,4 +1,4 @@
-\phaseheader{3}{Screen for counterfactual recovery opportunity}{Measure whether the current stochastic action proposal and recovery horizon contain enough within-state outcome variation for a candidate critic to be scientifically and practically learnable.}
+\phaseheader{3}{Screen for counterfactual recovery opportunity}{\textbf{Completed bounded pilot; continuation gate failed.} Exact Phase~2 snapshots and candidate branches were analyzed without new simulator calls. Across 10 parents, 20 snapshots, and 80 candidates, no candidate completed its frozen trigger stage or full task. The result rejects the 64-step proposal--horizon pair. It does not evaluate SAFE ranking quality because there was no successful candidate to rank.}
 
 \subsection{Scientific hypothesis}
 
@@ -8,25 +8,81 @@ Even a perfect critic cannot improve recovery if all candidate chunks from a sna
 \end{equation}
 $O_i>0$ means candidate selection can outperform random choice for that snapshot. The phase hypothesis is that a nontrivial fraction of early and mid-stage snapshots have mixed candidate outcomes and positive oracle headroom.
 
-\subsection{Implemented bounded analyzer and remaining collector work}
+\subsection{Implemented bounded analyzer}
 
-Phase~2 already collected the first bounded candidate set with exact parent, snapshot, candidate, seed, action, raw SAFE feature, state context, suffix outcome, ordered progress, regression, and source provenance. Phase~3 begins by analyzing those existing artifacts without new simulator calls. Each derived candidate row retains an immutable source-payload reference plus compressed-file, payload, action, feature, snapshot, plan, runtime, code, and checkpoint hashes.
+Phase~2 already collected the first bounded candidate set with exact parent, snapshot, candidate, seed, action, raw SAFE feature, state context, suffix outcome, ordered progress, regression, and source provenance. Phase~3 analyzed those existing artifacts without new simulator calls. Each derived candidate row retains an immutable source-payload reference plus compressed-file, payload, action, feature, snapshot, plan, runtime, code, and checkpoint hashes.
 
-The collector should compute selection policies offline after all candidate outcomes are available. This permits exactly paired comparisons among default $K=1$, expected random $K=4$, lowest terminal-SAFE score, highest terminal-SAFE score, action-norm heuristics, and oracle best-of-$K$ without generating different candidate sets.
+Selection policies are computed offline after all candidate outcomes are available. This permits exactly paired comparisons among default $K=1$, expected random $K=4$, lowest terminal-SAFE score, highest terminal-SAFE score, action-norm heuristics, and oracle best-of-$K$ without generating different candidate sets.
 
-\implementationnote{Existing implementation.}{Reuse explicit sampling seeds and diversity logging in \path{robocasa/recovery/xiaomi_robotics_1_policy.py}, frozen SAFE scoring in \path{robocasa/recovery/safe/xr1_best_of_k.py}, ordered completion in \path{robocasa/recovery/subtask_eval.py}, exact branches in \path{robocasa/recovery/counterfactual_branch.py}, and the complete Phase~2 runner in \path{robocasa/recovery/run_phase2_snapshot_replay.py}.}
+\implementationnote{Existing implementation.}{Reuse explicit sampling seeds and diversity logging in \path{robocasa/recovery/xiaomi_robotics_1_policy.py}, frozen SAFE scoring in \path{robocasa/recovery/safe/xr1_best_of_k.py}, ordered completion in \path{robocasa/recovery/subtask_eval.py}, exact branches in \path{robocasa/recovery/exact_replay/counterfactual_branch.py}, and the complete Phase~2 runner in \path{robocasa/recovery/exact_replay/run_phase2_snapshot_replay.py}.}
 
-\cautionnote{Current limitation.}{The Phase~2 pilot covers two tasks, 20 snapshots, four explicit candidates per snapshot, and one frozen short suffix. It can screen proposal headroom, but it cannot estimate the formal five-task task-support gate, deployment prevalence, long-delay recoverability, or final-task benefit.}
+\cautionnote{Current limitation.}{The completed pilot covers two tasks, 20 snapshots, four explicit candidates per snapshot, and one frozen short suffix. It screens the specific proposal--horizon combination only; it cannot estimate the formal five-task task-support gate, deployment prevalence, long-delay recoverability, or final-task benefit.}
 
-\implementationnote{Phase~3 analyzer.}{\path{robocasa/recovery/analyze_phase3_candidate_opportunity.py} is a read-only paired analyzer. It requires a zero-error all-pass shared-restored Phase~2 source, collapses exactly agreeing nominal repeats, excludes environment-only controls, scores the four explicit candidates, computes task-macro and task--parent--snapshot bootstrap estimates, optionally applies the frozen three-seed independent SAFE ensemble, refuses output overwrite, and verifies that source hashes remain unchanged. Its focused tests include a mixed-outcome opportunity case, invalid Phase~2 rejection, and nominal-repeat disagreement rejection.}
+\implementationnote{Phase~3 analyzer.}{\path{robocasa/recovery/exact_replay/analyze_phase3_candidate_opportunity.py} is a read-only paired analyzer. It requires a zero-error all-pass shared-restored Phase~2 source, collapses exactly agreeing nominal repeats, excludes environment-only controls, scores the four explicit candidates, computes task-macro and task--parent--snapshot bootstrap estimates, optionally applies the frozen three-seed independent SAFE ensemble, refuses output overwrite, and verifies that source hashes remain unchanged. Its focused tests include a mixed-outcome opportunity case, invalid Phase~2 rejection, and nominal-repeat disagreement rejection.}
+
+\subsection{Completed Tier 1 result}
+
+The bounded pilot used the all-pass shared-policy Phase~2 artifact: 10 parents, five per task; 20 exact snapshots; and four explicitly seeded candidates per snapshot. The source contained no branch errors, reproduced same-seed causal trajectories exactly, and preserved candidate diversity. The analysis artifact is \path{xr1_phase3_candidate_opportunity_v3_indep_2tasks_20260826_232556}. SAFE scoring used the frozen independent ensemble and did not update a checkpoint, normalization, threshold, candidate set, or outcome.
+
+\begin{table}[H]
+\centering
+\caption{Observed Phase~3 bounded candidate-opportunity result. All completion quantities are task-macro estimates; both tasks had the same zero-completion result.}
+\label{tab:phase3-observed}
+\small
+\begin{tabularx}{\textwidth}{P{0.42\textwidth}Y}
+\toprule
+Quantity & Observed value \\
+\midrule
+Parents / snapshots / explicit candidates & $10 / 20 / 80$ \\
+Mixed-outcome snapshot fraction & $0.000$ \\
+Expected random-of-four completion & $0.000$ \\
+Oracle-best-of-four completion & $0.000$ \\
+Oracle headroom over random & $+0.000$ \\
+Nominal continuation completion & $0.000$ \\
+Lowest-SAFE completion & $0.000$ \\
+Lowest-SAFE minus random & $+0.000$ \\
+Snapshots with nonzero SAFE-score spread & $20/20$ \\
+Formal five-task gate & Not estimable in this two-task pilot \\
+Scale decision & \textbf{Redesign; do not train a critic} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The zero opportunity was not caused by identical proposals. Mean pairwise first-action distance was 1.486 for ArrangeTea and 0.520 for CuttingToolSelection; mean SAFE-feature distance was 469.147 and 456.471, respectively. Every snapshot had nonzero SAFE-score spread, although the mean spread was only $1.14\times10^{-4}$ and the maximum was $9.42\times10^{-4}$. Thus the proposals were numerically distinct, but none produced the required semantic outcome within the frozen suffix.
+
+\begin{table}[H]
+\centering
+\caption{Mechanistic diagnostic of the zero-opportunity result. A policy-inference window is one genuine Xiaomi replan, not one cached environment action.}
+\label{tab:phase3-diagnostic}
+\small
+\begin{tabularx}{\textwidth}{P{0.44\textwidth}Y}
+\toprule
+Diagnostic & Observed value \\
+\midrule
+Frozen suffix & 64 environment steps \\
+Xiaomi replan interval & 16 environment steps \\
+Policy-inference windows per branch & 4 \\
+Training-derived stage horizon & ArrangeTea 30 replans; CuttingToolSelection 16 replans \\
+Branches ending at suffix horizon & $80/80$ \\
+Stage completions / full-task successes & $0/80$ / $0/80$ \\
+Positive / zero / negative progress & $2/80$ / $68/80$ / $10/80$ \\
+Mean / maximum progress gain & $-0.025$ / $+0.25$ \\
+Regressions & $12/80$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The 64-step suffix exposed only four replans, or approximately 13\% of the ArrangeTea stage horizon and 25\% of the CuttingToolSelection stage horizon. This is the most plausible mechanistic explanation for the absence of completions, but it is not evidence that a longer suffix will succeed. The negative result is instead precise: \emph{the current snapshot, proposal, and 64-step continuation protocol contains no measurable candidate-selection opportunity}.
+
+\sciencenote{What was and was not learned.}{The pilot rejects immediate scaling of this short-suffix protocol and blocks critic training. It does not show that SAFE cannot rank recovery candidates: oracle, random, nominal, and SAFE-selected policies all score zero because no successful candidate exists. It also does not establish that candidate sampling is intrinsically poor, because the frozen horizon was substantially shorter than both training-derived stage horizons.}
 
 \subsection{Two-tier experimental design}
 
-\textbf{Tier 1: active bounded pilot.} Analyze the 20 validated Phase~2 snapshots and 80 existing explicit candidates. The two same-seed repeats collapse to one nominal control; the environment-only branch remains a replay diagnostic and is excluded from utility estimates. No checkpoint, normalization, threshold, candidate set, or outcome is updated. The frozen live trigger predicate must be false at the snapshot and become true within the suffix, or the full task must succeed; generic progress and branch-local ordered traces do not count as completion. This tier estimates mixed-outcome frequency and oracle headroom on two tasks. It cannot pass or fail the formal ``three of five tasks'' requirement.
+\textbf{Tier 1: completed bounded pilot.} The 20 validated Phase~2 snapshots and 80 explicit candidates were analyzed. The two same-seed repeats collapsed to one nominal control; the environment-only branch remained a replay diagnostic and was excluded from utility estimates. No checkpoint, normalization, threshold, candidate set, or outcome was updated. The frozen live trigger predicate had to be false at the snapshot and become true within the suffix, or the full task had to succeed; generic progress and branch-local ordered traces did not count as completion. The pilot failed both estimable continuation criteria and could not adjudicate the formal ``three of five tasks'' requirement.
 
-The pilot supports scaling only if at least 20\% of snapshots have mixed candidate outcomes and task-macro oracle-best-of-four exceeds expected random-of-four completion by at least 15 percentage points. Failure means redesign before collection, not critic training.
+The pilot supported scaling only if at least 20\% of snapshots had mixed candidate outcomes and task-macro oracle-best-of-four exceeded expected random-of-four completion by at least 15 percentage points. Both observed values were zero. This requires redesign before collection, not critic training.
 
-\textbf{Tier 2: conditional formal screen.} If Tier~1 passes, use the same five development tasks and the exact Phase~2 snapshot protocol. The larger design below is frozen before new collection.
+\textbf{Tier 2: blocked conditional formal screen.} Do not run the five-task design unless the bounded horizon redesign below first establishes nonzero opportunity. If that redesign passes, use the same five development tasks and the exact Phase~2 snapshot protocol. The larger design below remains frozen before new collection.
 
 Use the same five development tasks. For each task, collect 10 eventually failed and 10 eventually successful-control parents, producing 100 parents. This is an explicit case-control opportunity study and must never be used to estimate deployment prevalence or event rates.
 
@@ -64,8 +120,9 @@ Use snapshot-level paired contrasts and bootstrap task, then parent, then snapsh
 
 \positiveresult{For the formal Tier~2 screen, proceed when at least 20\% of snapshots have mixed outcomes, mixed outcomes occur in at least three of five tasks, and oracle-best-of-four improves recovery by at least 15 percentage points over random choice. Tier~1 uses only the two estimable numerical criteria as a scale decision. A positive result means the action proposal contains exploitable causal recovery variation; it does not mean SAFE or a learned critic can identify the good candidate.}
 
-\negativeresult{Do not train a critic. Permit one predeclared bounded redesign of proposal diversity, snapshot timing, recovery prompt, replan length, or horizon using development data only. If oracle headroom remains negligible, abandon local candidate reranking and prioritize higher-level replan or rollback operators.}
+\negativeresult{Observed: do not train a critic and do not scale to five tasks. The distinct Phase~3B training-horizon continuation was completed and still found negligible local-candidate benefit: oracle-minus-random was 0.0125, only one of 20 snapshots was mixed, and full-task success was zero. Local chunk reranking is now closed for this proposal family; the subsequent higher-level operator screen also failed, and the next proposed diagnostic tests intervention timing from a shared stage-entry state (Section~\ref{sec:next-timing-study}).}
 
 \subsection{Required outputs}
 
-Tier~1 writes an immutable candidate-reference manifest, snapshot table, per-task summary, source hashes, task-macro opportunity estimates, hierarchical uncertainty, successful-control harm, and explicit continuation gates. Tier~2 additionally publishes the full five-task support/tie tables and matched videos showing homogeneous, mixed, beneficial, and harmful candidate sets.
+\enlargethispage{\baselineskip}
+Tier~1 produced immutable candidate references, snapshot/task tables, hashes, estimates, uncertainty, harm, and gates. Phase~3B referenced those immutable artifacts and completed the longer-horizon screen. Tier~2 was not unlocked; no five-task candidate corpus should be collected for the current proposal family.

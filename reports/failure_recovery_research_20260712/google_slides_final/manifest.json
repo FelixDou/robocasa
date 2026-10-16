@@ -1,0 +1,489 @@
+{
+  "source": "/Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/reports/failure_recovery_research_20260712/report.html",
+  "title": "Natural Failures and Subtask-Guided Recovery in RoboCasa",
+  "eyebrow": "",
+  "counts": {
+    "metrics": 4,
+    "sections": 15,
+    "charts": 1,
+    "tables": 3
+  },
+  "metrics": [
+    {
+      "label": "pi0 composite-seen success",
+      "value": "6.1%",
+      "note": "Success across 16 composite-seen target tasks.",
+      "source": "RoboCasa365 official leaderboard · Table: robocasa.ai.leaderboard · Materializes the reviewed RoboCasa365 policy-by-split leaderboard values used in this report.",
+      "source_query": "SELECT * FROM (VALUES ('pi0', 'Atomic seen', 0.346), ('pi0', 'Composite seen', 0.061), ('pi0', 'Composite unseen', 0.011), ('pi0.5', 'Atomic seen', 0.396), ('pi0.5', 'Composite seen', 0.071), ('pi0.5', 'Composite unseen', 0.012), ('GR00T N1.5', 'Atomic seen', 0.507), ('GR00T N1.5', 'Composite seen', 0.148), ('GR00T N1.5', 'Composite unseen', 0.027), ('RLDX-1', 'Atomic seen', 0.676), ('RLDX-1', 'Composite seen', 0.279), ('RLDX-1', 'Composite unseen', 0.085), ('Xiaomi-Robotics-1', 'Atomic seen', 0.802), ('Xiaomi-Robotics-1', 'Composite seen', 0.571), ('Xiaomi-Robotics-1', 'Composite unseen', 0.321)) AS t(policy, split, success_rate)",
+      "portable": true
+    },
+    {
+      "label": "RLDX-1 composite-seen success",
+      "value": "27.9%",
+      "note": "Success across 16 composite-seen target tasks.",
+      "source": "RoboCasa365 official leaderboard · Table: robocasa.ai.leaderboard · Materializes the reviewed RoboCasa365 policy-by-split leaderboard values used in this report.",
+      "source_query": "SELECT * FROM (VALUES ('pi0', 'Atomic seen', 0.346), ('pi0', 'Composite seen', 0.061), ('pi0', 'Composite unseen', 0.011), ('pi0.5', 'Atomic seen', 0.396), ('pi0.5', 'Composite seen', 0.071), ('pi0.5', 'Composite unseen', 0.012), ('GR00T N1.5', 'Atomic seen', 0.507), ('GR00T N1.5', 'Composite seen', 0.148), ('GR00T N1.5', 'Composite unseen', 0.027), ('RLDX-1', 'Atomic seen', 0.676), ('RLDX-1', 'Composite seen', 0.279), ('RLDX-1', 'Composite unseen', 0.085), ('Xiaomi-Robotics-1', 'Atomic seen', 0.802), ('Xiaomi-Robotics-1', 'Composite seen', 0.571), ('Xiaomi-Robotics-1', 'Composite unseen', 0.321)) AS t(policy, split, success_rate)",
+      "portable": true
+    },
+    {
+      "label": "Composite-seen tasks",
+      "value": "16",
+      "note": "Number of target composite tasks seen during Human300 pretraining.",
+      "source": "RoboCasa365 official leaderboard · Table: robocasa.ai.leaderboard · Materializes the reviewed RoboCasa365 policy-by-split leaderboard values used in this report.",
+      "source_query": "SELECT * FROM (VALUES ('pi0', 'Atomic seen', 0.346), ('pi0', 'Composite seen', 0.061), ('pi0', 'Composite unseen', 0.011), ('pi0.5', 'Atomic seen', 0.396), ('pi0.5', 'Composite seen', 0.071), ('pi0.5', 'Composite unseen', 0.012), ('GR00T N1.5', 'Atomic seen', 0.507), ('GR00T N1.5', 'Composite seen', 0.148), ('GR00T N1.5', 'Composite unseen', 0.027), ('RLDX-1', 'Atomic seen', 0.676), ('RLDX-1', 'Composite seen', 0.279), ('RLDX-1', 'Composite unseen', 0.085), ('Xiaomi-Robotics-1', 'Atomic seen', 0.802), ('Xiaomi-Robotics-1', 'Composite seen', 0.571), ('Xiaomi-Robotics-1', 'Composite unseen', 0.321)) AS t(policy, split, success_rate)",
+      "portable": true
+    },
+    {
+      "label": "Composite-unseen tasks",
+      "value": "16",
+      "note": "Number of held-out composite tasks evaluated zero-shot.",
+      "source": "RoboCasa365 official leaderboard · Table: robocasa.ai.leaderboard · Materializes the reviewed RoboCasa365 policy-by-split leaderboard values used in this report.",
+      "source_query": "SELECT * FROM (VALUES ('pi0', 'Atomic seen', 0.346), ('pi0', 'Composite seen', 0.061), ('pi0', 'Composite unseen', 0.011), ('pi0.5', 'Atomic seen', 0.396), ('pi0.5', 'Composite seen', 0.071), ('pi0.5', 'Composite unseen', 0.012), ('GR00T N1.5', 'Atomic seen', 0.507), ('GR00T N1.5', 'Composite seen', 0.148), ('GR00T N1.5', 'Composite unseen', 0.027), ('RLDX-1', 'Atomic seen', 0.676), ('RLDX-1', 'Composite seen', 0.279), ('RLDX-1', 'Composite unseen', 0.085), ('Xiaomi-Robotics-1', 'Atomic seen', 0.802), ('Xiaomi-Robotics-1', 'Composite seen', 0.571), ('Xiaomi-Robotics-1', 'Composite unseen', 0.321)) AS t(policy, split, success_rate)",
+      "portable": true
+    }
+  ],
+  "sections": {
+    "Technical summary": {
+      "title": "Technical summary",
+      "paragraphs": [
+        "Use RoboCasa as the primary benchmark, retain pi0 as a weak-policy baseline, and add RLDX-1 as the higher-progress policy. The most defensible first contribution is not a fully retrained recovery VLA. It is a modular system that detects failure early, returns the end effector to a last-good anchor, and chooses among policy-generated action chunks with a subtask-conditioned critic.",
+        "Recovery demonstrations are not required for locally retryable failures when the environment remains task-valid and the base policy assigns some probability to a successful continuation. They become necessary for state-breaking failures, unsafe rollback motion, or repeated proposal-support failure.",
+        "The dataset should remain centered on natural on-policy failures, with expert-derived perturbations used as controlled augmentation rather than as the main scientific claim. The project becomes stronger if it measures how recovery changes across policy competence levels instead of treating one policy's failure distribution as universal."
+      ],
+      "bullets": [],
+      "links": []
+    },
+    "A stronger policy is needed to expose meaningful late-stage failures": {
+      "title": "A stronger policy is needed to expose meaningful late-stage failures",
+      "paragraphs": [
+        "On the official benchmark, RLDX -1 's composite-seen success rate is about 4.6 times pi0's. That makes RLDX-1 more likely to reach later subtasks, while its remaining failure rate is still high enough for recovery-data collection. Pi0.5 improves only marginally over pi0 on composite tasks, so switching from pi0 to pi0.5 is unlikely to justify migration effort."
+      ],
+      "bullets": [],
+      "links": []
+    },
+    "Policy options for failure-recovery research": {
+      "title": "Policy options for failure-recovery research",
+      "paragraphs": [],
+      "bullets": [],
+      "links": []
+    },
+    "RoboCasa is the right primary benchmark, but not sufficient alone": {
+      "title": "RoboCasa is the right primary benchmark, but not sufficient alone",
+      "paragraphs": [
+        "RoboCasa aligns unusually well with the research question: long-horizon composite tasks, atomic-skill structure, diverse scenes, simulator checkpointing, and newly released per-frame labels for subtask index, skill name, stage, and instruction. These properties enable failure localization, correct-prefix preservation, and subtask-conditioned recovery evaluation.",
+        "The final paper should still add either a small real-robot pilot or a secondary benchmark. A real-robot pilot is more valuable if resources are limited because it directly tests whether EEF rollback and critic-based retry work without privileged full-state restoration."
+      ],
+      "bullets": [],
+      "links": []
+    },
+    "Scope, data, and decision metrics": {
+      "title": "Scope, data, and decision metrics",
+      "paragraphs": [
+        "Natural failure means an on-policy execution failure produced without injecting a predefined perturbation into an expert trajectory. Locally retryable failure means the task environment remains valid, the successful prefix is preserved, and at least one candidate continuation can complete the current subtask. State-breaking failure means a drop, topple, jam, wrong object state, or other change that places the environment outside the task policy's useful support.",
+        "The primary dataset unit should be a failure-centered episode containing the task and semantic subtask, completed-prefix predicates, failure-onset window, last-good checkpoint, robot and object state summaries, policy identity, action chunks, and outcome labels from deterministic simulator forks. Recovery trajectories are an optional field reserved for failures that cannot be solved by rollback plus resampling."
+      ],
+      "bullets": [],
+      "links": []
+    },
+    "The literature supports a hybrid natural-plus-controlled data strategy": {
+      "title": "The literature supports a hybrid natural-plus-controlled data strategy",
+      "paragraphs": [
+        "The reviewed field is not uniformly synthetic. SAFE trains on successful and failed rollouts, and AFIL explicitly uses failures generated online by a pretrained VLA. In contrast, FailSafe injects motion errors into ground-truth rollouts; Sentinel-VLA automatically synthesizes error-recovery trajectories; FLARE creates perturbation-and-bridging data plus targeted reset skills; and Phoenix mixes expert-derived motion labels with human intervention and offline correction annotation.",
+        "The open opportunity is therefore narrower and stronger: natural failures organized by long-horizon subtask progress , coupled with counterfactual action outcomes from the same failure state."
+      ],
+      "bullets": [],
+      "links": []
+    },
+    "Failure and recovery evidence matrix": {
+      "title": "Failure and recovery evidence matrix",
+      "paragraphs": [],
+      "bullets": [],
+      "links": []
+    },
+    "Recommended architecture: monitor, anchor, rerank, then reset": {
+      "title": "Recommended architecture: monitor, anchor, rerank, then reset",
+      "paragraphs": [],
+      "bullets": [
+        "Progress-aware monitor. Train a small temporal head on frozen VLA features, observations, completed-prefix predicates, semantic subtask text, and time-in-subtask. Predict failure risk, progress regression, and whether the state is locally retryable. SAFE provides the closest architectural precedent.",
+        "Last-good anchor. Save checkpoints when ordered subtask predicates advance and remain stable. Restore only the EEF pose for the principal experiment; treat full simulator-state restoration as an oracle.",
+        "Subtask critic. Sample multiple action chunks from the base policy and score the probability that each chunk completes the current subtask without regressing the successful prefix. Train the critic from simulator forks labeled by short-horizon outcomes. This needs action-outcome supervision, not human recovery demonstrations.",
+        "Recovery router. Execute the best candidate when confidence is sufficient. Escalate to a reset skill after repeated retry failure or when the monitor predicts a state-breaking error. FLARE's retry/reset distinction motivates this boundary."
+      ],
+      "links": []
+    },
+    "Direct flow guidance should be the second algorithmic stage": {
+      "title": "Direct flow guidance should be the second algorithmic stage",
+      "paragraphs": [
+        "After critic reranking is validated, train success and failure action generators with a shared visual-language backbone and guide the flow field away from failed behavior:",
+        "u_guided = u_success + lambda_t (u_success - u_failure)",
+        "Condition both generators on task instruction, semantic subtask, completed prefix, observation history, and rollback state. Gate lambda_t by detector/critic confidence and cap it to avoid pushing samples outside feasible control support. AFIL establishes failure distributions as negative guidance; this project can add long-horizon subtask conditioning and natural failure-state anchors."
+      ],
+      "bullets": [],
+      "links": []
+    },
+    "Evaluate recovery at detector, local, and end-to-end levels": {
+      "title": "Evaluate recovery at detector, local, and end-to-end levels",
+      "paragraphs": [
+        "Detector: onset precision/recall, false alarms per rollout, detection delay, and subtask localization accuracy.",
+        "Local recovery: probability of completing the failed subtask from the same checkpoint, retained-prefix rate, attempts required, and state-breaking escalation rate.",
+        "End to end: full-task success, clean-run degradation, added control steps, inference latency, intervention count, unsafe contacts, drops, and success-but-unsafe outcomes. Use paired seeds and identical saved checkpoints for every recovery comparison.",
+        "The policy-selection metric should be useful-failure yield : P(failure) x P(progress >= 1 | failure) x P(retryable | failure) . This measures whether a policy produces scientifically useful recovery episodes rather than merely many failures."
+      ],
+      "bullets": [],
+      "links": []
+    },
+    "Minimal-to-full experimental ladder": {
+      "title": "Minimal-to-full experimental ladder",
+      "paragraphs": [],
+      "bullets": [],
+      "links": []
+    },
+    "Limitations and robustness checks": {
+      "title": "Limitations and robustness checks",
+      "paragraphs": [],
+      "bullets": [
+        "Simulator privilege: EEF pose restoration must be reported separately from full environment restoration; the latter is an oracle.",
+        "Policy dependence: failure distributions shift with policy competence. Train/evaluate across pi0 and RLDX-1, or explicitly limit claims to one policy family.",
+        "Multiple valid subtask orders: condition on semantic subtask identity and the observed completed prefix, not a fixed global index.",
+        "Success is not safety: add drop, contact, spill, collision, and success-but-unsafe metrics rather than relying only on task predicates.",
+        "Critic exploitation: compare critic predictions with deterministic fork outcomes, monitor calibration, and test whether aggressive guidance degrades clean rollouts.",
+        "Benchmark validity: use paired seeds, confidence intervals, and shortcut/leakage checks; RoboCasa performs comparatively well in recent audits but is not immune to benchmark artifacts."
+      ],
+      "links": []
+    },
+    "Recommended next steps": {
+      "title": "Recommended next steps",
+      "paragraphs": [],
+      "bullets": [
+        "Integrate the released RLDX-1 RoboCasa checkpoint behind the existing model-agnostic policy interface.",
+        "Run a six-task pilot with matched pi0 and RLDX-1 rollouts; estimate useful-failure yield and failure-depth distributions before recollecting at scale.",
+        "Extend annotations with failure onset, last-good checkpoint, retryable/state-breaking class, completed prefix, and forked candidate outcomes.",
+        "Implement EEF rollback plus unguided retry as the minimum baseline.",
+        "Train the subtask critic and compare reranking against unguided retry from identical checkpoints.",
+        "Add the learned monitor only after the oracle-onset recovery experiment works.",
+        "Attempt direct flow guidance only after reranking demonstrates that successful policy proposals exist at the recovered states.",
+        "Collect explicit reset trajectories only for the residual state-breaking failure set."
+      ],
+      "links": []
+    },
+    "Further questions that can change the design": {
+      "title": "Further questions that can change the design",
+      "paragraphs": [],
+      "bullets": [
+        "What proportion of current failures occur after at least one stable completed subtask?",
+        "After EEF rollback, how often does simple resampling already succeed?",
+        "Does the critic need observation history, or are the current frame and completed-prefix state sufficient?",
+        "Can a critic trained on pi0 candidate outcomes transfer to RLDX-1 proposals?",
+        "Which failures are genuinely state-breaking rather than merely outside the current policy's proposal support?",
+        "How much performance survives when simulator predicates are removed from the monitor at inference?"
+      ],
+      "links": []
+    },
+    "Sources": {
+      "title": "Sources",
+      "paragraphs": [],
+      "bullets": [
+        "Current project report and research notes duckdb · 2026-07-12T00:00:00+09:00 Materializes the reviewed experimental ladder from the current project report. SQL query SELECT * FROM (VALUES (1, 'Oracle failure onset plus EEF rollback and unguided retry'), (2, 'EEF rollback plus subtask-critic reranking'), (3, 'Learned temporal detector and recovery router'), (4, 'Subtask-conditioned direct flow guidance'), (5, 'Explicit reset skills for state-breaking failures')) AS t(phase_order, intervention)",
+        "RoboCasa365 official site and release notes",
+        "RoboCasa365 official leaderboard duckdb · 2026-07-12T00:00:00+09:00 Materializes the reviewed RoboCasa365 policy-by-split leaderboard values used in this report. SQL query SELECT * FROM (VALUES ('pi0', 'Atomic seen', 0.346), ('pi0', 'Composite seen', 0.061), ('pi0', 'Composite unseen', 0.011), ('pi0.5', 'Atomic seen', 0.396), ('pi0.5', 'Composite seen', 0.071), ('pi0.5', 'Composite unseen', 0.012), ('GR00T N1.5', 'Atomic seen', 0.507), ('GR00T N1.5', 'Composite seen', 0.148), ('GR00T N1.5', 'Composite unseen', 0.027), ('RLDX-1', 'Atomic seen', 0.676), ('RLDX-1', 'Composite seen', 0.279), ('RLDX-1', 'Composite unseen', 0.085), ('Xiaomi-Robotics-1', 'Atomic seen', 0.802), ('Xiaomi-Robotics-1', 'Composite seen', 0.571), ('Xiaomi-Robotics-1', 'Composite unseen', 0.321)) AS t(policy, split, success_rate)",
+        "RoboCasa365 multi-task learning documentation",
+        "What Are We Actually Benchmarking in Robot Manipulation?",
+        "RLDX-1 technical report and RoboCasa submission",
+        "Phoenix: A Motion-based Self-Reflection Framework for Fine-grained Robotic Action Correction",
+        "SAFE: Multitask Failure Detection for Vision-Language-Action Models",
+        "FailSafe: Reasoning and Recovery from Failures in Vision-Language-Action Models",
+        "Sentinel-VLA: A Metacognitive VLA Model with Active Status Monitoring for Dynamic Reasoning and Error Recovery",
+        "Failing Forward: Adaptive Failure-Informed Learning for Vision-Language-Action Models",
+        "FLARE: A Failure-Aware Framework for Autonomous Correction and Recovery in Visual-Language Robotic Manipulation",
+        "SafeVLA-Bench",
+        "Reviewed failure and recovery literature set source_notes.md · duckdb · 2026-07-12T00:00:00+09:00 Materializes the paper-method taxonomy reviewed from six primary papers. SQL query SELECT * FROM (VALUES ('AFIL', 'Natural on-policy failures'), ('FailSafe', 'Injected errors in expert rollouts'), ('FLARE', 'Perturbation and bridging plus mined OOD failures'), ('Phoenix', 'Expert labels plus human correction annotation'), ('SAFE', 'Successful and failed on-policy rollouts'), ('Sentinel-VLA', 'Automatically synthesized recovery trajectories')) AS t(method, failure_source)",
+        "Policy benchmark and implementation evidence source_notes.md · duckdb · 2026-07-12T00:00:00+09:00 Materializes the reviewed policy decision table from the official leaderboard and implementation evidence. SQL query SELECT * FROM (VALUES ('pi0', 0.148, 0.061, 0.011), ('pi0.5', 0.169, 0.071, 0.012), ('GR00T N1.5', 0.239, 0.148, 0.027), ('RLDX-1', 0.360, 0.279, 0.085), ('Xiaomi-Robotics-1', 0.574, 0.571, 0.321)) AS t(policy, overall, composite_seen, composite_unseen)"
+      ],
+      "links": []
+    }
+  },
+  "charts": [
+    {
+      "index": 1,
+      "title": "RoboCasa365 success rate by policy and evaluation split",
+      "takeaway": "RoboCasa365 success rate by policy and evaluation split",
+      "caveat": "Chart data preserved from the report section: A stronger policy is needed to expose meaningful late-stage failures.",
+      "source_kind": "portable_data_table",
+      "source": "RoboCasa365 official leaderboard · Table: robocasa.ai.leaderboard · Materializes the reviewed RoboCasa365 policy-by-split leaderboard values used in this report.",
+      "source_query": "SELECT * FROM (VALUES ('pi0', 'Atomic seen', 0.346), ('pi0', 'Composite seen', 0.061), ('pi0', 'Composite unseen', 0.011), ('pi0.5', 'Atomic seen', 0.396), ('pi0.5', 'Composite seen', 0.071), ('pi0.5', 'Composite unseen', 0.012), ('GR00T N1.5', 'Atomic seen', 0.507), ('GR00T N1.5', 'Composite seen', 0.148), ('GR00T N1.5', 'Composite unseen', 0.027), ('RLDX-1', 'Atomic seen', 0.676), ('RLDX-1', 'Composite seen', 0.279), ('RLDX-1', 'Composite unseen', 0.085), ('Xiaomi-Robotics-1', 'Atomic seen', 0.802), ('Xiaomi-Robotics-1', 'Composite seen', 0.571), ('Xiaomi-Robotics-1', 'Composite unseen', 0.321)) AS t(policy, split, success_rate)",
+      "data_table": {
+        "headers": [
+          "Policy",
+          "Task success rate",
+          "Evaluation split"
+        ],
+        "rows": [
+          [
+            "pi0",
+            "34.6%",
+            "Atomic seen"
+          ],
+          [
+            "pi0",
+            "6.1%",
+            "Composite seen"
+          ],
+          [
+            "pi0",
+            "1.1%",
+            "Composite unseen"
+          ],
+          [
+            "pi0.5",
+            "39.6%",
+            "Atomic seen"
+          ],
+          [
+            "pi0.5",
+            "7.1%",
+            "Composite seen"
+          ],
+          [
+            "pi0.5",
+            "1.2%",
+            "Composite unseen"
+          ],
+          [
+            "GR00T N1.5",
+            "50.7%",
+            "Atomic seen"
+          ],
+          [
+            "GR00T N1.5",
+            "14.8%",
+            "Composite seen"
+          ],
+          [
+            "GR00T N1.5",
+            "2.7%",
+            "Composite unseen"
+          ],
+          [
+            "RLDX-1",
+            "67.6%",
+            "Atomic seen"
+          ],
+          [
+            "RLDX-1",
+            "27.9%",
+            "Composite seen"
+          ],
+          [
+            "RLDX-1",
+            "8.5%",
+            "Composite unseen"
+          ],
+          [
+            "Xiaomi-Robotics-1",
+            "80.2%",
+            "Atomic seen"
+          ],
+          [
+            "Xiaomi-Robotics-1",
+            "57.1%",
+            "Composite seen"
+          ],
+          [
+            "Xiaomi-Robotics-1",
+            "32.1%",
+            "Composite unseen"
+          ]
+        ],
+        "title": "RoboCasa365 success rate by policy and evaluation split",
+        "note": "",
+        "source": "RoboCasa365 official leaderboard · Table: robocasa.ai.leaderboard · Materializes the reviewed RoboCasa365 policy-by-split leaderboard values used in this report.",
+        "source_query": "SELECT * FROM (VALUES ('pi0', 'Atomic seen', 0.346), ('pi0', 'Composite seen', 0.061), ('pi0', 'Composite unseen', 0.011), ('pi0.5', 'Atomic seen', 0.396), ('pi0.5', 'Composite seen', 0.071), ('pi0.5', 'Composite unseen', 0.012), ('GR00T N1.5', 'Atomic seen', 0.507), ('GR00T N1.5', 'Composite seen', 0.148), ('GR00T N1.5', 'Composite unseen', 0.027), ('RLDX-1', 'Atomic seen', 0.676), ('RLDX-1', 'Composite seen', 0.279), ('RLDX-1', 'Composite unseen', 0.085), ('Xiaomi-Robotics-1', 'Atomic seen', 0.802), ('Xiaomi-Robotics-1', 'Composite seen', 0.571), ('Xiaomi-Robotics-1', 'Composite unseen', 0.321)) AS t(policy, split, success_rate)"
+      },
+      "image_path": "/Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/reports/failure_recovery_research_20260712/google_slides_final/assets/charts/chart_01.png",
+      "width_px": 1200,
+      "height_px": 675
+    }
+  ],
+  "tables": [
+    {
+      "headers": [
+        "Policy",
+        "Overall",
+        "Composite seen",
+        "Composite unseen",
+        "Availability",
+        "Fit for guidance research",
+        "Recommended role"
+      ],
+      "rows": [
+        [
+          "Xiaomi-Robotics-1",
+          "57.4%",
+          "57.1%",
+          "32.1%",
+          "Closed; private evaluation",
+          "Not reproducible",
+          "Upper-bound context only"
+        ],
+        [
+          "RLDX-1",
+          "36%",
+          "27.9%",
+          "8.5%",
+          "Open code and RoboCasa checkpoint",
+          "Flow-matching action generator",
+          "Recommended higher-progress primary policy"
+        ],
+        [
+          "GR00T N1.5",
+          "23.9%",
+          "14.8%",
+          "2.7%",
+          "Open; official RoboCasa support",
+          "Higher integration/training cost",
+          "Secondary alternative"
+        ],
+        [
+          "pi0.5",
+          "16.9%",
+          "7.1%",
+          "1.2%",
+          "Open",
+          "Native flow-policy fit",
+          "Do not prioritize; progress gain is small"
+        ],
+        [
+          "pi0",
+          "14.8%",
+          "6.1%",
+          "1.1%",
+          "Open; current project baseline",
+          "Native flow-policy fit",
+          "Weak-policy baseline and existing natural-failure dataset"
+        ]
+      ],
+      "title": "Policy options for failure-recovery research",
+      "note": "",
+      "source": "Policy benchmark and implementation evidence · Tables: robocasa.ai.leaderboard, reviewed_policy_implementations.availability · Materializes the reviewed policy decision table from the official leaderboard and implementation evidence.",
+      "source_query": "SELECT * FROM (VALUES ('pi0', 0.148, 0.061, 0.011), ('pi0.5', 0.169, 0.071, 0.012), ('GR00T N1.5', 0.239, 0.148, 0.027), ('RLDX-1', 0.360, 0.279, 0.085), ('Xiaomi-Robotics-1', 0.574, 0.571, 0.321)) AS t(policy, overall, composite_seen, composite_unseen)"
+    },
+    {
+      "headers": [
+        "Method",
+        "Failure source",
+        "Corrective signal",
+        "Monitoring",
+        "Implication for this project"
+      ],
+      "rows": [
+        [
+          "AFIL",
+          "Natural on-policy VLA failures",
+          "Success/failure generators with negative guidance",
+          "Adaptive sampling guidance",
+          "Closest direct flow-guidance precedent"
+        ],
+        [
+          "FailSafe",
+          "Injected errors in expert rollouts",
+          "Verified executable recovery actions",
+          "External failure-reasoning VLM",
+          "Controlled, but less natural, baseline"
+        ],
+        [
+          "FLARE",
+          "Bridging augmentation plus mined OOD failures",
+          "Retry policy and reset-skill library",
+          "MLLM routes retry versus reset",
+          "Supports retryable/state-breaking routing"
+        ],
+        [
+          "Phoenix",
+          "Expert labels plus human correction annotation",
+          "Motion instruction conditions diffusion policy",
+          "Motion correction module",
+          "Useful mid-level interface; more supervision"
+        ],
+        [
+          "SAFE",
+          "Successful and failed on-policy rollouts",
+          "Failure score from frozen VLA features",
+          "Temporal detector with conformal calibration",
+          "Best starting point for early detection"
+        ],
+        [
+          "Sentinel-VLA",
+          "Synthetic recovery trajectories",
+          "Unified status-aware recovery training",
+          "Integrated status sentinel",
+          "On-demand reasoning; larger first build"
+        ]
+      ],
+      "title": "Failure and recovery evidence matrix",
+      "note": "",
+      "source": "Reviewed failure and recovery literature set · Table: reviewed_primary_papers.failure_taxonomy · Materializes the paper-method taxonomy reviewed from six primary papers.",
+      "source_query": "SELECT * FROM (VALUES ('AFIL', 'Natural on-policy failures'), ('FailSafe', 'Injected errors in expert rollouts'), ('FLARE', 'Perturbation and bridging plus mined OOD failures'), ('Phoenix', 'Expert labels plus human correction annotation'), ('SAFE', 'Successful and failed on-policy rollouts'), ('Sentinel-VLA', 'Automatically synthesized recovery trajectories')) AS t(method, failure_source)"
+    },
+    {
+      "headers": [
+        "Phase",
+        "Intervention",
+        "Controlled comparison",
+        "Decision gate"
+      ],
+      "rows": [
+        [
+          "1",
+          "Oracle failure onset plus EEF rollback and unguided retry",
+          "No intervention; retry without rollback; full-state rollback oracle",
+          "Rollback produces retryable states without frequent prefix regression"
+        ],
+        [
+          "2",
+          "EEF rollback plus subtask-critic reranking",
+          "Same checkpoints and candidate budgets as unguided retry",
+          "Reranking improves failed-subtask completion and end-to-end success"
+        ],
+        [
+          "3",
+          "Learned temporal detector and retryable/state-breaking router",
+          "Oracle onset and simulator-timeout detection",
+          "Timely detection with acceptable clean-run false alarms"
+        ],
+        [
+          "4",
+          "Subtask-conditioned direct flow guidance",
+          "Critic reranking at matched inference budget",
+          "Guidance adds value without reducing clean-run success or safety"
+        ],
+        [
+          "5",
+          "Explicit reset skills for state-breaking failures",
+          "Retry-only system and reset oracle",
+          "Targeted reset data closes failures that resampling cannot solve"
+        ]
+      ],
+      "title": "Minimal-to-full experimental ladder",
+      "note": "",
+      "source": "Current project report and research notes · Table: current_project_report.experiment_ladder · Materializes the reviewed experimental ladder from the current project report.",
+      "source_query": "SELECT * FROM (VALUES (1, 'Oracle failure onset plus EEF rollback and unguided retry'), (2, 'EEF rollback plus subtask-critic reranking'), (3, 'Learned temporal detector and recovery router'), (4, 'Subtask-conditioned direct flow guidance'), (5, 'Explicit reset skills for state-breaking failures')) AS t(phase_order, intervention)"
+    }
+  ],
+  "colors": {
+    "surface": "#FCFCFD",
+    "ink": "#1F2430",
+    "muted": "#6F768A",
+    "grid": "#E6E8F0",
+    "axis": "#D7DBE7",
+    "blue": "#2E4780",
+    "blue_light": "#CEDFFE",
+    "gold": "#B8A037",
+    "neutral": "#C5CAD3",
+    "neutral_dark": "#464C55"
+  },
+  "outputs": {
+    "deck_pptx": "/Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/reports/failure_recovery_research_20260712/google_slides_final/deck.pptx",
+    "deck_plan": "/Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/reports/failure_recovery_research_20260712/google_slides_final/deck_plan.json",
+    "preflight": "/Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/reports/failure_recovery_research_20260712/google_slides_final/preflight_checks.json"
+  }
+}

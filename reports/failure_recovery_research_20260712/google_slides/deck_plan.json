@@ -1,0 +1,144 @@
+[
+  {
+    "kind": "cover",
+    "title": "Natural Failures and Subtask-Guided Recovery in RoboCasa",
+    "elements": [
+      "slide-title",
+      "lede",
+      "metric-1",
+      "metric-2",
+      "metric-3",
+      "metric-4"
+    ]
+  },
+  {
+    "kind": "executive_summary",
+    "title": "Executive summary",
+    "elements": [
+      "slide-title",
+      "summary-bullets",
+      "metric-card-1",
+      "metric-card-2",
+      "metric-card-3",
+      "metric-card-4"
+    ],
+    "source_paragraphs": [
+      "Use RoboCasa as the primary benchmark, retain pi0 as a weak-policy baseline, and add RLDX-1 as the higher-progress policy. The most defensible first contribution is not a fully retrained recovery VLA. It is a modular system that detects failure early, returns the end effector to a last-good anchor, and chooses among policy-generated action chunks with a subtask-conditioned critic.",
+      "Recovery demonstrations are not required for locally retryable failures when the environment remains task-valid and the base policy assigns some probability to a successful continuation. They become necessary for state-breaking failures, unsafe rollback motion, or repeated proposal-support failure.",
+      "The dataset should remain centered on natural on-policy failures, with expert-derived perturbations used as controlled augmentation rather than as the main scientific claim. The project becomes stronger if it measures how recovery changes across policy competence levels instead of treating one policy's failure distribution as universal."
+    ]
+  },
+  {
+    "kind": "chart_evidence",
+    "title": "RoboCasa365 success rate by policy and evaluation split",
+    "chart_index": 1,
+    "source_kind": "portable_data_table",
+    "source": "RoboCasa365 official leaderboard · Table: robocasa.ai.leaderboard · Materializes the reviewed RoboCasa365 policy-by-split leaderboard values used in this report.",
+    "elements": [
+      "slide-title",
+      "chart-main",
+      "chart-callout",
+      "source-note"
+    ]
+  },
+  {
+    "kind": "table",
+    "title": "Policy options for failure-recovery research table",
+    "table_index": 1,
+    "source": "Policy benchmark and implementation evidence · Tables: robocasa.ai.leaderboard, reviewed_policy_implementations.availability · Materializes the reviewed policy decision table from the official leaderboard and implementation evidence.",
+    "elements": [
+      "slide-title",
+      "table-main",
+      "table-note",
+      "source-note"
+    ]
+  },
+  {
+    "kind": "table",
+    "title": "Failure and recovery evidence matrix table",
+    "table_index": 2,
+    "source": "Reviewed failure and recovery literature set · Table: reviewed_primary_papers.failure_taxonomy · Materializes the paper-method taxonomy reviewed from six primary papers.",
+    "elements": [
+      "slide-title",
+      "table-main",
+      "table-note",
+      "source-note"
+    ]
+  },
+  {
+    "kind": "table",
+    "title": "Minimal-to-full experimental ladder table",
+    "table_index": 3,
+    "source": "Current project report and research notes · Table: current_project_report.experiment_ladder · Materializes the reviewed experimental ladder from the current project report.",
+    "elements": [
+      "slide-title",
+      "table-main",
+      "table-note",
+      "source-note"
+    ]
+  },
+  {
+    "kind": "conclusions_implications",
+    "title": "Recommended next steps",
+    "elements": [
+      "slide-title",
+      "conclusions",
+      "implications"
+    ],
+    "source_paragraphs": {
+      "conclusions": [],
+      "implications": [
+        "Integrate the released RLDX-1 RoboCasa checkpoint behind the existing model-agnostic policy interface.",
+        "Run a six-task pilot with matched pi0 and RLDX-1 rollouts; estimate useful-failure yield and failure-depth distributions before recollecting at scale.",
+        "Extend annotations with failure onset, last-good checkpoint, retryable/state-breaking class, completed prefix, and forked candidate outcomes.",
+        "Implement EEF rollback plus unguided retry as the minimum baseline.",
+        "Train the subtask critic and compare reranking against unguided retry from identical checkpoints.",
+        "Add the learned monitor only after the oracle-onset recovery experiment works.",
+        "Attempt direct flow guidance only after reranking demonstrates that successful policy proposals exist at the recovered states.",
+        "Collect explicit reset trajectories only for the residual state-breaking failure set."
+      ]
+    }
+  },
+  {
+    "kind": "caveats",
+    "title": "Limitations and robustness checks",
+    "elements": [
+      "slide-title",
+      "caveats"
+    ],
+    "source_paragraphs": [
+      "Simulator privilege: EEF pose restoration must be reported separately from full environment restoration; the latter is an oracle.",
+      "Policy dependence: failure distributions shift with policy competence. Train/evaluate across pi0 and RLDX-1, or explicitly limit claims to one policy family.",
+      "Multiple valid subtask orders: condition on semantic subtask identity and the observed completed prefix, not a fixed global index.",
+      "Success is not safety: add drop, contact, spill, collision, and success-but-unsafe metrics rather than relying only on task predicates.",
+      "Critic exploitation: compare critic predictions with deterministic fork outcomes, monitor calibration, and test whether aggressive guidance degrades clean rollouts.",
+      "Benchmark validity: use paired seeds, confidence intervals, and shortcut/leakage checks; RoboCasa performs comparatively well in recent audits but is not immune to benchmark artifacts."
+    ]
+  },
+  {
+    "kind": "sources_reproducibility",
+    "title": "Sources",
+    "elements": [
+      "slide-title",
+      "sources"
+    ],
+    "source_paragraphs": [
+      "Current project report and research notes duckdb · 2026-07-12T00:00:00+09:00 Materializes the reviewed experimental ladder from the current project report. SQL query SELECT * FROM (VALUES (1, 'Oracle failure onset plus EEF rollback and unguided retry'), (2, 'EEF rollback plus subtask-critic reranking'), (3, 'Learned temporal detector and recovery router'), (4, 'Subtask-conditioned direct flow guidance'), (5, 'Explicit reset skills for state-breaking failures')) AS t(phase_order, intervention)",
+      "RoboCasa365 official site and release notes",
+      "RoboCasa365 official leaderboard duckdb · 2026-07-12T00:00:00+09:00 Materializes the reviewed RoboCasa365 policy-by-split leaderboard values used in this report. SQL query SELECT * FROM (VALUES ('pi0', 'Atomic seen', 0.346), ('pi0', 'Composite seen', 0.061), ('pi0', 'Composite unseen', 0.011), ('pi0.5', 'Atomic seen', 0.396), ('pi0.5', 'Composite seen', 0.071), ('pi0.5', 'Composite unseen', 0.012), ('GR00T N1.5', 'Atomic seen', 0.507), ('GR00T N1.5', 'Composite seen', 0.148), ('GR00T N1.5', 'Composite unseen', 0.027), ('RLDX-1', 'Atomic seen', 0.676), ('RLDX-1', 'Composite seen', 0.279), ('RLDX-1', 'Composite unseen', 0.085), ('Xiaomi-Robotics-1', 'Atomic seen', 0.802), ('Xiaomi-Robotics-1', 'Composite seen', 0.571), ('Xiaomi-Robotics-1', 'Composite unseen', 0.321)) AS t(policy, split, success_rate)",
+      "RoboCasa365 multi-task learning documentation",
+      "What Are We Actually Benchmarking in Robot Manipulation?",
+      "RLDX-1 technical report and RoboCasa submission",
+      "Phoenix: A Motion-based Self-Reflection Framework for Fine-grained Robotic Action Correction",
+      "SAFE: Multitask Failure Detection for Vision-Language-Action Models",
+      "FailSafe: Reasoning and Recovery from Failures in Vision-Language-Action Models",
+      "Sentinel-VLA: A Metacognitive VLA Model with Active Status Monitoring for Dynamic Reasoning and Error Recovery",
+      "Failing Forward: Adaptive Failure-Informed Learning for Vision-Language-Action Models",
+      "FLARE: A Failure-Aware Framework for Autonomous Correction and Recovery in Visual-Language Robotic Manipulation",
+      "SafeVLA-Bench",
+      "Reviewed failure and recovery literature set source_notes.md · duckdb · 2026-07-12T00:00:00+09:00 Materializes the paper-method taxonomy reviewed from six primary papers. SQL query SELECT * FROM (VALUES ('AFIL', 'Natural on-policy failures'), ('FailSafe', 'Injected errors in expert rollouts'), ('FLARE', 'Perturbation and bridging plus mined OOD failures'), ('Phoenix', 'Expert labels plus human correction annotation'), ('SAFE', 'Successful and failed on-policy rollouts'), ('Sentinel-VLA', 'Automatically synthesized recovery trajectories')) AS t(method, failure_source)",
+      "Policy benchmark and implementation evidence source_notes.md · duckdb · 2026-07-12T00:00:00+09:00 Materializes the reviewed policy decision table from the official leaderboard and implementation evidence. SQL query SELECT * FROM (VALUES ('pi0', 0.148, 0.061, 0.011), ('pi0.5', 0.169, 0.071, 0.012), ('GR00T N1.5', 0.239, 0.148, 0.027), ('RLDX-1', 0.360, 0.279, 0.085), ('Xiaomi-Robotics-1', 0.574, 0.571, 0.321)) AS t(policy, overall, composite_seen, composite_unseen)"
+    ],
+    "source_links": []
+  }
+]

@@ -1,5 +1,10 @@
 # XR1 timing pilot with audited parent exclusions
 
+> **Frozen 2026-10-16.** This track is closed and must not be extended; see
+> [exact_replay_frozen.md](exact_replay_frozen.md). Code moved to
+> `robocasa/recovery/exact_replay/` and `scripts/exact_replay/`; existing
+> registrations must be resumed or reviewed from commit `4d65b542`.
+
 Protocol: `xr1_common_entry_timing_audit_and_exclude_pilot_v1`.
 First live pilot: **72/72 assigned executions collected, all engineering gates
 passed, zero timing errors; nominal image review is pending. Only three
@@ -168,7 +173,7 @@ export XR1_PILOT_GPU=0
 export XR1_PILOT_SERVER_GPU=1
 export XR1_PILOT_PORT=10332
 export XR1_PILOT_ROOT=/gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_pilot_$(date +%Y%m%d_%H%M%S)
-bash scripts/run_xr1_timing_pilot.sh start
+bash scripts/exact_replay/run_xr1_timing_pilot.sh start
 ```
 
 The launcher validates source provenance before starting a private policy
@@ -180,7 +185,7 @@ before launching any further work.
 
 ```bash
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_pilot_latest.env
-bash "$ROBOCASA_REPO/scripts/run_xr1_timing_pilot.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/run_xr1_timing_pilot.sh" status
 tail -n 60 "$XR1_PILOT_LOG"
 ```
 
@@ -206,7 +211,7 @@ Resume an interrupted pilot with its saved environment:
 
 ```bash
 source /path/to/pilot_run/run.env
-bash "$ROBOCASA_REPO/scripts/run_xr1_timing_pilot.sh" resume
+bash "$ROBOCASA_REPO/scripts/exact_replay/run_xr1_timing_pilot.sh" resume
 ```
 
 Resume revalidates code, source/evidence hashes, parent markers, complete branch
@@ -230,7 +235,7 @@ separate file, set each `reviewed_all_frames=true`, and set each
 
 ```bash
 source /path/to/pilot_run/run.env
-bash "$ROBOCASA_REPO/scripts/run_xr1_timing_pilot.sh" review /path/to/completed_image_review.json
+bash "$ROBOCASA_REPO/scripts/exact_replay/run_xr1_timing_pilot.sh" review /path/to/completed_image_review.json
 ```
 
 Review is CPU-only and records one immutable assessment. A rejected nominal
@@ -247,8 +252,8 @@ source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_pilot_2026
 cp -n "$XR1_PILOT_ROOT/pilot/image_review_template.json" "$XR1_PILOT_ROOT/completed_image_review.json"
 nano "$XR1_PILOT_ROOT/completed_image_review.json"
 # After inspecting every frame, fill each parent's two booleans and notes.
-bash "$ROBOCASA_REPO/scripts/run_xr1_timing_pilot.sh" review "$XR1_PILOT_ROOT/completed_image_review.json"
-bash "$ROBOCASA_REPO/scripts/run_xr1_timing_pilot.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/run_xr1_timing_pilot.sh" review "$XR1_PILOT_ROOT/completed_image_review.json"
+bash "$ROBOCASA_REPO/scripts/exact_replay/run_xr1_timing_pilot.sh" status
 ```
 
 The top-level gallery links to each eligible reference's gallery under
@@ -291,8 +296,8 @@ engineering/image checks. Fresh independent validation remains necessary.
 ## Local checks
 
 ```bash
-.venv_video/bin/python -m unittest tests.test_intervention_timing_pilot tests.test_intervention_timing_fresh_references tests.test_intervention_timing_source_inspection tests.test_intervention_timing_parent_audit tests.test_intervention_timing_observation_diagnostic tests.test_intervention_timing_replay_diagnostic tests.test_intervention_timing tests.test_operator_screen tests.test_phase2_snapshot_replay tests.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
-bash -n scripts/run_xr1_timing_pilot.sh
+.venv_video/bin/python -m unittest tests.exact_replay.test_intervention_timing_pilot tests.exact_replay.test_intervention_timing_fresh_references tests.exact_replay.test_intervention_timing_source_inspection tests.exact_replay.test_intervention_timing_parent_audit tests.exact_replay.test_intervention_timing_observation_diagnostic tests.exact_replay.test_intervention_timing_replay_diagnostic tests.exact_replay.test_intervention_timing tests.exact_replay.test_operator_screen tests.exact_replay.test_phase2_snapshot_replay tests.exact_replay.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
+bash -n scripts/exact_replay/run_xr1_timing_pilot.sh
 ```
 
 These are simulator-free protocol/execution tests and shell checks, not live

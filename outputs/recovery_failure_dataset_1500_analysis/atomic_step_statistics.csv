@@ -1,0 +1,292 @@
+task_name,task_granularity,atomic_step_id,atomic_instruction,opportunities,failures,completions,failure_rate,completion_rate
+ArrangeBreadBasket,composite,ArrangeBreadBasket,"Open the cabinet, pick up the bread from the cabinet and place it in the basket. Then move the basket to the dining counter.",30,30,0,1.0,0.0
+ArrangeTea,composite,ArrangeTea,Pick the kettle from the counter and place it on the tray. Then pick the mug from the cabinet and place it on the tray. Then close the cabinet doors.,30,30,0,1.0,0.0
+BreadSelection,composite,BreadSelection,"From the different types of pastries on the counter, select a croissant and place it on the cutting board. Then retrieve a jar of jam from the cabinet and place it alongside the croissant on the cutting board.",30,30,0,1.0,0.0
+CategorizeCondiments,composite,CategorizeCondiments,Put the shaker and condiment bottle from the counter next to their counterparts in the cabinet.,30,30,0,1.0,0.0
+CloseBlenderLid,atomic,CloseBlenderLid,Close the lid blender by securely placing the lid on top.,30,30,0,1.0,0.0
+CloseToasterOvenDoor,atomic,CloseToasterOvenDoor,Close the toaster oven door.,30,30,0,1.0,0.0
+CoffeeSetupMug,atomic,CoffeeSetupMug,Pick the mug from the counter and place it under the coffee machine dispenser.,30,30,0,1.0,0.0
+DeliverStraw,composite,DeliverStraw,Take a straw from the drawer in front and place it inside the glass cup on the dining counter.,30,30,0,1.0,0.0
+GarnishPancake,composite,GarnishPancake,"Take the strawberry from the fridge and place it on top of the pancake, located on the dining counter.",30,30,0,1.0,0.0
+GatherTableware,composite,GatherTableware,Gather all objects into one cabinet and sort the glasses and bowls to opposite sides.,30,30,0,1.0,0.0
+GetToastedBread,composite,GetToastedBread,"Start the toaster. Once the lever pops up, take the bread to the plate on the dining counter.",30,30,0,1.0,0.0
+HeatKebabSandwich,composite,HeatKebabSandwich,"Pick up the kebab skewer and baguette bread, and place them inside the toaster oven. Close the toaster oven door and start by setting the timer.",30,30,0,1.0,0.0
+KettleBoiling,composite,KettleBoiling,Pick the kettle from the counter and place it on a stove burner. Then turn the burner on.,30,30,0,1.0,0.0
+LoadDishwasher,composite,LoadDishwasher,"Pick up the cup and bowl from the counter, place them in the dishwasher, and close the dishwasher door.",30,30,0,1.0,0.0
+MakeIceLemonade,composite,MakeIceLemonade,"Grab a lemon wedge from the fridge and one ice cube from the ice bowl, and put them in the glass of lemonade.",30,30,0,1.0,0.0
+OpenStandMixerHead,atomic,OpenStandMixerHead,Open the stand mixer head.,30,30,0,1.0,0.0
+PanTransfer,composite,PanTransfer,Pick up the pan and dump the vegetables in it onto the plate. Then return the pan to the stove.,30,30,0,1.0,0.0
+PickPlaceToasterToCounter,atomic,PickPlaceToasterToCounter,Place the toasted item on a plate.,30,30,0,1.0,0.0
+PortionHotDogs,composite,PortionHotDogs,Place one bun and one sausage from the bowl on each plate.,30,30,0,1.0,0.0
+PreSoakPan,composite,PreSoakPan,Pick the pan and sponge and place them into the sink. Then turn on the water.,30,30,0,1.0,0.0
+PrepareCoffee,composite,PrepareCoffee,"Pick the mug from the cabinet, place it under the coffee machine dispenser, and press the start button.",30,30,0,1.0,0.0
+RecycleBottlesByType,composite,RecycleBottlesByType,"Move the plastic bottles in the middle to the plastics group, and the glass bottles in the middle to the glass group.",30,30,0,1.0,0.0
+RinseSinkBasin,composite,RinseSinkBasin,Turn on the sink and manuever the spout to wash all locations of the sink basin.,30,30,0,1.0,0.0
+ScrubCuttingBoard,composite,ScrubCuttingBoard,"Pick up the sponge from the counter and clean the cutting board by briefly scrubbing or pressing down on the cutting board. Once finished, release the sponge.",30,30,0,1.0,0.0
+SetUpCuttingStation,composite,SetUpCuttingStation,Pick up the knife from the drawer and place it on the cutting board. Then place the meat from the plate to the cutting board.,30,30,0,1.0,0.0
+StackBowlsCabinet,composite,StackBowlsCabinet,Pick up the bowls on the counter and stack them on top of one another in the open cabinet. Place the smaller bowl on top of the larger bowl.,30,30,0,1.0,0.0
+TurnOnElectricKettle,atomic,TurnOnElectricKettle,Press down the lever to turn on the electric kettle.,30,30,0,1.0,0.0
+TurnOnMicrowave,atomic,TurnOnMicrowave,Press the start button on the microwave.,30,30,0,1.0,0.0
+TurnOnSinkFaucet,atomic,TurnOnSinkFaucet,Turn on the sink faucet.,30,30,0,1.0,0.0
+WaffleReheat,composite,WaffleReheat,"Open the microwave, place the bowl with waffle inside the microwave, then close the microwave door and turn it on.",30,30,0,1.0,0.0
+WashLettuce,composite,WashLettuce,Wash the lettuce in the sink by running water over it.,30,30,0,1.0,0.0
+CloseFridge,atomic,CloseFridge,Close the fridge door.,25,25,0,1.0,0.0
+SlideDishwasherRack,atomic,SlideDishwasherRack,Fully slide the top dishwasher rack out.,22,22,0,1.0,0.0
+OpenCabinet,atomic,OpenCabinet,Open the cabinet doors.,21,21,0,1.0,0.0
+OpenDrawer,atomic,OpenDrawer,Open the right drawer.,18,18,0,1.0,0.0
+OpenDrawer,atomic,OpenDrawer,Open the left drawer.,12,12,0,1.0,0.0
+OpenCabinet,atomic,OpenCabinet,Open the cabinet door.,9,9,0,1.0,0.0
+TurnOffStove,atomic,TurnOffStove,Turn off the front right burner of the stove.,9,9,0,1.0,0.0
+WeighIngredients,composite,WeighIngredients,"Pick the boxed food and place it on the digital scale for weighing, and close the cabinet.",9,9,0,1.0,0.0
+SlideDishwasherRack,atomic,SlideDishwasherRack,Fully slide the top dishwasher rack in.,8,8,0,1.0,0.0
+CuttingToolSelection,composite,CuttingToolSelection,Place the appropriate cutting tool for cutting the avocado skin on the cutting board.,7,7,0,1.0,0.0
+CuttingToolSelection,composite,CuttingToolSelection,Place the appropriate cutting tool for cutting the eggplant skin on the cutting board.,7,7,0,1.0,0.0
+NavigateKitchen,atomic,NavigateKitchen,Navigate to the sink.,7,7,0,1.0,0.0
+PickPlaceDrawerToCounter,atomic,PickPlaceDrawerToCounter,Pick the peeler from the drawer and place it on the counter.,7,7,0,1.0,0.0
+TurnOffStove,atomic,TurnOffStove,Turn off the front left burner of the stove.,7,7,0,1.0,0.0
+TurnOffStove,atomic,TurnOffStove,Turn off the rear left burner of the stove.,7,7,0,1.0,0.0
+WeighIngredients,composite,WeighIngredients,"Pick the jam and place it on the digital scale for weighing, and close the cabinet.",7,7,0,1.0,0.0
+NavigateKitchen,atomic,NavigateKitchen,Navigate to the fridge.,6,6,0,1.0,0.0
+PickPlaceDrawerToCounter,atomic,PickPlaceDrawerToCounter,Pick the ladle from the drawer and place it on the counter.,6,6,0,1.0,0.0
+WeighIngredients,composite,WeighIngredients,"Pick the bar and place it on the digital scale for weighing, and close the cabinet.",6,6,0,1.0,0.0
+CloseFridge,atomic,CloseFridge,Close the fridge doors.,5,5,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the lemon from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,5,5,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and broccoli from their plates and place them in the bowl. Then put the bowl in the fridge.,5,5,0,1.0,0.0
+TurnOffStove,atomic,TurnOffStove,Turn off the rear right burner of the stove.,5,5,0,1.0,0.0
+CuttingToolSelection,composite,CuttingToolSelection,Place the appropriate cutting tool for cutting the carrot skin on the cutting board.,4,4,0,1.0,0.0
+CuttingToolSelection,composite,CuttingToolSelection,Place the appropriate cutting tool for cutting the cucumber skin on the cutting board.,4,4,0,1.0,0.0
+NavigateKitchen,atomic,NavigateKitchen,Navigate to the coffee machine.,4,4,0,1.0,0.0
+NavigateKitchen,atomic,NavigateKitchen,Navigate to the microwave.,4,4,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one lemon wedge and one chicken drumstick in each tupperware on the nearby counter, to pack two identical lunches.",4,4,0,1.0,0.0
+PickPlaceDrawerToCounter,atomic,PickPlaceDrawerToCounter,Pick the measuring cup from the drawer and place it on the counter.,4,4,0,1.0,0.0
+PickPlaceDrawerToCounter,atomic,PickPlaceDrawerToCounter,Pick the tongs from the drawer and place it on the counter.,4,4,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and lemon from their plates and place them in the bowl. Then put the bowl in the fridge.,4,4,0,1.0,0.0
+WeighIngredients,composite,WeighIngredients,"Pick the cereal and place it on the digital scale for weighing, and close the cabinet.",4,4,0,1.0,0.0
+CuttingToolSelection,composite,CuttingToolSelection,Place the appropriate cutting tool for cutting the broccoli skin on the cutting board.,3,3,0,1.0,0.0
+CuttingToolSelection,composite,CuttingToolSelection,Place the appropriate cutting tool for cutting the garlic skin on the cutting board.,3,3,0,1.0,0.0
+NavigateKitchen,atomic,NavigateKitchen,Navigate to the dishwasher.,3,3,0,1.0,0.0
+NavigateKitchen,atomic,NavigateKitchen,Navigate to the oven.,3,3,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the chicken drumstick from the plate and place it in the pan.,3,3,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the marshmallow from the plate and place it in the pan.,3,3,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the shrimp from the plate and place it in the pan.,3,3,0,1.0,0.0
+PickPlaceDrawerToCounter,atomic,PickPlaceDrawerToCounter,Pick the rolling pin from the drawer and place it on the counter.,3,3,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the broccoli from the sink and place it on the plate located on the counter.,3,3,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the milk from the sink and place it on the plate located on the counter.,3,3,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the front left burner on the stove. Then place the chicken drumstick on the stove and turn the burner on.,3,3,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the front right burner on the stove. Then place the chicken drumstick on the stove and turn the burner on.,3,3,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the front right burner on the stove. Then place the fish on the stove and turn the burner on.,3,3,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the rear left burner on the stove. Then place the shrimp on the stove and turn the burner on.,3,3,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the rear right burner on the stove. Then place the steak on the stove and turn the burner on.,3,3,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the bell pepper from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,3,3,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the lemon wedge from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,3,3,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the lime from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,3,3,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the sweet potato from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,3,3,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and avocado from their plates and place them in the bowl. Then put the bowl in the fridge.,3,3,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and onion from their plates and place them in the bowl. Then put the bowl in the fridge.,3,3,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the orange in the colander, and turn on the sink faucet and pour water over the colander.",3,3,0,1.0,0.0
+CuttingToolSelection,composite,CuttingToolSelection,Place the appropriate cutting tool for cutting the potato skin on the cutting board.,2,2,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one bell pepper and one chicken drumstick in each tupperware on the nearby counter, to pack two identical lunches.",2,2,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one carrot and one fish in each tupperware on the nearby counter, to pack two identical lunches.",2,2,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one garlic and one steak in each tupperware on the nearby counter, to pack two identical lunches.",2,2,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one lemon and one chicken drumstick in each tupperware on the nearby counter, to pack two identical lunches.",2,2,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one onion and one steak in each tupperware on the nearby counter, to pack two identical lunches.",2,2,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the baguette from the counter and place it in the cabinet.,2,2,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the boxed drink from the counter and place it in the cabinet.,2,2,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the bread from the counter and place it in the cabinet.,2,2,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the cup from the counter and place it in the cabinet.,2,2,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the cheese from the plate and place it in the pan.,2,2,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the hotdog bun from the plate and place it in the pan.,2,2,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the mango from the plate and place it in the pan.,2,2,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the mushroom from the plate and place it in the pan.,2,2,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the steak from the plate and place it in the pan.,2,2,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the sweet potato from the plate and place it in the pan.,2,2,0,1.0,0.0
+PickPlaceDrawerToCounter,atomic,PickPlaceDrawerToCounter,Pick the pizza cutter from the drawer and place it on the counter.,2,2,0,1.0,0.0
+PickPlaceDrawerToCounter,atomic,PickPlaceDrawerToCounter,Pick the whisk from the drawer and place it on the counter.,2,2,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the avocado from the sink and place it on the plate located on the counter.,2,2,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the cream cheese stick from the sink and place it on the plate located on the counter.,2,2,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the lemon wedge from the sink and place it on the plate located on the counter.,2,2,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the mushroom from the sink and place it on the plate located on the counter.,2,2,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the shrimp from the sink and place it on the plate located on the counter.,2,2,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the squash from the sink and place it on the plate located on the counter.,2,2,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the front left burner on the stove. Then place the steak on the stove and turn the burner on.,2,2,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the rear center burner on the stove. Then place the chicken drumstick on the stove and turn the burner on.,2,2,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the rear right burner on the stove. Then place the chicken drumstick on the stove and turn the burner on.,2,2,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the rear right burner on the stove. Then place the fish on the stove and turn the burner on.,2,2,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the avocado from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,2,2,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the carrot from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,2,2,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the eggplant from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,2,2,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the tomato from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,2,2,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the cucumber and eggplant in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,2,2,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and cucumber from their plates and place them in the bowl. Then put the bowl in the fridge.,2,2,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and lemon wedge from their plates and place them in the bowl. Then put the bowl in the fridge.,2,2,0,1.0,0.0
+TurnOffStove,atomic,TurnOffStove,Turn off the front center burner of the stove.,2,2,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the apple in the colander, and turn on the sink faucet and pour water over the colander.",2,2,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the kiwi in the colander, and turn on the sink faucet and pour water over the colander.",2,2,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the mango in the colander, and turn on the sink faucet and pour water over the colander.",2,2,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the tangerine in the colander, and turn on the sink faucet and pour water over the colander.",2,2,0,1.0,0.0
+WeighIngredients,composite,WeighIngredients,"Pick the canned food and place it on the digital scale for weighing, and close the cabinet.",2,2,0,1.0,0.0
+WeighIngredients,composite,WeighIngredients,"Pick the honey bottle and place it on the digital scale for weighing, and close the cabinet.",2,2,0,1.0,0.0
+NavigateKitchen,atomic,NavigateKitchen,Navigate to the electric kettle.,1,1,0,1.0,0.0
+NavigateKitchen,atomic,NavigateKitchen,Navigate to the stove.,1,1,0,1.0,0.0
+NavigateKitchen,atomic,NavigateKitchen,Navigate to the toaster oven.,1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one avocado and one chicken drumstick in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one avocado and one steak in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one broccoli and one fish in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one carrot and one chicken drumstick in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one corn and one steak in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one eggplant and one chicken drumstick in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one garlic and one chicken drumstick in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one garlic and one fish in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one lemon and one fish in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one lemon and one steak in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one lime and one steak in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one onion and one chicken drumstick in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one onion and one fish in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one potato and one chicken drumstick in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one sweet potato and one fish in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PackIdenticalLunches,composite,PackIdenticalLunches,"Place one tomato and one chicken drumstick in each tupperware on the nearby counter, to pack two identical lunches.",1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the aluminum foil from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the boxed food from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the candle from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the cheese grater from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the cinnamon from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the coffee cup from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the colander from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the condiment bottle from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the croissant from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the donut from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the egg from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the glass cup from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the jug from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the mustard from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the peeler from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the pitcher from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the potato from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the reamer from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the soap dispenser from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the straw from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the tupperware from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToCabinet,atomic,PickPlaceCounterToCabinet,Pick the yogurt from the counter and place it in the cabinet.,1,1,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the bell pepper from the plate and place it in the pan.,1,1,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the corn from the plate and place it in the pan.,1,1,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the egg from the plate and place it in the pan.,1,1,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the eggplant from the plate and place it in the pan.,1,1,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the fish from the plate and place it in the pan.,1,1,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the hot dog from the plate and place it in the pan.,1,1,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the kebab skewer from the plate and place it in the pan.,1,1,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the potato from the plate and place it in the pan.,1,1,0,1.0,0.0
+PickPlaceCounterToStove,atomic,PickPlaceCounterToStove,Pick the squash from the plate and place it in the pan.,1,1,0,1.0,0.0
+PickPlaceDrawerToCounter,atomic,PickPlaceDrawerToCounter,Pick the dish brush from the drawer and place it on the counter.,1,1,0,1.0,0.0
+PickPlaceDrawerToCounter,atomic,PickPlaceDrawerToCounter,Pick the wooden spoon from the drawer and place it on the counter.,1,1,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the cheese from the sink and place it on the plate located on the counter.,1,1,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the chicken drumstick from the sink and place it on the plate located on the counter.,1,1,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the cucumber from the sink and place it on the plate located on the counter.,1,1,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the fish from the sink and place it on the plate located on the counter.,1,1,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the garlic from the sink and place it on the plate located on the counter.,1,1,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the lemon from the sink and place it on the plate located on the counter.,1,1,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the mango from the sink and place it on the plate located on the counter.,1,1,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the onion from the sink and place it on the plate located on the counter.,1,1,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the steak from the sink and place it on the plate located on the counter.,1,1,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the tangerine from the sink and place it on the plate located on the counter.,1,1,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the tomato from the sink and place it on the plate located on the counter.,1,1,0,1.0,0.0
+PickPlaceSinkToCounter,atomic,PickPlaceSinkToCounter,Pick the yogurt from the sink and place it on the plate located on the counter.,1,1,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the front center burner on the stove. Then place the fish on the stove and turn the burner on.,1,1,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the front left burner on the stove. Then place the fish on the stove and turn the burner on.,1,1,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the front left burner on the stove. Then place the shrimp on the stove and turn the burner on.,1,1,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the front right burner on the stove. Then place the shrimp on the stove and turn the burner on.,1,1,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the front right burner on the stove. Then place the steak on the stove and turn the burner on.,1,1,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the rear left burner on the stove. Then place the chicken drumstick on the stove and turn the burner on.,1,1,0,1.0,0.0
+SearingMeat,composite,SearingMeat,Grab the pan from the cabinet and place it on the rear left burner on the stove. Then place the steak on the stove and turn the burner on.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the chicken drumstick and place it on the second highest rack of the freezer. Then take the vegetable container that has the carrot and garlic and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the chicken drumstick and place it on the second highest rack of the freezer. Then take the vegetable container that has the cucumber and garlic and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the chicken drumstick and place it on the second highest rack of the freezer. Then take the vegetable container that has the cucumber and lemon and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the chicken drumstick and place it on the second highest rack of the freezer. Then take the vegetable container that has the cucumber and potato and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the chicken drumstick and place it on the second highest rack of the freezer. Then take the vegetable container that has the eggplant and avocado and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the chicken drumstick and place it on the second highest rack of the freezer. Then take the vegetable container that has the lime and garlic and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the chicken drumstick and place it on the second highest rack of the freezer. Then take the vegetable container that has the lime and tomato and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the chicken drumstick and place it on the second highest rack of the freezer. Then take the vegetable container that has the mushrooms and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the chicken drumstick and place it on the second highest rack of the freezer. Then take the vegetable container that has the squash and mushroom and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the fish and place it on the second highest rack of the freezer. Then take the vegetable container that has the avocado and tomato and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the fish and place it on the second highest rack of the freezer. Then take the vegetable container that has the carrot and corn and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the fish and place it on the second highest rack of the freezer. Then take the vegetable container that has the corns and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the fish and place it on the second highest rack of the freezer. Then take the vegetable container that has the eggplant and sweet potato and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the fish and place it on the second highest rack of the freezer. Then take the vegetable container that has the lime and tomato and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the fish and place it on the second highest rack of the freezer. Then take the vegetable container that has the sweet potato and bell pepper and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the fish and place it on the second highest rack of the freezer. Then take the vegetable container that has the tomato and garlic and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the shrimp and place it on the second highest rack of the freezer. Then take the vegetable container that has the corn and squash and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the shrimp and place it on the second highest rack of the freezer. Then take the vegetable container that has the eggplant and avocado and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the shrimp and place it on the second highest rack of the freezer. Then take the vegetable container that has the garlic and bell pepper and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the shrimp and place it on the second highest rack of the freezer. Then take the vegetable container that has the garlic and cucumber and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the shrimp and place it on the second highest rack of the freezer. Then take the vegetable container that has the lemon and eggplant and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the shrimp and place it on the second highest rack of the freezer. Then take the vegetable container that has the lemon and sweet potato and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the shrimp and place it on the second highest rack of the freezer. Then take the vegetable container that has the lemon wedge and avocado and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the shrimp and place it on the second highest rack of the freezer. Then take the vegetable container that has the lime and bell pepper and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the shrimp and place it on the second highest rack of the freezer. Then take the vegetable container that has the sweet potato and corn and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the steak and place it on the second highest rack of the freezer. Then take the vegetable container that has the avocado and cucumber and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the steak and place it on the second highest rack of the freezer. Then take the vegetable container that has the bell pepper and garlic and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the steak and place it on the second highest rack of the freezer. Then take the vegetable container that has the lime and lemon and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the steak and place it on the second highest rack of the freezer. Then take the vegetable container that has the onion and carrot and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SeparateFreezerRack,composite,SeparateFreezerRack,Take the meat container that has the steak and place it on the second highest rack of the freezer. Then take the vegetable container that has the onion and lime and place it on the highest rack of the freezer.,1,1,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the broccoli from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,1,1,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the corn from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,1,1,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the cucumber from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,1,1,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the mushroom from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,1,1,0,1.0,0.0
+SteamInMicrowave,composite,SteamInMicrowave,Pick the onion from the sink and place it in the bowl. Then pick the bowl and place it in the microwave. Then close the microwave door and press the start button.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the avocado and eggplant in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the avocado and lime in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the bell pepper and avocado in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the bell pepper and corn in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the bell pepper and eggplant in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the broccoli and eggplant in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the carrot and onion in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the corn and avocado in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the cucumber and avocado in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the cucumber and carrot in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the eggplant and avocado in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the eggplant and broccoli in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the eggplant and onion in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the lemon and cucumber in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the lemon wedge and avocado in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the lemon wedge and lemon in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the lemon wedge and potato in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the lemon wedge and squash in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the lime and eggplant in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the lime and tomato in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the mushroom and eggplant in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the mushroom and mushroom in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the onion and carrot in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the onion and garlic in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the potato and cucumber in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the potato and lemon wedge in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the sweet potato and cucumber in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StirVegetables,composite,StirVegetables,Put the sweet potato and sweet potato in the pot. Retrieve the spatula and lightly stir the vegetables in the pot.,1,1,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and bell pepper from their plates and place them in the bowl. Then put the bowl in the fridge.,1,1,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and carrot from their plates and place them in the bowl. Then put the bowl in the fridge.,1,1,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and corn from their plates and place them in the bowl. Then put the bowl in the fridge.,1,1,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and eggplant from their plates and place them in the bowl. Then put the bowl in the fridge.,1,1,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and garlic from their plates and place them in the bowl. Then put the bowl in the fridge.,1,1,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and lime from their plates and place them in the bowl. Then put the bowl in the fridge.,1,1,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and mushroom from their plates and place them in the bowl. Then put the bowl in the fridge.,1,1,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and potato from their plates and place them in the bowl. Then put the bowl in the fridge.,1,1,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and squash from their plates and place them in the bowl. Then put the bowl in the fridge.,1,1,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and sweet potato from their plates and place them in the bowl. Then put the bowl in the fridge.,1,1,0,1.0,0.0
+StoreLeftoversInBowl,composite,StoreLeftoversInBowl,Pick the chicken drumstick and tomato from their plates and place them in the bowl. Then put the bowl in the fridge.,1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the apple, apple, apple in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the apple, apple, kiwi in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the apple, kiwi in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the banana in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the banana, apple, apple in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the banana, kiwi in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the kiwi, banana in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the kiwi, mango in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the orange, apple, banana in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the orange, orange, kiwi in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the orange, orange, peach in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the orange, tangerine, peach in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the peach, peach, tangerine in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the peach, tangerine in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the peach, tangerine, orange in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the pear, kiwi, mango in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the pear, kiwi, pear in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the tangerine, banana in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0
+WashFruitColander,composite,WashFruitColander,"Put the colander in the sink, put the tangerine, orange, pear in the colander, and turn on the sink faucet and pour water over the colander.",1,1,0,1.0,0.0

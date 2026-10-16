@@ -1,0 +1,1002 @@
+{
+  "status": "passed",
+  "summary": {
+    "checks": 72,
+    "passed": 72,
+    "failed": 0
+  },
+  "checks": [
+    {
+      "name": "source:title",
+      "status": "passed",
+      "message": "source report title extracted",
+      "details": {
+        "title": "Natural Failures and Subtask-Guided Recovery in RoboCasa"
+      }
+    },
+    {
+      "name": "source:content",
+      "status": "passed",
+      "message": "source report body content extracted",
+      "details": {
+        "sections": 15,
+        "metrics": 4,
+        "charts": 1,
+        "tables": 3
+      }
+    },
+    {
+      "name": "source:metrics",
+      "status": "passed",
+      "message": "extracted 4 metric cards",
+      "details": {
+        "metrics": 4
+      }
+    },
+    {
+      "name": "source:charts",
+      "status": "passed",
+      "message": "extracted 1 charts",
+      "details": {
+        "charts": 1
+      }
+    },
+    {
+      "name": "source:portable_chart_summaries",
+      "status": "passed",
+      "message": "preserved 1 portable chart summaries as chart evidence",
+      "details": {
+        "charts": 1,
+        "provenance_preserved": 1
+      }
+    },
+    {
+      "name": "coverage:portable_chart_provenance",
+      "status": "passed",
+      "message": "portable chart source metadata preserved",
+      "details": {
+        "charts": 1
+      }
+    },
+    {
+      "name": "coverage:portable_metric_provenance",
+      "status": "passed",
+      "message": "preserved source metadata for 4 metric cards",
+      "details": {
+        "metrics": 4,
+        "with_source": 4
+      }
+    },
+    {
+      "name": "source:tables",
+      "status": "passed",
+      "message": "extracted 3 tables",
+      "details": {
+        "tables": 3
+      }
+    },
+    {
+      "name": "coverage:executive_section",
+      "status": "passed",
+      "message": "executive-style section discovery completed",
+      "details": {
+        "found": true
+      }
+    },
+    {
+      "name": "coverage:caveats",
+      "status": "passed",
+      "message": "caveat-style section discovery completed",
+      "details": {
+        "found": true
+      }
+    },
+    {
+      "name": "coverage:sources",
+      "status": "passed",
+      "message": "source-style section discovery completed",
+      "details": {
+        "found": true
+      }
+    },
+    {
+      "name": "chart_render:1",
+      "status": "passed",
+      "message": "chart 1 rendered to chart_01.png",
+      "details": {
+        "size": [
+          1200,
+          675
+        ],
+        "extrema": [
+          [
+            31,
+            255
+          ],
+          [
+            36,
+            255
+          ],
+          [
+            48,
+            255
+          ]
+        ],
+        "changed_ratio": 0.1079,
+        "renderer": "portable_semantic_chart_table",
+        "rows_rendered": 10,
+        "columns_rendered": 3
+      }
+    },
+    {
+      "name": "text_fit:eyebrow",
+      "status": "passed",
+      "message": "eyebrow text fits at 10pt",
+      "details": {
+        "font_size_pt": 9.5,
+        "box": [
+          0.72,
+          0.46,
+          5.2,
+          0.36
+        ],
+        "text": "Analytics report"
+      }
+    },
+    {
+      "name": "text_fit:slide-title",
+      "status": "passed",
+      "message": "slide-title text fits at 28pt",
+      "details": {
+        "font_size_pt": 28,
+        "box": [
+          0.68,
+          0.95,
+          11.7,
+          1.55
+        ],
+        "text": "Natural Failures and Subtask-Guided Recovery in RoboCasa"
+      }
+    },
+    {
+      "name": "text_fit:lede",
+      "status": "passed",
+      "message": "lede text fits at 14pt",
+      "details": {
+        "font_size_pt": 14,
+        "box": [
+          0.72,
+          3.02,
+          10.7,
+          1.0
+        ],
+        "text": ""
+      }
+    },
+    {
+      "name": "text_fit:metric-label-1",
+      "status": "passed",
+      "message": "metric-label-1 text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          0.84,
+          5.57,
+          2.5999999999999996,
+          0.32
+        ],
+        "text": "pi0 composite-seen success"
+      }
+    },
+    {
+      "name": "text_fit:metric-value-1",
+      "status": "passed",
+      "message": "metric-value-1 text fits at 19pt",
+      "details": {
+        "font_size_pt": 19,
+        "box": [
+          0.84,
+          5.91,
+          2.5999999999999996,
+          0.46
+        ],
+        "text": "6.1%"
+      }
+    },
+    {
+      "name": "text_fit:metric-note-1",
+      "status": "passed",
+      "message": "metric-note-1 text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          0.84,
+          6.3,
+          2.5999999999999996,
+          0.36
+        ],
+        "text": "Success across 16 composite-seen target tasks."
+      }
+    },
+    {
+      "name": "text_fit:metric-label-2",
+      "status": "passed",
+      "message": "metric-label-2 text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          3.8600000000000003,
+          5.57,
+          2.5999999999999996,
+          0.32
+        ],
+        "text": "RLDX-1 composite-seen success"
+      }
+    },
+    {
+      "name": "text_fit:metric-value-2",
+      "status": "passed",
+      "message": "metric-value-2 text fits at 19pt",
+      "details": {
+        "font_size_pt": 19,
+        "box": [
+          3.8600000000000003,
+          5.91,
+          2.5999999999999996,
+          0.46
+        ],
+        "text": "27.9%"
+      }
+    },
+    {
+      "name": "text_fit:metric-note-2",
+      "status": "passed",
+      "message": "metric-note-2 text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          3.8600000000000003,
+          6.3,
+          2.5999999999999996,
+          0.36
+        ],
+        "text": "Success across 16 composite-seen target tasks."
+      }
+    },
+    {
+      "name": "text_fit:metric-label-3",
+      "status": "passed",
+      "message": "metric-label-3 text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          6.88,
+          5.57,
+          2.5999999999999996,
+          0.32
+        ],
+        "text": "Composite-seen tasks"
+      }
+    },
+    {
+      "name": "text_fit:metric-value-3",
+      "status": "passed",
+      "message": "metric-value-3 text fits at 19pt",
+      "details": {
+        "font_size_pt": 19,
+        "box": [
+          6.88,
+          5.91,
+          2.5999999999999996,
+          0.46
+        ],
+        "text": "16"
+      }
+    },
+    {
+      "name": "text_fit:metric-note-3",
+      "status": "passed",
+      "message": "metric-note-3 text fits at 6pt",
+      "details": {
+        "font_size_pt": 6.5,
+        "box": [
+          6.88,
+          6.3,
+          2.5999999999999996,
+          0.36
+        ],
+        "text": "Number of target composite tasks seen during Human300 pretraining."
+      }
+    },
+    {
+      "name": "text_fit:metric-label-4",
+      "status": "passed",
+      "message": "metric-label-4 text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          9.9,
+          5.57,
+          2.5999999999999996,
+          0.32
+        ],
+        "text": "Composite-unseen tasks"
+      }
+    },
+    {
+      "name": "text_fit:metric-value-4",
+      "status": "passed",
+      "message": "metric-value-4 text fits at 19pt",
+      "details": {
+        "font_size_pt": 19,
+        "box": [
+          9.9,
+          5.91,
+          2.5999999999999996,
+          0.46
+        ],
+        "text": "16"
+      }
+    },
+    {
+      "name": "text_fit:metric-note-4",
+      "status": "passed",
+      "message": "metric-note-4 text fits at 6pt",
+      "details": {
+        "font_size_pt": 6.5,
+        "box": [
+          9.9,
+          6.3,
+          2.5999999999999996,
+          0.36
+        ],
+        "text": "Number of held-out composite tasks evaluated zero-shot."
+      }
+    },
+    {
+      "name": "text_fit:source-note",
+      "status": "passed",
+      "message": "source-note text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          0.62,
+          7.02,
+          12.1,
+          0.34
+        ],
+        "text": "Source: RoboCasa365 official leaderboard · Table: robocasa.ai.leaderboard · Materializes the reviewed RoboCasa365 policy-by-split leaderboard values used in this report."
+      }
+    },
+    {
+      "name": "text_fit:slide-title",
+      "status": "passed",
+      "message": "slide-title text fits at 25pt",
+      "details": {
+        "font_size_pt": 25,
+        "box": [
+          0.65,
+          0.45,
+          12.0,
+          0.6
+        ],
+        "text": "Executive summary"
+      }
+    },
+    {
+      "name": "text_fit:summary-bullets",
+      "status": "passed",
+      "message": "summary-bullets bullets fit at 16pt",
+      "details": {
+        "items": 3,
+        "font_size_pt": 15.7,
+        "box": [
+          0.72,
+          1.48,
+          7.08,
+          4.55
+        ]
+      }
+    },
+    {
+      "name": "text_fit:metrics-heading",
+      "status": "passed",
+      "message": "metrics-heading text fits at 10pt",
+      "details": {
+        "font_size_pt": 10.5,
+        "box": [
+          8.32,
+          1.22,
+          4.25,
+          0.34
+        ],
+        "text": "Key metrics"
+      }
+    },
+    {
+      "name": "text_fit:summary-metric-label-1",
+      "status": "passed",
+      "message": "summary-metric-label-1 text fits at 8pt",
+      "details": {
+        "font_size_pt": 8.4,
+        "box": [
+          8.46,
+          1.7999999999999998,
+          1.7449999999999999,
+          0.46
+        ],
+        "text": "pi0 composite-seen success"
+      }
+    },
+    {
+      "name": "text_fit:summary-metric-value-1",
+      "status": "passed",
+      "message": "summary-metric-value-1 text fits at 16pt",
+      "details": {
+        "font_size_pt": 16,
+        "box": [
+          8.46,
+          2.3,
+          1.7449999999999999,
+          0.42
+        ],
+        "text": "6.1%"
+      }
+    },
+    {
+      "name": "text_fit:summary-metric-note-1",
+      "status": "passed",
+      "message": "summary-metric-note-1 text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.800000000000001,
+        "box": [
+          8.46,
+          2.8,
+          1.7449999999999999,
+          0.42
+        ],
+        "text": "Success across 16 composite-seen target tasks."
+      }
+    },
+    {
+      "name": "text_fit:summary-metric-label-2",
+      "status": "passed",
+      "message": "summary-metric-label-2 text fits at 8pt",
+      "details": {
+        "font_size_pt": 8.4,
+        "box": [
+          10.685,
+          1.7999999999999998,
+          1.7449999999999999,
+          0.46
+        ],
+        "text": "RLDX-1 composite-seen success"
+      }
+    },
+    {
+      "name": "text_fit:summary-metric-value-2",
+      "status": "passed",
+      "message": "summary-metric-value-2 text fits at 16pt",
+      "details": {
+        "font_size_pt": 16,
+        "box": [
+          10.685,
+          2.3,
+          1.7449999999999999,
+          0.42
+        ],
+        "text": "27.9%"
+      }
+    },
+    {
+      "name": "text_fit:summary-metric-note-2",
+      "status": "passed",
+      "message": "summary-metric-note-2 text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.800000000000001,
+        "box": [
+          10.685,
+          2.8,
+          1.7449999999999999,
+          0.42
+        ],
+        "text": "Success across 16 composite-seen target tasks."
+      }
+    },
+    {
+      "name": "text_fit:summary-metric-label-3",
+      "status": "passed",
+      "message": "summary-metric-label-3 text fits at 8pt",
+      "details": {
+        "font_size_pt": 8.4,
+        "box": [
+          8.46,
+          3.7,
+          1.7449999999999999,
+          0.46
+        ],
+        "text": "Composite-seen tasks"
+      }
+    },
+    {
+      "name": "text_fit:summary-metric-value-3",
+      "status": "passed",
+      "message": "summary-metric-value-3 text fits at 16pt",
+      "details": {
+        "font_size_pt": 16,
+        "box": [
+          8.46,
+          4.2,
+          1.7449999999999999,
+          0.42
+        ],
+        "text": "16"
+      }
+    },
+    {
+      "name": "text_fit:summary-metric-note-3",
+      "status": "passed",
+      "message": "summary-metric-note-3 text fits at 7pt",
+      "details": {
+        "font_size_pt": 7,
+        "box": [
+          8.46,
+          4.7,
+          1.7449999999999999,
+          0.42
+        ],
+        "text": "Number of target composite tasks seen during Human300 pretraining."
+      }
+    },
+    {
+      "name": "text_fit:summary-metric-label-4",
+      "status": "passed",
+      "message": "summary-metric-label-4 text fits at 8pt",
+      "details": {
+        "font_size_pt": 8.4,
+        "box": [
+          10.685,
+          3.7,
+          1.7449999999999999,
+          0.46
+        ],
+        "text": "Composite-unseen tasks"
+      }
+    },
+    {
+      "name": "text_fit:summary-metric-value-4",
+      "status": "passed",
+      "message": "summary-metric-value-4 text fits at 16pt",
+      "details": {
+        "font_size_pt": 16,
+        "box": [
+          10.685,
+          4.2,
+          1.7449999999999999,
+          0.42
+        ],
+        "text": "16"
+      }
+    },
+    {
+      "name": "text_fit:summary-metric-note-4",
+      "status": "passed",
+      "message": "summary-metric-note-4 text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.800000000000001,
+        "box": [
+          10.685,
+          4.7,
+          1.7449999999999999,
+          0.42
+        ],
+        "text": "Number of held-out composite tasks evaluated zero-shot."
+      }
+    },
+    {
+      "name": "text_fit:source-note",
+      "status": "passed",
+      "message": "source-note text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          0.62,
+          7.02,
+          12.1,
+          0.34
+        ],
+        "text": "Source: RoboCasa365 official leaderboard · Table: robocasa.ai.leaderboard · Materializes the reviewed RoboCasa365 policy-by-split leaderboard values used in this report."
+      }
+    },
+    {
+      "name": "text_fit:slide-title",
+      "status": "passed",
+      "message": "slide-title text fits at 20pt",
+      "details": {
+        "font_size_pt": 20,
+        "box": [
+          0.62,
+          0.38,
+          12.0,
+          0.82
+        ],
+        "text": "RoboCasa365 success rate by policy and evaluation split"
+      }
+    },
+    {
+      "name": "text_fit:chart-callout-heading",
+      "status": "passed",
+      "message": "chart-callout-heading text fits at 10pt",
+      "details": {
+        "font_size_pt": 10,
+        "box": [
+          9.25,
+          1.55,
+          3.05,
+          0.35
+        ],
+        "text": "Context"
+      }
+    },
+    {
+      "name": "text_fit:chart-callout",
+      "status": "passed",
+      "message": "chart-callout text fits at 12pt",
+      "details": {
+        "font_size_pt": 12.5,
+        "box": [
+          9.25,
+          1.95,
+          3.05,
+          2.2
+        ],
+        "text": "Chart data preserved from the report section: A stronger policy is needed to expose meaningful late-stage failures."
+      }
+    },
+    {
+      "name": "text_fit:chart-source",
+      "status": "passed",
+      "message": "chart-source text fits at 8pt",
+      "details": {
+        "font_size_pt": 8.5,
+        "box": [
+          9.25,
+          4.68,
+          3.05,
+          0.75
+        ],
+        "text": "RoboCasa365 success rate by policy and evaluation split"
+      }
+    },
+    {
+      "name": "text_fit:source-note",
+      "status": "passed",
+      "message": "source-note text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          0.62,
+          7.02,
+          12.1,
+          0.34
+        ],
+        "text": "Source: RoboCasa365 official leaderboard · Table: robocasa.ai.leaderboard · Materializes the reviewed RoboCasa365 policy-by-split leaderboard values used in this report."
+      }
+    },
+    {
+      "name": "text_fit:slide-title",
+      "status": "passed",
+      "message": "slide-title text fits at 22pt",
+      "details": {
+        "font_size_pt": 22,
+        "box": [
+          0.62,
+          0.42,
+          12.0,
+          0.55
+        ],
+        "text": "Policy options for failure-recovery research table"
+      }
+    },
+    {
+      "name": "text_fit:table-note",
+      "status": "passed",
+      "message": "table-note text fits at 12pt",
+      "details": {
+        "font_size_pt": 11.5,
+        "box": [
+          0.78,
+          4.720000000000001,
+          11.7,
+          0.55
+        ],
+        "text": "Source table extracted from the report."
+      }
+    },
+    {
+      "name": "table_coverage:main",
+      "status": "passed",
+      "message": "main table has 5 body rows and 7 columns",
+      "details": {
+        "rows": 5,
+        "columns": 7
+      }
+    },
+    {
+      "name": "text_fit:source-note",
+      "status": "passed",
+      "message": "source-note text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          0.62,
+          7.02,
+          12.1,
+          0.34
+        ],
+        "text": "Source: Policy benchmark and implementation evidence · Tables: robocasa.ai.leaderboard, reviewed_policy_implementations.availability · Materializes the reviewed policy decision tab"
+      }
+    },
+    {
+      "name": "text_fit:slide-title",
+      "status": "passed",
+      "message": "slide-title text fits at 22pt",
+      "details": {
+        "font_size_pt": 22,
+        "box": [
+          0.62,
+          0.42,
+          12.0,
+          0.55
+        ],
+        "text": "Failure and recovery evidence matrix table"
+      }
+    },
+    {
+      "name": "text_fit:table-note",
+      "status": "passed",
+      "message": "table-note text fits at 12pt",
+      "details": {
+        "font_size_pt": 11.5,
+        "box": [
+          0.78,
+          4.7700000000000005,
+          11.7,
+          0.55
+        ],
+        "text": "Source table extracted from the report."
+      }
+    },
+    {
+      "name": "table_coverage:main",
+      "status": "passed",
+      "message": "main table has 6 body rows and 5 columns",
+      "details": {
+        "rows": 6,
+        "columns": 5
+      }
+    },
+    {
+      "name": "text_fit:source-note",
+      "status": "passed",
+      "message": "source-note text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          0.62,
+          7.02,
+          12.1,
+          0.34
+        ],
+        "text": "Source: Reviewed failure and recovery literature set · Table: reviewed_primary_papers.failure_taxonomy · Materializes the paper-method taxonomy reviewed from six primary papers."
+      }
+    },
+    {
+      "name": "text_fit:slide-title",
+      "status": "passed",
+      "message": "slide-title text fits at 22pt",
+      "details": {
+        "font_size_pt": 22,
+        "box": [
+          0.62,
+          0.42,
+          12.0,
+          0.55
+        ],
+        "text": "Minimal-to-full experimental ladder table"
+      }
+    },
+    {
+      "name": "text_fit:table-note",
+      "status": "passed",
+      "message": "table-note text fits at 12pt",
+      "details": {
+        "font_size_pt": 11.5,
+        "box": [
+          0.78,
+          4.720000000000001,
+          11.7,
+          0.55
+        ],
+        "text": "Source table extracted from the report."
+      }
+    },
+    {
+      "name": "table_coverage:main",
+      "status": "passed",
+      "message": "main table has 5 body rows and 4 columns",
+      "details": {
+        "rows": 5,
+        "columns": 4
+      }
+    },
+    {
+      "name": "text_fit:source-note",
+      "status": "passed",
+      "message": "source-note text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          0.62,
+          7.02,
+          12.1,
+          0.34
+        ],
+        "text": "Source: Current project report and research notes · Table: current_project_report.experiment_ladder · Materializes the reviewed experimental ladder from the current project report."
+      }
+    },
+    {
+      "name": "text_fit:slide-title",
+      "status": "passed",
+      "message": "slide-title text fits at 21pt",
+      "details": {
+        "font_size_pt": 21,
+        "box": [
+          0.62,
+          0.42,
+          12.0,
+          0.72
+        ],
+        "text": "Recommended next steps"
+      }
+    },
+    {
+      "name": "text_fit:implications",
+      "status": "passed",
+      "message": "implications bullets fit at 15pt",
+      "details": {
+        "items": 5,
+        "font_size_pt": 14.6,
+        "box": [
+          0.75,
+          1.48,
+          11.4,
+          4.75
+        ]
+      }
+    },
+    {
+      "name": "text_fit:source-note",
+      "status": "passed",
+      "message": "source-note text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          0.62,
+          7.02,
+          12.1,
+          0.34
+        ],
+        "text": "Source: report implications section."
+      }
+    },
+    {
+      "name": "text_fit:slide-title",
+      "status": "passed",
+      "message": "slide-title text fits at 23pt",
+      "details": {
+        "font_size_pt": 23,
+        "box": [
+          0.62,
+          0.42,
+          12.0,
+          0.55
+        ],
+        "text": "Limitations and robustness checks"
+      }
+    },
+    {
+      "name": "text_fit:caveats",
+      "status": "passed",
+      "message": "caveats bullets fit at 15pt",
+      "details": {
+        "items": 5,
+        "font_size_pt": 15.1,
+        "box": [
+          0.92,
+          1.52,
+          11.15,
+          4.85
+        ]
+      }
+    },
+    {
+      "name": "text_fit:source-note",
+      "status": "passed",
+      "message": "source-note text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          0.62,
+          7.02,
+          12.1,
+          0.34
+        ],
+        "text": "Source: report caveats and assumptions section."
+      }
+    },
+    {
+      "name": "text_fit:slide-title",
+      "status": "passed",
+      "message": "slide-title text fits at 23pt",
+      "details": {
+        "font_size_pt": 23,
+        "box": [
+          0.62,
+          0.42,
+          12.0,
+          0.55
+        ],
+        "text": "Sources"
+      }
+    },
+    {
+      "name": "text_fit:sources",
+      "status": "passed",
+      "message": "sources bullets fit at 11pt",
+      "details": {
+        "items": 6,
+        "font_size_pt": 10.6,
+        "box": [
+          0.92,
+          1.38,
+          11.15,
+          5.45
+        ]
+      }
+    },
+    {
+      "name": "coverage:source_links",
+      "status": "passed",
+      "message": "preserved 0 source links from the report",
+      "details": {
+        "links": []
+      }
+    },
+    {
+      "name": "text_fit:source-note",
+      "status": "passed",
+      "message": "source-note text fits at 8pt",
+      "details": {
+        "font_size_pt": 7.5,
+        "box": [
+          0.62,
+          7.02,
+          12.1,
+          0.34
+        ],
+        "text": "Source: report sources and reproducibility section."
+      }
+    },
+    {
+      "name": "pptx:package",
+      "status": "passed",
+      "message": "PPTX package is readable",
+      "details": {
+        "bad_member": null,
+        "slide_count": 9,
+        "media_count": 1
+      }
+    }
+  ]
+}

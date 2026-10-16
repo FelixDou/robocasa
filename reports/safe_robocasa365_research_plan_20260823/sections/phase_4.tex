@@ -13,18 +13,23 @@ The contribution is not the generic observation that long delays are bad. The di
 
 \subsection{What must be implemented}
 
+\sciencenote{Current dependency.}{Both the local-candidate screen and the subsequent 160-suffix operator screen failed. Phase~4 remains locked: continuation was best and oracle routing added zero completion gain. A small common-stage-entry timing diagnostic is proposed first (Section~\ref{sec:next-timing-study}); any selected operator/timing rule requires fresh-parent validation before a broad surface grid.}
+
 \paragraph{Operator interface.}
-Define a common recovery operator API with explicit \code{prepare}, \code{act}, and \code{end} methods plus a cost record. Initial operators should be:
+Define a common recovery operator API with explicit \code{prepare}, \code{act}, and \code{end} methods plus a cost record. Phase~4 must use only the deployable recovery mechanism or mechanisms that showed headroom in Phase~3B; it must not populate an expensive grid with failed arms. The available registry should include:
 \begin{itemize}
   \item \code{continue}: no intervention;
-  \item \code{replan}: clear the cached chunk and request a new nominal chunk under the original task instruction;
-  \item \code{subtask\_retry}: use the causal stage tracker to re-prompt or retry the current atomic goal;
-  \item \code{random\_K4}: sample four chunks and select randomly;
-  \item \code{env\_to\_last\_good}: simulator-oracle rewind, reported only as an upper bound.
+  \item \code{history\_reset\_replan}: clear policy image/state context and replan; a cache-only flush is redundant at empty-cache inference boundaries;
+  \item \code{stage\_retry}: re-prompt with the current atomic goal; the completed screen used supervisor-supplied goals, while a deployable causal stage tracker remains to be validated;
+  \item \code{retreat\_reset\_replan}: execute a frozen bounded retreat/open-gripper/reset sequence, then replan;
+  \item no candidate-selection arm under the current evidence; such an arm could return only after a materially different proposal family establishes new oracle headroom under a separate frozen screen;
+  \item \code{env\_to\_last\_good}: optional simulator-oracle diagnostic requiring genuine earlier anchors; none were executed in the operator screen and its success is not a guaranteed upper bound.
 \end{itemize}
 
 \paragraph{State and delay grid.}
-Select branch states at prespecified genuine-inference prefixes such as $\{1,2,4,8\}$ within the active stage. For trigger-conditioned latency analysis, apply delays $\mathcal{D}=\{0,1,2,4\}$ genuine inferences after the frozen trigger. Cached environment actions are not independent warning opportunities.
+Use three detector-independent intervention landmarks---early, middle, and late---within the active stage as the primary design. Generate all three from the same stage-entry snapshot: restore that state, follow the same frozen nominal trajectory to the assigned intervention time, apply the operator, and evaluate at a common absolute endpoint measured from stage entry. This identifies a dynamic intervention-regime contrast under shared pre-intervention history. Merely comparing unrelated early and late snapshots does not prove that delay caused the difference.
+
+For trigger-conditioned latency analysis, apply delays such as $\mathcal{D}=\{0,1,2,4\}$ genuine inferences only on a smaller secondary subset. Keeping this factor out of the primary grid prevents a combinatorial expansion. Cached environment actions are not independent warning opportunities. Equal post-intervention suffix length may be reported as a secondary compute-matched view, but it must not replace the common-endpoint primary analysis because it grants later interventions more total task time.
 
 \paragraph{Analysis tooling.}
 Add a surface builder that estimates $R_k$, $\Delta_k$, uncertainty, task/stage support, censoring, and the operational deadline in Equation~\eqref{eq:deadline}. It must preserve the difference between natural and injected failures and between oracle and deployable context.
@@ -33,9 +38,9 @@ Add a surface builder that estimates $R_k$, $\Delta_k$, uncertainty, task/stage 
 
 \subsection{Experimental design}
 
-Select 12-16 composite tasks before method results, stratified by horizon, number of semantic stages, baseline success, and observed failure support. Use the five current tasks for method development but reserve at least four tasks or scenes as untouched generalization identities.
+\textbf{Phase 4A: development, support, and variance.} Select eight composite tasks before inspecting surface outcomes, stratified by horizon, semantic-stage count, baseline success, and failure support. Reserve whole task or scene identities rather than descendants of development parents. A planning design is eight tasks, 12 parent identities per task, three common-base intervention times, four arms including \code{continue}, and two predeclared continuation-seed schedules, yielding $8\times12\times3\times4\times2=2{,}304$ suffix executions before censoring. Retain only operators supported by the higher-level operator screen and reduce the arm count rather than padding the study with failed mechanisms. On a stratified subset, use additional continuation seeds to estimate seed variance.
 
-A planning design is 12 tasks, 15 parent identities per task, three supported prefix states per parent, four deployable operators, and two predeclared continuation-seed schedules, yielding approximately 4,320 suffix executions before censoring. On a stratified calibration subset, use at least five continuation seeds per state/operator to estimate seed variance. The final allocation may be adjusted using Phase 3 support, not method performance.
+Open Phase~4A arm identities only for support, variance, operator, and threshold selection. Freeze the retained arms, endpoints, and allocation rule afterward. Expand to approximately 12 tasks only through a separate \textbf{Phase 4B} confirmation with sealed parents and whole task or scene identities. The same 2,304 branches cannot serve as both method-selection and confirmatory evidence.
 
 For a single snapshot and a single seed, the outcome is a realized finite-seed utility, not a probability. Define the empirical operator value as
 \begin{equation}
@@ -54,9 +59,11 @@ Natural failures and successful controls are primary. Injected actuation noise, 
   \item \textbf{Heterogeneity.} Fit an interpretable mixed-effects or hierarchical model with task/stage/failure-type effects, and retain raw task-level curves.
   \item \textbf{Failure probability versus value.} Compare SAFE score ranking with realized $\Delta_k$, best-operator identity, and deadline. Use within-snapshot and task-level analyses.
   \item \textbf{Rescue and harm.} Report rescue among failed nominal suffixes and corruption among successful nominal suffixes. Do not summarize only average success.
+  \item \textbf{Downstream retention.} Report whether an apparent rescue persists through the next stage landmark and to final task outcome when supported.
+  \item \textbf{Risk sets.} Publish the number of states still eligible at every later landmark; stages that naturally terminate before the late intervention cannot silently disappear from denominators.
 \end{enumerate}
 
-\positiveresult{The dataset supports several task-stage strata in which at least one deployable operator has positive paired advantage, the best operator or deadline varies across states, and failure probability does not perfectly rank causal recovery value. The finding should replicate across multiple tasks rather than one favorable stage. Such a result establishes the scientific object and justifies learning a utility gate.}
+\positiveresult{Phase~4A supports several task-stage strata in which at least one deployable operator has positive paired advantage, the best operator or deadline varies across states, and failure probability does not perfectly rank causal recovery value. Support is distributed across tasks rather than one favorable stage, immediate gains persist downstream, and the resulting variance estimate makes a sealed Phase~4B feasible. Only Phase~4B can confirm the frozen surface and justify the corresponding general claim.}
 
 \negativeresult{If only environment rewind helps, the current deployable recovery operators are insufficient. If all deployable $\Delta_k$ values are near zero, narrow the project to a diagnostic benchmark or change the recovery mechanism. If only one task contributes signal, do not claim a general long-horizon recoverability surface.}
 
@@ -66,4 +73,4 @@ Branch-state selection must be detector-independent. Later prefixes require expl
 
 \subsection{Required outputs}
 
-The dataset release should contain a versioned manifest, full snapshot hashes, branch provenance, natural/injected labels, common-randomness schedule, support/censoring table, recoverability curves, deadline estimates, rescue/harm plots, and a failure taxonomy with representative videos.
+The dataset release should contain separate Phase~4A and Phase~4B manifests, full snapshot hashes, branch provenance, natural/injected labels, common-base and continuation-randomness schedules, common absolute endpoints, support/censoring and risk-set tables, recoverability curves, deadline estimates, downstream retention, rescue/harm plots, and a failure taxonomy with representative videos.

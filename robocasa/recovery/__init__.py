@@ -40,9 +40,9 @@ _EXPORTS = {
         "robocasa.recovery.full_snapshot",
         "restore_full_snapshot",
     ),
-    "BranchSpec": ("robocasa.recovery.counterfactual_branch", "BranchSpec"),
+    "BranchSpec": ("robocasa.recovery.exact_replay.counterfactual_branch", "BranchSpec"),
     "run_counterfactual_branch": (
-        "robocasa.recovery.counterfactual_branch",
+        "robocasa.recovery.exact_replay.counterfactual_branch",
         "run_counterfactual_branch",
     ),
 }

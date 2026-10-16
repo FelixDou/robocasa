@@ -1,0 +1,208 @@
+task_name,task_granularity,subtask_id,subtask_instruction,opportunities,failures,completions,failure_rate,completion_rate
+ArrangeTea,composite,PickPlaceCounterToCounter_1_pick,Pick the kettle.,30,30,0,1.0,0.0
+CloseFridge,atomic,fridge_closed,Close fridge.,30,30,0,1.0,0.0
+CloseToasterOvenDoor,atomic,toaster_oven_closed,Close toaster oven.,30,30,0,1.0,0.0
+CuttingToolSelection,composite,OpenDrawer_1,Open the drawer.,30,30,0,1.0,0.0
+DeliverStraw,composite,OpenDrawer_1,Open the drawer.,30,30,0,1.0,0.0
+GatherTableware,composite,third_glass_grasped,Pick the third glass.,30,30,0,1.0,0.0
+NavigateKitchen,atomic,at_target_position,Move robot to target.,30,30,0,1.0,0.0
+OpenCabinet,atomic,cabinet_open,Open cabinet.,30,30,0,1.0,0.0
+OpenDrawer,atomic,drawer_open,Open drawer.,30,30,0,1.0,0.0
+OpenStandMixerHead,atomic,stand_mixer_head_open,Open stand mixer head.,30,30,0,1.0,0.0
+SeparateFreezerRack,composite,freezer_open,Open the freezer.,30,30,0,1.0,0.0
+SetUpCuttingStation,composite,OpenDrawer_1,Open the drawer.,30,30,0,1.0,0.0
+SlideDishwasherRack,atomic,dishwasher_rack_slid,Slide dishwasher rack.,30,30,0,1.0,0.0
+TurnOffStove,atomic,burner_off,Turn off burner.,30,30,0,1.0,0.0
+TurnOnElectricKettle,atomic,electric_kettle_on,Turn on electric kettle.,30,30,0,1.0,0.0
+TurnOnSinkFaucet,atomic,water_on,Turn on water.,30,30,0,1.0,0.0
+PortionHotDogs,composite,first_bun_grasped,Pick one bun from the bowl.,30,29,1,0.9666666666666667,0.03333333333333333
+RecycleBottlesByType,composite,middle_plastic_bottle_grasped,Pick the middle plastic bottle.,30,29,1,0.9666666666666667,0.03333333333333333
+TurnOnMicrowave,atomic,microwave_started,Start microwave.,30,29,1,0.9666666666666667,0.03333333333333333
+StoreLeftoversInBowl,composite,chicken_grasped,Pick the chicken drumstick.,30,28,2,0.9333333333333333,0.06666666666666667
+GetToastedBread,composite,TurnOnToaster_1,Start the toaster.,30,27,3,0.9,0.1
+HeatKebabSandwich,composite,PickPlaceCounterToToasterOven_1_pick,Pick the kebab.,30,26,4,0.8666666666666667,0.13333333333333333
+WashFruitColander,composite,PickPlaceCounterToSink_1_pick,Pick the colander from the counter.,30,26,4,0.8666666666666667,0.13333333333333333
+BreadSelection,composite,PickPlaceCounterToCounter_1_pick,Pick the croissant.,30,25,5,0.8333333333333334,0.16666666666666666
+CloseBlenderLid,atomic,blender_lid_on_blender,Move blender lid onto blender.,30,25,5,0.8333333333333334,0.16666666666666666
+PackIdenticalLunches,composite,first_vegetable_grasped,Pick the first vegetable from the fridge.,30,24,6,0.8,0.2
+WashLettuce,composite,water_on,Turn on the sink faucet.,30,24,6,0.8,0.2
+MakeIceLemonade,composite,fridge_open,Open fridge.,30,23,7,0.7666666666666667,0.23333333333333334
+SteamInMicrowave,composite,bowl_grasped,Pick the bowl.,30,23,3,0.7666666666666667,0.1
+WaffleReheat,composite,OpenMicrowave_1,Open the microwave.,30,23,7,0.7666666666666667,0.23333333333333334
+RinseSinkBasin,composite,TurnOnSinkFaucet_1,Turn on the sink faucet.,30,22,8,0.7333333333333333,0.26666666666666666
+ScrubCuttingBoard,composite,cutting_board_scrubbed,Scrub the cutting board with the sponge.,30,22,0,0.7333333333333333,0.0
+StackBowlsCabinet,composite,larger_bowl_grasped,Pick the larger bowl from the counter.,30,22,8,0.7333333333333333,0.26666666666666666
+CategorizeCondiments,composite,PickPlaceCounterToCabinet_1_pick,Pick the condiment bottle.,30,20,10,0.6666666666666666,0.3333333333333333
+SearingMeat,composite,PickPlaceCabinetToStove_2_place,Place it on the target stove burner.,30,17,2,0.5666666666666667,0.06666666666666667
+StirVegetables,composite,first_vegetable_grasped,Pick the first vegetable from the counter.,30,17,13,0.5666666666666667,0.43333333333333335
+ArrangeBreadBasket,composite,OpenCabinet_1,Open the cabinet.,30,16,14,0.5333333333333333,0.4666666666666667
+PrepareCoffee,composite,mug_under_dispenser,Place the mug under the coffee machine dispenser.,30,16,1,0.5333333333333333,0.03333333333333333
+PickPlaceCounterToStove,atomic,object_in_pan,Move object to pan.,30,15,1,0.5,0.03333333333333333
+CoffeeSetupMug,atomic,mug_under_dispenser,Move mug under coffee dispenser.,30,14,2,0.4666666666666667,0.06666666666666667
+KettleBoiling,composite,PickPlaceCounterToStove_1_place,Place it on the stove burner.,30,13,5,0.43333333333333335,0.16666666666666666
+PickPlaceSinkToCounter,atomic,object_in_container,Move object to container.,30,13,4,0.43333333333333335,0.13333333333333333
+PanTransfer,composite,pan_tilted_to_transfer_vegetable,Keep holding the pan and tilt it to dump the vegetable onto the plate without touching the food.,30,12,0,0.4,0.0
+PickPlaceToasterToCounter,atomic,object_on_plate,Move object to plate.,30,12,6,0.4,0.2
+StirVegetables,composite,second_vegetable_grasped,Pick the second vegetable from the counter.,30,11,2,0.36666666666666664,0.06666666666666667
+GarnishPancake,composite,fridge_open,Open the fridge.,30,10,20,0.3333333333333333,0.6666666666666666
+ArrangeBreadBasket,composite,PickPlaceCabinetToCounter_2_pick,Pick the bread from the cabinet.,30,9,5,0.3,0.16666666666666666
+PickPlaceCounterToCabinet,atomic,object_in_cabinet,Move object to cabinet.,30,9,2,0.3,0.06666666666666667
+PickPlaceDrawerToCounter,atomic,release_object_at_valid_counter_location,Release the target object at a valid counter location.,30,8,0,0.26666666666666666,0.0
+RinseSinkBasin,composite,TurnSinkSpout_2,Move the sink spout to rinse the sink basin.,30,8,0,0.26666666666666666,0.0
+WeighIngredients,composite,PickPlaceCabinetToCounter_1_place,Place it on the scale.,30,8,2,0.26666666666666666,0.06666666666666667
+GarnishPancake,composite,strawberry_on_pancake,Place the strawberry on the pancake.,30,7,0,0.23333333333333334,0.0
+PickPlaceDrawerToCounter,atomic,object_on_counter,Move the target object from the drawer to the counter.,30,7,11,0.23333333333333334,0.36666666666666664
+WaffleReheat,composite,PickPlaceCounterToMicrowave_3_pick,Pick the bowl.,30,7,0,0.23333333333333334,0.0
+CategorizeCondiments,composite,PickPlaceCounterToCabinet_1_place,Place it next to the matching bottle in the cabinet.,30,6,4,0.2,0.13333333333333333
+LoadDishwasher,composite,cup_on_rack,Place the cup on the dishwasher rack.,30,6,10,0.2,0.3333333333333333
+PreSoakPan,composite,TurnOnSinkFaucet_3,Turn on the sink faucet.,30,6,0,0.2,0.0
+WashLettuce,composite,lettuce_rinsed,Move the lettuce under the running water and rinse it.,30,6,0,0.2,0.0
+ArrangeBreadBasket,composite,PickPlaceCounterToCounter_3_pick,Pick the basket.,30,5,0,0.16666666666666666,0.0
+BreadSelection,composite,PickPlaceCabinetToCounter_2_pick,Pick the jam.,30,5,0,0.16666666666666666,0.0
+PackIdenticalLunches,composite,second_vegetable_grasped,Pick the second vegetable from the fridge.,30,4,0,0.13333333333333333,0.0
+PreSoakPan,composite,PickPlaceCounterToSink_1_place,Place it in the sink.,30,4,17,0.13333333333333333,0.5666666666666667
+StackBowlsCabinet,composite,smaller_bowl_grasped,Pick the smaller bowl from the counter.,30,4,4,0.13333333333333333,0.13333333333333333
+SteamInMicrowave,composite,vegetable_grasped,Pick the vegetable from the sink.,30,4,26,0.13333333333333333,0.8666666666666667
+WashFruitColander,composite,PickPlaceCounterToSink_2_pick,Pick the fruit from the counter.,30,4,0,0.13333333333333333,0.0
+HeatKebabSandwich,composite,PickPlaceCounterToToasterOven_2_pick,Pick the baguette.,30,3,1,0.1,0.03333333333333333
+MakeIceLemonade,composite,lemon_in_glass,Move the lemon wedge to the glass.,30,3,0,0.1,0.0
+PickPlaceSinkToCounter,atomic,release_object_at_valid_counter_location,Release object at a valid counter location.,30,3,0,0.1,0.0
+PickPlaceToasterToCounter,atomic,release_object_at_valid_plate_location,Release object at a valid plate location.,30,3,0,0.1,0.0
+StackBowlsCabinet,composite,smaller_bowl_stacked_on_larger_bowl,Stack the smaller bowl on top of the larger bowl in the cabinet.,30,3,1,0.1,0.03333333333333333
+SteamInMicrowave,composite,microwave_started,Start microwave.,30,3,0,0.1,0.0
+CategorizeCondiments,composite,PickPlaceCounterToCabinet_2_pick,Pick the shaker.,30,2,2,0.06666666666666667,0.06666666666666667
+CategorizeCondiments,composite,PickPlaceCounterToCabinet_2_place,Place it next to the matching shaker in the cabinet.,30,2,0,0.06666666666666667,0.0
+CloseBlenderLid,atomic,gripper_released,Release blender lid.,30,2,3,0.06666666666666667,0.1
+KettleBoiling,composite,PickPlaceCounterToStove_1_release,Release the object at the target location.,30,2,3,0.06666666666666667,0.1
+KettleBoiling,composite,TurnOnStove_2,Turn on the target stove burner.,30,2,0,0.06666666666666667,0.0
+LoadDishwasher,composite,bowl_on_rack,Place the bowl on the dishwasher rack.,30,2,0,0.06666666666666667,0.0
+PackIdenticalLunches,composite,first_meat_grasped,Pick the first meat item from the fridge.,30,2,4,0.06666666666666667,0.13333333333333333
+GetToastedBread,composite,PickPlaceToasterToCounter_2_place,Place it on the plate.,30,1,0,0.03333333333333333,0.0
+HeatKebabSandwich,composite,CloseToasterOvenDoor_3,Close the toaster oven door.,30,1,0,0.03333333333333333,0.0
+PickPlaceCounterToCabinet,atomic,release_object_at_valid_cabinet_location,Release object at a valid cabinet location.,30,1,0,0.03333333333333333,0.0
+PickPlaceCounterToStove,atomic,release_object_at_valid_pan_location,Release object at a valid pan location.,30,1,0,0.03333333333333333,0.0
+PortionHotDogs,composite,first_sausage_grasped,Pick one sausage from the bowl.,30,1,0,0.03333333333333333,0.0
+PrepareCoffee,composite,coffee_started,Start the coffee machine.,30,1,0,0.03333333333333333,0.0
+RecycleBottlesByType,composite,middle_glass_bottle_grasped,Pick the middle glass bottle.,30,1,0,0.03333333333333333,0.0
+SearingMeat,composite,PickPlaceCounterToStove_3_place,Place it in the pan.,30,1,0,0.03333333333333333,0.0
+StackBowlsCabinet,composite,smaller_bowl_released_on_stack,Release the smaller bowl on top of the larger bowl.,30,1,0,0.03333333333333333,0.0
+StirVegetables,composite,vegetables_stirred,Stir the vegetables in the pot with the spatula.,30,1,0,0.03333333333333333,0.0
+StoreLeftoversInBowl,composite,bowl_with_leftovers_grasped,Pick the bowl containing the leftovers.,30,1,0,0.03333333333333333,0.0
+StoreLeftoversInBowl,composite,vegetable_grasped,Pick the vegetable.,30,1,1,0.03333333333333333,0.03333333333333333
+WeighIngredients,composite,CloseCabinet_2,Close the cabinet.,30,1,0,0.03333333333333333,0.0
+WeighIngredients,composite,PickPlaceCabinetToCounter_1_release,Release the object at the target location.,30,1,1,0.03333333333333333,0.03333333333333333
+ArrangeBreadBasket,composite,PickPlaceCabinetToCounter_2_place,Place it in the basket.,30,0,5,0.0,0.16666666666666666
+ArrangeBreadBasket,composite,PickPlaceCabinetToCounter_2_release,Release the object at the target location.,30,0,5,0.0,0.16666666666666666
+ArrangeBreadBasket,composite,PickPlaceCounterToCounter_3_place,Place it on the dining counter.,30,0,0,0.0,0.0
+ArrangeBreadBasket,composite,PickPlaceCounterToCounter_3_release,Release the object at the target location.,30,0,0,0.0,0.0
+ArrangeTea,composite,CloseCabinet_3,Close the cabinet.,30,0,0,0.0,0.0
+ArrangeTea,composite,PickPlaceCabinetToCounter_2_pick,Pick the mug from the cabinet.,30,0,0,0.0,0.0
+ArrangeTea,composite,PickPlaceCabinetToCounter_2_place,Place it on the tray.,30,0,0,0.0,0.0
+ArrangeTea,composite,PickPlaceCabinetToCounter_2_release,Release the object at the target location.,30,0,0,0.0,0.0
+ArrangeTea,composite,PickPlaceCounterToCounter_1_place,Place it on the tray.,30,0,0,0.0,0.0
+ArrangeTea,composite,PickPlaceCounterToCounter_1_release,Release the object at the target location.,30,0,0,0.0,0.0
+BreadSelection,composite,PickPlaceCabinetToCounter_2_place,Place it on the cutting board.,30,0,0,0.0,0.0
+BreadSelection,composite,PickPlaceCabinetToCounter_2_release,Release the object at the target location.,30,0,0,0.0,0.0
+BreadSelection,composite,PickPlaceCounterToCounter_1_place,Place it on the cutting board.,30,0,5,0.0,0.16666666666666666
+BreadSelection,composite,PickPlaceCounterToCounter_1_release,Release the object at the target location.,30,0,5,0.0,0.16666666666666666
+CategorizeCondiments,composite,PickPlaceCounterToCabinet_1_release,Release the object at the target location.,30,0,4,0.0,0.13333333333333333
+CategorizeCondiments,composite,PickPlaceCounterToCabinet_2_release,Release the object at the target location.,30,0,0,0.0,0.0
+CoffeeSetupMug,atomic,gripper_released,Release mug.,30,0,2,0.0,0.06666666666666667
+CuttingToolSelection,composite,PickPlaceDrawerToCounter_2_place,Place it on the cutting board.,30,0,0,0.0,0.0
+CuttingToolSelection,composite,PickPlaceDrawerToCounter_2_release,Release the object at the target location.,30,0,0,0.0,0.0
+DeliverStraw,composite,PickPlaceDrawerToGlass_2_place,Place it inside the glass.,30,0,0,0.0,0.0
+DeliverStraw,composite,PickPlaceDrawerToGlass_2_release,Release the object at the target location.,30,0,0,0.0,0.0
+GarnishPancake,composite,pancake_on_plate,Place the pancake on the plate.,30,0,0,0.0,0.0
+GarnishPancake,composite,plate_on_table,Move the plate with the pancake to the table.,30,0,0,0.0,0.0
+GarnishPancake,composite,strawberry_released_on_pancake,Release the strawberry on the pancake.,30,0,0,0.0,0.0
+GatherTableware,composite,bowl_grasped,Pick the bowl.,30,0,0,0.0,0.0
+GatherTableware,composite,bowl_placed_away_from_glasses,Place the bowl away from the glasses in the cabinet.,30,0,0,0.0,0.0
+GatherTableware,composite,bowl_released_away_from_glasses,Release the bowl away from the glasses in the cabinet.,30,0,0,0.0,0.0
+GatherTableware,composite,cabinets_open,Open the cabinets.,30,0,30,0.0,1.0
+GatherTableware,composite,third_glass_placed_with_others,Place the third glass in the cabinet with the other glasses.,30,0,0,0.0,0.0
+GatherTableware,composite,third_glass_released_with_others,Release the third glass in the cabinet with the other glasses.,30,0,0,0.0,0.0
+GetToastedBread,composite,PickPlaceToasterToCounter_2_release,Release the object at the target location.,30,0,0,0.0,0.0
+HeatKebabSandwich,composite,PickPlaceCounterToToasterOven_1_place,Place it inside the toaster oven.,30,0,4,0.0,0.13333333333333333
+HeatKebabSandwich,composite,PickPlaceCounterToToasterOven_1_release,Release the object at the target location.,30,0,4,0.0,0.13333333333333333
+HeatKebabSandwich,composite,PickPlaceCounterToToasterOven_2_place,Place it inside the toaster oven.,30,0,1,0.0,0.03333333333333333
+HeatKebabSandwich,composite,PickPlaceCounterToToasterOven_2_release,Release the object at the target location.,30,0,1,0.0,0.03333333333333333
+HeatKebabSandwich,composite,TurnOnToasterOven_4,Set the toaster oven timer.,30,0,0,0.0,0.0
+LoadDishwasher,composite,bowl_released_on_rack,Release the bowl on the dishwasher rack.,30,0,0,0.0,0.0
+LoadDishwasher,composite,cup_released_on_rack,Release the cup on the dishwasher rack.,30,0,10,0.0,0.3333333333333333
+LoadDishwasher,composite,dishwasher_closed,Close the dishwasher.,30,0,0,0.0,0.0
+LoadDishwasher,composite,dishwasher_rack_accessible,Pull out the dishwasher rack.,30,0,30,0.0,1.0
+MakeIceLemonade,composite,ice_cube1_in_glass,Move the first ice cube to the glass.,30,0,0,0.0,0.0
+MakeIceLemonade,composite,ingredients_released_in_glass,Move the second ice cube to the glass and release the ingredients.,30,0,0,0.0,0.0
+NavigateKitchen,atomic,facing_target,Face target.,30,0,0,0.0,0.0
+PackIdenticalLunches,composite,first_meat_packed,Place the first meat item in the first tupperware.,30,0,4,0.0,0.13333333333333333
+PackIdenticalLunches,composite,first_vegetable_packed,Place the first vegetable in the first tupperware.,30,0,6,0.0,0.2
+PackIdenticalLunches,composite,fridge_open,Open the fridge.,30,0,30,0.0,1.0
+PackIdenticalLunches,composite,packed_lunches_released,Release the food after both tupperwares contain one vegetable and one meat item.,30,0,0,0.0,0.0
+PackIdenticalLunches,composite,second_meat_grasped,Pick the second meat item from the fridge.,30,0,0,0.0,0.0
+PackIdenticalLunches,composite,second_meat_packed,Place the second meat item in the second tupperware.,30,0,0,0.0,0.0
+PackIdenticalLunches,composite,second_vegetable_packed,Place the second vegetable in the second tupperware.,30,0,0,0.0,0.0
+PanTransfer,composite,pan_replaced_on_stove,Place the pan back on the stove and release it.,30,0,0,0.0,0.0
+PickPlaceSinkToCounter,atomic,container_on_counter,Move container to counter.,30,0,4,0.0,0.13333333333333333
+PortionHotDogs,composite,first_bun_on_plate,Place the bun on the first plate.,30,0,1,0.0,0.03333333333333333
+PortionHotDogs,composite,first_sausage_on_plate,Place the sausage on the first plate.,30,0,0,0.0,0.0
+PortionHotDogs,composite,hot_dogs_released,Release the food after each plate has one bun and one sausage.,30,0,0,0.0,0.0
+PortionHotDogs,composite,second_bun_grasped,Pick the remaining bun from the bowl.,30,0,0,0.0,0.0
+PortionHotDogs,composite,second_bun_on_plate,Place the bun on the second plate.,30,0,0,0.0,0.0
+PortionHotDogs,composite,second_sausage_grasped,Pick the remaining sausage from the bowl.,30,0,0,0.0,0.0
+PortionHotDogs,composite,second_sausage_on_plate,Place the sausage on the second plate.,30,0,0,0.0,0.0
+PreSoakPan,composite,PickPlaceCounterToSink_1_release,Release the object at the target location.,30,0,17,0.0,0.5666666666666667
+PreSoakPan,composite,PickPlaceCounterToSink_2_place,Place it in the sink.,30,0,8,0.0,0.26666666666666666
+PreSoakPan,composite,PickPlaceCounterToSink_2_release,Release the object at the target location.,30,0,8,0.0,0.26666666666666666
+PrepareCoffee,composite,mug_released_under_dispenser,Release the mug under the coffee machine dispenser.,30,0,1,0.0,0.03333333333333333
+RecycleBottlesByType,composite,bottles_released_on_table,Release the bottles on the table.,30,0,0,0.0,0.0
+RecycleBottlesByType,composite,middle_glass_bottle_clustered,Place the middle glass bottle with the glass bottle group.,30,0,0,0.0,0.0
+RecycleBottlesByType,composite,middle_glass_bottle_released,Release the middle glass bottle with the glass bottle group.,30,0,0,0.0,0.0
+RecycleBottlesByType,composite,middle_plastic_bottle_clustered,Place the middle plastic bottle with the plastic bottle group.,30,0,1,0.0,0.03333333333333333
+RecycleBottlesByType,composite,middle_plastic_bottle_released,Release the middle plastic bottle with the plastic bottle group.,30,0,1,0.0,0.03333333333333333
+RecycleBottlesByType,composite,mystery_bottle_clustered,Identify the mystery bottle and place it with the matching bottle group.,30,0,0,0.0,0.0
+SearingMeat,composite,OpenCabinet_1,Open the cabinet.,30,0,30,0.0,1.0
+SearingMeat,composite,PickPlaceCabinetToStove_2_release,Release the object at the target location.,30,0,2,0.0,0.06666666666666667
+SearingMeat,composite,PickPlaceCounterToStove_3_release,Release the object at the target location.,30,0,0,0.0,0.0
+SearingMeat,composite,TurnOnStove_4,Turn on the target stove burner.,30,0,0,0.0,0.0
+SeparateFreezerRack,composite,freezer_containers_released,Release the freezer containers on their target racks.,30,0,0,0.0,0.0
+SeparateFreezerRack,composite,meat_container_grasped,Pick the meat container.,30,0,0,0.0,0.0
+SeparateFreezerRack,composite,meat_container_placed_on_second_rack,Place the meat container on the second freezer rack.,30,0,0,0.0,0.0
+SeparateFreezerRack,composite,meat_container_ready,Verify the meat is in the meat container.,30,0,0,0.0,0.0
+SeparateFreezerRack,composite,vegetable_container_grasped,Pick the vegetable container.,30,0,0,0.0,0.0
+SeparateFreezerRack,composite,vegetable_container_placed_on_top_rack,Place the vegetable container on the top freezer rack.,30,0,0,0.0,0.0
+SeparateFreezerRack,composite,vegetable_container_ready,Verify both vegetables are in the vegetable container.,30,0,0,0.0,0.0
+SetUpCuttingStation,composite,PickPlaceCounterToCounter_3_place,Place it on the cutting board.,30,0,0,0.0,0.0
+SetUpCuttingStation,composite,PickPlaceCounterToCounter_3_release,Release the object at the target location.,30,0,0,0.0,0.0
+SetUpCuttingStation,composite,PickPlaceDrawerToCounter_2_place,Place it on the cutting board.,30,0,0,0.0,0.0
+SetUpCuttingStation,composite,PickPlaceDrawerToCounter_2_release,Release the object at the target location.,30,0,0,0.0,0.0
+StackBowlsCabinet,composite,cabinet_open,Open the cabinet.,30,0,30,0.0,1.0
+StackBowlsCabinet,composite,larger_bowl_placed_in_cabinet,Place the larger bowl in the cabinet.,30,0,8,0.0,0.26666666666666666
+StackBowlsCabinet,composite,larger_bowl_released_in_cabinet,Release the larger bowl in the cabinet.,30,0,8,0.0,0.26666666666666666
+SteamInMicrowave,composite,bowl_placed_in_microwave,Place the bowl inside the microwave.,30,0,3,0.0,0.1
+SteamInMicrowave,composite,bowl_released_in_microwave,Release the bowl inside the microwave.,30,0,3,0.0,0.1
+SteamInMicrowave,composite,microwave_closed,Close microwave.,30,0,3,0.0,0.1
+SteamInMicrowave,composite,vegetable_placed_in_bowl,Place the vegetable in the bowl.,30,0,26,0.0,0.8666666666666667
+SteamInMicrowave,composite,vegetable_released_in_bowl,Release the vegetable in the bowl.,30,0,26,0.0,0.8666666666666667
+StirVegetables,composite,first_vegetable_placed_in_pot,Place the first vegetable in the pot.,30,0,13,0.0,0.43333333333333335
+StirVegetables,composite,first_vegetable_released_in_pot,Release the first vegetable in the pot.,30,0,13,0.0,0.43333333333333335
+StirVegetables,composite,second_vegetable_placed_in_pot,Place the second vegetable in the pot.,30,0,2,0.0,0.06666666666666667
+StirVegetables,composite,second_vegetable_released_in_pot,Release the second vegetable in the pot.,30,0,2,0.0,0.06666666666666667
+StoreLeftoversInBowl,composite,bowl_with_leftovers_placed_in_fridge,Place the bowl containing the leftovers in the already-open fridge.,30,0,0,0.0,0.0
+StoreLeftoversInBowl,composite,bowl_with_leftovers_released_in_fridge,Release the bowl containing the leftovers in the fridge.,30,0,0,0.0,0.0
+StoreLeftoversInBowl,composite,chicken_placed_in_bowl,Place the chicken drumstick in the bowl.,30,0,2,0.0,0.06666666666666667
+StoreLeftoversInBowl,composite,chicken_released_in_bowl,Release the chicken drumstick in the bowl.,30,0,2,0.0,0.06666666666666667
+StoreLeftoversInBowl,composite,vegetable_placed_in_bowl,Place the vegetable in the bowl.,30,0,1,0.0,0.03333333333333333
+StoreLeftoversInBowl,composite,vegetable_released_in_bowl,Release the vegetable in the bowl.,30,0,1,0.0,0.03333333333333333
+TurnOnMicrowave,atomic,gripper_released,Release microwave button.,30,0,1,0.0,0.03333333333333333
+WaffleReheat,composite,CloseMicrowave_4,Close the microwave.,30,0,0,0.0,0.0
+WaffleReheat,composite,PickPlaceCounterToBowl_2_pick,Pick the waffle.,30,0,7,0.0,0.23333333333333334
+WaffleReheat,composite,PickPlaceCounterToBowl_2_place,Place it in the bowl.,30,0,7,0.0,0.23333333333333334
+WaffleReheat,composite,PickPlaceCounterToBowl_2_release,Release the object at the target location.,30,0,7,0.0,0.23333333333333334
+WaffleReheat,composite,PickPlaceCounterToMicrowave_3_place,Place it inside the microwave.,30,0,0,0.0,0.0
+WaffleReheat,composite,PickPlaceCounterToMicrowave_3_release,Release the object at the target location.,30,0,0,0.0,0.0
+WaffleReheat,composite,TurnOnMicrowave_5,Start the microwave.,30,0,0,0.0,0.0
+WashFruitColander,composite,PickPlaceCounterToSink_1_place,Place it in the sink.,30,0,4,0.0,0.13333333333333333
+WashFruitColander,composite,PickPlaceCounterToSink_1_release,Release the object at the target location.,30,0,4,0.0,0.13333333333333333
+WashFruitColander,composite,PickPlaceCounterToSink_2_place,Place it in the colander.,30,0,0,0.0,0.0
+WashFruitColander,composite,PickPlaceCounterToSink_2_release,Release the object at the target location.,30,0,0,0.0,0.0
+WashFruitColander,composite,TurnOnSinkFaucet_3,Move the colander under the sink water.,30,0,0,0.0,0.0

@@ -1,5 +1,10 @@
 # XR1 common-stage-entry intervention timing study
 
+> **Frozen 2026-10-16.** This track is closed and must not be extended; see
+> [exact_replay_frozen.md](exact_replay_frozen.md). Code moved to
+> `robocasa/recovery/exact_replay/` and `scripts/exact_replay/`; existing
+> registrations must be resumed or reviewed from commit `4d65b542`.
+
 Status: **historical endpoint camera corruption confirmed for one source;
 the original timing study remains stopped at 80/220 executions; a new
 reference cohort is required before the timing comparison can proceed**.
@@ -794,7 +799,7 @@ cd /gs/fs/tga-shinoda/felid/robocasa
 git pull --ff-only origin main
 export XR1_TIMING_GPU=0
 export XR1_TIMING_PORT=10318
-bash scripts/run_xr1_intervention_timing.sh start
+bash scripts/exact_replay/run_xr1_intervention_timing.sh start
 ```
 
 By default `XR1_TIMING_SOURCE` is read from `xr1_operator_latest.env` and points
@@ -806,7 +811,7 @@ Monitor and inspect results without a GPU:
 
 ```bash
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_latest.env
-bash /gs/fs/tga-shinoda/felid/robocasa/scripts/run_xr1_intervention_timing.sh status
+bash /gs/fs/tga-shinoda/felid/robocasa/scripts/exact_replay/run_xr1_intervention_timing.sh status
 tail -f "$XR1_TIMING_LOG"
 cat "$XR1_TIMING_ROOT/full/scientific_analysis.json"
 ```
@@ -818,7 +823,7 @@ and verifies frozen hashes before reusing completed trajectories:
 ```bash
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_latest.env
 export XR1_TIMING_GPU=0
-bash /gs/fs/tga-shinoda/felid/robocasa/scripts/run_xr1_intervention_timing.sh resume
+bash /gs/fs/tga-shinoda/felid/robocasa/scripts/exact_replay/run_xr1_intervention_timing.sh resume
 ```
 
 A recorded technical error or provenance/engineering failure stops collection.
@@ -827,7 +832,7 @@ resume. A corrected implementation requires a new registration and output root.
 
 ### Diagnose one failed nominal parent
 
-Use `scripts/diagnose_xr1_timing_replay.sh` in a GPU allocation for an isolated
+Use `scripts/exact_replay/diagnose_xr1_timing_replay.sh` in a GPU allocation for an isolated
 diagnostic. It leaves the timing collector, launcher, source registration,
 errors, and all completed trajectories unchanged. No recovery branches are
 collected and no historical source is replaced.
@@ -860,10 +865,10 @@ export XR1_REPLAY_SOURCE="$XR1_TIMING_ROOT/full"
 export XR1_REPLAY_PARENT=f9cd6c2c907171c2f8fea437
 export XR1_REPLAY_GPU=0
 export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_$(date +%Y%m%d_%H%M%S)"
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" start
 
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" status
 tail -n 50 "$XR1_REPLAY_LOG"
 ```
 
@@ -875,7 +880,7 @@ restarting the full study or considering a separately registered new cohort.
 
 ### Isolate observation generation using recorded actions
 
-`scripts/diagnose_xr1_timing_observations.sh` uses the completed nominal
+`scripts/exact_replay/diagnose_xr1_timing_observations.sh` uses the completed nominal
 diagnostic's attempt-0 actions. It requires a GPU allocation for rendering, but
 starts no model server and loads no policy checkpoint. It validates the frozen
 timing registration, source snapshot identity/file hash, diagnostic input
@@ -908,10 +913,10 @@ cd "$ROBOCASA_REPO"
 git pull --ff-only origin main
 export XR1_OBS_SOURCE="$XR1_REPLAY_ROOT/diagnostic"
 export XR1_OBS_GPU=0
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_observations.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_observations.sh" start
 
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_observations_latest.env
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_observations.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_observations.sh" status
 tail -n 50 "$XR1_OBS_LOG"
 ```
 
@@ -971,10 +976,10 @@ git pull --ff-only origin main
 export XR1_OBS_COMPARE_INIT_ORDER=1
 export XR1_OBS_GPU=0
 export XR1_OBS_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_init_order_$(date +%Y%m%d_%H%M%S)"
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_observations.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_observations.sh" start
 
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_observations_latest.env
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_observations.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_observations.sh" status
 tail -n 50 "$XR1_OBS_LOG"
 ```
 
@@ -1016,10 +1021,10 @@ export XR1_REPLAY_RNG_RUNTIME_INIT=before_env
 export XR1_REPLAY_GPU=0
 export XR1_REPLAY_PORT=10320
 export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_earlycuda_$(date +%Y%m%d_%H%M%S)"
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" start
 
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" status
 tail -n 50 "$XR1_REPLAY_LOG"
 ```
 
@@ -1070,10 +1075,10 @@ export XR1_REPLAY_OBS_WINDOW_END=236
 export XR1_REPLAY_GPU=0
 export XR1_REPLAY_PORT=10321
 export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_window_$(date +%Y%m%d_%H%M%S)"
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" start
 
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" status
 tail -n 50 "$XR1_REPLAY_LOG"
 ```
 
@@ -1132,10 +1137,10 @@ export XR1_REPLAY_OBS_WINDOW_END=236
 export XR1_REPLAY_GPU=0
 export XR1_REPLAY_PORT=10322
 export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_raw_$(date +%Y%m%d_%H%M%S)"
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" start
 
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" status
 ```
 
 This remains two 400-step policy-driven replays and the existing two
@@ -1172,10 +1177,10 @@ export XR1_REPLAY_OBS_WINDOW_START=232
 export XR1_REPLAY_OBS_WINDOW_END=236
 export XR1_REPLAY_PORT=10323
 export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_splitgpu_$(date +%Y%m%d_%H%M%S)"
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" start
 
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" status
 ```
 
 The new diagnostic still performs two 400-step replays, 50 nominal requests,
@@ -1228,10 +1233,10 @@ export XR1_REPLAY_RNG_RUNTIME_INIT=before_env
 export XR1_REPLAY_RECORD_ALL_OBSERVATIONS=1
 export XR1_REPLAY_PORT=10324
 export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_gcdisabled_$(date +%Y%m%d_%H%M%S)"
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" start
 
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" status
 ```
 
 This still performs two 400-step replays and the existing seeded-request probes.
@@ -1260,10 +1265,10 @@ git pull --ff-only origin main
 export XR1_REPLAY_GC_MODE=default
 export XR1_REPLAY_PORT=10325
 export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_gccontrol_$(date +%Y%m%d_%H%M%S)"
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" start
 
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" status
 ```
 
 Inspect collection events near the first image mismatch and compare source
@@ -1313,10 +1318,10 @@ export XR1_REPLAY_SERVER_GPU=1
 unset XR1_REPLAY_OBS_WINDOW_START XR1_REPLAY_OBS_WINDOW_END
 export XR1_REPLAY_PORT=10327
 export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_parent_audit_gc_scope_$(date +%Y%m%d_%H%M%S)"
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" start
 
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" status
 tail -n 50 "$XR1_REPLAY_LOG"
 ```
 
@@ -1330,7 +1335,7 @@ bind their artifacts. This is an engineering preflight, with zero scientific
 intervention trajectories and `full_timing_study_complete: false`.
 
 An interrupted audit without a recorded error can resume with the same saved
-`run.env` and `bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" resume`.
+`run.env` and `bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" resume`.
 The source/configuration/code and every completed parent's artifact hashes are
 revalidated; accepted parents are skipped, and an interrupted uncommitted
 attempt gets a separate new directory. Old files and logs are preserved.
@@ -1355,10 +1360,10 @@ export XR1_REPLAY_ALL_PARENTS=0
 export XR1_REPLAY_PARENT=6cfb095ec52c00970abf8340
 export XR1_REPLAY_PORT=10328
 export XR1_REPLAY_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_replay_6cf_isolated_$(date +%Y%m%d_%H%M%S)"
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" start
 
 source /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_replay_latest.env
-bash "$ROBOCASA_REPO/scripts/diagnose_xr1_timing_replay.sh" status
+bash "$ROBOCASA_REPO/scripts/exact_replay/diagnose_xr1_timing_replay.sh" status
 tail -n 50 "$XR1_REPLAY_LOG"
 ```
 
@@ -1390,7 +1395,7 @@ cd "$ROBOCASA_REPO"
 git pull --ff-only origin main
 export XR1_SOURCE_INSPECT_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_source_inspection_$(date +%Y%m%d_%H%M%S)"
 set -o pipefail
-"$XR1_CLIENT_ENV/bin/python" -u -m robocasa.recovery.inspect_intervention_timing_source \
+"$XR1_CLIENT_ENV/bin/python" -u -m robocasa.recovery.exact_replay.inspect_intervention_timing_source \
   --diagnostic-dir "$XR1_REPLAY_ROOT/diagnostic" \
   --comparison-diagnostic-dir /gs/bs/tga-shinoda/felid/robocasa_rollouts/recovery/xr1_timing_parent_audit_gc_scope_20261013_171134/diagnostic/parents/6cfb095ec52c00970abf8340/attempt_g9lwwpxh/diagnostic \
   --output-dir "$XR1_SOURCE_INSPECT_ROOT" \
@@ -1444,7 +1449,7 @@ cd "$ROBOCASA_REPO"
 git pull --ff-only origin main
 export XR1_TIMING_ROOT="$STORAGE_BS/robocasa_rollouts/recovery/xr1_timing_rngfix_$(date +%Y%m%d_%H%M%S)"
 export XR1_TIMING_GPU=0
-bash "$ROBOCASA_REPO/scripts/run_xr1_intervention_timing.sh" start
+bash "$ROBOCASA_REPO/scripts/exact_replay/run_xr1_intervention_timing.sh" start
 ```
 
 Implementation: `intervention_timing.py`, `run_intervention_timing.py`, and
@@ -1452,8 +1457,8 @@ Implementation: `intervention_timing.py`, `run_intervention_timing.py`, and
 `scripts/`. Local checks:
 
 ```bash
-.venv_video/bin/python -m unittest tests.test_intervention_timing_source_inspection tests.test_intervention_timing_parent_audit tests.test_intervention_timing_observation_diagnostic tests.test_intervention_timing_replay_diagnostic tests.test_intervention_timing tests.test_operator_screen tests.test_phase2_snapshot_replay tests.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
-bash -n scripts/run_xr1_intervention_timing.sh
-bash -n scripts/diagnose_xr1_timing_replay.sh
-bash -n scripts/diagnose_xr1_timing_observations.sh
+.venv_video/bin/python -m unittest tests.exact_replay.test_intervention_timing_source_inspection tests.exact_replay.test_intervention_timing_parent_audit tests.exact_replay.test_intervention_timing_observation_diagnostic tests.exact_replay.test_intervention_timing_replay_diagnostic tests.exact_replay.test_intervention_timing tests.exact_replay.test_operator_screen tests.exact_replay.test_phase2_snapshot_replay tests.exact_replay.test_phase3b_training_horizon tests.test_safe_xiaomi_policy
+bash -n scripts/exact_replay/run_xr1_intervention_timing.sh
+bash -n scripts/exact_replay/diagnose_xr1_timing_replay.sh
+bash -n scripts/exact_replay/diagnose_xr1_timing_observations.sh
 ```
