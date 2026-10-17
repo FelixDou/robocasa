@@ -106,6 +106,20 @@ evidence, not a held-out result: the same 37-parent partition selected the
 regularization, and only 18 successful calibration parents made the nominal
 5% conformal threshold degenerate and maximally conservative.
 
+An offline baseline study (Section 15.10) then reused the recorded exports
+for a single post-hoc evaluation on the already-opened 760-rollout cohort,
+after reproducing every frozen threshold and result exactly. Inside the staged
+wrapper, standard success-only scores (Mahalanobis, cosine k-NN, PCA-KMeans,
+RND) matched staged SAFE: recall differences ranged from −0.002 to −0.029, with
+every bootstrap interval reaching zero. Removing the staging helped instead.
+An unstaged SAFE-or-time detector reached recall **0.955** at FPR **0.058**,
++0.287 over staged SAFE (95% CI [+0.156, +0.426]), and detected 0.038 task
+horizons earlier. No detector exceeded 3% recall by 25% of the horizon.
+Because the fused detector was defined after the cohort was opened, it needs a
+fresh prospective confirmation. The matching fused-baseline control is
+pending. STAC-Single is undefined for XR-1, whose 16-step chunks are executed
+in full.
+
 ## 1. Scope, labels, and evaluation rules
 
 ### 1.1 Raw SAFE target
@@ -1816,6 +1830,16 @@ The present evidence supports the following hierarchy of conclusions:
     beat terminal SAFE on all five composites and time-only on four, but this
     0.696 ROC-AUC was used for regularization selection and is not a held-out
     performance estimate.
+13. **Not supported (post-hoc):** a SAFE-specific early-window contribution.
+    Inside the staged wrapper, standard success-only baseline scores matched
+    staged SAFE within bootstrap intervals that reach zero (Section 15.10).
+14. **Supported post-hoc, needs confirmation:** removing the staging improves
+    the detector. Unstaged SAFE-or-time fusion raised prospective recall from
+    0.668 to 0.955 and detected earlier after misses were charged, at test FPR
+    0.058. It was defined after the cohort was opened, and whether the gain
+    needs SAFE rather than any fused policy-internal score is pending.
+15. **Unchanged:** no evaluated detector provides meaningful early warning. The
+    best recall by 25% of the task horizon is 2.9%.
 
 ## 15. Recommended next experiments
 
@@ -2316,6 +2340,178 @@ requirement: the final 5% successful-parent FPR claim should use at least 100
 successful calibration parents, balanced for task coverage. The mathematical
 minimum for a nontrivial strict-crossing 5% threshold is 39 successes, but that
 would still provide an unstable operating-point estimate.
+
+### 15.10 Offline baselines on the opened prospective cohort: complete (fused-baseline extension pending)
+
+#### Question and evidentiary status
+
+This study asks two questions about the frozen staged SAFE + time detector.
+First, does the early-window score need SAFE's learned head, or would a
+standard failure score do as well? Second, does the staging (SAFE only before
+25%, time only after 50%) help? It reuses the recorded Section 15.6 exports
+and frozen runtime bundle; no rollout was collected and no policy was run. The
+760-rollout primary prospective cohort had already been opened for the frozen
+detectors. These results are therefore a single post-hoc evaluation of
+detectors frozen before scoring it. They do not change the frozen Section 15.6
+result and cannot support a confirmatory claim on their own.
+
+#### Protocol
+
+The runbook is [`xr1_offline_detector_baselines.md`](xr1_offline_detector_baselines.md).
+The run used code commit `d71b6d27` in a dedicated detached worktree.
+
+1. **Features.** Each export was read with the pinned official SAFE loader
+   and the frozen MLP configuration, so every embedding baseline sees the
+   same per-inference vector as SAFE: the last flow step and last of the 16
+   action positions of the pre-`action_output_layer` DiT state.
+2. **Development.** Only the 1,824 outer-training rollouts of the final-refit
+   split were used. Each task/outcome group was split 70/30 into
+   reference-fit and meta-validation partitions before any fitting. Baselines
+   were fitted on reference-fit successes only. A configuration and a causal
+   aggregation (running maximum, running mean, or cumulative sum) were
+   selected on meta-validation. The criterion was mean task-macro at-risk
+   ROC-AUC at the 10% and 25% landmarks, the window in which a staged
+   baseline acts. Task normalization (median/robust scale, as for SAFE) was
+   fitted on meta-validation. No calibration or prospective outcome was read.
+3. **Calibration.** Thresholds came from the frozen 228-rollout primary
+   calibration cohort under the frozen event-level `FPR <= 0.05` cap and
+   ranking. The run first re-selected the three frozen detectors and
+   reproduced their thresholds exactly.
+4. **Evaluation.** One evaluation was run on the 760-rollout primary cohort
+   (380/380). It stops unless it reproduces the frozen `overall`,
+   all-retained, paired-timing, and bootstrap results. All three reproduced.
+   The interpretation plan (`interpretation_plan.md`) was written before
+   evaluation, and the frozen-input checksums verified after it. Each detector
+   was paired against `staged_safe_time` and `time_only` with the frozen
+   task/rollout bootstrap (2,000 replicates, seed 0).
+
+Detectors: `<baseline>_only` uses the baseline for the whole rollout;
+`staged_<baseline>_time` keeps the frozen staged wrapper and swaps only the
+early score; `fused_safe_time` makes normalized SAFE and time both eligible
+for the whole rollout, with a jointly searched threshold pair (the staging
+ablation).
+
+| Cache | Rollouts (success / failure) | Inferences | Tasks |
+|---|---:|---:|---:|
+| Development (export) | 1,950 (1,105 / 845) | 174,521 | 39 |
+| Calibration | 454 (254 / 200) | 38,403 | 38 |
+| Prospective | 1,643 (973 / 670) | 132,009 | 38 |
+
+Every cache recorded `pred_horizon` 16, `exec_horizon` 16, and no irregular
+inference gaps. XR-1 records `(5, 16, 1024)` features with `(16, 12)` action
+chunks and executes every predicted action. Consecutive chunks therefore do
+not overlap, so the official STAC-Single action-consistency baseline is
+undefined here and was skipped.
+
+Development selections (all chose `cumulative_sum` aggregation):
+
+| Baseline | Selected configuration | Meta-validation selection score |
+|---|---|---:|
+| Mahalanobis | per-task Gaussian in 256-d pooled PCA space | 0.628 |
+| PCA-KMeans | 64-d PCA, 32 clusters per task | 0.579 |
+| RND | hidden 512, output 128 | 0.562 |
+| Cosine k-NN | `k=5`, per-task reference | 0.542 |
+
+On calibration every detector sat at 5/114 false positives (0.044). Its
+in-sample recall was: `fused_safe_time` 0.965, `mahalanobis_only` 0.711,
+`staged_safe_time` 0.702, `staged_knn_cosine_time` 0.684,
+`staged_pca_kmeans_time` 0.684, `staged_rnd_time` 0.675,
+`staged_mahalanobis_time` 0.658, `rnd_only` 0.649, `time_only` 0.632,
+`pca_kmeans_only` 0.605, `knn_cosine_only` 0.596, `safe_only` 0.561.
+
+#### Prospective results
+
+**Table 15.10a — Primary prospective cohort (380 successes, 380 failures).**
+Deltas are detector minus reference with the paired task/rollout bootstrap
+95% CI. For miss-adjusted detection, negative means earlier.
+
+| Detector | TPR | FPR | Balanced accuracy | Miss-adjusted | Recall by 25% | ΔTPR vs staged SAFE | ΔMiss-adj vs staged SAFE | ΔTPR vs time |
+|---|---:|---:|---:|---:|---:|---|---|---|
+| `staged_safe_time` (frozen) | 0.668 | 0.050 | 0.809 | 0.854 | 0.029 | — | — | +0.037 [+0.000, +0.090] |
+| `time_only` (frozen) | 0.632 | 0.047 | 0.792 | 0.880 | 0.000 | −0.037 [−0.090, +0.000] | +0.026 [−0.004, +0.068] | — |
+| `safe_only` (frozen) | 0.566 | 0.039 | 0.763 | 0.810 | 0.000 | −0.101 [−0.376, +0.166] | −0.044 [−0.127, +0.039] | −0.065 [−0.354, +0.215] |
+| `fused_safe_time` | **0.955** | 0.058 | **0.949** | **0.816** | 0.000 | +0.287 [+0.156, +0.426] | −0.038 [−0.070, −0.006] | +0.324 [+0.178, +0.469] |
+| `staged_knn_cosine_time` | 0.666 | 0.061 | 0.803 | 0.857 | 0.011 | −0.002 [−0.045, +0.034] | +0.003 [−0.024, +0.037] | +0.035 [+0.000, +0.097] |
+| `staged_mahalanobis_time` | 0.639 | 0.045 | 0.797 | 0.876 | 0.005 | −0.029 [−0.076, +0.000] | +0.022 [−0.001, +0.059] | +0.008 [+0.000, +0.022] |
+| `staged_pca_kmeans_time` | 0.639 | 0.045 | 0.797 | 0.877 | 0.003 | −0.029 [−0.079, +0.000] | +0.023 [+0.000, +0.062] | +0.008 [+0.000, +0.025] |
+| `staged_rnd_time` | 0.639 | 0.050 | 0.795 | 0.877 | 0.003 | −0.029 [−0.076, +0.000] | +0.023 [+0.000, +0.060] | +0.008 [+0.000, +0.026] |
+| `mahalanobis_only` | 0.666 | 0.068 | 0.799 | 0.782 | 0.003 | −0.002 [−0.249, +0.246] | −0.072 [−0.158, +0.010] | +0.035 [−0.225, +0.291] |
+| `rnd_only` | 0.629 | 0.068 | 0.780 | 0.792 | 0.000 | −0.039 [−0.298, +0.217] | −0.061 [−0.146, +0.020] | −0.002 [−0.270, +0.267] |
+| `pca_kmeans_only` | 0.605 | 0.063 | 0.771 | 0.806 | 0.000 | −0.063 [−0.326, +0.201] | −0.048 [−0.130, +0.031] | −0.026 [−0.297, +0.247] |
+| `knn_cosine_only` | 0.582 | 0.055 | 0.763 | 0.818 | 0.000 | −0.087 [−0.354, +0.179] | −0.036 [−0.115, +0.041] | −0.050 [−0.333, +0.228] |
+| `fused_<baseline>_time` (four detectors) | pending | pending | pending | pending | pending | pending | pending | pending |
+
+The three frozen rows equal Section 15.6 exactly. `fused_safe_time` raised
+22/380 false alarms (0.058, Wilson 95% [0.039, 0.086]); `staged_safe_time`
+raised 19/380 (0.050, [0.032, 0.077]).
+
+**Table 15.10b — Task-type strata, primary cohort (TPR / FPR / miss-adjusted).**
+
+| Detector | Atomic (10 tasks) | Composite (28 tasks) |
+|---|---|---|
+| `time_only` | 0.400 / 0.020 / 0.942 | 0.714 / 0.057 / 0.857 |
+| `staged_safe_time` | 0.540 / 0.040 / 0.832 | 0.714 / 0.054 / 0.861 |
+| `fused_safe_time` | 0.980 / 0.030 / 0.783 | 0.946 / 0.068 / 0.828 |
+| `safe_only` | 0.800 / 0.080 / 0.642 | 0.482 / 0.025 / 0.870 |
+| `staged_knn_cosine_time` | 0.530 / 0.080 / 0.844 | 0.714 / 0.054 / 0.860 |
+| `staged_mahalanobis_time`, `staged_pca_kmeans_time`, `staged_rnd_time` | 0.430 / 0.020–0.040 / 0.919–0.920 | 0.714 / 0.054 / 0.860–0.861 |
+| `mahalanobis_only` | 0.820 / 0.070 / 0.658 | 0.611 / 0.068 / 0.826 |
+| `rnd_only` | 0.840 / 0.100 / 0.650 | 0.554 / 0.057 / 0.843 |
+| `pca_kmeans_only` | 0.800 / 0.100 / 0.666 | 0.536 / 0.050 / 0.855 |
+| `knn_cosine_only` | 0.800 / 0.100 / 0.675 | 0.504 / 0.039 / 0.869 |
+
+On composites every staged variant has exactly the time-only recall: in the
+staged wrapper, composite failures are caught only by the time fallback,
+whatever the early score.
+
+#### Interpretation
+
+- **Representation.** Inside the staged wrapper, swapping SAFE for a standard
+  success-only score changed recall by −0.002 to −0.029 and miss-adjusted
+  detection by +0.003 to +0.023. Every interval reaches zero. Staged SAFE is
+  numerically best, but it is not separable from the baselines; staged
+  cosine k-NN ties it. The current data do not show that SAFE's learned head
+  is needed for the early-window gain.
+- **Staging.** Removing the staging improved both endpoints. `fused_safe_time`
+  had +0.287 recall over `staged_safe_time` (CI [+0.156, +0.426]) and
+  detected 0.038 task horizons earlier after misses were charged (CI
+  [−0.070, −0.006]). On these two endpoints the staging buys nothing. Its
+  only advantage is the earliest landmark: 11/380 failures by 25% versus 0/380
+  for fused. One explanation, not yet checked per rollout, is that SAFE and
+  elapsed time catch largely different failures while their false alarms fall
+  on the same successes.
+- **Early warning.** No detector reached 3% recall by the 25% landmark. The
+  maximum was 0.029, for `staged_safe_time`.
+- **Operating point.** `fused_safe_time` rose from 5/114 (0.044) false alarms
+  on calibration to 22/380 (0.058) on test. Its Wilson interval still
+  contains 0.05. Because `fused_safe_time` was defined after the cohort was
+  opened, a confirmatory claim needs a frozen fused detector and a fresh
+  prospective collection.
+- **Time-proxy caveat.** All four baselines selected cumulative-sum
+  aggregation, which grows with elapsed inferences. The standalone baselines
+  therefore partly encode elapsed time, and their higher recall than
+  `safe_only` (running maximum) comes with higher test FPR (0.055–0.068 versus
+  0.039). Standalone comparisons are not representation-only. The staged
+  comparison limits each baseline to the first 25% of the horizon and is the
+  cleaner representation test.
+- **Atomic tasks.** Every standalone score detected about 80% of atomic
+  failures early (miss-adjusted 0.64–0.68 versus 0.94 for time). SAFE was not
+  distinctive there either.
+- **STAC-Single** is not applicable to XR-1, because its 16-step chunks are
+  executed in full.
+- **Pending.** The four `fused_<baseline>_time` detectors are the remaining
+  control. They ask whether the fused gain needs SAFE or only some
+  policy-internal score fused with time. Their decision rule is pre-declared
+  in `interpretation_plan_fused.md`: a SAFE-specific contribution is supported
+  only if `fused_safe_time` beats every fused baseline on recall at matched
+  FPR, with a paired bootstrap CI excluding zero.
+
+Run root (caches, development, calibration, evaluation, interpretation plan,
+and checksums):
+
+```text
+/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_offline_baselines_20261017_100820
+```
 
 ## 16. Limitations
 

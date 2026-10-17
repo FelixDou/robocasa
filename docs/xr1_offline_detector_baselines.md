@@ -22,6 +22,7 @@ score at inference `t` uses only inputs available through `t`.
 | `fused_safe_time` | normalized SAFE OR time risk, both eligible for the whole rollout (staging ablation) | joint pair |
 | `<baseline>_only` | the baseline alone over the whole rollout | single |
 | `staged_<baseline>_time` | the baseline in the 0–25% window, time fallback from 50% (the frozen staged wrapper) | joint pair |
+| `fused_<baseline>_time` | the baseline OR time risk, both eligible for the whole rollout (section 10 extension) | joint pair |
 
 The `staged_<baseline>_time` rows separate the contribution of the SAFE
 representation from that of the staging scheme: they keep the wrapper fixed
@@ -401,3 +402,250 @@ the score.
 - The atomic/composite strata are secondary, as in the frozen study.
 - Do not select a baseline, aggregation, or threshold from these test results,
   and do not rerun `evaluate` with a different bundle to improve a baseline.
+
+## 10. Fused baseline extension
+
+The completed run showed `fused_safe_time` ahead of `staged_safe_time` on
+recall. This extension asks whether that gain needs SAFE in particular, or
+whether any policy-internal score fused with elapsed time does as well. It
+adds `fused_mahalanobis_time`, `fused_knn_cosine_time`,
+`fused_pca_kmeans_time`, and `fused_rnd_time`. Each is the selected baseline
+score OR the frozen time risk, both eligible for the whole rollout, with the
+threshold pair searched exactly as for `fused_safe_time`. The run reuses the
+existing caches and `develop/baseline_bundle.json` without change, and writes
+only to new directories:
+
+- `calibrate_fused/` must reproduce every threshold and calibration metric in
+  `calibrate/` (`--reference-calibration`), or it stops;
+- `evaluate_fused/` must reproduce every result in `evaluate/`
+  (`--reference-evaluation`) and the frozen prospective analysis, or it stops.
+  It also pairs every detector against `fused_safe_time`, `staged_safe_time`,
+  and `time_only`.
+
+This is a second post-hoc look at the already-opened prospective cohort. Write
+the interpretation note's first part before calibration and its second part
+before evaluation.
+
+### 10.1 Session, code, and prior-output checksums
+
+Run the export block in section 3 (through `XR1_FROZEN_ANALYSIS`), then point
+at the completed run and move its dedicated worktree to the current main. Do
+not touch the shared `$PROJECT_FS/robocasa` checkout.
+
+```bash
+export XR1_BASELINE_TAG=xr1_offline_baselines_20261017_100820
+export XR1_BASELINE_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/$XR1_BASELINE_TAG"
+export XR1_BASELINE_LOG_ROOT="$STORAGE_BS/robocasa_logs/eval/$XR1_BASELINE_TAG"
+export XR1_BASELINE_WORKTREE="$PROJECT_FS/robocasa_xr1_baselines_d71b6d27"
+export XR1_FUSED_NOTE="$XR1_BASELINE_ROOT/interpretation_plan_fused.md"
+
+test -z "$(git -C "$XR1_BASELINE_WORKTREE" status --porcelain --untracked-files=no)" \
+  || echo "STOP: the baseline worktree has local changes"
+git -C "$XR1_BASELINE_WORKTREE" fetch origin main
+export XR1_FUSED_CODE_SHA="$(git -C "$XR1_BASELINE_WORKTREE" rev-parse FETCH_HEAD)"
+git -C "$XR1_BASELINE_WORKTREE" checkout --detach "$XR1_FUSED_CODE_SHA"
+echo "fused code commit: $XR1_FUSED_CODE_SHA"
+grep -q -- "--fused-baselines" \
+  "$XR1_BASELINE_WORKTREE/robocasa/recovery/safe/run_offline_detector_baselines.py" \
+  || echo "STOP: worktree lacks the fused extension"
+
+cd "$XR1_BASELINE_WORKTREE"
+"$SAFE_PY" -m unittest tests.test_safe_offline_detector_baselines tests.test_safe_prospective_matched_fpr
+"$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines synthetic-smoke \
+  --output-dir "$XR1_BASELINE_ROOT/synthetic_smoke_fused"
+
+cd "$XR1_BASELINE_ROOT"
+sha256sum -c --quiet frozen_inputs.sha256 && echo "frozen inputs OK"
+find develop calibrate evaluate -type f -print0 | sort -z | xargs -0 sha256sum \
+  > prior_outputs_before_fused.sha256
+wc -l prior_outputs_before_fused.sha256
+```
+
+Continue only if the tests pass, the smoke reports five `fused_detectors` and
+`reference_detectors_reproduced: 14`, and the frozen inputs verify.
+
+### 10.2 Interpretation note, part i (before calibration)
+
+```bash
+if test -e "$XR1_FUSED_NOTE"; then
+  echo "STOP: $XR1_FUSED_NOTE already exists; do not rewrite it"
+else
+  printf '# Interpretation plan: fused baseline detectors\n\nRun root: %s\nCode commit: %s\nPart i written (UTC): %s\n\n' \
+    "$XR1_BASELINE_ROOT" "$XR1_FUSED_CODE_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    > "$XR1_FUSED_NOTE"
+  cat >> "$XR1_FUSED_NOTE" <<'NOTE'
+## Part i: declared before calibration
+
+Status of the cohort. The 760-rollout primary prospective cohort was opened
+for the frozen detectors (17 August 2026) and again for the twelve offline
+baseline detectors (17 October 2026, evaluate/). Evaluating the
+fused_<baseline>_time detectors is a second post-hoc look at this
+already-opened cohort. Its results are descriptive; a confirmatory claim
+requires a fresh prospective collection.
+
+Fixed before calibration. Baseline models, aggregations, and task
+normalization come unchanged from develop/baseline_bundle.json. The four new
+detectors (fused_mahalanobis_time, fused_knn_cosine_time,
+fused_pca_kmeans_time, fused_rnd_time) take their threshold pairs only from
+the 228-rollout primary calibration cohort, with the same joint search,
+event-level FPR <= 0.05 cap, and tie-breaking as fused_safe_time.
+calibrate_fused must reproduce every threshold in calibrate/, and
+evaluate_fused must reproduce every result in evaluate/ and the frozen
+prospective analysis, or the run stops. Nothing is selected or changed from
+test results: no baseline, aggregation, threshold, stage window, or detector.
+evaluate_fused runs once.
+
+Decision rule. A SAFE-specific contribution to the fused detector is
+supported only if fused_safe_time has higher failure recall than every
+fused_<baseline>_time at the calibrated operating points, and, for every
+baseline, the paired task/rollout bootstrap 95% CI of the recall difference
+(fused_<baseline>_time minus fused_safe_time; 2,000 replicates, seed 0) lies
+entirely below zero. Otherwise the fused gain is reported as coming from
+fusing a policy-internal score with elapsed time, not from SAFE specifically.
+Test FPR (with Wilson intervals) and miss-adjusted detection (with bootstrap
+CIs) are reported alongside but do not change this rule.
+NOTE
+  cat "$XR1_FUSED_NOTE"
+fi
+```
+
+### 10.3 Calibration
+
+```bash
+cd "$XR1_BASELINE_WORKTREE"
+if grep -q '^## Part i:' "$XR1_FUSED_NOTE" && ! grep -q '^## Part ii' "$XR1_FUSED_NOTE"; then
+  nohup "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines calibrate \
+    --baseline-bundle "$XR1_BASELINE_ROOT/develop/baseline_bundle.json" \
+    --calibration-cache "$XR1_BASELINE_ROOT/cache_calibration" \
+    --output-dir "$XR1_BASELINE_ROOT/calibrate_fused" \
+    --fused-baselines \
+    --reference-calibration "$XR1_BASELINE_ROOT/calibrate/baseline_calibration.json" \
+    --workers 8 \
+    > "$XR1_BASELINE_LOG_ROOT/calibrate_fused.log" 2>&1 &
+  echo "calibrate_fused PID: $!"
+else
+  echo "STOP: write part i of the interpretation note first"
+fi
+```
+
+Continue only if `calibrate_fused/status.json` lists all 12 prior detectors
+under `reference_detectors_reproduced` and every detector has calibration FPR
+at most 0.05.
+
+### 10.4 Interpretation note, part ii (before evaluation)
+
+Append the in-sample calibration operating points. These chose the thresholds
+and are not performance estimates.
+
+```bash
+"$SAFE_PY" - "$XR1_BASELINE_ROOT/calibrate_fused/baseline_calibration.json" "$XR1_FUSED_NOTE" <<'PY'
+import datetime, hashlib, json, pathlib, sys
+
+path, note = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+if "## Part ii" in note.read_text():
+    raise SystemExit("STOP: part ii already exists")
+data = json.loads(path.read_text())
+names = ["time_only", "staged_safe_time", "fused_safe_time"] + sorted(
+    name for name, row in data["detectors"].items() if row["family"] == "fused_baseline"
+)
+lines = [
+    "",
+    "## Part ii: calibration operating points, appended before evaluation",
+    "",
+    f"Written (UTC): {datetime.datetime.now(datetime.timezone.utc):%Y-%m-%dT%H:%M:%SZ}",
+    f"calibrate_fused/baseline_calibration.json sha256: {hashlib.sha256(path.read_bytes()).hexdigest()}",
+    f"Prior detectors reproduced: {len(data['reference_detectors_reproduced'])}",
+    "",
+    "| Detector | TP | FP | TPR | FPR | Miss-adjusted |",
+    "|---|---:|---:|---:|---:|---:|",
+]
+for name in names:
+    metrics = data["detectors"][name]["calibration_metrics"]
+    confusion = metrics["confusion"]
+    lines.append(
+        f"| {name} | {confusion['tp']}/{confusion['tp'] + confusion['fn']} | "
+        f"{confusion['fp']}/{confusion['fp'] + confusion['tn']} | "
+        f"{metrics['true_positive_rate']:.3f} | {metrics['false_positive_rate']:.3f} | "
+        f"{metrics['missed_failure_adjusted_detection_fraction']:.3f} |"
+    )
+lines += ["", "These in-sample values selected the thresholds; they are not performance estimates.", ""]
+with note.open("a") as stream:
+    stream.write("\n".join(lines))
+print(note.read_text())
+PY
+```
+
+### 10.5 One evaluation
+
+```bash
+cd "$XR1_BASELINE_WORKTREE"
+if grep -q '^## Part ii' "$XR1_FUSED_NOTE"; then
+  nohup "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines evaluate \
+    --baseline-calibration "$XR1_BASELINE_ROOT/calibrate_fused/baseline_calibration.json" \
+    --test-cache "$XR1_BASELINE_ROOT/cache_prospective_test" \
+    --frozen-analysis "$XR1_FROZEN_ANALYSIS" \
+    --reference-evaluation "$XR1_BASELINE_ROOT/evaluate/analysis.json" \
+    --interpretation-note "$XR1_FUSED_NOTE" \
+    --output-dir "$XR1_BASELINE_ROOT/evaluate_fused" \
+    --test-per-class 10 \
+    --bootstrap-samples 2000 \
+    --bootstrap-seed 0 \
+    > "$XR1_BASELINE_LOG_ROOT/evaluate_fused.log" 2>&1 &
+  echo "evaluate_fused PID: $!"
+else
+  echo "STOP: append part ii of the interpretation note first"
+fi
+```
+
+After it exits, confirm that nothing earlier changed:
+
+```bash
+cd "$XR1_BASELINE_ROOT"
+sha256sum -c --quiet prior_outputs_before_fused.sha256 && echo "prior outputs unchanged"
+sha256sum -c --quiet frozen_inputs.sha256 && echo "frozen inputs unchanged"
+```
+
+### 10.6 Audit table and decision rule
+
+```bash
+"$SAFE_PY" - "$XR1_BASELINE_ROOT/evaluate_fused/analysis.json" <<'PY'
+import json, pathlib, sys
+
+d = json.loads(pathlib.Path(sys.argv[1]).read_text())
+print("status:", d["status"], "| frozen reproduced:", d["frozen_results_reproduced"],
+      "| prior detectors reproduced:", len(d["reference_detectors_reproduced"]))
+print("note sha256:", d["interpretation_note_sha256"])
+boot = d["task_rollout_bootstrap"]
+
+def delta(name, reference, key):
+    row = boot.get(f"{name}__vs__{reference}")
+    if row is None:
+        return f"{'-':>22s}"
+    value = row[key]
+    return f"{value['mean']:+.3f} [{value['ci95'][0]:+.3f},{value['ci95'][1]:+.3f}]"
+
+print(f"{'detector':34s} {'TPR':>6s} {'FPR':>6s} {'BA':>6s} {'adj':>6s} {'r@25':>6s} "
+      f"{'dTPR vs fused SAFE':>22s} {'d_adj vs fused SAFE':>22s} "
+      f"{'dTPR vs staged':>22s} {'dTPR vs time':>22s}")
+for name, row in sorted(d["overall"].items()):
+    print(f"{name:34s} {row['true_positive_rate']:6.3f} {row['false_positive_rate']:6.3f} "
+          f"{row['balanced_accuracy']:6.3f} {row['missed_failure_adjusted_detection_fraction']:6.3f} "
+          f"{row['failure_recall_by_landmark']['0.25']:6.3f} "
+          f"{delta(name, 'fused_safe_time', 'tpr_delta')} "
+          f"{delta(name, 'fused_safe_time', 'adjusted_detection_delta')} "
+          f"{delta(name, 'staged_safe_time', 'tpr_delta')} {delta(name, 'time_only', 'tpr_delta')}")
+
+fused = sorted(name for name, row in d["detectors"].items() if row["family"] == "fused_baseline")
+rule = {name: boot[f"{name}__vs__fused_safe_time"]["tpr_delta"]["ci95"][1] < 0.0 for name in fused}
+print("\nSAFE-specific rule (every fused baseline recall CI below zero):", rule)
+print("SAFE-specific contribution supported:", bool(rule) and all(rule.values()))
+for task_type, rows in d["by_task_type"].items():
+    print("\n", task_type)
+    for name in ["time_only", "staged_safe_time", "fused_safe_time"] + fused:
+        row = rows[name]
+        print(f"  {name:32s} TPR {row['true_positive_rate']:.3f} FPR {row['false_positive_rate']:.3f} "
+              f"adj {row['missed_failure_adjusted_detection_fraction']:.3f}")
+PY
+```
+
+Report the decision rule's outcome as written in part i, whatever it is.
