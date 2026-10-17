@@ -157,6 +157,16 @@ GPU 2: RLDX server, TCP/ZMQ port 20102 <- optional third evaluator
 
 Do not mix OpenPI ports `812x` and RLDX ports `2010x`.
 
+### XR-1 recoverability ladder
+
+`scripts/run_recoverability_ladder_xr1.sh` starts one XR-1 server per worker
+(`LADDER_GPU_PAIRS="sim_gpu:server_gpu"`, ports from `LADDER_PORT_BASE`,
+default `10340`), waits for `Model loaded`, then the simulator client. Phases
+(smoke, naturals, audit, stage calibration, branched run, resume, analyze)
+and their copy-paste commands are in `docs/recoverability_ladder.md`. Outputs
+go to `$STORAGE_BS/robocasa_rollouts/recovery/xr1_ladder_v2_*`, logs to
+`$STORAGE_BS/robocasa_logs/eval`.
+
 ## 5. Copy the pi0 checkpoint to node-local storage
 
 `/tmp` is local to the allocated node and is empty in a new allocation. Copy

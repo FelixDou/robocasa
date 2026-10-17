@@ -1,6 +1,8 @@
 {
-  "_comment": "Five-task XR-1 recoverability-ladder pilot. See docs/recoverability_ladder.md.",
+  "_comment": "Five-task XR-1 recoverability-ladder pilot, schema 2. See docs/recoverability_ladder.md. The v1 (schema 1) config is in git history at b7f1f6d6 and frozen in the v1 run's plan.json.",
   "_expected_success_rates_source": "XR-1 natural-rate 50-rollout selections in docs/safe_xiaomi_dense_subtask.md (success/50); all inside 20-80% and all with curated ordered predicates",
+  "_exclude_predicates_source": "audit-predicates on the v1 pilot (docs/recoverability_ladder_pilot_20261016.md, problem A): CuttingToolSelection drawer_open was the first stage to latch only at success in 7/7 successful parents (drawer starts 27-30% open, is_open needs 0.90); ArrangeBreadBasket cabinet_open in 4/9. Ladder-level only; eval_composite_predicates.py is unchanged.",
+  "_planning_anchor_source": "expected_detection_fraction / expected_stage_entry_fraction: medians over v1 failed parents of the schema-2 stage-overdue detector replayed on v1 progress events with a v1 calibration (in-sample, approximate). Replace with plan --reference-run on the naturals run.",
   "tasks": [
     "ArrangeBreadBasket",
     "ArrangeTea",
@@ -18,23 +20,49 @@
   "split": "pretrain",
   "env_interface": "gym",
   "seed_protocol": "repeated_reset",
-  "base_seed": 300007,
+  "base_seed": 310007,
   "parents_per_task": 24,
   "failed_parents_per_task": 8,
-  "success_controls_per_task": 2,
+  "success_controls_per_task": 4,
   "k_branches": 4,
   "cells": [
     ["resample_continue", "detection"],
     ["robot_reset", "last_good"],
-    ["robot_reset", "last_good_minus_2"],
     ["subtask_reprompt", "detection"],
     ["world_reset", "last_good"],
-    ["world_reset", "last_good_minus_2"]
+    ["resample_continue", "stage_entry"],
+    ["resample_continue", "stage_entry_plus_4"],
+    ["resample_continue", "stage_entry_plus_8"],
+    ["resample_continue", "stage_entry_plus_16"],
+    ["subtask_reprompt", "stage_entry"],
+    ["subtask_reprompt", "stage_entry_plus_4"],
+    ["subtask_reprompt", "stage_entry_plus_8"],
+    ["subtask_reprompt", "stage_entry_plus_16"]
   ],
-  "detector": "stall",
+  "control_cells": [
+    ["resample_continue", "detection"],
+    ["robot_reset", "last_good"],
+    ["subtask_reprompt", "detection"],
+    ["world_reset", "last_good"]
+  ],
+  "detector": "overdue_or_regression",
   "stall_fraction": 0.15,
   "time_fraction": 0.5,
+  "stage_quantile": 0.9,
+  "stage_min_examples": 3,
+  "stage_overdue_min_steps": 32,
+  "regression_min_steps": 16,
+  "regression_ignore_stages": ["precondition", "release"],
+  "regression_ignore_predicates": {},
+  "required_subtask_overrides": {},
+  "exclude_predicates": {
+    "ArrangeBreadBasket": ["cabinet_open"],
+    "CuttingToolSelection": ["drawer_open"]
+  },
+  "budget_mode": "remaining_horizon",
   "budget_fraction": 0.5,
+  "_max_budget_steps_source": "ArrangeBreadBasket H=4350 is 2.5x its longest v1 natural success (1727 steps from reset); 2200 steps keeps every branch longer than any observed full success and brings the expected cost to about two 24 h allocations. Remove to use the full remaining horizon (about one more allocation).",
+  "max_budget_steps": {"ArrangeBreadBasket": 2200},
   "anchor_back_inferences": 2,
   "policy_context": "reset",
   "reprompt_level": "atomic",
@@ -50,10 +78,28 @@
     "policy_name": "Xiaomi-Robotics-1-RoboCasa365"
   },
   "max_errors": 10,
-  "seconds_per_env_step": 0.06,
+  "expected_detection_fraction": {
+    "ArrangeBreadBasket": 0.39,
+    "ArrangeTea": 0.11,
+    "BreadSelection": 0.26,
+    "CuttingToolSelection": 0.73,
+    "GarnishPancake": 0.76
+  },
+  "expected_stage_entry_fraction": {
+    "ArrangeBreadBasket": 0.0,
+    "ArrangeTea": 0.0,
+    "BreadSelection": 0.12,
+    "CuttingToolSelection": 0.0,
+    "GarnishPancake": 0.27
+  },
+  "seconds_per_env_step": 0.053,
   "seconds_per_reset": 20.0,
   "success_step_fraction": 0.6,
-  "assumed_branch_success_rate": 0.3,
+  "assumed_branch_success_rate": 0.2,
+  "assumed_control_success_rate": 0.5,
+  "assumed_success_budget_fraction": 0.5,
   "gpus_per_worker": 2,
-  "num_workers": 2
+  "num_workers": 1,
+  "allocation_hours": 24.0,
+  "allocation_overhead_hours": 0.5
 }

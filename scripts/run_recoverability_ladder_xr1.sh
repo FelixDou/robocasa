@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# XR-1 recoverability ladder: plan | smoke | start | resume | status | analyze.
+# XR-1 recoverability ladder (schema 2):
+#   plan | smoke | naturals | audit | calibrate-stages | start | resume | status | analyze.
 # One worker = one XR-1 server GPU + one simulator GPU + one unique port.
 # See docs/recoverability_ladder.md.
 set -euo pipefail
 action=${1:-status}
-case "$action" in plan|smoke|start|resume|status|analyze|worker) ;; *)
-  echo "Usage: $0 {plan|smoke|start|resume|status|analyze}"; exit 1 ;; esac
+case "$action" in plan|smoke|naturals|audit|calibrate-stages|start|resume|status|analyze|worker) ;; *)
+  echo "Usage: $0 {plan|smoke|naturals|audit|calibrate-stages|start|resume|status|analyze}"; exit 1 ;; esac
 
 export STORAGE_BS=${STORAGE_BS:-/gs/bs/tga-shinoda/felid}
 export ROBOCASA_REPO=${ROBOCASA_REPO:-/gs/fs/tga-shinoda/felid/robocasa}
@@ -15,10 +16,15 @@ export XR1_SAFE_REPO=${XR1_SAFE_REPO:-/gs/fs/tga-shinoda/felid/robocasa_benchmar
 export XR1_SAFE_CHECKPOINT=${XR1_SAFE_CHECKPOINT:-$STORAGE_BS/robocasa_checkpoints/xiaomi_robotics_1/Xiaomi-Robotics-1-RoboCasa365-safe}
 export LADDER_MODEL=${LADDER_MODEL:-$XR1_SAFE_CHECKPOINT}
 export LADDER_CONFIG=${LADDER_CONFIG:-$ROBOCASA_REPO/scripts/recoverability_ladder_xr1_pilot.json}
+export LADDER_RUN_PREFIX=${LADDER_RUN_PREFIX:-xr1_ladder_v2}
 # Space-separated "simulator_gpu:server_gpu" pairs; one worker (task shard) per pair.
 export LADDER_GPU_PAIRS=${LADDER_GPU_PAIRS:-"0:1"}
 export LADDER_PORT_BASE=${LADDER_PORT_BASE:-10340}
+# Natural-parent (no-branch) phase that feeds audit-predicates and calibrate-stages.
+export LADDER_NATURAL_PARENTS=${LADDER_NATURAL_PARENTS:-12}
+export LADDER_NATURAL_BASE_SEED=${LADDER_NATURAL_BASE_SEED:-320007}
 latest="$STORAGE_BS/robocasa_rollouts/recovery/xr1_ladder_latest.env"
+recovery_root="$STORAGE_BS/robocasa_rollouts/recovery"
 log_dir="$STORAGE_BS/robocasa_logs/eval"
 py="$XR1_CLIENT_ENV/bin/python"
 module=robocasa.recovery.recoverability_ladder
@@ -27,18 +33,33 @@ if [[ "$action" == plan ]]; then
   cd "$ROBOCASA_REPO"
   extra=()
   [[ -z "${LADDER_CALIBRATION_DIR:-}" ]] || extra+=(--calibration-dir "$LADDER_CALIBRATION_DIR")
+  # shellcheck disable=SC2206
+  [[ -z "${LADDER_REFERENCE_RUNS:-}" ]] || { refs=($LADDER_REFERENCE_RUNS); extra+=(--reference-run "${refs[@]}"); }
   pairs=($LADDER_GPU_PAIRS)
   exec "$py" -m "$module" plan --config "$LADDER_CONFIG" --num-workers "${#pairs[@]}" "${extra[@]}"
 fi
 
-if [[ "$action" == status || "$action" == analyze ]]; then
+if [[ "$action" == status || "$action" == analyze || "$action" == audit || "$action" == calibrate-stages ]]; then
   [[ -n "${LADDER_ROOT:-}" ]] || source "$latest"
+  cd "$ROBOCASA_REPO"
   if [[ "$action" == analyze ]]; then
-    cd "$ROBOCASA_REPO"
-    shards=("$LADDER_ROOT"/shard*)
+    # shellcheck disable=SC2206
+    runs=(${LADDER_ANALYZE_RUNS:-"$LADDER_ROOT"/shard*})
     extra=()
     [[ -z "${LADDER_SCORES_JSONL:-}" ]] || extra+=(--scores-jsonl "$LADDER_SCORES_JSONL")
-    exec "$py" -m "$module" analyze --run-dirs "${shards[@]}" --output-dir "$LADDER_ROOT/analysis" "${extra[@]}"
+    exec "$py" -m "$module" analyze --run-dirs "${runs[@]}" --output-dir "${LADDER_ANALYSIS_DIR:-$LADDER_ROOT/analysis}" "${extra[@]}"
+  fi
+  if [[ "$action" == audit ]]; then
+    # shellcheck disable=SC2206
+    runs=(${LADDER_AUDIT_RUNS:-"$LADDER_ROOT"/shard*})
+    exec "$py" -m "$module" audit-predicates --run-dirs "${runs[@]}" --config "$LADDER_CONFIG" \
+      --output-dir "${LADDER_AUDIT_DIR:-$LADDER_ROOT/predicate_audit}"
+  fi
+  if [[ "$action" == calibrate-stages ]]; then
+    # shellcheck disable=SC2206
+    runs=(${LADDER_CALIBRATION_RUNS:-"$LADDER_ROOT"/shard*})
+    exec "$py" -m "$module" calibrate-stages --run-dirs "${runs[@]}" --config "$LADDER_CONFIG" \
+      --output "${LADDER_STAGE_CALIBRATION:-$LADDER_ROOT/stage_calibration.json}"
   fi
   echo "run: $LADDER_ROOT"
   for shard in "$LADDER_ROOT"/shard*; do
@@ -106,7 +127,7 @@ PY
   exit 0
 fi
 
-# smoke | start | resume
+# smoke | naturals | start | resume
 test -x "$py" && test -x "$XR1_SERVER_ENV/bin/python"
 test -f "$XR1_SAFE_REPO/deploy/server.py" && test -f "$LADDER_CONFIG"
 grep -q 'input_data.pop("sampling_seed"' "$XR1_SAFE_REPO/deploy/server.py" || {
@@ -115,22 +136,48 @@ export HF_HOME="$STORAGE_BS/hf_home" TRANSFORMERS_CACHE="$STORAGE_BS/hf_home/tra
 export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0 NO_ALBUMENTATIONS_UPDATE=1
 extra=()
 pairs=($LADDER_GPU_PAIRS)
+stamp=$(date +%Y%m%d_%H%M%S)
 if [[ "$action" == smoke ]]; then
-  export LADDER_ROOT=${LADDER_ROOT:-$STORAGE_BS/robocasa_rollouts/recovery/xr1_ladder_smoke_$(date +%Y%m%d_%H%M%S)}
+  export LADDER_ROOT=${LADDER_ROOT:-$recovery_root/${LADDER_RUN_PREFIX}_smoke_$stamp}
   pairs=("${pairs[0]}")
   extra=(--tasks CuttingToolSelection --parents-per-task 3 --failed-parents-per-task 1 --success-controls-per-task 0 --k-branches 1)
+elif [[ "$action" == naturals ]]; then
+  export LADDER_ROOT=${LADDER_ROOT:-$recovery_root/${LADDER_RUN_PREFIX}_naturals_$stamp}
+  [[ ! -e "$LADDER_ROOT" ]] || { echo "LADDER_ROOT exists; use resume or a new root"; exit 1; }
+  extra=(--parents-only --parents-per-task "$LADDER_NATURAL_PARENTS" --base-seed "$LADDER_NATURAL_BASE_SEED")
 elif [[ "$action" == start ]]; then
-  export LADDER_ROOT=${LADDER_ROOT:-$STORAGE_BS/robocasa_rollouts/recovery/xr1_ladder_pilot_$(date +%Y%m%d_%H%M%S)}
+  export LADDER_ROOT=${LADDER_ROOT:-$recovery_root/${LADDER_RUN_PREFIX}_pilot_$stamp}
   [[ ! -e "$LADDER_ROOT" ]] || { echo "LADDER_ROOT exists; use resume or a new root"; exit 1; }
 else
   [[ -n "${LADDER_ROOT:-}" ]] || source "$latest"
   test -d "$LADDER_ROOT" || { echo "Missing $LADDER_ROOT"; exit 1; }
   for shard in "$LADDER_ROOT"/shard*; do rm -f "$shard/worker_failure.json"; done
   extra=(--resume)
+  # A resumed naturals run must repeat its parents-only arguments.
+  if [[ -f "$LADDER_ROOT/collect_args.txt" ]]; then
+    mapfile -t saved < "$LADDER_ROOT/collect_args.txt"
+    extra+=("${saved[@]}")
+  fi
 fi
 case "$LADDER_ROOT" in "$STORAGE_BS"/*) ;; *) echo "LADDER_ROOT must be under $STORAGE_BS"; exit 1 ;; esac
+# The stage-overdue detector needs a calibration; without one it is the v1 stall timer.
+frozen_calibration="$LADDER_ROOT/stage_calibration.frozen.json"
+if [[ "$action" == start ]]; then
+  if [[ -n "${LADDER_STAGE_CALIBRATION:-}" ]]; then
+    test -f "$LADDER_STAGE_CALIBRATION" || { echo "Missing $LADDER_STAGE_CALIBRATION"; exit 1; }
+  elif [[ "${LADDER_ALLOW_UNCALIBRATED:-0}" != 1 ]]; then
+    echo "Set LADDER_STAGE_CALIBRATION (calibrate-stages output) or LADDER_ALLOW_UNCALIBRATED=1"; exit 1
+  fi
+fi
 mkdir -p "$LADDER_ROOT" "$log_dir"
-for name in STORAGE_BS ROBOCASA_REPO LADDER_ROOT LADDER_CONFIG LADDER_MODEL LADDER_GPU_PAIRS LADDER_PORT_BASE XR1_CLIENT_ENV XR1_SERVER_ENV XR1_SAFE_REPO; do
+if [[ "$action" != resume && -n "${LADDER_STAGE_CALIBRATION:-}" ]]; then
+  cp "$LADDER_STAGE_CALIBRATION" "$frozen_calibration"
+fi
+[[ ! -f "$frozen_calibration" ]] || extra+=(--stage-calibration "$frozen_calibration")
+if [[ "$action" == naturals ]]; then
+  printf '%s\n' --parents-only --parents-per-task "$LADDER_NATURAL_PARENTS" --base-seed "$LADDER_NATURAL_BASE_SEED" > "$LADDER_ROOT/collect_args.txt"
+fi
+for name in STORAGE_BS ROBOCASA_REPO LADDER_ROOT LADDER_CONFIG LADDER_MODEL LADDER_GPU_PAIRS LADDER_PORT_BASE LADDER_RUN_PREFIX XR1_CLIENT_ENV XR1_SERVER_ENV XR1_SAFE_REPO; do
   printf 'export %s=%q\n' "$name" "${!name}"
 done > "$LADDER_ROOT/run.env"
 cp "$LADDER_ROOT/run.env" "$latest"
