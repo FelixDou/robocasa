@@ -299,6 +299,123 @@ class TestOfflineBaselineRunner(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "checksum"):
                 evaluation("evaluate_tampered_model", fixture["frozen_analysis"])
 
+    def test_fused_extension_reproduces_reference_runs_and_rejects_drift(self):
+        from robocasa.recovery.safe.run_offline_detector_baselines import (
+            calibrate,
+            develop,
+            evaluate,
+            write_synthetic_fixture,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = write_synthetic_fixture(root / "fixture", seed=2)
+            development = develop(
+                argparse.Namespace(
+                    development_cache=str(fixture["caches"]["development"]),
+                    runtime_bundle=str(fixture["runtime_bundle"]),
+                    split_manifest=None,
+                    output_dir=str(root / "develop"),
+                    baselines=["mahalanobis"],
+                    aggregations=["running_max"],
+                    grid="smoke",
+                    selection_landmarks=[0.10, 0.25],
+                    validation_fraction=0.3,
+                    meta_split_seed=0,
+                    model_seed=0,
+                    max_fit_rows=50000,
+                )
+            )
+
+            def calibration(output, **extra):
+                return calibrate(
+                    argparse.Namespace(
+                        baseline_bundle=development["baseline_bundle"],
+                        calibration_cache=str(fixture["caches"]["calibration"]),
+                        calibration_predictions=None,
+                        output_dir=str(root / output),
+                        workers=1,
+                        **extra,
+                    )
+                )
+
+            def evaluation(output, calibration_path, **extra):
+                return evaluate(
+                    argparse.Namespace(
+                        baseline_calibration=calibration_path,
+                        test_cache=str(fixture["caches"]["prospective_test"]),
+                        test_predictions=None,
+                        frozen_analysis=str(fixture["frozen_analysis"]),
+                        output_dir=str(root / output),
+                        test_per_class=fixture["test_per_class"],
+                        bootstrap_samples=fixture["bootstrap_samples"],
+                        bootstrap_seed=0,
+                        **extra,
+                    )
+                )
+
+            base = calibration("calibrate")
+            self.assertNotIn("fused_mahalanobis_time", base["detectors"])
+            evaluation("evaluate", base["baseline_calibration"])
+            reference_analysis = root / "evaluate" / "analysis.json"
+
+            fused = calibration(
+                "calibrate_fused",
+                fused_baselines=True,
+                reference_calibration=base["baseline_calibration"],
+            )
+            self.assertIn("fused_mahalanobis_time", fused["detectors"])
+            self.assertEqual(
+                set(fused["reference_detectors_reproduced"]), set(base["detectors"])
+            )
+            note = root / "interpretation_plan_fused.md"
+            with self.assertRaisesRegex(ValueError, "Interpretation note"):
+                evaluation(
+                    "evaluate_no_note",
+                    fused["baseline_calibration"],
+                    reference_evaluation=str(reference_analysis),
+                    interpretation_note=str(note),
+                )
+            note.write_text("Decision rule declared before evaluation.\n")
+            result = evaluation(
+                "evaluate_fused",
+                fused["baseline_calibration"],
+                reference_evaluation=str(reference_analysis),
+                interpretation_note=str(note),
+            )
+            self.assertEqual(
+                set(result["reference_detectors_reproduced"]), set(base["detectors"])
+            )
+            self.assertIn(
+                "fused_mahalanobis_time__vs__fused_safe_time",
+                result["task_rollout_bootstrap"],
+            )
+            self.assertIn("fused_mahalanobis_time__vs__time_only", result["paired"])
+            self.assertIsNotNone(result["interpretation_note_sha256"])
+
+            drifted = json.loads(Path(base["baseline_calibration"]).read_text())
+            drifted["detectors"]["staged_safe_time"]["thresholds"]["early_safe"] += 1e-6
+            drifted_path = root / "drifted_calibration.json"
+            drifted_path.write_text(json.dumps(drifted))
+            with self.assertRaisesRegex(ValueError, "Reference calibration was not reproduced"):
+                calibration(
+                    "calibrate_drifted",
+                    fused_baselines=True,
+                    reference_calibration=str(drifted_path),
+                )
+
+            drifted = json.loads(reference_analysis.read_text())
+            drifted["overall"]["mahalanobis_only"]["false_positive_rate"] += 0.01
+            drifted_path = root / "drifted_analysis.json"
+            drifted_path.write_text(json.dumps(drifted))
+            with self.assertRaisesRegex(ValueError, "Reference evaluation was not reproduced"):
+                evaluation(
+                    "evaluate_drifted",
+                    fused["baseline_calibration"],
+                    reference_evaluation=str(drifted_path),
+                    interpretation_note=str(note),
+                )
+
     def test_action_baseline_is_skipped_without_chunk_overlap(self):
         from robocasa.recovery.safe.run_offline_detector_baselines import (
             develop,

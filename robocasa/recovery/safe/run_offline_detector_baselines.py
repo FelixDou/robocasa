@@ -72,7 +72,7 @@ from .train_seen_tasks import load_outer_split_ids
 
 PROTOCOL = "offline_success_only_baselines_xr1_matched_fpr"
 CACHE_GROUPS = ("development", "calibration", "prospective_test")
-REFERENCE_DETECTORS = ("time_only", "staged_safe_time")
+REFERENCE_DETECTORS = ("time_only", "staged_safe_time", "fused_safe_time")
 EVALUATION_LANDMARKS = (0.10, 0.25, 0.50)
 PREDICTION_KEYS = (
     "rollout_id",
@@ -547,7 +547,8 @@ def develop(args):
 # ---------------------------------------------------------------------------
 
 
-def detector_specs(baselines):
+def detector_specs(baselines, fused_baselines=False):
+    """Detector specifications; ``fused_baselines`` adds unstaged baseline OR time."""
     specs = [
         {"name": "time_only", "base": "time_only", "score": "safe", "family": "frozen"},
         {"name": "safe_only", "base": "safe_only", "score": "safe", "family": "frozen"},
@@ -581,6 +582,15 @@ def detector_specs(baselines):
                 "family": "staged_baseline",
             }
         )
+        if fused_baselines:
+            specs.append(
+                {
+                    "name": f"fused_{baseline}_time",
+                    "base": "fused_safe_time",
+                    "score": baseline,
+                    "family": "fused_baseline",
+                }
+            )
     return specs
 
 
@@ -757,7 +767,21 @@ def calibrate(args):
     ):
         raise ValueError("Primary calibration cohort differs from the frozen cohort")
 
-    specs = detector_specs(tuple(baseline["selected"]))
+    reference_path, reference = None, None
+    if getattr(args, "reference_calibration", None) is not None:
+        reference_path = Path(args.reference_calibration).resolve()
+        reference = json.loads(reference_path.read_text())
+        if reference.get("phase") != "calibration_frozen":
+            raise ValueError("Reference calibration is not a frozen artifact")
+        if reference["baseline_bundle_sha256"] != _sha256(baseline_path):
+            raise ValueError("Reference calibration used a different baseline bundle")
+        if reference["runtime_bundle_sha256"] != _sha256(runtime_path):
+            raise ValueError("Reference calibration used a different runtime bundle")
+    specs = detector_specs(tuple(baseline["selected"]), fused_baselines=getattr(args, "fused_baselines", False))
+    if reference is not None:
+        missing = sorted(set(reference["detectors"]) - {spec["name"] for spec in specs})
+        if missing:
+            raise ValueError(f"Reference calibration detectors are not recomputed: {missing}")
     jobs = [
         (spec["name"], spec["base"], _views(primary, spec), target_fpr, safe_end, time_start)
         for spec in specs
@@ -789,6 +813,22 @@ def calibrate(args):
             "calibration_metrics": selection["validation_metrics"],
             "search": selection.get("search", {"feasible": selection.get("feasible_thresholds")}),
         }
+    if reference is not None:
+        mismatches = []
+        for name, previous in reference["detectors"].items():
+            thresholds = {key: float(value) for key, value in detectors[name]["thresholds"].items()}
+            expected = {key: float(value) for key, value in previous["thresholds"].items()}
+            if thresholds != expected:
+                mismatches.append(f"{name}.thresholds")
+            mismatches += _same_numbers(
+                previous["calibration_metrics"],
+                _json_value(detectors[name]["calibration_metrics"]),
+                path=f"{name}.calibration_metrics",
+            )
+        if mismatches:
+            raise ValueError(
+                f"Reference calibration was not reproduced: {mismatches[:8]}"
+            )
     artifact = {
         "schema_version": 1,
         "protocol": PROTOCOL,
@@ -807,6 +847,14 @@ def calibrate(args):
         "primary_per_class": per_class,
         "primary_calibration_rollouts": len(primary),
         "frozen_thresholds_reproduced": reproduction,
+        "fused_baselines": bool(getattr(args, "fused_baselines", False)),
+        "reference_calibration": None if reference_path is None else str(reference_path),
+        "reference_calibration_sha256": (
+            None if reference_path is None else _sha256(reference_path)
+        ),
+        "reference_detectors_reproduced": (
+            [] if reference is None else sorted(reference["detectors"])
+        ),
         "detectors": detectors,
     }
     artifact_path = output / "baseline_calibration.json"
@@ -817,6 +865,7 @@ def calibrate(args):
         "baseline_calibration": str(artifact_path),
         "primary_calibration_rollouts": len(primary),
         "frozen_thresholds_reproduced": True,
+        "reference_detectors_reproduced": artifact["reference_detectors_reproduced"],
         "detectors": {
             name: {
                 "thresholds": value["thresholds"],
@@ -986,9 +1035,62 @@ def _summary_rows(specs, overall, comparisons, bootstrap):
     return rows
 
 
+def _reference_evaluation_mismatches(reference, result):
+    """Paths where a new evaluation differs from every value of a prior one."""
+    if reference.get("status") != "complete":
+        return ["status"]
+    mismatches = [
+        key
+        for key in ("baseline_bundle", "runtime_bundle", "test_predictions")
+        if reference.get(key) != result.get(key)
+    ]
+    if (
+        reference["test_cache_provenance"]["features_sha256"]
+        != result["test_cache_provenance"]["features_sha256"]
+    ):
+        mismatches.append("test_cache_provenance.features_sha256")
+    current = _json_value(result)
+    for section in (
+        "overall",
+        "all_retained_secondary",
+        "calibration_to_test_fpr_drift",
+        "paired",
+        "task_rollout_bootstrap",
+    ):
+        for name, value in reference[section].items():
+            if name not in current[section]:
+                mismatches.append(f"{section}.{name}")
+            else:
+                mismatches += _same_numbers(
+                    value, current[section][name], path=f"{section}.{name}"
+                )
+    for task_type, rows in reference["by_task_type"].items():
+        for name, value in rows.items():
+            actual = current["by_task_type"].get(task_type, {}).get(name)
+            if actual is None:
+                mismatches.append(f"by_task_type.{task_type}.{name}")
+            else:
+                mismatches += _same_numbers(
+                    value, actual, path=f"by_task_type.{task_type}.{name}"
+                )
+    reference_sources = {row["score_source"] for row in reference["landmarks"]}
+    mismatches += _same_numbers(
+        reference["landmarks"],
+        [row for row in current["landmarks"] if row["score_source"] in reference_sources],
+        path="landmarks",
+    )
+    mismatches += _same_numbers(reference["counts"], current["counts"], path="counts")
+    return mismatches
+
+
 def evaluate(args):
     if int(args.test_per_class) < 1 or int(args.bootstrap_samples) < 1:
         raise ValueError("--test-per-class and --bootstrap-samples must be positive")
+    note_path = None
+    if getattr(args, "interpretation_note", None) is not None:
+        note_path = Path(args.interpretation_note).resolve()
+        if not note_path.is_file() or not note_path.read_text().strip():
+            raise ValueError(f"Interpretation note is missing or empty: {note_path}")
     output = _prepare_output(args.output_dir)
     calibration_path = Path(args.baseline_calibration).resolve()
     calibration = json.loads(calibration_path.read_text())
@@ -1066,7 +1168,7 @@ def evaluate(args):
     comparisons = {}
     for spec in specs:
         for reference in REFERENCE_DETECTORS:
-            if spec["name"] != reference:
+            if reference in thresholds and spec["name"] != reference:
                 comparisons[(spec["name"], reference)] = paired_comparison(
                     primary, outcomes[spec["name"]], outcomes[reference]
                 )
@@ -1171,7 +1273,18 @@ def evaluate(args):
             - calibration_metrics[name]["false_positive_rate"]
             for name in overall
         },
+        "interpretation_note": None if note_path is None else str(note_path),
+        "interpretation_note_sha256": None if note_path is None else _sha256(note_path),
     }
+    if getattr(args, "reference_evaluation", None) is not None:
+        reference_path = Path(args.reference_evaluation).resolve()
+        reference = json.loads(reference_path.read_text())
+        mismatches = _reference_evaluation_mismatches(reference, result)
+        if mismatches:
+            raise ValueError(f"Reference evaluation was not reproduced: {mismatches[:8]}")
+        result["reference_evaluation"] = str(reference_path)
+        result["reference_evaluation_sha256"] = _sha256(reference_path)
+        result["reference_detectors_reproduced"] = sorted(reference["overall"])
     _write_json(output / "analysis.json", result)
     _write_csv(
         output / "detector_summary.csv", _summary_rows(specs, overall, comparisons, bootstrap)
@@ -1410,10 +1523,40 @@ def synthetic_smoke(args):
             bootstrap_seed=0,
         )
     )
+    # Fused extension: new output directories, every prior result reproduced.
+    fused_calibration = calibrate(
+        argparse.Namespace(
+            baseline_bundle=development["baseline_bundle"],
+            calibration_cache=str(fixture["caches"]["calibration"]),
+            calibration_predictions=None,
+            output_dir=str(output / "calibrate_fused"),
+            workers=args.workers,
+            fused_baselines=True,
+            reference_calibration=calibration["baseline_calibration"],
+        )
+    )
+    note = output / "interpretation_plan_fused.md"
+    note.write_text("Synthetic smoke: decision rule declared before evaluation.\n")
+    fused = evaluate(
+        argparse.Namespace(
+            baseline_calibration=fused_calibration["baseline_calibration"],
+            test_cache=str(fixture["caches"]["prospective_test"]),
+            test_predictions=None,
+            frozen_analysis=str(fixture["frozen_analysis"]),
+            output_dir=str(output / "evaluate_fused"),
+            test_per_class=fixture["test_per_class"],
+            bootstrap_samples=fixture["bootstrap_samples"],
+            bootstrap_seed=0,
+            reference_evaluation=str(output / "evaluate" / "analysis.json"),
+            interpretation_note=str(note),
+        )
+    )
     status = {
         "status": "synthetic_smoke_complete",
         "frozen_results_reproduced": result["frozen_results_reproduced"],
         "detectors": sorted(result["overall"]),
+        "fused_detectors": sorted(set(fused["overall"]) - set(result["overall"])),
+        "reference_detectors_reproduced": len(fused["reference_detectors_reproduced"]),
         "output_dir": str(output),
     }
     _write_json(output / "status.json", status)
@@ -1463,6 +1606,15 @@ def build_parser():
     calibration.add_argument("--calibration-predictions")
     calibration.add_argument("--output-dir", required=True)
     calibration.add_argument("--workers", type=int, default=1)
+    calibration.add_argument(
+        "--fused-baselines",
+        action="store_true",
+        help="Also calibrate fused_<baseline>_time (baseline OR time, unstaged).",
+    )
+    calibration.add_argument(
+        "--reference-calibration",
+        help="Prior baseline_calibration.json whose detectors must be reproduced exactly.",
+    )
 
     evaluation = subparsers.add_parser("evaluate")
     evaluation.add_argument("--baseline-calibration", required=True)
@@ -1473,6 +1625,14 @@ def build_parser():
     evaluation.add_argument("--test-per-class", type=int, default=10)
     evaluation.add_argument("--bootstrap-samples", type=int, default=2000)
     evaluation.add_argument("--bootstrap-seed", type=int, default=0)
+    evaluation.add_argument(
+        "--reference-evaluation",
+        help="Prior analysis.json whose detector results must be reproduced exactly.",
+    )
+    evaluation.add_argument(
+        "--interpretation-note",
+        help="Pre-written interpretation note; its checksum is recorded.",
+    )
 
     smoke = subparsers.add_parser("synthetic-smoke")
     smoke.add_argument("--output-dir", required=True)
