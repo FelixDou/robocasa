@@ -1,9 +1,10 @@
 # Confirmatory prospective test of fused SAFE + time (preregistration and runbook)
 
-**Status: draft preregistration, awaiting the user's review of the success
-criteria.** No rollout may be collected for this test until the reviewed
-version of this file is committed and pushed, and the cluster worktree is
-pinned to that commit (Section 2).
+**Status: final preregistration. The hypotheses and success criteria (A.2–A.6)
+were reviewed and approved by the user on 2026-10-17.** No rollout may be
+collected for this test until the cluster worktree is pinned to the commit
+containing this version of the file (Section 2) and `preregister` has run
+(Section 3).
 
 ## Part A. Preregistration
 
