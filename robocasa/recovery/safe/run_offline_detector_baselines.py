@@ -1487,6 +1487,20 @@ def _criteria_verdict(overall, bootstrap, criteria, detector, reference):
     }
 
 
+def _running_code_commit():
+    import subprocess
+
+    try:
+        return subprocess.run(
+            ["git", "-C", str(Path(__file__).resolve().parent), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def confirm(args):
     registration_path = Path(args.preregistration).resolve()
     registration = json.loads(registration_path.read_text())
@@ -1502,6 +1516,7 @@ def confirm(args):
     for source in registration["exclusion_sources"]:
         _verify_sha(source["path"], source["sha256"], "Exclusion source")
     output = _prepare_output(args.output_dir)
+    running_commit = _running_code_commit()
     calibration_path = next(
         artifact["path"]
         for artifact in registration["frozen_artifacts"]
@@ -1650,6 +1665,8 @@ def confirm(args):
         "preregistration_sha256": _sha256(registration_path),
         "preregistration_doc_sha256": registration["preregistration_doc_sha256"],
         "code_commit": registration["code_commit"],
+        "running_code_commit": running_commit,
+        "code_commit_matches": running_commit == registration["code_commit"],
         "frozen_artifacts_verified": True,
         "disjoint_from_prior_data": True,
         "thresholds_updated_on_test": False,
