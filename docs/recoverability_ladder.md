@@ -1,5 +1,8 @@
 # Recoverability ladder
 
+> **Pilot results (17 October 2026):** see
+> [recoverability_ladder_pilot_20261016.md](recoverability_ladder_pilot_20261016.md).
+
 ## Why
 
 The bit-exact snapshot-replay track (Phase 2/3B, operator screen, timing

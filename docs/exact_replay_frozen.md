@@ -59,3 +59,16 @@ ended `complete_limited_coverage` with decision
 uninformative about timing because the entry point is the episode start and
 the 256-step budget is a floor effect. Full numbers are in
 [xr1_timing_audit_exclude_pilot.md](xr1_timing_audit_exclude_pilot.md#final-result-16-october-2026).
+
+## Post-hoc note: CuttingToolSelection target stage (17 October 2026)
+
+The recoverability-ladder pilot found that CuttingToolSelection's
+`drawer_open` predicate cannot be reached in normal execution: the task opens
+the drawer to 27–30% of its range at reset (`ManipulateDrawer(behavior="close")`
+with `partial_open=True`), while `drawer_open` requires 90%. The tools are
+reachable without opening further. This was the CTS target stage
+(`OpenDrawer_1` / `drawer_open`) in Phase 3B, the operator screen and the timing
+pilot, and the `stage_retry` subgoal was "Open the drawer.". Their zero CTS
+stage completions are therefore most likely a predicate artifact, not evidence
+about the policy or the operators. See
+[recoverability_ladder_pilot_20261016.md](recoverability_ladder_pilot_20261016.md).
