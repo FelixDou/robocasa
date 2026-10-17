@@ -120,7 +120,8 @@ PY
   done
   grep -q 'Model loaded' "$server_log" || { echo "Missing model-ready message"; tail -60 "$server_log"; exit 1; }
   cd "$ROBOCASA_REPO"
-  export CUDA_VISIBLE_DEVICES="$gpu" MUJOCO_EGL_DEVICE_ID=0
+  # robosuite requires the EGL device id to be one of the CUDA_VISIBLE_DEVICES ids.
+  export CUDA_VISIBLE_DEVICES="$gpu" MUJOCO_EGL_DEVICE_ID="$gpu"
   "$py" -u -m "$module" collect --config "$LADDER_CONFIG" --output-dir "$out" \
     --shard-index "$shard" --num-shards "$nshards" --host 127.0.0.1 --port "$port" \
     --policy-arg "model_path=$LADDER_MODEL" --policy-arg "policy_checkpoint=$LADDER_MODEL" "$@"
