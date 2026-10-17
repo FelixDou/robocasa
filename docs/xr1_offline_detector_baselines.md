@@ -428,9 +428,11 @@ before evaluation.
 
 ### 10.1 Session, code, and prior-output checksums
 
-Run the export block in section 3 (through `XR1_FROZEN_ANALYSIS`), then point
+Run the export block in section 3 (through `XR1_FROZEN_ANALYSIS`; `SAFE_PY` is
+the absolute `$SAFE_ENV/bin/python`), then point
 at the completed run and move its dedicated worktree to the current main. Do
-not touch the shared `$PROJECT_FS/robocasa` checkout.
+not touch the shared `$PROJECT_FS/robocasa` checkout. Every command is
+CPU-only (`CUDA_VISIBLE_DEVICES=""`) and runs under `nice`.
 
 ```bash
 export XR1_BASELINE_TAG=xr1_offline_baselines_20261017_100820
@@ -444,14 +446,16 @@ test -z "$(git -C "$XR1_BASELINE_WORKTREE" status --porcelain --untracked-files=
 git -C "$XR1_BASELINE_WORKTREE" fetch origin main
 export XR1_FUSED_CODE_SHA="$(git -C "$XR1_BASELINE_WORKTREE" rev-parse FETCH_HEAD)"
 git -C "$XR1_BASELINE_WORKTREE" checkout --detach "$XR1_FUSED_CODE_SHA"
+test "$(git -C "$XR1_BASELINE_WORKTREE" rev-parse HEAD)" = "$XR1_FUSED_CODE_SHA" \
+  || echo "STOP: worktree HEAD is not the fetched commit"
 echo "fused code commit: $XR1_FUSED_CODE_SHA"
 grep -q -- "--fused-baselines" \
   "$XR1_BASELINE_WORKTREE/robocasa/recovery/safe/run_offline_detector_baselines.py" \
   || echo "STOP: worktree lacks the fused extension"
 
 cd "$XR1_BASELINE_WORKTREE"
-"$SAFE_PY" -m unittest tests.test_safe_offline_detector_baselines tests.test_safe_prospective_matched_fpr
-"$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines synthetic-smoke \
+CUDA_VISIBLE_DEVICES="" nice -n 10 "$SAFE_PY" -m unittest tests.test_safe_offline_detector_baselines tests.test_safe_prospective_matched_fpr
+CUDA_VISIBLE_DEVICES="" nice -n 10 "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines synthetic-smoke \
   --output-dir "$XR1_BASELINE_ROOT/synthetic_smoke_fused"
 
 cd "$XR1_BASELINE_ROOT"
@@ -514,7 +518,7 @@ fi
 ```bash
 cd "$XR1_BASELINE_WORKTREE"
 if grep -q '^## Part i:' "$XR1_FUSED_NOTE" && ! grep -q '^## Part ii' "$XR1_FUSED_NOTE"; then
-  nohup "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines calibrate \
+  CUDA_VISIBLE_DEVICES="" nohup nice -n 10 "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines calibrate \
     --baseline-bundle "$XR1_BASELINE_ROOT/develop/baseline_bundle.json" \
     --calibration-cache "$XR1_BASELINE_ROOT/cache_calibration" \
     --output-dir "$XR1_BASELINE_ROOT/calibrate_fused" \
@@ -580,7 +584,7 @@ PY
 ```bash
 cd "$XR1_BASELINE_WORKTREE"
 if grep -q '^## Part ii' "$XR1_FUSED_NOTE"; then
-  nohup "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines evaluate \
+  CUDA_VISIBLE_DEVICES="" nohup nice -n 10 "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines evaluate \
     --baseline-calibration "$XR1_BASELINE_ROOT/calibrate_fused/baseline_calibration.json" \
     --test-cache "$XR1_BASELINE_ROOT/cache_prospective_test" \
     --frozen-analysis "$XR1_FROZEN_ANALYSIS" \
