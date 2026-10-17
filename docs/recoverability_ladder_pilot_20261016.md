@@ -130,3 +130,6 @@ The approximate-branching design works and is cheap enough to scale. The
 pilot already shows two distinct recovery signatures (instruction stalls,
 world-state failures) and harm from ungated intervention. Do not scale the
 current configuration: fix A–D first, then rerun.
+
+The fixes are implemented as schema 2; see "What changed in v2" in
+[recoverability_ladder.md](recoverability_ladder.md).
