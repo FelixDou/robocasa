@@ -41,14 +41,22 @@ The embedding baselines follow the `use_success_only` variants of the official
 SAFE `embed` model. `rnd` is a feature-only adaptation; the official SAFE RND
 uses an action-conditioned 1-D UNet and is not reproduced here.
 `action_inconsistency` requires `pred_horizon > exec_horizon`. The extractor
-checks this and records it. XR-1 predicts 30-step chunks and replans every 16
-steps, so 14 positions overlap. If the check fails, `develop` skips the
-baseline and records the reason.
+checks this and records it, and `develop` skips the baseline with the reason
+when it fails. **For XR-1 it fails.** The released RoboCasa365 checkpoint
+predicts 16-step chunks (`actions` `(16, 12)`, `pre_velocity` `(5, 16, 1024)`)
+and replans every 16 steps. Each chunk is executed in full, so consecutive
+chunks share no predicted step and STAC-Single is undefined. This was verified
+on the calibration export on 17 October 2026. The XR-1 suite therefore
+evaluates 12 detectors; the baseline remains available for policies whose
+chunks overlap.
 
 All embedding baselines read exactly the per-inference vector that the frozen
 SAFE MLP reads: the official SAFE loader with the frozen configuration
-(`horizon_idx_rel=1.0`, `diff_idx_rel=1.0`, i.e. the last flow step and last
-action position of the pre-`action_output_layer` DiT state). Every baseline
+(`horizon_idx_rel=1.0`, `diff_idx_rel=1.0`, i.e. the last flow step and the
+last of the 16 action positions of the pre-`action_output_layer` DiT state).
+The pinned loader selects that position from the feature tensor's own shape
+and sets the configuration's `pred_horizon` from the exported `actions`; it
+never truncates actions or features. Every baseline
 also chooses a causal temporal aggregation (running maximum, running mean, or
 the official cumulative sum) during development.
 
@@ -192,7 +200,9 @@ cd "$ROBOCASA_REPO"
 ```
 
 Continue only if all tests pass and the smoke prints
-`"frozen_results_reproduced": true` with 14 detectors.
+`"frozen_results_reproduced": true` with 14 detectors. The synthetic data has
+overlapping chunks, so it includes the two action-baseline detectors that the
+XR-1 run skips.
 
 The first real-data smoke is the calibration extraction, the smallest export
 (454 rollouts):
@@ -226,9 +236,10 @@ PY
 ```
 
 Expected: 454 rollouts (254 successes, 200 failures), 38 tasks, 38,403
-inferences, `feature_dim` 1024, `pred_horizon` 30, `exec_horizon` 16, and
-`stac_supported: True`. Report a nonzero `irregular_inference_step_gaps`
-value; STAC-Single follows the official fixed `exec_horizon` offset.
+inferences, `feature_dim` 1024, `pred_horizon` 16, `dim_action` 12,
+`exec_horizon` 16, `stac_overlap_positions` 0, `stac_supported: False`, and
+`irregular_inference_step_gaps` 0 (all observed on 17 October 2026).
+`develop` will then report `action_inconsistency` under `skipped`.
 
 ## 5. Extract the development and prospective caches
 

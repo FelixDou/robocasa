@@ -253,7 +253,9 @@ integration records the final-layer action-token hidden states immediately
 before `action_output_layer`:
 
 - feature identifier: `dit_action_tokens_pre_action_output_layer`;
-- expected inference shape: `(5, 30, 1024)`;
+- inference shape: `(5, 16, 1024)` with a `(16, 12)` action chunk, fully
+  executed at `replan_steps=16` (verified on the prospective calibration
+  export; earlier drafts stated `(5, 30, 1024)`);
 - stored dtype: `float32`;
 - stored rollout shape:
   `(num_policy_inferences, flow_steps, action_horizon, feature_dim)`.

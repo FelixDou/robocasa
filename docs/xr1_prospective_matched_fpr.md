@@ -526,7 +526,8 @@ Do not tune or rerun thresholds based on either result.
 
 [`xr1_offline_detector_baselines.md`](xr1_offline_detector_baselines.md) adds
 success-only embedding baselines (Mahalanobis, cosine k-NN, PCA-KMeans, RND),
-the official STAC-Single action-consistency baseline, an unstaged SAFE/time
+the official STAC-Single action-consistency baseline (skipped for XR-1,
+whose 16-step chunks do not overlap), an unstaged SAFE/time
 fusion ablation, and every baseline inside the frozen staged wrapper. It reuses
 the recorded exports and this protocol's frozen bundle. It must reproduce the
 frozen thresholds and the published prospective results exactly before

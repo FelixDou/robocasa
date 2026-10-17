@@ -38,9 +38,11 @@ The feature identifier is:
 dit_action_tokens_pre_action_output_layer
 ```
 
-For the released RoboCasa365 checkpoint, one inference is expected to produce
-float32 `(5, 30, 1024)` features: five flow steps, 30 action positions, and a
-1,024-wide DiT state. Dimensions are validated from the live response rather
+For the released RoboCasa365 checkpoint, one inference produces float32
+`(5, 16, 1024)` features: five flow steps, 16 action positions, and a
+1,024-wide DiT state. The matching action chunk is `(16, 12)`, so with
+`replan_steps=16` every predicted action is executed (shape verified on the
+prospective calibration export, 17 October 2026). Dimensions are validated from the live response rather
 than hard-coded in the collector. A rollout stores:
 
 ```text
@@ -248,7 +250,7 @@ PY
 
 The smoke passes only when the validator prints both `RoboCasa SAFE dataset:
 VALID` and `Official SAFE loader compatible: True`, the tensor is finite and
-nonzero, its expected tail shape is `(5, 30, 1024)`, and inference steps are
+nonzero, its tail shape is `(5, 16, 1024)`, and inference steps are
 spaced by at least 16 environment actions.
 
 ## Plan collection from the official 2,500-rollout results
