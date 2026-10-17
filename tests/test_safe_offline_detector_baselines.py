@@ -416,6 +416,117 @@ class TestOfflineBaselineRunner(unittest.TestCase):
                     interpretation_note=str(note),
                 )
 
+    def test_confirmatory_mode_freezes_inputs_and_rejects_prior_data(self):
+        from robocasa.recovery.safe.run_offline_detector_baselines import (
+            calibrate,
+            confirm,
+            develop,
+            preregister,
+            write_synthetic_fixture,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = write_synthetic_fixture(root / "fixture", seed=3)
+            development = develop(
+                argparse.Namespace(
+                    development_cache=str(fixture["caches"]["development"]),
+                    runtime_bundle=str(fixture["runtime_bundle"]),
+                    split_manifest=None,
+                    output_dir=str(root / "develop"),
+                    baselines=["knn_cosine"],
+                    aggregations=["running_max"],
+                    grid="smoke",
+                    selection_landmarks=[0.10, 0.25],
+                    validation_fraction=0.3,
+                    meta_split_seed=0,
+                    model_seed=0,
+                    max_fit_rows=50000,
+                )
+            )
+            calibration = calibrate(
+                argparse.Namespace(
+                    baseline_bundle=development["baseline_bundle"],
+                    calibration_cache=str(fixture["caches"]["calibration"]),
+                    calibration_predictions=None,
+                    output_dir=str(root / "calibrate_fused"),
+                    workers=1,
+                    fused_baselines=True,
+                )
+            )
+            document = root / "preregistration.md"
+            document.write_text("Hypotheses and criteria fixed before collection.\n")
+
+            def registration(name, base, sources):
+                return preregister(
+                    argparse.Namespace(
+                        baseline_calibration=calibration["baseline_calibration"],
+                        preregistration_doc=str(document),
+                        code_commit="a" * 40,
+                        base_environment_seed=base,
+                        num_rollouts_per_task=10,
+                        exclusion_sources=[str(path) for path in sources],
+                        output=str(root / name),
+                        test_per_class=fixture["test_per_class"],
+                        bootstrap_samples=fixture["bootstrap_samples"],
+                    )
+                )
+
+            def confirmation(registered, output):
+                return confirm(
+                    argparse.Namespace(
+                        preregistration=registered["preregistration"],
+                        safe_score_root=str(fixture["confirmatory_score_root"]),
+                        test_cache=str(fixture["caches"]["confirmatory_test"]),
+                        output_dir=str(root / output),
+                    )
+                )
+
+            sources = fixture["exclusion_sources"]
+            with self.assertRaisesRegex(ValueError, "overlap prior collection"):
+                registration("overlap.json", 2000, sources)
+
+            registered = registration("prereg.json", fixture["confirmatory_base_seed"], sources)
+            frozen = json.loads(Path(registered["preregistration"]).read_text())
+            self.assertFalse(frozen["refit"])
+            self.assertIn("baseline_calibration", {row["role"] for row in frozen["frozen_artifacts"]})
+            result = confirmation(registered, "confirm")
+            self.assertEqual(set(result["verdict"]), {"primary", "secondary"})
+            self.assertEqual(result["verdict"]["primary"]["detector"], "fused_safe_time")
+            self.assertEqual(
+                set(result["verdict"]["secondary"]["checks"]),
+                {
+                    "a_bootstrap_ci95_lower_above_zero",
+                    "b_point_recall_gain_at_least_0p15",
+                    "c_test_fpr_controlled",
+                },
+            )
+            self.assertIn("fused_safe_time__vs__time_only", result["by_task_type_paired"]["atomic"])
+            self.assertTrue((root / "confirm" / "verdict.json").is_file())
+            with self.assertRaises(FileExistsError):
+                confirmation(registered, "confirm")
+
+            shifted = registration(
+                "shifted.json", fixture["confirmatory_base_seed"] + 5, sources
+            )
+            with self.assertRaisesRegex(ValueError, "outside the preregistered range"):
+                confirmation(shifted, "confirm_shifted")
+
+            reused = root / "reused.jsonl"
+            reused.write_text(
+                json.dumps({"rollout_id": "confirmatory-SynthAtomic-0-0", "task_name": "SynthAtomic"})
+                + "\n"
+            )
+            overlapping = registration(
+                "reused.json", fixture["confirmatory_base_seed"], [*sources, reused]
+            )
+            with self.assertRaisesRegex(ValueError, "rollout IDs overlap"):
+                confirmation(overlapping, "confirm_reused")
+
+            document.write_text("Edited after registration.\n")
+            with self.assertRaisesRegex(ValueError, "checksum"):
+                confirmation(registered, "confirm_edited")
+
     def test_action_baseline_is_skipped_without_chunk_overlap(self):
         from robocasa.recovery.safe.run_offline_detector_baselines import (
             develop,

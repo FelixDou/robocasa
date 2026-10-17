@@ -71,7 +71,7 @@ from .train_seen_tasks import load_outer_split_ids
 
 
 PROTOCOL = "offline_success_only_baselines_xr1_matched_fpr"
-CACHE_GROUPS = ("development", "calibration", "prospective_test")
+CACHE_GROUPS = ("development", "calibration", "prospective_test", "confirmatory_test")
 REFERENCE_DETECTORS = ("time_only", "staged_safe_time", "fused_safe_time")
 EVALUATION_LANDMARKS = (0.10, 0.25, 0.50)
 PREDICTION_KEYS = (
@@ -1309,6 +1309,408 @@ def evaluate(args):
 
 
 # ---------------------------------------------------------------------------
+# Preregistered confirmatory test on a fresh prospective cohort
+# ---------------------------------------------------------------------------
+
+CONFIRMATORY_PROTOCOL = "xr1_confirmatory_fused_prospective"
+CONFIRMATORY_GROUP = "confirmatory_test"
+CONFIRMATORY_HYPOTHESES = {
+    "primary": {"detector": "fused_safe_time", "reference": "time_only"},
+    "secondary": {"detector": "fused_knn_cosine_time", "reference": "time_only"},
+}
+CONFIRMATORY_CRITERIA = {
+    "bootstrap_recall_delta_ci95_lower_greater_than": 0.0,
+    "minimum_point_recall_gain": 0.15,
+    "maximum_test_fpr": 0.075,
+    "maximum_test_fpr_wilson_upper": 0.10,
+    "bootstrap_samples": 2000,
+    "bootstrap_seed": 0,
+    "test_per_class": 10,
+}
+OFFICIAL_XIAOMI_TARGET_TASKS = 50
+
+
+def _load_exclusion_source(path):
+    """Rollout IDs and (task, seed, reset) identities from a prior collection."""
+    path = Path(path).resolve()
+    if path.is_dir():
+        for name in ("manifest.jsonl", "rollouts.jsonl"):
+            if (path / name).is_file():
+                path = path / name
+                break
+        else:
+            raise ValueError(f"No manifest.jsonl or rollouts.jsonl in {path}")
+    ids, identities = set(), set()
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        ids.add(str(row["rollout_id"]))
+        if row.get("environment_seed") is not None:
+            identities.add(
+                (
+                    str(row["task_name"]),
+                    int(row["environment_seed"]),
+                    None
+                    if row.get("environment_reset_index") is None
+                    else int(row["environment_reset_index"]),
+                )
+            )
+    if not ids:
+        raise ValueError(f"Exclusion source has no rollouts: {path}")
+    return path, ids, identities
+
+
+def _frozen_artifacts(calibration_path):
+    """Every frozen file the confirmatory test depends on, with checksums."""
+    calibration_path = Path(calibration_path).resolve()
+    calibration = json.loads(calibration_path.read_text())
+    if calibration.get("phase") != "calibration_frozen":
+        raise ValueError("Baseline calibration is not a frozen artifact")
+    baseline_path = Path(calibration["baseline_bundle"])
+    _verify_sha(baseline_path, calibration["baseline_bundle_sha256"], "Frozen baseline bundle")
+    baseline = json.loads(baseline_path.read_text())
+    runtime_path, runtime = _load_runtime_bundle(calibration["runtime_bundle"])
+    _verify_sha(runtime_path, calibration["runtime_bundle_sha256"], "Frozen runtime bundle")
+    artifacts = [
+        {"role": "baseline_calibration", "path": str(calibration_path)},
+        {"role": "baseline_bundle", "path": str(baseline_path)},
+        {"role": "runtime_bundle", "path": str(runtime_path)},
+    ]
+    for seed, files in sorted(runtime["checkpoint_bundle"].items()):
+        for name, artifact in sorted(files.items()):
+            _verify_sha(artifact["path"], artifact["sha256"], f"Frozen SAFE seed {seed} {name}")
+            artifacts.append({"role": f"safe_seed{seed}_{name}", "path": artifact["path"]})
+    for name, selection in sorted(baseline["selected"].items()):
+        _verify_sha(selection["model_path"], selection["model_sha256"], f"Frozen {name} model")
+        artifacts.append({"role": f"baseline_model_{name}", "path": selection["model_path"]})
+    for artifact in artifacts:
+        artifact["sha256"] = _sha256(artifact["path"])
+    return artifacts, calibration, baseline, runtime
+
+
+def preregister(args):
+    output = Path(args.output).resolve()
+    if output.exists():
+        raise FileExistsError(f"Preregistration already exists: {output}")
+    artifacts, calibration, _, _ = _frozen_artifacts(args.baseline_calibration)
+    for role, hypothesis in CONFIRMATORY_HYPOTHESES.items():
+        for name in (hypothesis["detector"], hypothesis["reference"]):
+            if name not in calibration["detectors"]:
+                raise ValueError(f"{role} detector {name} is not in the frozen calibration")
+    document = Path(args.preregistration_doc).resolve()
+    if not document.is_file() or not document.read_text().strip():
+        raise ValueError(f"Preregistration document is missing or empty: {document}")
+    if not str(args.code_commit) or len(str(args.code_commit)) != 40:
+        raise ValueError("--code-commit must be a full 40-character SHA")
+    base = int(args.base_environment_seed)
+    planned = [base, base + OFFICIAL_XIAOMI_TARGET_TASKS * int(args.num_rollouts_per_task)]
+    sources = []
+    for source in args.exclusion_sources:
+        path, ids, identities = _load_exclusion_source(source)
+        in_range = sorted(
+            {seed for _, seed, _ in identities if planned[0] <= seed < planned[1]}
+        )
+        if in_range:
+            raise ValueError(
+                f"Planned seeds {planned} overlap prior collection {path}: {in_range[:5]}"
+            )
+        sources.append(
+            {
+                "path": str(path),
+                "sha256": _sha256(path),
+                "rollouts": len(ids),
+                "identities": len(identities),
+            }
+        )
+    registration = {
+        "schema_version": 1,
+        "protocol": CONFIRMATORY_PROTOCOL,
+        "phase": "preregistered",
+        "code_commit": str(args.code_commit),
+        "preregistration_doc": str(document),
+        "preregistration_doc_sha256": _sha256(document),
+        "hypotheses": CONFIRMATORY_HYPOTHESES,
+        "criteria": {
+            **CONFIRMATORY_CRITERIA,
+            "test_per_class": int(getattr(args, "test_per_class", CONFIRMATORY_CRITERIA["test_per_class"])),
+            "bootstrap_samples": int(
+                getattr(args, "bootstrap_samples", CONFIRMATORY_CRITERIA["bootstrap_samples"])
+            ),
+        },
+        "frozen_artifacts": artifacts,
+        "frozen_thresholds": {
+            name: detector["thresholds"] for name, detector in calibration["detectors"].items()
+        },
+        "base_environment_seed": base,
+        "num_rollouts_per_task": int(args.num_rollouts_per_task),
+        "planned_environment_seed_range": planned,
+        "exclusion_sources": sources,
+        "refit": False,
+        "recalibration": False,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(output, registration)
+    return {
+        "status": "preregistered",
+        "preregistration": str(output),
+        "preregistration_sha256": _sha256(output),
+        "planned_environment_seed_range": planned,
+        "exclusion_sources": len(sources),
+        "frozen_artifacts": len(artifacts),
+    }
+
+
+def _criteria_verdict(overall, bootstrap, criteria, detector, reference):
+    row = overall[detector]
+    delta = bootstrap[(detector, reference)]["tpr_delta"]
+    upper = row["fpr_wilson_95"][1]
+    gain = row["true_positive_rate"] - overall[reference]["true_positive_rate"]
+    checks = {
+        "a_bootstrap_ci95_lower_above_zero": delta["ci95"][0]
+        > criteria["bootstrap_recall_delta_ci95_lower_greater_than"],
+        "b_point_recall_gain_at_least_0p15": gain
+        >= criteria["minimum_point_recall_gain"] - 1e-12,
+        "c_test_fpr_controlled": row["false_positive_rate"]
+        <= criteria["maximum_test_fpr"] + 1e-12
+        and upper <= criteria["maximum_test_fpr_wilson_upper"] + 1e-12,
+    }
+    return {
+        "detector": detector,
+        "reference": reference,
+        "point_recall_gain": gain,
+        "recall_delta_bootstrap": delta,
+        "test_fpr": row["false_positive_rate"],
+        "test_fpr_wilson_95": row["fpr_wilson_95"],
+        "checks": checks,
+        "all_pass": all(checks.values()),
+    }
+
+
+def confirm(args):
+    registration_path = Path(args.preregistration).resolve()
+    registration = json.loads(registration_path.read_text())
+    if registration.get("phase") != "preregistered":
+        raise ValueError("Preregistration is not a frozen preregistered artifact")
+    for artifact in registration["frozen_artifacts"]:
+        _verify_sha(artifact["path"], artifact["sha256"], f"Frozen {artifact['role']}")
+    _verify_sha(
+        registration["preregistration_doc"],
+        registration["preregistration_doc_sha256"],
+        "Preregistration document",
+    )
+    for source in registration["exclusion_sources"]:
+        _verify_sha(source["path"], source["sha256"], "Exclusion source")
+    output = _prepare_output(args.output_dir)
+    calibration_path = next(
+        artifact["path"]
+        for artifact in registration["frozen_artifacts"]
+        if artifact["role"] == "baseline_calibration"
+    )
+    _, calibration, baseline, runtime = _frozen_artifacts(calibration_path)
+    criteria = registration["criteria"]
+    models = _load_baseline_models(baseline)
+    safe_end = float(calibration["safe_eligibility_end_fraction"])
+    time_start = float(calibration["time_eligibility_start_fraction"])
+    horizons = {str(task): int(value) for task, value in runtime["task_horizons"].items()}
+
+    from .run_prospective_matched_fpr import (
+        _assemble_external,
+        _load_seed_group,
+        _validate_score_provenance,
+    )
+
+    seeds = tuple(int(seed) for seed in runtime["model_seeds"])
+    runs, _, provenances = _load_seed_group(args.safe_score_root, seeds)
+    _validate_score_provenance(
+        provenances,
+        {
+            str(seed): runtime["checkpoint_bundle"][str(seed)]["model_final.ckpt"]["sha256"]
+            for seed in seeds
+        },
+        CONFIRMATORY_GROUP,
+        seeds,
+    )
+    records = _assemble_external(
+        runs, runtime["task_normalizations"], horizons, runtime["time_risk_curves"]
+    )
+    for record in records:
+        record["safe_scores"] = np.asarray(record["safe_scores"], dtype=np.float64)
+        record["time_scores"] = np.asarray(record["time_scores"], dtype=np.float64)
+    if {record["task_name"] for record in records} != set(horizons):
+        raise ValueError("Confirmatory scores lack exact frozen task coverage")
+
+    ids = {record["rollout_id"] for record in records}
+    identities = {
+        (str(record["task_name"]), int(record["environment_seed"]), record.get("environment_reset_index"))
+        for record in records
+        if record.get("environment_seed") is not None
+    }
+    if len(identities) != len(records):
+        raise ValueError("Every confirmatory rollout needs a unique seed/reset identity")
+    planned = registration["planned_environment_seed_range"]
+    outside = sorted(seed for _, seed, _ in identities if not planned[0] <= seed < planned[1])
+    if outside:
+        raise ValueError(f"Confirmatory seeds lie outside the preregistered range: {outside[:5]}")
+    prior_ids = (
+        set(runtime.get("development_rollout_ids", []))
+        | set(runtime["calibration_rollout_ids"])
+        | set(baseline["fit_rollout_ids"])
+        | set(baseline["validation_rollout_ids"])
+    )
+    prior_identities = {
+        (str(task), int(seed), None if reset is None else int(reset))
+        for task, seed, reset in runtime["calibration_seed_reset_identities"]
+    }
+    for source in registration["exclusion_sources"]:
+        _, source_ids, source_identities = _load_exclusion_source(source["path"])
+        prior_ids |= source_ids
+        prior_identities |= source_identities
+    if ids & prior_ids:
+        raise ValueError(f"Confirmatory rollout IDs overlap prior data: {sorted(ids & prior_ids)[:3]}")
+    if identities & prior_identities:
+        raise ValueError(
+            f"Confirmatory identities overlap prior data: {sorted(identities & prior_identities)[:3]}"
+        )
+
+    cache = FeatureCache(args.test_cache, expected_group=CONFIRMATORY_GROUP)
+    if set(cache.by_id) != ids:
+        raise ValueError("Confirmatory cache differs from the confirmatory SAFE scores")
+    score_records(records, cache, baseline, models)
+    primary, primary_selection = _select_per_task_class(records, criteria["test_per_class"])
+
+    specs = [
+        {key: value for key, value in detector.items() if key in ("name", "base", "score", "family")}
+        for detector in calibration["detectors"].values()
+    ]
+    thresholds = {name: detector["thresholds"] for name, detector in calibration["detectors"].items()}
+    if thresholds != registration["frozen_thresholds"]:
+        raise ValueError("Calibration thresholds differ from the preregistered thresholds")
+
+    def metrics_for(cohort):
+        return {
+            spec["name"]: event_metrics(
+                _views(cohort, spec),
+                spec["base"],
+                thresholds[spec["name"]],
+                safe_end=safe_end,
+                time_start=time_start,
+            )
+            for spec in specs
+        }
+
+    def paired_for(cohort):
+        outcomes = {
+            spec["name"]: detector_outcomes(cohort, spec, thresholds[spec["name"]], safe_end, time_start)
+            for spec in specs
+        }
+        comparisons = {
+            (spec["name"], reference): paired_comparison(
+                cohort, outcomes[spec["name"]], outcomes[reference]
+            )
+            for spec in specs
+            for reference in REFERENCE_DETECTORS
+            if reference in thresholds and spec["name"] != reference
+        }
+        bootstrap = task_rollout_bootstrap(
+            cohort,
+            outcomes,
+            tuple(comparisons),
+            criteria["bootstrap_samples"],
+            criteria["bootstrap_seed"],
+        )
+        return comparisons, bootstrap
+
+    overall = metrics_for(primary)
+    comparisons, bootstrap = paired_for(primary)
+    verdict = {
+        role: _criteria_verdict(
+            overall, bootstrap, criteria, hypothesis["detector"], hypothesis["reference"]
+        )
+        for role, hypothesis in registration["hypotheses"].items()
+    }
+    by_type, by_type_paired = {}, {}
+    for task_type in ("atomic", "composite"):
+        cohort = [row for row in primary if row.get("task_type") == task_type]
+        if {bool(row["failed"]) for row in cohort} == {False, True}:
+            by_type[task_type] = metrics_for(cohort)
+            stratum_comparisons, stratum_bootstrap = paired_for(cohort)
+            by_type_paired[task_type] = {
+                f"{a}__vs__{b}": {"paired": stratum_comparisons[(a, b)], "bootstrap": value}
+                for (a, b), value in stratum_bootstrap.items()
+            }
+    calibration_metrics = {
+        name: detector["calibration_metrics"] for name, detector in calibration["detectors"].items()
+    }
+    result = {
+        "schema_version": 1,
+        "status": "complete",
+        "protocol": CONFIRMATORY_PROTOCOL,
+        "preregistration": str(registration_path),
+        "preregistration_sha256": _sha256(registration_path),
+        "preregistration_doc_sha256": registration["preregistration_doc_sha256"],
+        "code_commit": registration["code_commit"],
+        "frozen_artifacts_verified": True,
+        "disjoint_from_prior_data": True,
+        "thresholds_updated_on_test": False,
+        "policy_intervention": False,
+        "safe_score_root": str(Path(args.safe_score_root).resolve()),
+        "safe_score_provenance": provenances,
+        "test_cache": str(cache.root),
+        "test_cache_provenance": cache.provenance,
+        "counts": {
+            "primary_balanced": {
+                "rollouts": len(primary),
+                "successes": sum(not row["failed"] for row in primary),
+                "failures": sum(row["failed"] for row in primary),
+            },
+            "retained_all": {
+                "rollouts": len(records),
+                "successes": sum(not row["failed"] for row in records),
+                "failures": sum(row["failed"] for row in records),
+            },
+            "tasks": len({row["task_name"] for row in records}),
+            "primary_selection": primary_selection,
+        },
+        "criteria": criteria,
+        "verdict": verdict,
+        "overall": overall,
+        "all_retained_secondary": metrics_for(records),
+        "by_task_type": by_type,
+        "by_task_type_paired": by_type_paired,
+        "landmarks": _score_source_landmarks(primary, horizons, ("safe", "time", *baseline["selected"])),
+        "paired": {f"{a}__vs__{b}": value for (a, b), value in comparisons.items()},
+        "task_rollout_bootstrap": {f"{a}__vs__{b}": value for (a, b), value in bootstrap.items()},
+        "calibration_to_test_fpr_drift": {
+            name: overall[name]["false_positive_rate"] - calibration_metrics[name]["false_positive_rate"]
+            for name in overall
+        },
+    }
+    _write_json(output / "analysis.json", result)
+    _write_json(output / "verdict.json", {"criteria": criteria, "verdict": verdict})
+    _write_csv(output / "detector_summary.csv", _summary_rows(specs, overall, comparisons, bootstrap))
+    primary_ids = {row["rollout_id"] for row in primary}
+    _write_jsonl(
+        output / "event_predictions.jsonl",
+        [
+            {
+                **{key: record.get(key) for key in PREDICTION_KEYS},
+                "primary_balanced": record["rollout_id"] in primary_ids,
+                "safe_scores": record["safe_scores"],
+                "time_scores": record["time_scores"],
+                "baseline_scores": record["baseline_scores"],
+            }
+            for record in records
+        ],
+    )
+    _write_json(
+        output / "status.json",
+        {"status": "complete", "analysis": str((output / "analysis.json").resolve())},
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Synthetic end-to-end smoke
 # ---------------------------------------------------------------------------
 
@@ -1367,6 +1769,19 @@ def write_synthetic_fixture(root, *, seed=0, feature_dim=12):
             for failed in (False, True):
                 for index in range(count):
                     groups[group].append(rollout(task, failed, f"{group}-{task}-{int(failed)}-{index}"))
+    # A fresh cohort for the confirmatory mode, generated after the others so
+    # the earlier groups stay identical.
+    groups["confirmatory_test"] = [
+        rollout(task, failed, f"confirmatory-{task}-{int(failed)}-{index}")
+        for task in tasks
+        for failed in (False, True)
+        for index in range(6)
+    ]
+    environment_seed_bases = {
+        "calibration": 1000,
+        "prospective_test": 2000,
+        "confirmatory_test": 3000,
+    }
 
     final = root / "final"
     for model_seed in (0, 1, 2):
@@ -1391,6 +1806,7 @@ def write_synthetic_fixture(root, *, seed=0, feature_dim=12):
         for group, score_group in (
             ("calibration", "calibration"),
             ("prospective_test", "prospective_test"),
+            ("confirmatory_test", "confirmatory_test"),
         ):
             score_root = root / f"{group}_scores" / f"seed{model_seed}"
             score_root.mkdir(parents=True)
@@ -1403,7 +1819,7 @@ def write_synthetic_fixture(root, *, seed=0, feature_dim=12):
                         "task_type": item["task_type"],
                         "failed": item["failed"],
                         "scores": [value + 0.01 * model_seed for value in item["safe"]],
-                        "environment_seed": (1000 if group == "calibration" else 2000) + index,
+                        "environment_seed": environment_seed_bases[group] + index,
                         "environment_reset_index": 0,
                     }
                     for index, item in enumerate(groups[group])
@@ -1480,6 +1896,13 @@ def write_synthetic_fixture(root, *, seed=0, feature_dim=12):
         "caches": caches,
         "bootstrap_samples": 50,
         "test_per_class": 4,
+        "confirmatory_score_root": root / "confirmatory_test_scores",
+        "confirmatory_base_seed": environment_seed_bases["confirmatory_test"],
+        "exclusion_sources": [
+            caches["development"],
+            caches["calibration"],
+            test_dir / "event_predictions.jsonl",
+        ],
     }
 
 
@@ -1551,8 +1974,35 @@ def synthetic_smoke(args):
             interpretation_note=str(note),
         )
     )
+    # Fresh-cohort confirmatory mode: preregister, then evaluate once.
+    document = output / "preregistration.md"
+    document.write_text("Synthetic preregistration: hypotheses and criteria fixed.\n")
+    registration = preregister(
+        argparse.Namespace(
+            baseline_calibration=fused_calibration["baseline_calibration"],
+            preregistration_doc=str(document),
+            code_commit="0" * 40,
+            base_environment_seed=fixture["confirmatory_base_seed"],
+            num_rollouts_per_task=10,
+            exclusion_sources=[str(path) for path in fixture["exclusion_sources"]],
+            output=str(output / "preregistration.json"),
+            test_per_class=fixture["test_per_class"],
+            bootstrap_samples=fixture["bootstrap_samples"],
+        )
+    )
+    confirmation = confirm(
+        argparse.Namespace(
+            preregistration=registration["preregistration"],
+            safe_score_root=str(fixture["confirmatory_score_root"]),
+            test_cache=str(fixture["caches"]["confirmatory_test"]),
+            output_dir=str(output / "confirm"),
+        )
+    )
     status = {
         "status": "synthetic_smoke_complete",
+        "confirmatory_verdict": {
+            role: value["all_pass"] for role, value in confirmation["verdict"].items()
+        },
         "frozen_results_reproduced": result["frozen_results_reproduced"],
         "detectors": sorted(result["overall"]),
         "fused_detectors": sorted(set(fused["overall"]) - set(result["overall"])),
@@ -1634,6 +2084,27 @@ def build_parser():
         help="Pre-written interpretation note; its checksum is recorded.",
     )
 
+    registration = subparsers.add_parser("preregister")
+    registration.add_argument("--baseline-calibration", required=True)
+    registration.add_argument("--preregistration-doc", required=True)
+    registration.add_argument("--code-commit", required=True)
+    registration.add_argument("--base-environment-seed", type=int, required=True)
+    registration.add_argument("--num-rollouts-per-task", type=int, default=500)
+    registration.add_argument("--exclusion-sources", nargs="+", required=True)
+    registration.add_argument("--output", required=True)
+    registration.add_argument(
+        "--test-per-class", type=int, default=CONFIRMATORY_CRITERIA["test_per_class"]
+    )
+    registration.add_argument(
+        "--bootstrap-samples", type=int, default=CONFIRMATORY_CRITERIA["bootstrap_samples"]
+    )
+
+    confirmation = subparsers.add_parser("confirm")
+    confirmation.add_argument("--preregistration", required=True)
+    confirmation.add_argument("--safe-score-root", required=True)
+    confirmation.add_argument("--test-cache", required=True)
+    confirmation.add_argument("--output-dir", required=True)
+
     smoke = subparsers.add_parser("synthetic-smoke")
     smoke.add_argument("--output-dir", required=True)
     smoke.add_argument("--seed", type=int, default=0)
@@ -1646,6 +2117,8 @@ PHASES = {
     "develop": develop,
     "calibrate": calibrate,
     "evaluate": evaluate,
+    "preregister": preregister,
+    "confirm": confirm,
     "synthetic-smoke": synthetic_smoke,
 }
 
@@ -1656,6 +2129,12 @@ def main(argv=None):
         result = PHASES[args.phase](args)
     except (FileExistsError, ValueError) as error:
         raise SystemExit(f"error: {error}") from error
+    if args.phase == "confirm":
+        result = {
+            "status": result["status"],
+            "counts": result["counts"]["primary_balanced"],
+            "verdict": result["verdict"],
+        }
     if args.phase in ("evaluate",):
         result = {
             "status": result["status"],
