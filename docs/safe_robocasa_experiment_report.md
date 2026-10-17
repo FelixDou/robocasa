@@ -115,10 +115,18 @@ every bootstrap interval reaching zero. Removing the staging helped instead.
 An unstaged SAFE-or-time detector reached recall **0.955** at FPR **0.058**,
 +0.287 over staged SAFE (95% CI [+0.156, +0.426]), and detected 0.038 task
 horizons earlier. No detector exceeded 3% recall by 25% of the horizon.
-Because the fused detector was defined after the cohort was opened, it needs a
-fresh prospective confirmation. The matching fused-baseline control is
-pending. STAC-Single is undefined for XR-1, whose 16-step chunks are executed
-in full.
+The same fusion with each success-only baseline in place of SAFE reached
+recall 0.905–0.947 at FPR 0.061–0.068. No recall difference from fused SAFE
+was significant: the pre-declared rule for a SAFE-specific contribution failed
+for all four baselines. Fused cosine k-NN alarmed slightly earlier than fused
+SAFE. The supported conclusion is therefore time-aware fusion of a
+policy-internal score with elapsed time, not SAFE specifically. The
+preregistered staged SAFE + time detector remains as reported in Section 15.6:
+a modest recall gain over time-only without the required earlier warning.
+Every fused detector was defined after the cohort was opened, and their test
+FPRs (0.058–0.068) exceeded calibration's 0.044. A confirmatory claim needs a
+fresh prospective collection with one fused detector frozen in advance.
+STAC-Single is undefined for XR-1, whose 16-step chunks are executed in full.
 
 ## 1. Scope, labels, and evaluation rules
 
@@ -1833,11 +1841,15 @@ The present evidence supports the following hierarchy of conclusions:
 13. **Not supported (post-hoc):** a SAFE-specific early-window contribution.
     Inside the staged wrapper, standard success-only baseline scores matched
     staged SAFE within bootstrap intervals that reach zero (Section 15.10).
-14. **Supported post-hoc, needs confirmation:** removing the staging improves
-    the detector. Unstaged SAFE-or-time fusion raised prospective recall from
-    0.668 to 0.955 and detected earlier after misses were charged, at test FPR
-    0.058. It was defined after the cohort was opened, and whether the gain
-    needs SAFE rather than any fused policy-internal score is pending.
+14. **Supported post-hoc, needs confirmation:** time-aware fusion of a
+    policy-internal score with elapsed time. Unstaged SAFE-or-time fusion raised
+    prospective recall from 0.668 (staged) to 0.955 and detected earlier after
+    misses were charged. Fusing a success-only baseline instead gave 0.905–0.947
+    with no significant difference from fused SAFE, so the pre-declared
+    SAFE-specific rule failed. All fused detectors were defined after the cohort
+    was opened and had test FPR 0.058–0.068 against 0.044 on calibration; a
+    fresh prospective collection with one frozen fused detector is required.
+    The preregistered staged result (items 9–10) stands as reported.
 15. **Unchanged:** no evaluated detector provides meaningful early warning. The
     best recall by 25% of the task horizon is 2.9%.
 
@@ -2341,7 +2353,7 @@ successful calibration parents, balanced for task coverage. The mathematical
 minimum for a nontrivial strict-crossing 5% threshold is 39 successes, but that
 would still provide an unstable operating-point estimate.
 
-### 15.10 Offline baselines on the opened prospective cohort: complete (fused-baseline extension pending)
+### 15.10 Offline baselines on the opened prospective cohort: complete
 
 #### Question and evidentiary status
 
@@ -2439,9 +2451,9 @@ Deltas are detector minus reference with the paired task/rollout bootstrap
 | `rnd_only` | 0.629 | 0.068 | 0.780 | 0.792 | 0.000 | −0.039 [−0.298, +0.217] | −0.061 [−0.146, +0.020] | −0.002 [−0.270, +0.267] |
 | `pca_kmeans_only` | 0.605 | 0.063 | 0.771 | 0.806 | 0.000 | −0.063 [−0.326, +0.201] | −0.048 [−0.130, +0.031] | −0.026 [−0.297, +0.247] |
 | `knn_cosine_only` | 0.582 | 0.055 | 0.763 | 0.818 | 0.000 | −0.087 [−0.354, +0.179] | −0.036 [−0.115, +0.041] | −0.050 [−0.333, +0.228] |
-| `fused_<baseline>_time` (four detectors) | pending | pending | pending | pending | pending | pending | pending | pending |
 
-The three frozen rows equal Section 15.6 exactly. `fused_safe_time` raised
+The four `fused_<baseline>_time` detectors are reported in Table 15.10c. The
+three frozen rows equal Section 15.6 exactly. `fused_safe_time` raised
 22/380 false alarms (0.058, Wilson 95% [0.039, 0.086]); `staged_safe_time`
 raised 19/380 (0.050, [0.032, 0.077]).
 
@@ -2459,6 +2471,10 @@ raised 19/380 (0.050, [0.032, 0.077]).
 | `rnd_only` | 0.840 / 0.100 / 0.650 | 0.554 / 0.057 / 0.843 |
 | `pca_kmeans_only` | 0.800 / 0.100 / 0.666 | 0.536 / 0.050 / 0.855 |
 | `knn_cosine_only` | 0.800 / 0.100 / 0.675 | 0.504 / 0.039 / 0.869 |
+| `fused_knn_cosine_time` | 0.940 / 0.080 / 0.679 | 0.950 / 0.064 / 0.801 |
+| `fused_mahalanobis_time` | 0.890 / 0.050 / 0.728 | 0.957 / 0.075 / 0.803 |
+| `fused_pca_kmeans_time` | 0.920 / 0.080 / 0.709 | 0.925 / 0.054 / 0.812 |
+| `fused_rnd_time` | 0.890 / 0.080 / 0.720 | 0.911 / 0.057 / 0.821 |
 
 On composites every staged variant has exactly the time-only recall: in the
 staged wrapper, composite failures are caught only by the time fallback,
@@ -2499,12 +2515,78 @@ whatever the early score.
   distinctive there either.
 - **STAC-Single** is not applicable to XR-1, because its 16-step chunks are
   executed in full.
-- **Pending.** The four `fused_<baseline>_time` detectors are the remaining
-  control. They ask whether the fused gain needs SAFE or only some
-  policy-internal score fused with time. Their decision rule is pre-declared
-  in `interpretation_plan_fused.md`: a SAFE-specific contribution is supported
-  only if `fused_safe_time` beats every fused baseline on recall at matched
-  FPR, with a paired bootstrap CI excluding zero.
+- **Fusion, not SAFE.** The fused-baseline control below answers whether the
+  fused gain needs SAFE. By the pre-declared rule it does not.
+
+#### Fused-baseline extension
+
+The extension asks whether the fused gain needs SAFE or only some
+policy-internal score fused with elapsed time. It added
+`fused_<baseline>_time` for the four baselines: the selected baseline score OR
+the frozen time risk, both eligible for the whole rollout, with the threshold
+pair searched exactly as for `fused_safe_time`. The run used code commit
+`1d2f86cc` in the same dedicated worktree, the unchanged caches and
+`develop/baseline_bundle.json`, and wrote only to `calibrate_fused/` and
+`evaluate_fused/`.
+
+- Calibration reproduced all 12 earlier detectors and the frozen thresholds
+  exactly. Evaluation reproduced the frozen prospective results and every
+  earlier `evaluate/` row.
+- `prior_outputs_before_fused.sha256` and `frozen_inputs.sha256` both
+  verified after evaluation, so no earlier output or frozen input changed.
+- The interpretation note `interpretation_plan_fused.md` (sha256
+  `bb0fa44c1e42c8755b1ca03227c7e4fd5a6b83bc727e3f5e41a956a873ade031`) was
+  written in two parts. Part i, before calibration, declared the decision
+  rule and recorded that this is a second post-hoc look at an opened cohort.
+  Part ii, before evaluation, recorded the in-sample calibration recalls.
+- Decision rule: a SAFE-specific contribution is supported only if
+  `fused_safe_time` has higher recall than every `fused_<baseline>_time`, with
+  each paired task/rollout bootstrap 95% CI of the recall difference (fused
+  baseline minus fused SAFE; 2,000 replicates, seed 0) entirely below zero.
+
+On calibration every fused detector sat at 5/114 false positives (0.044).
+
+| Detector | Calibration TPR | Thresholds (score, time) |
+|---|---:|---|
+| `fused_safe_time` | 0.965 | 1.5219, 0.9722 |
+| `fused_knn_cosine_time` | 0.965 | 0.6735, 0.9800 |
+| `fused_mahalanobis_time` | 0.956 | 0.7774, 0.9792 |
+| `fused_pca_kmeans_time` | 0.947 | 0.8330, 0.9792 |
+| `fused_rnd_time` | 0.939 | 0.8720, 0.9800 |
+
+**Table 15.10c — Fused detectors on the primary prospective cohort (380
+successes, 380 failures).** Deltas are detector minus reference with the
+paired task/rollout bootstrap 95% CI. For miss-adjusted detection, negative
+means earlier.
+
+| Detector | TPR | FPR | Balanced accuracy | Miss-adjusted | Recall by 25% | ΔTPR vs fused SAFE | ΔMiss-adj vs fused SAFE | ΔTPR vs staged SAFE | ΔTPR vs time |
+|---|---:|---:|---:|---:|---:|---|---|---|---|
+| `fused_safe_time` | **0.955** | 0.058 | **0.949** | 0.816 | 0.000 | — | — | +0.287 [+0.156, +0.426] | +0.324 [+0.178, +0.469] |
+| `fused_knn_cosine_time` | 0.947 | 0.068 | 0.939 | **0.769** | 0.000 | −0.008 [−0.093, +0.072] | −0.047 [−0.089, −0.006] | +0.280 [+0.116, +0.445] | +0.316 [+0.142, +0.495] |
+| `fused_mahalanobis_time` | 0.939 | 0.068 | 0.936 | 0.783 | 0.000 | −0.016 [−0.097, +0.065] | −0.033 [−0.076, +0.012] | +0.272 [+0.108, +0.434] | +0.308 [+0.133, +0.484] |
+| `fused_pca_kmeans_time` | 0.924 | 0.061 | 0.932 | 0.785 | 0.000 | −0.031 [−0.130, +0.061] | −0.031 [−0.073, +0.011] | +0.257 [+0.083, +0.429] | +0.293 [+0.105, +0.479] |
+| `fused_rnd_time` | 0.905 | 0.063 | 0.921 | 0.794 | 0.000 | −0.049 [−0.153, +0.050] | −0.022 [−0.064, +0.021] | +0.238 [+0.055, +0.418] | +0.275 [+0.082, +0.469] |
+| `staged_safe_time` (frozen) | 0.668 | 0.050 | 0.809 | 0.854 | 0.029 | −0.287 [−0.426, −0.156] | +0.038 [+0.006, +0.070] | — | +0.037 [+0.000, +0.090] |
+| `time_only` (frozen) | 0.632 | 0.047 | 0.792 | 0.880 | 0.000 | −0.324 [−0.469, −0.178] | +0.064 [+0.033, +0.096] | −0.037 [−0.090, +0.000] | — |
+
+Atomic/composite strata for the fused baselines are in Table 15.10b.
+
+**Decision.** No fused baseline's recall interval lies entirely below zero, so
+the rule returns "not supported" for all four. As part i specified, the fused
+gain is attributed to fusing a policy-internal score with elapsed time, not to
+SAFE specifically.
+
+- `fused_safe_time` has the highest recall, the lowest test FPR among the fused
+  detectors, and the best atomic result (0.980 recall at 0.030 FPR). None of
+  these differences is significant.
+- `fused_knn_cosine_time` alarms earlier than fused SAFE (−0.047 task
+  horizons, CI excluding zero), at a higher test FPR (0.068 versus 0.058).
+- Cosine k-NN and Mahalanobis are fitted on successful rollouts only, so a
+  fused detector built on them needs no failure labels.
+- Every fused detector is a post-hoc look at an opened cohort, and every test
+  FPR (0.058–0.068) exceeds calibration's 0.044. A confirmatory claim needs a
+  fresh prospective collection with one fused detector frozen in advance.
+- No fused detector has any recall by the 25% landmark.
 
 Run root (caches, development, calibration, evaluation, interpretation plan,
 and checksums):
