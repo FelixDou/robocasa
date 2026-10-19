@@ -7,6 +7,9 @@
 > This document describes **schema 2 (v2)**, which fixes the validity problems
 > A–F found there. Schema-1 runs stay readable by `analyze`,
 > `calibrate-stages` and `audit-predicates`.
+>
+> **Next step:** prospective stage-gated re-prompt trial on fresh seeds,
+> [stage_gated_reprompt.md](stage_gated_reprompt.md).
 
 ## Why
 

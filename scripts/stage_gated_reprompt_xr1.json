@@ -1,0 +1,57 @@
+{
+  "_comment": "Prospective stage-gated re-prompt trial for XR-1 (no branching). See docs/stage_gated_reprompt.md. Natural rollouts on fresh seeds, three arms per (task, seed) with the same environment seed and the same policy sampling-seed schedule.",
+  "_whitelist_source": "Recoverability ladder: P minus R from the same state was positive at ArrangeTea mug_on_tray in v1 (0/16 -> 4/16) and v2 (+0.20 to +0.35 at stage entry to +8 inferences) and at BreadSelection jam_on_cutting_board in v1 (0/20 -> 19/20, 5 parents). GarnishPancake has no whitelisted stage (v2 strawberry_on_pancake: -0.25 to -0.46): it is the control task on which gated_reprompt must equal baseline, and always_reprompt shows the harm of ungated switching.",
+  "_reprompt_step_cap_source": "Steps from switch to target completion in ladder re-prompt branches that went on to succeed: ArrangeTea mug_on_tray 96% (v2, 23 branches) and 100% (v1) within 1280 steps; BreadSelection jam_on_cutting_board 100% (v1, 22 branches) within 960. 1280 = 80 XR-1 inferences of 16 steps.",
+  "_base_seed_source": "400007 has not been used by any previous XR-1 run (ladder: 300007, 310007, 320007, 340007).",
+  "_expected_success_rates_source": "XR-1 natural-rate selections (docs/safe_xiaomi_dense_subtask.md), as in scripts/recoverability_ladder_xr1_pilot.json; planning only.",
+  "_success_step_fraction_source": "Median natural success step / H in the v1+v2 ladder parents: ArrangeTea ~1350/2250, BreadSelection ~1100-1700/1950, GarnishPancake ~1100/2700; planning only.",
+  "tasks": ["ArrangeTea", "BreadSelection", "GarnishPancake"],
+  "arms": ["baseline", "gated_reprompt", "always_reprompt"],
+  "reprompt_whitelist": {
+    "ArrangeTea": ["mug_on_tray"],
+    "BreadSelection": ["jam_on_cutting_board"]
+  },
+  "seeds_per_task": 50,
+  "base_seed": 400007,
+  "split": "pretrain",
+  "env_interface": "gym",
+  "seed_protocol": "repeated_reset",
+  "arm_order": "counterbalanced",
+  "seed_block_size": 10,
+  "reprompt_step_cap": 1280,
+  "reprompt_level": "atomic",
+  "required_subtask_overrides": {},
+  "exclude_predicates": {},
+  "regression_ignore_stages": ["precondition", "release"],
+  "regression_ignore_predicates": {},
+  "state_hash_stride": 16,
+  "policy_module": "robocasa.recovery.xiaomi_robotics_1_policy:make_policy",
+  "policy_args": {
+    "replan_steps": 16,
+    "crop_ratio": 0.95,
+    "observation_history": 4,
+    "observation_interval": 2,
+    "collect_safe_features": false,
+    "policy_name": "Xiaomi-Robotics-1-RoboCasa365"
+  },
+  "max_errors": 10,
+  "alpha": 0.05,
+  "expected_success_rates": {
+    "ArrangeTea": 0.54,
+    "BreadSelection": 0.34,
+    "GarnishPancake": 0.62
+  },
+  "success_step_fraction": {
+    "ArrangeTea": 0.6,
+    "BreadSelection": 0.7,
+    "GarnishPancake": 0.45
+  },
+  "seconds_per_env_step": 0.055,
+  "seconds_per_reset": 20.0,
+  "seconds_per_env_creation": 60.0,
+  "gpus_per_worker": 2,
+  "num_workers": 2,
+  "allocation_hours": 24.0,
+  "allocation_overhead_hours": 0.5,
+  "power_target_difference": 0.15
+}
