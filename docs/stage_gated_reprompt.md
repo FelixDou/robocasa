@@ -266,7 +266,7 @@ Optionally re-plan with the measured throughput:
 GATE_CALIBRATION_DIR="$SMOKE_ROOT/shard0" bash scripts/run_stage_gated_reprompt_xr1.sh plan | grep -A8 '"upper"'
 ```
 
-3. Trial (two workers, four GPUs; about 7.5–9.3 h):
+3. Trial (two workers, four GPUs; about 15–18.6 h at 100 seeds per task):
 
 ```bash
 unset GATE_ROOT
@@ -274,7 +274,7 @@ GATE_GPU_PAIRS="0:1 2:3" bash scripts/run_stage_gated_reprompt_xr1.sh start
 source "$STORAGE_BS/robocasa_rollouts/recovery/xr1_stage_gate_latest.env" && export TRIAL_ROOT="$GATE_ROOT" && echo "$TRIAL_ROOT"
 ```
 
-With only two GPUs, use `GATE_GPU_PAIRS="0:1"` (one worker, ≤ 18.6 h).
+With only two GPUs, use `GATE_GPU_PAIRS="0:1"` (one worker, about 30–37 h: one resume).
 
 4. Monitor:
 
