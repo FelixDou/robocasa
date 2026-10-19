@@ -707,6 +707,102 @@ def evaluate(args):
     return result
 
 
+def export_predictions(args):
+    """Assemble frozen SAFE and time-risk trajectories without scoring any detector.
+
+    Used for cohorts whose analysis lives elsewhere (the lead-time endpoint in
+    scripts/xr1_lead_time/confirm_lead.py): only the frozen runtime bundle is
+    applied, and no threshold, alarm or outcome metric is computed here.
+    """
+    output = Path(args.output).resolve()
+    if output.exists():
+        raise FileExistsError(f"Output already exists: {output}")
+    bundle_path = Path(args.runtime_bundle).resolve()
+    bundle = json.loads(bundle_path.read_text())
+    if bundle.get("phase") != "calibration_frozen":
+        raise ValueError("Runtime bundle is not a frozen calibration artifact")
+    seeds = tuple(int(seed) for seed in bundle["model_seeds"])
+    for files in bundle["checkpoint_bundle"].values():
+        for artifact in files.values():
+            if _sha256(artifact["path"]) != artifact["sha256"]:
+                raise ValueError(f"Frozen runtime artifact checksum changed: {artifact['path']}")
+    runs, _, provenances = _load_seed_group(args.score_root, seeds)
+    _validate_score_provenance(
+        provenances,
+        {
+            str(seed): bundle["checkpoint_bundle"][str(seed)]["model_final.ckpt"]["sha256"]
+            for seed in seeds
+        },
+        args.score_group,
+        seeds,
+    )
+    records = _assemble_external(
+        runs,
+        bundle["task_normalizations"],
+        bundle["task_horizons"],
+        bundle["time_risk_curves"],
+    )
+    expected_tasks = set(bundle["task_horizons"])
+    observed_tasks = {str(row["task_name"]) for row in records}
+    if observed_tasks != expected_tasks:
+        raise ValueError(
+            "Score root lacks exact frozen task coverage: "
+            f"missing={sorted(expected_tasks - observed_tasks)}, "
+            f"unexpected={sorted(observed_tasks - expected_tasks)}"
+        )
+    ids = {row["rollout_id"] for row in records}
+    identities = _identity_keys(records)
+    if set(bundle.get("development_rollout_ids", [])) & ids:
+        raise ValueError("Development and exported rollout IDs overlap")
+    if set(bundle["calibration_rollout_ids"]) & ids:
+        raise ValueError("Frozen calibration and exported rollout IDs overlap")
+    if {tuple(value) for value in bundle["calibration_seed_reset_identities"]} & identities:
+        raise ValueError("Frozen calibration and exported seed/reset identities overlap")
+    for path in args.disjoint_from or ():
+        other = [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
+        if {str(row["rollout_id"]) for row in other} & ids:
+            raise ValueError(f"Exported rollout IDs overlap {path}")
+        overlap = _identity_keys(other) & identities
+        if overlap:
+            raise ValueError(f"Exported seed/reset identities overlap {path}: {sorted(overlap)[:3]}")
+    if args.seed_range:
+        low, high = (int(value) for value in args.seed_range)
+        outside = [
+            row["rollout_id"]
+            for row in records
+            if row.get("environment_seed") is None
+            or not low <= int(row["environment_seed"]) < high
+        ]
+        if outside:
+            raise ValueError(f"{len(outside)} rollouts lie outside seed range [{low}, {high})")
+    primary, selection = _select_per_task_class(records, args.per_class)
+    primary_ids = {row["rollout_id"] for row in primary}
+    for row in records:
+        row["primary_balanced"] = row["rollout_id"] in primary_ids
+    output.parent.mkdir(parents=True, exist_ok=True)
+    _write_jsonl(output, records)
+    summary = {
+        "status": "exported",
+        "predictions": str(output),
+        "predictions_sha256": _sha256(output),
+        "runtime_bundle": str(bundle_path),
+        "runtime_bundle_sha256": _sha256(bundle_path),
+        "score_root": str(Path(args.score_root).resolve()),
+        "score_group": args.score_group,
+        "seed_range": args.seed_range,
+        "disjoint_from": [str(Path(path).resolve()) for path in args.disjoint_from or ()],
+        "counts": {
+            "all_retained": len(records),
+            "primary_balanced": len(primary),
+            "per_class": int(args.per_class),
+            "tasks": len(observed_tasks),
+        },
+        "selection": selection,
+    }
+    _write_json(output.with_suffix(".summary.json"), summary)
+    return summary
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="phase", required=True)
@@ -727,13 +823,22 @@ def build_parser():
     evaluation.add_argument("--bootstrap-samples", type=int, default=2000)
     evaluation.add_argument("--bootstrap-seed", type=int, default=0)
     evaluation.add_argument("--test-per-class", type=int, default=10)
+    export = subparsers.add_parser("export")
+    export.add_argument("--runtime-bundle", required=True)
+    export.add_argument("--score-root", required=True)
+    export.add_argument("--score-group", required=True)
+    export.add_argument("--output", required=True)
+    export.add_argument("--per-class", type=int, default=10)
+    export.add_argument("--seed-range", nargs=2, type=int, metavar=("LOW", "HIGH"))
+    export.add_argument("--disjoint-from", nargs="+", default=[])
     return parser
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    phases = {"calibrate": calibrate, "evaluate": evaluate, "export": export_predictions}
     try:
-        result = calibrate(args) if args.phase == "calibrate" else evaluate(args)
+        result = phases[args.phase](args)
     except (FileExistsError, ValueError) as error:
         raise SystemExit(f"error: {error}") from error
     print(json.dumps(_json_value(result), indent=2, sort_keys=True, allow_nan=False))

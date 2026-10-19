@@ -206,7 +206,7 @@ def build_parser():
     parser.add_argument("--safe-repo", required=True)
     parser.add_argument("--training-run-dir", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--group", choices=("calibration", "prospective_test", "confirmatory_test"), required=True)
+    parser.add_argument("--group", choices=("calibration", "prospective_test", "confirmatory_test", "lead_calibration"), required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
         "--allow-task-subset",

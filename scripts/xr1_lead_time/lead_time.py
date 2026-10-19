@@ -11,7 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 import numpy as np
 
-D = Path(sys.argv[1]); ALPHA = 0.05
+ALPHA = 0.05
 def load(p):
     out = []
     for l in open(p):
@@ -31,8 +31,6 @@ def sel(records, q):
                        r.get("environment_reset_index") if r.get("environment_reset_index") is not None else -1, str(r["rollout_id"])))
             out += v[:q]
     return out
-cal = sel(load(D / "calibration_predictions.jsonl"), 3); te = sel(load(D / "event_predictions.jsonl"), 10)
-
 def first(x, tau):
     if tau is None: return math.inf
     m = np.maximum.accumulate(x); i = np.searchsorted(m, tau, side="left")
@@ -89,39 +87,47 @@ def search(data, keys):
     if len(keys) > 1: th[keys[1]] = best[2]
     return th
 
-res = {}
-frozen = json.load(open(D / "results.json"))["fused_safe_thresholds"]
-res["fused_safe_risk_frozen"] = {"th": frozen, "test": ev(te, {"safe": frozen["score"], "risk": frozen["time"]})}
-for name, keys in [("timer", ["timer"]), ("risk", ["risk"]), ("safe", ["safe"]), ("safe_timer", ["safe", "timer"]), ("safe_risk_leadobj", ["safe", "risk"]), ("risk_timer", ["risk", "timer"])]:
-    th = search(cal, keys)
-    res[name] = {"th": th, "cal": ev(cal, th), "test": ev(te, th)}
-for k, v in res.items():
-    print(k, {a: round(float(b), 4) for a, b in v["th"].items()}, "\n   cal ", strip(v["cal"]) if "cal" in v else "", "\n   test", strip(v["test"]))
-# Oracle timer matched to each detector's test FPR (chosen on test: favours the timer)
-def timer_at_test_fpr(target):
-    best = None
-    for c in np.arange(0.5, 1.0001, 0.0025):
-        e = ev(te, {"timer": c})
-        if e["fpr"] <= target + 1e-12 and (best is None or e["mean_lead"] > best[1]["mean_lead"]):
-            best = (c, e)
-    return best
-for k in ("fused_safe_risk_frozen", "safe_timer"):
-    f = res[k]["test"]["fpr"]; c, e = timer_at_test_fpr(f)
-    print(f"oracle timer at test FPR<={f:.3f}: c={c:.4f}", strip(e))
-# paired bootstrap (task then rollout) of mean-lead difference safe_timer - timer, and fused frozen - timer
-rng = np.random.default_rng(0)
-tasks = sorted({r["task_name"] for r in te}); F = [r for r in te if r["failed"]]
-idx_by_task = defaultdict(list)
-for i, r in enumerate(F): idx_by_task[r["task_name"]].append(i)
-for k in ("safe_timer", "fused_safe_risk_frozen"):
-    d = res[k]["test"]["lead_vec"] - res["timer"]["test"]["lead_vec"]
-    bs = []
-    for _ in range(2000):
-        ts = rng.choice(tasks, len(tasks)); ii = np.concatenate([rng.choice(idx_by_task[t], len(idx_by_task[t])) for t in ts])
-        bs.append(d[ii].mean())
-    print(k, "- timer mean lead diff", round(float(d.mean()), 4), "CI", np.round(np.percentile(bs, [2.5, 97.5]), 4),
-          "earlier than timer:", int((d > 1e-12).sum()), "later:", int((d < -1e-12).sum()), "of", len(d))
-# seconds: control steps per inference = 16; RoboCasa control 20 Hz (verify)
-st = res["safe_timer"]["test"]
-print("horizon stats (inferences): failures", np.percentile([r["horizon"] for r in F], [0, 50, 100]))
-print("all failures end at H_k:", all(r["L"] == r["horizon"] for r in F))
+def run(D):
+    """The exploratory August analysis printed by the CLI; returns its cohorts and fits."""
+    cal = sel(load(D / "calibration_predictions.jsonl"), 3); te = sel(load(D / "event_predictions.jsonl"), 10)
+    res = {}
+    frozen = json.load(open(D / "results.json"))["fused_safe_thresholds"]
+    res["fused_safe_risk_frozen"] = {"th": frozen, "test": ev(te, {"safe": frozen["score"], "risk": frozen["time"]})}
+    for name, keys in [("timer", ["timer"]), ("risk", ["risk"]), ("safe", ["safe"]), ("safe_timer", ["safe", "timer"]), ("safe_risk_leadobj", ["safe", "risk"]), ("risk_timer", ["risk", "timer"])]:
+        th = search(cal, keys)
+        res[name] = {"th": th, "cal": ev(cal, th), "test": ev(te, th)}
+    for k, v in res.items():
+        print(k, {a: round(float(b), 4) for a, b in v["th"].items()}, "\n   cal ", strip(v["cal"]) if "cal" in v else "", "\n   test", strip(v["test"]))
+    # Oracle timer matched to each detector's test FPR (chosen on test: favours the timer)
+    def timer_at_test_fpr(target):
+        best = None
+        for c in np.arange(0.5, 1.0001, 0.0025):
+            e = ev(te, {"timer": c})
+            if e["fpr"] <= target + 1e-12 and (best is None or e["mean_lead"] > best[1]["mean_lead"]):
+                best = (c, e)
+        return best
+    for k in ("fused_safe_risk_frozen", "safe_timer"):
+        f = res[k]["test"]["fpr"]; c, e = timer_at_test_fpr(f)
+        print(f"oracle timer at test FPR<={f:.3f}: c={c:.4f}", strip(e))
+    # paired bootstrap (task then rollout) of mean-lead difference safe_timer - timer, and fused frozen - timer
+    rng = np.random.default_rng(0)
+    tasks = sorted({r["task_name"] for r in te}); F = [r for r in te if r["failed"]]
+    idx_by_task = defaultdict(list)
+    for i, r in enumerate(F): idx_by_task[r["task_name"]].append(i)
+    for k in ("safe_timer", "fused_safe_risk_frozen"):
+        d = res[k]["test"]["lead_vec"] - res["timer"]["test"]["lead_vec"]
+        bs = []
+        for _ in range(2000):
+            ts = rng.choice(tasks, len(tasks)); ii = np.concatenate([rng.choice(idx_by_task[t], len(idx_by_task[t])) for t in ts])
+            bs.append(d[ii].mean())
+        print(k, "- timer mean lead diff", round(float(d.mean()), 4), "CI", np.round(np.percentile(bs, [2.5, 97.5]), 4),
+              "earlier than timer:", int((d > 1e-12).sum()), "later:", int((d < -1e-12).sum()), "of", len(d))
+    # seconds: control steps per inference = 16; RoboCasa control 20 Hz (verify)
+    st = res["safe_timer"]["test"]
+    print("horizon stats (inferences): failures", np.percentile([r["horizon"] for r in F], [0, 50, 100]))
+    print("all failures end at H_k:", all(r["L"] == r["horizon"] for r in F))
+    return dict(cal=cal, te=te, res=res)
+
+
+if __name__ == "__main__":
+    run(Path(sys.argv[1]))

@@ -21,33 +21,32 @@ Usage: python3 -I quantile_timer.py <review_data dir> [calibration jsonl ...]
 Default calibration set: the primary balanced cohort, 3 successes and 3 failures per task, as
 selected by lead_time.py. For the confirmatory run, pass the 380-success balanced cohort.
 """
-import io, contextlib, runpy, sys, math, json
+import io, contextlib, sys, math, json
 from collections import defaultdict
 from pathlib import Path
 import numpy as np
 
 here = Path(__file__).resolve().parent
-D = Path(sys.argv[1])
-sys.argv = ["lead_time.py", str(D)]
-with contextlib.redirect_stdout(io.StringIO()):
-    g = runpy.run_path(str(here / "lead_time.py"))
-cal, te, first, ev, res = g["cal"], g["te"], g["first"], g["ev"], g["res"]
+sys.path.insert(0, str(here))
+import lead_time
+from lead_time import first
 ALPHA = 0.05
 QS = (0.75, 0.90, 0.95, 1.00)      # 0.95 is the registered primary; the others are sensitivity
 PRIMARY_Q = 0.95
 EPS = 1e-9
 
-bundle = json.load(open(D / "runtime_bundle.json"))
-def dev_success_fractions(task):
+def dev_success_fractions(bundle, task):
     ac = bundle["time_risk_curves"][task]["active_counts"]; H = len(ac)
     fr = []
     for i in range(1, H):                 # count drops between index i-1 and i: successes of length i
         fr += [i / H] * (ac[i - 1] - ac[i])
     return fr
-DEV = {t: dev_success_fractions(t) for t in bundle["time_risk_curves"]}
 
-def rho(q):
-    return {t: float(np.quantile(v, q)) if v else 1.0 for t, v in DEV.items()}
+def dev_fractions(bundle):
+    return {t: dev_success_fractions(bundle, t) for t in bundle["time_risk_curves"]}
+
+def rho(dev, q):
+    return {t: float(np.quantile(v, q)) if v else 1.0 for t, v in dev.items()}
 
 def timer_idx(r, rk, delta):
     c = min(1.0, rk[r["task_name"]] + delta)
@@ -94,8 +93,8 @@ def evaluate(rows, rk, lam, u, s):
 def cal_fail_lead(calF, rk, lam, u, s):
     return float(np.mean([(r["L"] - a) / r["horizon"] if (a := alarm(r, rk, lam, u, s)) <= r["L"] else 0.0 for r in calF]))
 
-def fit(calrows, q):
-    rk = rho(q)
+def fit(calrows, dev, q):
+    rk = rho(dev, q)
     S = [r for r in calrows if not r["failed"]]; F = [r for r in calrows if r["failed"]]
     timer = dict(u=math.inf, s=0.0, lam=conformal_lam(S, rk, math.inf, 0.0))
     # Path family for the fused detector, built from calibration-failure scores only.
@@ -122,9 +121,14 @@ def boot(d, rows_failed, B=2000, seed=0):
     return dict(mean=round(float(d.mean()), 4), ci95=np.round(np.percentile(bs, [2.5, 97.5]), 4).tolist())
 
 if __name__ == "__main__":
+    D = Path(sys.argv[1])
+    with contextlib.redirect_stdout(io.StringIO()):
+        g = lead_time.run(D)
+    cal, te, res = g["cal"], g["te"], g["res"]
+    DEV = dev_fractions(json.load(open(D / "runtime_bundle.json")))
     calrows = cal
     if len(sys.argv) > 2:
-        calrows = [r for p in sys.argv[2:] for r in g["load"](Path(p))]
+        calrows = [r for p in sys.argv[2:] for r in lead_time.load(Path(p))]
     Fte = [r for r in te if r["failed"]]
     out = dict(alpha=ALPHA, primary_q=PRIMARY_Q, n_cal_successes=sum(not r["failed"] for r in calrows),
                dev_successes_per_task=np.quantile([len(v) for v in DEV.values()], [0, .5, 1]).tolist(), by_q={})
@@ -132,7 +136,7 @@ if __name__ == "__main__":
     out["reference"] = dict(global_timer=dict(fpr=round(gt["fpr"], 4), mean_lead=round(gt["mean_lead"], 4)),
                             safe_global_timer=dict(fpr=round(st["fpr"], 4), mean_lead=round(st["mean_lead"], 4)))
     for q in QS:
-        rk, tm, fu = fit(calrows, q)
+        rk, tm, fu = fit(calrows, DEV, q)
         eP, lP = evaluate(te, rk, tm["lam"], math.inf, 0.0)
         eF, lF = evaluate(te, rk, fu["lam"], fu["u"], fu["s"])
         out["by_q"][str(q)] = dict(

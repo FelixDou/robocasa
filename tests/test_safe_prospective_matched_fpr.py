@@ -129,6 +129,7 @@ class TestProspectiveMatchedFpr(unittest.TestCase):
             final = root / "final"
             calibration_scores = root / "calibration_scores"
             evaluation_scores = root / "evaluation_scores"
+            lead_scores = root / "lead_scores"
             for seed in (0, 1, 2):
                 training_run = final / f"indep_seed{seed}"
                 training_run.mkdir(parents=True)
@@ -160,6 +161,7 @@ class TestProspectiveMatchedFpr(unittest.TestCase):
                 for score_root, group, base_seed in (
                     (calibration_scores, "calibration", 1000),
                     (evaluation_scores, "prospective_test", 2000),
+                    (lead_scores, "lead_calibration", 3000),
                 ):
                     seed_root = score_root / f"seed{seed}"
                     seed_root.mkdir(parents=True)
@@ -227,6 +229,41 @@ class TestProspectiveMatchedFpr(unittest.TestCase):
             self.assertTrue(result["calibration_ids_disjoint"])
             self.assertFalse(result["thresholds_updated_on_test"])
             self.assertEqual(result["counts"]["primary_balanced"]["rollouts"], 4)
+
+            from robocasa.recovery.safe.run_prospective_matched_fpr import export_predictions
+
+            def export(score_root, group, output, seed_range=None):
+                return export_predictions(
+                    argparse.Namespace(
+                        runtime_bundle=str(runtime_bundle),
+                        score_root=str(score_root),
+                        score_group=group,
+                        output=str(root / output),
+                        per_class=1,
+                        seed_range=seed_range,
+                        disjoint_from=[str(evaluation_output / "event_predictions.jsonl")],
+                    )
+                )
+
+            summary = export(lead_scores, "lead_calibration", "lead/predictions.jsonl", [3000, 3002])
+            self.assertEqual(summary["counts"]["primary_balanced"], 4)
+            rows = [
+                json.loads(line)
+                for line in (root / "lead/predictions.jsonl").read_text().splitlines()
+            ]
+            self.assertEqual(len(rows), 4)
+            self.assertTrue(all(row["primary_balanced"] for row in rows))
+            self.assertTrue(all(set(row["per_seed_raw_safe"]) == {"0", "1", "2"} for row in rows))
+            self.assertTrue(all("time_scores" in row and "safe_scores" in row for row in rows))
+            self.assertFalse(any("threshold" in key for key in summary))
+            with self.assertRaisesRegex(ValueError, "score group"):
+                export(lead_scores, "prospective_test", "wrong_group.jsonl")
+            with self.assertRaisesRegex(ValueError, "overlap"):
+                export(evaluation_scores, "prospective_test", "overlap.jsonl")
+            with self.assertRaisesRegex(ValueError, "outside seed range"):
+                export(lead_scores, "lead_calibration", "range.jsonl", [3000, 3001])
+            with self.assertRaises(FileExistsError):
+                export(lead_scores, "lead_calibration", "lead/predictions.jsonl")
 
 
 if __name__ == "__main__":
