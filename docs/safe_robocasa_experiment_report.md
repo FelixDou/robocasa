@@ -124,9 +124,22 @@ policy-internal score with elapsed time, not SAFE specifically. The
 preregistered staged SAFE + time detector remains as reported in Section 15.6:
 a modest recall gain over time-only without the required earlier warning.
 Every fused detector was defined after the cohort was opened, and their test
-FPRs (0.058–0.068) exceeded calibration's 0.044. A confirmatory claim needs a
-fresh prospective collection with one fused detector frozen in advance.
-STAC-Single is undefined for XR-1, whose 16-step chunks are executed in full.
+FPRs (0.058–0.068) exceeded calibration's 0.044. STAC-Single is undefined for
+XR-1, whose 16-step chunks are executed in full.
+
+A preregistered confirmatory test (Section 15.11) then evaluated the frozen
+fused detectors once on a fresh, identity-disjoint 760-rollout cohort
+(380/380), with no refit or recalibration. Both preregistered hypotheses
+passed all three criteria. `fused_safe_time` against `time_only`: recall
+**0.955** versus 0.632, gain +0.324 (bootstrap 95% CI [+0.179, +0.468]), at
+FPR **0.039** (Wilson [0.024, 0.064]). The label-free `fused_knn_cosine_time`:
+gain +0.313 ([+0.136, +0.492]) at FPR 0.058. Time-aware fusion of a
+policy-internal score with elapsed time is therefore prospectively confirmed
+on XR-1 at the frozen operating point. Descriptively, fused SAFE was the
+strongest instantiation, detecting 100/100 atomic failures with 1/100 false
+alarm. The preregistered staged detector (0.692 recall) and the post-hoc
+history above remain as reported. Fusion still gives no early warning: recall
+by 25% of the horizon stayed at most 0.050.
 
 ## 1. Scope, labels, and evaluation rules
 
@@ -1841,7 +1854,7 @@ The present evidence supports the following hierarchy of conclusions:
 13. **Not supported (post-hoc):** a SAFE-specific early-window contribution.
     Inside the staged wrapper, standard success-only baseline scores matched
     staged SAFE within bootstrap intervals that reach zero (Section 15.10).
-14. **Supported post-hoc, needs confirmation:** time-aware fusion of a
+14. **Supported post-hoc, later confirmed (item 16):** time-aware fusion of a
     policy-internal score with elapsed time. Unstaged SAFE-or-time fusion raised
     prospective recall from 0.668 (staged) to 0.955 and detected earlier after
     misses were charged. Fusing a success-only baseline instead gave 0.905–0.947
@@ -1851,7 +1864,17 @@ The present evidence supports the following hierarchy of conclusions:
     fresh prospective collection with one frozen fused detector is required.
     The preregistered staged result (items 9–10) stands as reported.
 15. **Unchanged:** no evaluated detector provides meaningful early warning. The
-    best recall by 25% of the task horizon is 2.9%.
+    best recall by 25% of the task horizon was 2.9% post hoc and 5.0% in the
+    confirmatory cohort.
+16. **Confirmed prospectively (Section 15.11):** time-aware fusion of a
+    policy-internal score with elapsed time beats elapsed time alone on XR-1 at
+    the frozen ~5% FPR operating point. On a fresh, identity-disjoint cohort,
+    `fused_safe_time` (primary) and label-free `fused_knn_cosine_time`
+    (secondary) passed every preregistered criterion: recall gains of +0.324
+    and +0.313 with bootstrap intervals above zero, and test FPR 0.039 and
+    0.058. SAFE was the strongest fused instantiation descriptively, but no
+    SAFE-specific advantage was tested or established. The result is a shadow
+    evaluation on an outcome-balanced cohort, not a recovery benefit.
 
 ## 15. Recommended next experiments
 
@@ -2593,6 +2616,174 @@ and checksums):
 
 ```text
 /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_offline_baselines_20261017_100820
+```
+
+### 15.11 Confirmatory prospective test of fused detectors: complete
+
+#### Preregistration
+
+Section 15.10 found, post hoc on an opened cohort, that unstaged fusion of a
+policy-internal score with elapsed time beat the staged detector. This test
+evaluated the frozen fused detectors once on a fresh, identity-disjoint
+cohort. The preregistration and runbook are
+[`xr1_confirmatory_fused_test.md`](xr1_confirmatory_fused_test.md), finalized
+at commit `4e82e5c8b50e6e367bfd5b2236e207cda42d734a`. That file was left
+unchanged after the run, so its checksum still matches the registration. The
+frozen `preregistration.json` has sha256
+`35548d2ab4143a39af2494bcbcf000a6be19676121f9af6027cb3a0fabaed6c9`. The
+running code matched the preregistered commit. The preregistration and every
+frozen input verified unchanged both before and after the evaluation.
+
+- **Primary hypothesis:** `fused_safe_time` has higher failure recall than
+  `time_only` at the frozen operating points.
+- **Pre-declared secondary:** `fused_knn_cosine_time` (fitted on successful
+  rollouts only, so label-free) has higher failure recall than `time_only`.
+  It was judged separately, with no multiplicity correction.
+- **Success criteria** (all three required for each hypothesis):
+  - (a) the paired task/rollout bootstrap 95% CI lower bound of the recall
+    difference is above 0 (2,000 replicates, seed 0);
+  - (b) the point recall gain is at least 0.15;
+  - (c) the test FPR is at most 0.075 and its Wilson 95% upper bound at most
+    0.10.
+
+There was no refit and no recalibration. The frozen artifacts were:
+
+| Component | Source |
+|---|---|
+| SAFE MLP seeds 0/1/2, task normalization, time-risk curves, horizons | `xr1_prospective_matched_fpr_20260815_163700_calibration/runtime_bundle.json` and its `runtime/seed*/` copies |
+| Baseline models, aggregations, normalization | `xr1_offline_baselines_20261017_100820/develop/baseline_bundle.json` and `develop/models/` |
+| All thresholds (calibrated on the August 228-rollout cohort, 5/114 FP each) | `xr1_offline_baselines_20261017_100820/calibrate_fused/baseline_calibration.json` |
+
+#### Collection and integrity
+
+The policy was the same SAFE-patched Xiaomi-Robotics-1 server as in August.
+Collection used the official Xiaomi seed protocol with base seed 1300007, so
+every seed lies in the preregistered range [1300007, 1325007). It covered the
+same 38 tasks and two shards on two GPUs, with a quota of the first 10
+successes and 10 failures per task, `--no-retain-only-quota`, `replan_steps`
+16, and SAFE features, actions and videos recorded.
+
+The run spanned three allocations and was resumed with `--resume`. Each
+interruption quarantined the one in-flight rollout as
+`incomplete_quarantined` in `errors.jsonl`, within the `--max-errors 5` cap.
+There were no other errors. All 38 tasks reached 10/10.
+
+| Cohort | Rollouts (success / failure) | Policy inferences |
+|---|---:|---:|
+| All retained | 1,526 (921 / 605) | 121,164 |
+| Primary (first 10/10 per task) | 760 (380 / 380) | — |
+
+Every rollout recorded `pred_horizon` and `exec_horizon` 16 with no irregular
+inference gaps. Before scoring, `confirm` verified that no rollout ID or
+(task, seed, reset) identity overlapped development, calibration, the August
+test, the baseline fit/validation sets, or any prior Xiaomi manifest listed in
+`exclusion_sources.txt`. The all-retained count (1,526 versus August's 1,643)
+reflects per-task quota stopping. It is not an unbiased prevalence estimate.
+
+#### Verdict
+
+**Table 15.11a — Preregistered criteria, primary cohort.**
+
+| Hypothesis | Detector vs `time_only` | (a) Recall delta, bootstrap 95% CI | (b) Point gain ≥ 0.15 | (c) FPR, Wilson 95% | Verdict |
+|---|---|---|---|---|---|
+| Primary | `fused_safe_time` | +0.324 [+0.179, +0.468] — pass | +0.324 — pass | 0.039 [0.024, 0.064] — pass | **All pass** |
+| Secondary | `fused_knn_cosine_time` | +0.313 [+0.136, +0.492] — pass | +0.313 — pass | 0.058 [0.039, 0.086] — pass | **All pass** |
+
+#### Full results
+
+**Table 15.11b — All frozen detectors, primary cohort (380/380).** Only the
+two hypotheses above were tested; every other row is descriptive.
+
+| Detector | TPR | FPR | Balanced accuracy | Miss-adjusted | Recall by 25% |
+|---|---:|---:|---:|---:|---:|
+| `fused_safe_time` | **0.955** | 0.039 | **0.958** | 0.810 | 0.000 |
+| `fused_knn_cosine_time` | 0.945 | 0.058 | 0.943 | **0.765** | 0.000 |
+| `fused_mahalanobis_time` | 0.934 | 0.055 | 0.939 | 0.774 | 0.000 |
+| `fused_pca_kmeans_time` | 0.932 | 0.058 | 0.937 | 0.780 | 0.000 |
+| `fused_rnd_time` | 0.918 | 0.053 | 0.933 | 0.791 | 0.000 |
+| `staged_safe_time` | 0.692 | 0.039 | 0.826 | 0.835 | **0.050** |
+| `staged_knn_cosine_time` | 0.674 | 0.053 | 0.811 | 0.851 | 0.018 |
+| `staged_pca_kmeans_time` | 0.653 | 0.032 | 0.811 | 0.866 | 0.013 |
+| `staged_mahalanobis_time` | 0.650 | 0.034 | 0.808 | 0.863 | 0.018 |
+| `staged_rnd_time` | 0.653 | 0.039 | 0.807 | 0.867 | 0.005 |
+| `time_only` | 0.632 | 0.034 | 0.799 | 0.880 | 0.000 |
+| `mahalanobis_only` | 0.705 | 0.058 | 0.824 | 0.770 | 0.013 |
+| `rnd_only` | 0.658 | 0.066 | 0.796 | 0.787 | 0.000 |
+| `pca_kmeans_only` | 0.618 | 0.053 | 0.783 | 0.799 | 0.000 |
+| `knn_cosine_only` | 0.600 | 0.042 | 0.779 | 0.813 | 0.000 |
+| `safe_only` | 0.550 | 0.034 | 0.758 | 0.806 | 0.000 |
+
+**Table 15.11c — Task-type strata (TPR / FPR; recall delta vs `time_only`
+with per-stratum paired bootstrap 95% CI).** Descriptive.
+
+| Detector | Atomic (10 tasks) | Composite (28 tasks) |
+|---|---|---|
+| `time_only` | 0.400 / 0.000 | 0.714 / 0.046 |
+| `staged_safe_time` | 0.630 / 0.030; +0.230 [+0.000, +0.479] | 0.714 / 0.043; +0.000 [+0.000, +0.000] |
+| `fused_safe_time` | 1.000 / 0.010; +0.596 [+0.303, +0.902] | 0.939 / 0.050; +0.226 [+0.090, +0.390] |
+| `fused_knn_cosine_time` | 0.920 / 0.070; +0.513 [+0.115, +0.895] | 0.954 / 0.054; +0.239 [+0.047, +0.434] |
+
+The other detectors' stratum values are in `confirm/analysis.json`.
+
+**Table 15.11d — Replication of the post-hoc Section 15.10 values (TPR / FPR).**
+
+| Detector | Section 15.10, opened August cohort | Section 15.11, fresh confirmatory cohort |
+|---|---|---|
+| `fused_safe_time` | 0.955 / 0.058 | 0.955 / 0.039 |
+| `fused_knn_cosine_time` | 0.947 / 0.068 | 0.945 / 0.058 |
+| `staged_safe_time` | 0.668 / 0.050 | 0.692 / 0.039 |
+| `time_only` | 0.632 / 0.047 | 0.632 / 0.034 |
+
+Recall replicated almost exactly. False-positive rates were lower on the
+fresh cohort (0.039–0.058 for the fused detectors versus 0.058–0.068), and
+closer to the 0.044 observed on calibration.
+
+#### Interpretation
+
+- **Confirmed claim.** Time-aware fusion of a policy-internal score with
+  elapsed time beats elapsed time alone. Both the SAFE and the label-free
+  cosine k-NN instantiations passed every preregistered criterion, with
+  recall gains of about +0.31 to +0.32 at the frozen operating points.
+- **SAFE as an instantiation.** Descriptively, `fused_safe_time` was the
+  strongest fused detector: the highest recall and balanced accuracy, and the
+  lowest FPR among the fused detectors. On atomic tasks it detected 100/100
+  failures with 1/100 false alarm, replicating the Section 15.10 atomic
+  pattern. These comparisons among fused detectors were not preregistered and
+  are untested. Section 15.10 found no significant SAFE-specific advantage,
+  so the confirmed claim is about fusion, not SAFE specifically.
+- **Label-free option.** `fused_knn_cosine_time` needs no failure labels,
+  also passed, and alarmed earliest on average (miss-adjusted 0.765), at
+  FPR 0.058.
+- **Staged detector.** The preregistered staged SAFE + time detector again
+  gave a small recall gain over time-only (0.692 versus 0.632), all of it on
+  atomic tasks; on composites it equals time-only.
+- **Still no early warning.** Recall by 25% of the task horizon was at most
+  0.050 (staged SAFE) and 0.000 for every fused detector. The fused gain is
+  more complete detection during the rollout, not an early alarm.
+
+#### Scope and limits
+
+- One policy (Xiaomi-Robotics-1) on 38 RoboCasa365 tasks.
+- One frozen operating point, calibrated at about 5% event-level FPR on the
+  August cohort.
+- An outcome-balanced primary cohort (10/10 per task), not deployment
+  prevalence.
+- A shadow evaluation: detectors observed completed rollouts and never
+  intervened, so no recovery benefit is shown.
+- The secondary hypothesis carries no multiplicity correction. All other
+  comparisons, including SAFE against the other fused scores, are descriptive
+  and untested.
+
+#### Durable artifacts
+
+```text
+Run root:  /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_confirmatory_fused_20261017_160220
+  preregistration.json, exclusion_sources.txt
+  confirmatory_collection/{shard0,shard1,merged_all_retained,official_safe_all_retained,frozen_mlp_scores}
+  cache_confirmatory_test
+  confirm/analysis.json
+Logs:      /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_confirmatory_fused_20261017_160220
+Worktree:  /gs/fs/tga-shinoda/felid/robocasa_xr1_confirmatory_4e82e5c8
 ```
 
 ## 16. Limitations
