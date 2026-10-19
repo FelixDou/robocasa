@@ -141,6 +141,16 @@ alarm. The preregistered staged detector (0.692 recall) and the post-hoc
 history above remain as reported. Fusion still gives no early warning: recall
 by 25% of the horizon stayed at most 0.050.
 
+Because every failure runs to the time limit, the paper's endpoint is now
+warning lead over a per-task quantile timer P, against which SAFE + P adds
+only 0.007 of lead on the opened cohort. An exploratory go/no-go check
+(Section 15.12) asked whether progress information could add more. On 250
+traced parents of five composite tasks, an *oracle* stage-overdue detector
+fused with P raised the mean lead from 0.149 to 0.220 (+0.071) at FPR 0.041.
+The task-then-rollout CI was [−0.021, +0.129], so the pre-declared rule gave
+**NO-GO**. The oracle reads privileged simulator stage predicates. A
+progress-detector methods paper is not pursued now.
+
 ## 1. Scope, labels, and evaluation rules
 
 ### 1.1 Raw SAFE target
@@ -1875,6 +1885,13 @@ The present evidence supports the following hierarchy of conclusions:
     0.058. SAFE was the strongest fused instantiation descriptively, but no
     SAFE-specific advantage was tested or established. The result is a shadow
     evaluation on an outcome-balanced cohort, not a recovery benefit.
+17. **Exploratory NO-GO (Section 15.12):** an oracle stage-overdue detector
+    fused with the per-task timer P added +0.071 of mean warning lead over P
+    on five traced composite tasks, at FPR 0.041. The task-level bootstrap CI
+    [−0.021, +0.129] includes 0, so the pre-declared go rule failed. Because
+    the oracle reads privileged stage predicates, it is an upper bound for any
+    deployable progress detector. The detection paper keeps the evaluation
+    framing: warning lead over P at matched FPR.
 
 ## 15. Recommended next experiments
 
@@ -2784,6 +2801,166 @@ Run root:  /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_confirmatory_fuse
   confirm/analysis.json
 Logs:      /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_confirmatory_fused_20261017_160220
 Worktree:  /gs/fs/tga-shinoda/felid/robocasa_xr1_confirmatory_4e82e5c8
+```
+
+### 15.12 Oracle stage-overdue detector against the per-task timer: NO-GO
+
+#### Question and evidentiary status
+
+Every failed XR-1 rollout runs to its task's time limit H_k, so recall cannot
+separate a monitor from a timer. The paper's endpoint therefore became the
+**mean warning lead**: (L − T)/H_k over failures, where T is the first alarm,
+with a miss counted as 0. The comparator is the **per-task quantile timer P**
+(confirmatory amendment 1). P alarms at t ≥ ceil(min(1, rho_k + delta)·H_k),
+where rho_k is the 95th percentile of task k's development success durations,
+and delta is a split-conformal margin set on calibration successes at
+alpha = 0.05.
+
+On the opened August cohort, SAFE + P added only 0.007 of lead over P. This
+exploratory go/no-go check asks whether any **progress-aware** detector could
+add more. It uses an *oracle*: a detector that reads the simulator's ordered
+subtask predicates, which a deployed robot does not have. If even the oracle
+cannot beat P by a useful margin, a learned progress estimator will not either.
+
+The plan, data choice, definitions and decision rule were committed before any
+run, in
+[`scripts/xr1_lead_time/stage_overdue_oracle_plan.md`](../scripts/xr1_lead_time/stage_overdue_oracle_plan.md),
+with the script
+[`stage_overdue_oracle.py`](../scripts/xr1_lead_time/stage_overdue_oracle.py),
+at commit `9a2a6ee3`. The result is exploratory and makes no paper claim.
+
+#### Data and protocol
+
+- **Cohort.** The August development, calibration and test cohorts were
+  collected with `--no-record-subtask-trace`. Replaying their actions was
+  rejected in Section 15.7, so the check uses the traced five-task live cohort
+  of Section 15.7: 250 natural parents of ArrangeBreadBasket, ArrangeTea,
+  BreadSelection, CuttingToolSelection and GarnishPancake, all composite. The
+  confirmatory cohort was not read; the script refuses its seed range.
+- **Oracle stage + P (primary detector).** At inference t the current stage is
+  the next ordered subtask not yet completed, or a post-completion stage once
+  all subtasks are done. The detector alarms when P fires or when the time in
+  the current stage, divided by H_k, reaches Q_{k,j} + delta. Q_{k,j} is the
+  95th percentile of that stage's duration in development successes. The two
+  rules share one conformal margin, delta.
+- **Folds.** Each parent is scored once by 5-fold cross-fitting, stratified by
+  task and outcome. In each fold, two folds calibrate delta, two fit the stage
+  quantiles, and one is the test fold.
+- **Comparators.** `P_registered` uses rho_k from the frozen August development
+  curves. `P_local` refits rho_k on the development-fold successes of this
+  cohort.
+- **Decision rule.** GO only if the lead gain of oracle + P_registered over
+  P_registered is at least 0.05 H_k *and* its task-then-rollout bootstrap 95%
+  CI (2,000 replicates) lies above 0. Otherwise NO-GO. A pass against
+  `P_registered` with a point gain below 0.05 against `P_local` would have been
+  INCONCLUSIVE.
+- **Definition check.** Before the run, the script's copy of P reproduced the
+  registered dry run on the opened August cohorts at every quantile
+  (q = 0.95: delta 0.1067, 17 FP, mean lead 0.1952). On the August test, P's
+  lead on these five tasks was 0.186, close to its 0.195 over all 38 tasks.
+
+#### Run integrity
+
+The run was CPU-only, from the pinned worktree `robocasa_stage_oracle_9a2a6ee3`.
+The inputs' sha256 checksums were identical before and after the run:
+
+| Input | sha256 |
+|---|---|
+| `xr1_prospective_matched_fpr_20260815_163700_calibration/runtime_bundle.json` | `c4378ba0e464e1c8c0aafd05faeaa31a82960d30ff32e82dbff93e6e82f9e7d1` |
+| `xr1_dense_subtask_live_5tasks_50each_20260817_195216/subtask_training/merged_5tasks_50each/manifest.jsonl` (250 rollouts) | `f07b270fcd00625d09a1ac962ce8c1e6a14fbb10bf2cd05baec29d8825d9f357` |
+
+The cohort holds 122 successes and 128 failures. All 128 failures ran to
+exactly H_k, and no rollout exceeded it.
+
+| Task | Successes | Failures |
+|---|---:|---:|
+| ArrangeBreadBasket | 29 | 21 |
+| ArrangeTea | 28 | 22 |
+| BreadSelection | 11 | 39 |
+| CuttingToolSelection | 18 | 32 |
+| GarnishPancake | 36 | 14 |
+
+#### Results
+
+**Table 15.12a — Primary quantile (q = 0.95, alpha = 0.05), pooled test folds.**
+Lead is a fraction of H_k; by 0.5 and by 0.75 are the fractions of failures
+alarmed by 0.5 H_k and 0.75 H_k.
+
+| Detector | Recall | FPR (FP of 122) | Mean lead | By 0.5 H | By 0.75 H |
+|---|---:|---:|---:|---:|---:|
+| `P_registered` (comparator) | 1.000 | 0.033 (4) | 0.149 | 0.047 | 0.273 |
+| `P_local` | 1.000 | 0.049 (6) | 0.166 | 0.031 | 0.273 |
+| Oracle stage + `P_registered` (primary) | 1.000 | 0.041 (5) | **0.220** | 0.102 | 0.461 |
+| Oracle stage + `P_local` | 1.000 | 0.041 (5) | 0.222 | 0.102 | 0.453 |
+| Oracle stage only | 0.695 | 0.041 (5) | 0.227 | 0.125 | 0.453 |
+
+**Table 15.12b — Paired lead gains, with 95% bootstrap intervals.**
+
+| Contrast | Gain | Task-then-rollout CI | Within-task rollout CI |
+|---|---:|---|---|
+| Oracle + `P_registered` − `P_registered` (primary) | **+0.071** | [−0.021, +0.129] | [+0.042, +0.099] |
+| Oracle + `P_local` − `P_local` | +0.056 | [−0.009, +0.112] | — |
+| Oracle + `P_registered` − `P_local` | +0.054 | [−0.001, +0.109] | — |
+
+Per-task gains of the primary contrast:
+
+| Task | Gain |
+|---|---:|
+| ArrangeBreadBasket | +0.057 |
+| ArrangeTea | +0.142 |
+| BreadSelection | +0.089 |
+| CuttingToolSelection | +0.117 |
+| GarnishPancake | −0.176 |
+
+On GarnishPancake, P alone reached a lead of 0.485 and the fused detector
+0.309. The likely cause is the shared margin, not the stage signal: adding
+the stage rule raises the conformal delta, which delays the timer part of the
+fused detector. The per-fold margins are in the output JSON (`folds[].delta_*`).
+
+Sensitivity of the primary gain to the quantile q (descriptive):
+
+| q | Gain | Task-then-rollout CI |
+|---|---:|---|
+| 0.75 | +0.043 | [−0.050, +0.108] |
+| 0.90 | +0.067 | [−0.036, +0.136] |
+| 0.95 | +0.071 | [−0.021, +0.129] |
+| 1.00 | +0.146 | [+0.022, +0.293] |
+
+The q = 1.0 row clears both thresholds only because P is weak at q = 1. It has
+no bearing on the decision.
+
+#### Verdict and interpretation
+
+- **NO-GO under the pre-declared rule.** The point gain (+0.071) passes the
+  0.05 threshold, but the task-level CI lower bound is below 0. With five
+  tasks, one of which (GarnishPancake) goes the other way, the task-level
+  uncertainty decides. The within-task interval excludes 0, so the gain is
+  consistent across rollouts within these tasks. It is not established across
+  tasks.
+- **An upper bound, not a deployable detector.** The oracle reads privileged
+  simulator stage predicates. A deployable detector would have to estimate
+  stage progress from the policy or observations. The only learned stage
+  signal tried so far, the subtask-label SAFE probe of Section 15.7, ranked
+  stages at chance (ROC-AUC 0.49).
+- **Decision.** A progress-detector methods paper is not pursued now. The
+  detection paper uses the evaluation framing: warning lead over the per-task
+  timer P at matched FPR. This check is reported as exploratory, descriptive
+  evidence. The oracle's +0.071 is larger than SAFE + P's +0.007, though the
+  two numbers come from different cohorts. This suggests that progress, not
+  policy-anomaly scores, carries most of the lead P lacks. No such claim is
+  established.
+- **Scope.** One policy, five composite tasks, an opened development cohort,
+  and no atomic tasks. For an atomic task the oracle reduces to P by
+  construction.
+
+#### Durable artifacts
+
+```text
+Output:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_stage_overdue_oracle_<run timestamp>/
+             stage_overdue_oracle.json, inputs_sha256_before.txt
+Log:       /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_stage_overdue_oracle_<run timestamp>.log
+Worktree:  /gs/fs/tga-shinoda/felid/robocasa_stage_oracle_9a2a6ee3
+Code:      scripts/xr1_lead_time/stage_overdue_oracle.py and _plan.md (commit 9a2a6ee3)
 ```
 
 ## 16. Limitations
