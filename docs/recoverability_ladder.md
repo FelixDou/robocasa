@@ -2,6 +2,8 @@
 
 > **v1 pilot results (17 October 2026):**
 > [recoverability_ladder_pilot_20261016.md](recoverability_ladder_pilot_20261016.md).
+> **v2 pilot results (19 October 2026):**
+> [recoverability_ladder_v2_pilot_20261017.md](recoverability_ladder_v2_pilot_20261017.md).
 > This document describes **schema 2 (v2)**, which fixes the validity problems
 > A–F found there. Schema-1 runs stay readable by `analyze`,
 > `calibrate-stages` and `audit-predicates`.
