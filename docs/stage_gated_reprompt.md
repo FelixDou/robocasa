@@ -123,7 +123,11 @@ sampling-seed schedule:
 
 ## Dry-run estimate and power
 
-`plan` with the default config: 3 tasks × 50 seeds × 3 arms = 450 rollouts,
+**The shipped config uses 100 seeds per task** (900 rollouts: 29.8 worker-h
+expected, 37.1 upper; about 15 / 18.6 h on two workers), chosen on 2026-10-19
+before any trial rollout. The table below is the 50-seed reference.
+
+`plan` with 3 tasks × 50 seeds × 3 arms = 450 rollouts,
 0.055 s/step, 20 s per reset, 60 s per env creation, horizons ArrangeTea 2250,
 BreadSelection 1950, GarnishPancake 2700, expected success 0.54 / 0.34 / 0.62.
 
@@ -316,8 +320,8 @@ Do not delete partial shards or logs. A `worker_failure.json`, a nonempty
 4. **Step cap 1280** from the ladder's re-prompt completion times (above).
 5. **`always_reprompt` included by default.** It adds 50% compute but still
    fits one allocation; drop it with `"arms": ["baseline", "gated_reprompt"]`.
-6. **Primary = pooled whitelisted macro**, not per task, because 50 seeds per
-   task are underpowered for realistic per-task effects.
+6. **Primary = pooled whitelisted macro**, not per task, because even 100 seeds
+   per task are underpowered for small per-task effects.
 7. **Repeated-reset seeding** (as in the ladder) with explicit global-RNG
    seeding before each reset and an initial-state hash check, instead of a
    fresh env per rollout (≈ 60 s more per rollout).

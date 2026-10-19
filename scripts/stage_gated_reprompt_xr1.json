@@ -11,7 +11,8 @@
     "ArrangeTea": ["mug_on_tray"],
     "BreadSelection": ["jam_on_cutting_board"]
   },
-  "seeds_per_task": 50,
+  "_seeds_per_task_source": "Set to 100 on 2026-10-19, before any trial rollout: the expected unconditional ArrangeTea effect (+0.05 to +0.10) is underpowered at 50 seeds per task; 100 seeds still fits one 24 h allocation on two workers (docs/stage_gated_reprompt.md).",
+  "seeds_per_task": 100,
   "base_seed": 400007,
   "split": "pretrain",
   "env_interface": "gym",

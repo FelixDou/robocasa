@@ -607,15 +607,15 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(plan["whitelisted_tasks"], ["ArrangeTea", "BreadSelection"])
         self.assertEqual(plan["control_tasks"], ["GarnishPancake"])
         self.assertEqual(plan["arms"], ["baseline", "gated_reprompt", "always_reprompt"])
-        self.assertEqual((plan["seeds_per_task"], plan["seed_range"]), (50, [400007, 400056]))
+        self.assertEqual((plan["seeds_per_task"], plan["seed_range"]), (100, [400007, 400106]))
         self.assertEqual((plan["num_workers"], plan["seconds_per_env_step"]), (2, 0.055))
         self.assertEqual(plan["warnings"], [])
         for kind in ("expected", "upper"):
             self.assertTrue(plan["totals"][kind]["fits_single_allocation"], kind)
             self.assertLess(plan["totals"][kind]["wall_hours_with_workers"], plan["usable_hours_per_allocation"])
         self.assertGreater(plan["totals"]["upper"]["worker_hours"], plan["totals"]["expected"]["worker_hours"])
-        self.assertEqual(sum(row["rollouts"] for row in plan["per_task"]), 450)
-        self.assertEqual(plan["totals"]["upper"]["env_steps"], 150 * (2250 + 1950 + 2700))
+        self.assertEqual(sum(row["rollouts"] for row in plan["per_task"]), 900)
+        self.assertEqual(plan["totals"]["upper"]["env_steps"], 300 * (2250 + 1950 + 2700))
         power = {(row["group"], row["p_help"], row["p_harm"]): row["power"] for row in plan["power"]["rows"]}
         self.assertGreater(power[("pooled_whitelisted", 0.15, 0.0)], power[("per_task", 0.15, 0.0)])
         self.assertGreater(power[("per_task", 0.15, 0.0)], power[("per_task", 0.25, 0.1)])
