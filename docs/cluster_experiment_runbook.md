@@ -167,6 +167,14 @@ and their copy-paste commands are in `docs/recoverability_ladder.md`. Outputs
 go to `$STORAGE_BS/robocasa_rollouts/recovery/xr1_ladder_v2_*`, logs to
 `$STORAGE_BS/robocasa_logs/eval`.
 
+### XR-1 stage-gated re-prompt trial
+
+`scripts/run_stage_gated_reprompt_xr1.sh` uses the same worker pattern
+(`GATE_GPU_PAIRS`, default two workers `"0:1 2:3"`, ports from
+`GATE_PORT_BASE`, default `10360`). Phases (plan, smoke, start, resume,
+status, analyze) and commands are in `docs/stage_gated_reprompt.md`. Outputs
+go to `$STORAGE_BS/robocasa_rollouts/recovery/xr1_stage_gate_*`.
+
 ## 5. Copy the pi0 checkpoint to node-local storage
 
 `/tmp` is local to the allocated node and is empty in a new allocation. Copy
