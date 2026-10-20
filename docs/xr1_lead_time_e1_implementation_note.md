@@ -88,6 +88,36 @@ Everything else in the output is descriptive:
 - timers tuned on the test cohort to the fused detector's test FPR;
 - the atomic and composite strata.
 
+## Run log
+
+**2026-10-21, first run at `cb5ad443`.**
+- Collection ended at 1,522 rollouts (925 successes, 597 failures, all 38 tasks at 10/10),
+  with 0 errors and every seed in [1400007, 1425007).
+- Both exports passed: 760 primary rollouts each, with 1,522 and 1,526 retained.
+- `reproduce` printed `REPRODUCTION OK`.
+- `run` printed the four per-q point estimates, then stopped with
+  `ValueError: Unexpected frozen fused threshold keys: ['early_safe', 'late_time']`.
+- The cause was the descriptive "frozen SAFE + time risk" row: the frozen calibration
+  stores the fused thresholds under the source names of `prospective_matched_fpr`, which
+  this code did not expect.
+- No output file was written, and the input checksums were unchanged.
+- The printed point estimates were:
+
+| q | P lead (FPR) | SAFE + P lead (FPR) | Gain |
+|---|---|---|---|
+| 0.75 | 0.2186 (0.0447) | 0.2449 (0.0474) | 0.0263 |
+| 0.90 | 0.2229 (0.0605) | 0.2512 (0.0579) | 0.0284 |
+| 0.95 (primary) | 0.2252 (0.0553) | 0.2550 (0.0605) | 0.0298 |
+| 1.00 | 0.1639 (0.0368) | 0.2376 (0.0500) | 0.0737 |
+
+**The fix.**
+- It changes only the key mapping of that descriptive row:
+  - `early_safe` maps to the whole SAFE trajectory;
+  - `late_time` maps to the whole time-risk trajectory;
+  - both alarm on `>=`, as in `prospective_matched_fpr.first_alert`.
+- Every primary, bootstrap and null computation is unchanged and deterministic (fixed
+  seeds), so the rerun must print the same four lines. A mismatch is a stop condition.
+
 ## Runbook
 
 Run on the cluster. This follows

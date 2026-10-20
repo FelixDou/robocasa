@@ -322,9 +322,13 @@ def run(args):
                          fpr_wilson95=wilson(e["fp"], sum(not r["failed"] for r in te)),
                          gain_vs_P=qt.boot(e["lead_vec"] - lP, Fte))
     fused = json.load(open(args.fused_calibration))["detectors"]["fused_safe_time"]["thresholds"]
-    if set(fused) != {"score", "time"}:
+    # prospective_matched_fpr names the fused sources early_safe / late_time; for
+    # fused_safe_time both span the whole rollout (SAFE and time risk, alarm on >=).
+    keys = {"early_safe": "safe", "late_time": "risk"} if set(fused) == {"early_safe", "late_time"} else \
+           {"score": "safe", "time": "risk"} if set(fused) == {"score", "time"} else None
+    if keys is None:
         raise ValueError(f"Unexpected frozen fused threshold keys: {sorted(fused)}")
-    e = lead_time.ev(te, {"safe": float(fused["score"]), "risk": float(fused["time"])})
+    e = lead_time.ev(te, {keys[k]: float(v) for k, v in fused.items()})
     sec["safe_plus_risk_frozen"] = dict(thresholds=fused, test=lead_time.strip(e),
                                         fpr_wilson95=wilson(e["fp"], sum(not r["failed"] for r in te)),
                                         gain_vs_P=qt.boot(e["lead_vec"] - lP, Fte))

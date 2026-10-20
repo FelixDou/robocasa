@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import sys
@@ -66,7 +68,7 @@ class TestConfirmLead(unittest.TestCase):
                 paths[name].write_text("".join(json.dumps(r) + "\n" for r in rows))
             (root / "bundle.json").write_text(json.dumps(bundle))
             (root / "fused.json").write_text(
-                json.dumps({"detectors": {"fused_safe_time": {"thresholds": {"score": 1.5, "time": 0.9}}}})
+                json.dumps({"detectors": {"fused_safe_time": {"thresholds": {"early_safe": 1.5, "late_time": 0.9}}}})
             )
             argv = sys.argv
             sys.argv = [
@@ -76,7 +78,8 @@ class TestConfirmLead(unittest.TestCase):
                 "--output", str(root / "out.json"), "--bootstrap", "20", "--null-draws", "2",
             ]
             try:
-                module.main()
+                with contextlib.redirect_stdout(io.StringIO()):
+                    module.main()
             finally:
                 sys.argv = argv
             out = json.loads((root / "out.json").read_text())
@@ -90,6 +93,14 @@ class TestConfirmLead(unittest.TestCase):
             self.assertEqual(set(out["by_task_type"]), {"atomic", "composite"})
             for name in ("global_timer", "safe_plus_risk_frozen", "P_tuned_on_test"):
                 self.assertIn(name, out["secondary"])
+            frozen = out["secondary"]["safe_plus_risk_frozen"]
+            self.assertEqual(frozen["thresholds"], {"early_safe": 1.5, "late_time": 0.9})
+            test_rows = [json.loads(line) for line in paths["test"].read_text().splitlines()]
+            chosen = module.lead_time.sel([dict(r, failed=bool(r["failed"])) for r in test_rows], 10)
+            expected_fp = sum(
+                (not r["failed"]) and (max(r["safe_scores"]) >= 1.5 or max(r["time_scores"]) >= 0.9) for r in chosen
+            )
+            self.assertEqual(frozen["test"]["fp"], expected_fp)
             with self.assertRaises(SystemExit):
                 sys.argv = ["confirm_lead.py", "run", "--calibration", str(paths["cal"]), "--test", str(paths["test"]),
                             "--runtime-bundle", str(root / "bundle.json"), "--fused-calibration", str(root / "fused.json"),
