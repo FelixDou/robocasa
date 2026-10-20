@@ -2956,9 +2956,9 @@ no bearing on the decision.
 #### Durable artifacts
 
 ```text
-Output:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_stage_overdue_oracle_<run timestamp>/
+Output:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_stage_overdue_oracle_20261019_220017/
              stage_overdue_oracle.json, inputs_sha256_before.txt
-Log:       /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_stage_overdue_oracle_<run timestamp>.log
+Log:       /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_stage_overdue_oracle_20261019_220017.log
 Worktree:  /gs/fs/tga-shinoda/felid/robocasa_stage_oracle_9a2a6ee3
 Code:      scripts/xr1_lead_time/stage_overdue_oracle.py and _plan.md (commit 9a2a6ee3)
 ```
