@@ -1,0 +1,428 @@
+% RSS 2027 Stage 1 extended abstract (due 2026-12-04 AoE). Limit: 5 pages of content + 1 page
+% of references. Anonymized: no author names, affiliations, acknowledgements or links.
+% Preamble follows the RSS LaTeX template (IEEEtran conference, Times, natbib numbers,
+% plainnat). The official template (roboticsconference.org/docs/paper-template-latex.tar.gz)
+% could not be downloaded from the drafting environment: before submission, diff this
+% preamble against the official root.tex and use its .cls/.bst if they differ.
+% Compile with pdflatex (Type-1 fonts): pdflatex main; bibtex main; pdflatex main; pdflatex main
+\documentclass[conference]{IEEEtran}
+\usepackage{times}
+\usepackage[numbers]{natbib}
+\usepackage{multicol}
+\usepackage[bookmarks=true]{hyperref}
+
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+
+\newtheorem{proposition}{Proposition}
+
+% Draft notes. Set \notesfalse for the submission build: every note disappears.
+\newif\ifnotes \notestrue
+\newcommand{\pending}[1]{\ifnotes\textcolor{red}{[PENDING: #1]}\fi}
+\newcommand{\verifynote}[1]{\ifnotes\textcolor{orange}{[CHECK: #1]}\fi}
+
+\pdfinfo{
+   /Author ()
+   /Title  (Time Is the Baseline to Beat: Lead Time over a Timer as the Test for VLA Failure Monitors)
+   /Subject (Robot learning; failure detection)
+   /Keywords (vision-language-action;failure detection;conformal calibration;runtime monitoring)
+}
+
+\begin{document}
+
+\title{Time Is the Baseline to Beat:\\Lead Time over a Timer as the Test for VLA Failure Monitors}
+
+\author{Author Names Omitted for Anonymous Review. Paper-ID [add your ID here]}
+
+\maketitle
+
+\begin{abstract}
+On RoboCasa365, a failed vision-language-action (VLA) rollout is one that reaches its time
+limit. A runtime failure monitor therefore competes with a timer that alarms at a fixed
+fraction of that limit. Calibrated at a 5\% false-positive rate (FPR), such a timer flags
+every one of 380 prospective failures, about 12 policy inferences before the timeout. Recall
+cannot separate a learned monitor from this timer; only lead time can. We state this as a
+testable hypothesis: at a matched calibrated FPR, alarming when \emph{either} a
+policy-internal score or the timer crosses its threshold warns earlier than the timer and
+than any combination of time signals alone. We give a split-conformal calibration of this
+two-threshold rule with a finite-sample FPR guarantee. Exploratory evidence on 760
+prospective rollouts of one VLA on 38 tasks favours time. Fusing the SAFE failure score with a
+single timer raises the mean warning lead from 0.090 to 0.207 of the time limit (paired gain
+0.117, 95\% CI 0.060--0.178), and noise fused with that timer reaches only 0.101. But a
+per-task timer, which alarms past the 95th percentile of each task's development success
+durations plus a conformally calibrated margin, reaches 0.195 at 0.045 FPR without reading the
+policy, and adding SAFE to it gains only 0.007 (CI $-0.003$ to $0.019$). Stage~2 tests the hypothesis
+against this stronger time baseline on a preregistered fresh cohort and a second VLA, and asks whether earlier alarms raise task success within a fixed
+time budget when they trigger a reset and retry.
+\end{abstract}
+
+\section{Introduction}
+
+Runtime monitors for VLA policies read the policy's hidden state and predict eventual
+failure~\cite{gu2025safe}, or score how unusual that state is relative to successful
+rollouts~\cite{xu2025faildetect,romer2025fiper}. They are compared with each other, but not
+with what the robot knows for free: how long the attempt has been running.
+
+In RoboCasa365, as in most simulated manipulation benchmarks, an episode ends at first
+success or at a time limit, and in our test cohort every one of 380 failed rollouts ran to
+its limit. A timer at 90\% of the limit therefore flags all of them at 4.7\% FPR. Against it,
+a monitor can add only one thing: an earlier alarm at the same false-alarm rate, which leaves
+time to stop, reset or ask for help. We make this lead time the test, with three
+contributions.
+\begin{enumerate}
+  \item \textbf{A testable hypothesis and endpoint.} We define the warning lead of an alarm
+  as the fraction of the time limit left when it fires (zero for a missed failure) and state
+  four hypotheses with decision rules fixed before Stage~2 data are collected
+  (Sec.~\ref{sec:hypotheses}).
+  \item \textbf{Calibrated OR-fusion with a guarantee.} We alarm when either a
+  policy-internal score or the timer crosses its threshold, and calibrate both thresholds
+  along a nested path with a split-conformal rule that bounds the FPR on a new successful
+  rollout by $\alpha$ in finite samples (Proposition~\ref{prop:fpr}).
+  \item \textbf{Preliminary evidence under a strict protocol.} With thresholds frozen on a
+  separate calibration cohort and evaluated once on a disjoint prospective cohort, SAFE
+  fused with a single timer more than doubles its mean lead, but a per-task timer that never
+  reads the policy matches it, and SAFE adds only 0.007 on top (Sec.~\ref{sec:evidence}).
+\end{enumerate}
+The preliminary data point to no useful effect. A negative confirmatory result would still be
+informative: on timeout-defined benchmarks, policy internals would add little to duration
+statistics, and monitors should be evaluated on failures that end early.
+
+\input{sections/related_work}
+
+\section{Problem Setting}
+\label{sec:setting}
+
+\textbf{Time.} We measure time in four units (Table~\ref{tab:time}). The simulator advances
+in \emph{control steps} at 20\,Hz, RoboCasa's default control rate, which our collection
+code does not change. The policy is queried once per 16-step action chunk and executes the
+whole chunk, so one \emph{policy inference} covers 16 control steps, or 0.8\,s. Inferences
+are our clock: $t = 1, 2, \dots$ counts them, and a monitor can change its decision only
+at an inference. The official time limit of task $k$ is $T_k$ control steps; in
+inferences it is $H_k = \lceil T_k/16 \rceil$, between 29 and 272 for our tasks (22.5 to
+217.5\,s). Videos keep every second control step (10\,Hz) and play at 20 frames per second,
+twice real time. We use them only for figures. Every fraction of time in this paper, such
+as $t/H_k$, the timer fraction $c$ and the lead $\ell$, is a fraction of $H_k$.
+
+\begin{table}[t]
+\centering
+\caption{Units of time, with the failed \emph{OpenCabinet} rollout of Fig.~\ref{fig:qualitative} as an example.}
+\label{tab:time}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.25\columnwidth}>{\raggedright\arraybackslash}p{0.5\columnwidth}>{\raggedright\arraybackslash}p{0.17\columnwidth}@{}}
+\toprule
+Unit & Definition & Example \\
+\midrule
+Control step & one simulator action, 20\,Hz (50\,ms) & 1{,}050 \\
+Policy inference $t$ & one 16-step action chunk (0.8\,s) & 66 \\
+Time limit $T_k$, $H_k$ & official limit, control steps; $H_k = \lceil T_k/16\rceil$ in inferences & 1{,}050; 66 \\
+Video frame & every 2nd control step, shown at 20\,fps & 526 \\
+Elapsed fraction & $t/H_k$ (SAFE alarm) & 30/66 \\
+Warning lead $\ell$ & $(H_k - T)/H_k$ at alarm $T$ & 36/66 = 0.55 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Monitoring.} A monitor watches a rollout of a known task $k$ and decides at each
+inference $t$ whether to alarm, using only the policy features so far, $t$, the task and
+$H_k$. The first crossing is the alarm $T$ (in inferences). FPR is the fraction of successful
+rollouts with any alarm. A rollout of length $L$ inferences ends at success or at $H_k$; for
+a failure ($L = H_k$) the \emph{warning lead} is $\ell = (L - T)/H_k$, or 0 if missed, and an
+alarm at the final inference counts with $\ell = 0$. The mean lead $\bar\ell$ combines recall
+and earliness. Detectors are compared at operating points fixed on a calibration cohort under
+FPR $\le \alpha = 0.05$. Confidence intervals come from a paired bootstrap that resamples
+tasks, then rollouts within each task (2,000 replicates).
+
+\section{Hypotheses}
+\label{sec:hypotheses}
+
+We test four hypotheses. H1 and H2 are evaluated on a fresh confirmatory cohort with the
+decision rules below, fixed before that cohort is opened; H3 and H4 are the Stage~2
+extensions (Sec.~\ref{sec:plan}).
+
+\textbf{H1 (lead time, primary).} At thresholds calibrated for FPR $\le 0.05$, OR-fusing a
+policy-internal score with the per-task timer (Sec.~\ref{sec:method}), the strongest time-only
+monitor we know, increases the mean warning lead over that timer alone.
+\emph{Supported} if the paired bootstrap 95\% CI of $\Delta\bar\ell$ lies above zero, the
+point gain is at least $0.05$ of the time limit, and the fused test FPR is at most $0.075$
+with a Wilson 95\% upper bound at most $0.10$. As a secondary check, the fused detector must
+also beat a timer whose fraction is tuned \emph{on the test cohort} to the fused detector's
+test FPR, which favours the timer.
+
+\textbf{H2 (the gain needs policy evidence).} Fusions that contain no policy-internal
+evidence (Gaussian noise, or SAFE scores resampled within task, each fused with the per-task
+timer) gain less than $0.05$ of the time limit over the per-task timer.
+
+\textbf{H3 (generality).} H1 holds for a second VLA with a different architecture.
+
+\textbf{H4 (utility).} When an alarm triggers a reset and retry, the OR-fused monitor yields
+a higher task success rate than the timer within the same per-task time budget.
+
+Only H1 and H2 are confirmatory; every other interval in this paper is descriptive. On the
+opened data the H1 gain is 0.007, so we expect H1 to fail; that outcome would show that, when
+failure means timeout, a policy's hidden state adds no usable warning over task duration.
+
+\section{Method}
+\label{sec:method}
+
+
+\subsection{Signals}
+
+\textbf{Policy score.} At each inference we take the final-layer action-token hidden state
+of the policy's action head (1,024 dimensions). The SAFE MLP~\cite{gu2025safe} maps it to a
+failure score $u^{(j)}_t$ for each of three training seeds $j$. With per-task location
+$m^{(j)}_k$ and scale $\sigma^{(j)}_k$ estimated on development rollouts, the policy score is
+\begin{equation}
+  s_t = \frac{1}{3}\sum_{j=1}^{3} \frac{\max_{t' \le t} u^{(j)}_{t'} - m^{(j)}_k}{\sigma^{(j)}_k}.
+\end{equation}
+The running maximum makes $s_t$ monotone and does not change when a threshold is first
+crossed. Success-only alternatives (Mahalanobis~\cite{lee2018mahalanobis},
+kNN~\cite{sun2022knn}, PCA-KMeans and RND~\cite{burda2019rnd}) are fitted on successful
+development rollouts and aggregated the same way.
+
+\textbf{Timers.} The global timer alarms once $t \ge c\,H_k$ for a fraction $c \in (0, 1]$
+shared by all tasks; it uses only the task's time limit. The per-task timer uses
+$c_k = \min(1, \rho_k + \delta)$, where $\rho_k$ is the 95th percentile of task $k$'s
+development success durations as fractions of $H_k$ and the shared margin $\delta$ is set by
+Proposition~\ref{prop:fpr} on calibration successes. It needs successful rollouts of each
+task, but no failures and no policy features. We fixed the 95th percentile after auditing the
+opened cohort, so we report 0.75, 0.90 and 1.0 (the longest success) as sensitivity.
+
+\textbf{Time risk (baseline).} The survival-style alternative estimates
+$r_t = \Pr(\text{failure} \mid k, \text{still running at } t)$ from development rollouts: with
+$n_t$ of them still running at $t$ and $f_t$ of those failing, it fits an increasing
+isotonic regression in $t/H_k$ to $(f_t + 0.5)/(n_t + 1)$, weighted by $n_t$. Because every
+failure runs to $H_k$, $r_t$ is a task-specific timer; its smoothing keeps it below a high
+threshold in tasks with few development failures, which is why it misses failures the
+plain timer catches.
+
+\subsection{OR-fusion}
+
+The fused monitor alarms at
+\begin{equation}
+  T = \min\{\, t : s_t > \tau_s \ \text{or}\ t \ge c\,H_k \,\}.
+\end{equation}
+Neither signal is restricted in time: the policy score may alarm early, and the timer
+guarantees an alarm on every failure, at $c\,H_k$ at the latest. The lead gain over the
+timer comes only from failures on which the policy score crosses first.
+
+\subsection{Calibration with a finite-sample FPR guarantee}
+\label{sec:guarantee}
+
+A successful rollout $i$ of length $L_i$ (in inferences) raises a false alarm under
+$(\tau_s, c)$ if and only if $M_i = \max_{t \le L_i} s_t > \tau_s$ or $\rho_i = L_i/H_{k_i}
+\ge c$, so its false alarm depends only on the pair $(M_i, \rho_i)$. Fix in advance a path
+$\gamma(\lambda) = (\tau_s(\lambda), c(\lambda))$, $\lambda \in [0, 1]$, with both
+coordinates continuous and nondecreasing, so that a larger $\lambda$ is more conservative and
+$\gamma(1)$ never alarms on a success. For each calibration success define
+\begin{equation}
+  V_i = \min\{\lambda : M_i \le \tau_s(\lambda) \ \text{and}\ \rho_i < c(\lambda)\},
+\end{equation}
+the least conservative point on the path at which rollout $i$ stays silent. Because the path
+is monotone, rollout $i$ is silent at $\lambda$ exactly when $\lambda \ge V_i$.\footnote{The
+strict $\rho_i < c(\lambda)$ makes the set right-open; taking $c$ on a finite grid, as the
+timer's resolution of one inference does anyway, makes the minimum attained.}
+
+\begin{proposition}
+\label{prop:fpr}
+Let $n$ calibration successes and a new successful rollout be exchangeable, and let the path
+$\gamma$ not depend on the calibration successes. Set $\hat\lambda = V_{(\lceil (n+1)(1-\alpha)
+\rceil)}$, the $\lceil (n+1)(1-\alpha) \rceil$-th smallest $V_i$ (or $\hat\lambda = 1$ if
+that rank exceeds $n$). Then the OR-fused monitor at $\gamma(\hat\lambda)$ raises a false
+alarm on the new success with probability at most $\alpha$.
+\end{proposition}
+\begin{IEEEproof}
+The new rollout alarms at $\hat\lambda$ if and only if $V_{n+1} > \hat\lambda = V_{(r)}$ with
+$r = \lceil (n+1)(1-\alpha) \rceil$. By exchangeability, the rank of $V_{n+1}$ among
+$V_1, \dots, V_{n+1}$ is uniform on $\{1, \dots, n+1\}$ (ties broken at random), so
+$\Pr(V_{n+1} > V_{(r)}) \le 1 - r/(n+1) \le \alpha$; this is the split-conformal quantile
+lemma~\cite{angelopoulos2021gentle} applied to the scalar $V$.
+\end{IEEEproof}
+
+The path may use any data except calibration successes, such as development rollouts or
+calibration \emph{failures}. The guarantee is marginal over tasks; a per-task version needs
+19 calibration successes per task. The deployed FPR is Beta-distributed given calibration: it
+exceeds 0.075 with probability 0.065 for $n = 114$, but 0.021 for $n = 380$.
+
+The preliminary results below use the simpler joint search of the original protocol: among
+all pairs of observed calibration maxima with calibration FPR $\le \alpha$, keep the pair with
+the largest mean lead (highest recall for the time-risk fusions). Selecting the best of many
+non-nested pairs on the same 114 successes has no finite-sample guarantee and is optimistic,
+which matches the test FPRs of 0.058--0.068 we observe for two-threshold detectors against
+0.044 on calibration. The per-task timer rows already use Proposition~\ref{prop:fpr}, with the
+path $\delta = \lambda$, $\tau_s = u + s\lambda$ and $(u, s)$ chosen on calibration failures;
+Stage~2 uses it for every detector.
+
+\section{Preliminary Evidence}
+\label{sec:evidence}
+
+\input{figures/qualitative/fig_qualitative}
+
+\textbf{Setup.} We use the released Xiaomi-Robotics-1 RoboCasa365
+checkpoint~\cite{xiaomi2026robotics}, which executes each 16-step action chunk in full, on the
+38 official RoboCasa365 tasks~\cite{nasiriany2024robocasa,robocasa365} with published success
+between 5 and 45 of 50 and enough failures (10 atomic, 28 composite; failures last 29--272
+inferences). Disjoint cohorts serve one purpose each: development (1,824 rollouts) fits SAFE
+and the time risk; calibration (3 successes and 3 failures per task; 454 rollouts including
+those past the quota) sets thresholds; the prospective test (10 per class per task) is
+evaluated once; a confirmatory cohort of the same size is reserved for Stage~2. SAFE, its
+normalization and the time risk were frozen before the test was collected; the timers and
+fused detectors were added later, with thresholds from calibration only, so the results below
+are exploratory.
+
+\begin{table}[t]
+\centering
+\caption{Prospective test (380 successes, 380 failures), thresholds from calibration at FPR
+$\le 0.05$. $\bar\ell$ = mean warning lead as a fraction of the time limit (miss = 0);
+Med = median lead in inferences over detected failures; @.75 = failures alarmed by $0.75\,H_k$.
+$^\ast$Mean over 20 draws (range of $\bar\ell$ 0.088--0.134). $^\dagger$95th percentile of
+development success durations, margin by Proposition~\ref{prop:fpr} on the 114 calibration
+successes.}
+\label{tab:main}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Detector & Recall & FPR & $\bar\ell$ & Med & @.75 \\
+\midrule
+Timer ($c = 0.903$) & 1.000 & 0.047 & 0.090 & 11.5 & 0.000 \\
+Time risk & 0.632 & 0.047 & 0.120 & 16.5 & 0.211 \\
+Time risk + timer & 1.000 & 0.050 & 0.125 & 11.0 & 0.105 \\
+Noise + timer$^\ast$ & 1.000 & 0.066 & 0.101 & -- & -- \\
+SAFE only & 0.566 & 0.039 & 0.190 & 23.0 & 0.421 \\
+SAFE + time risk & 0.955 & 0.058 & 0.184 & 12.0 & 0.311 \\
+Per-task timer$^\dagger$ & 1.000 & 0.045 & 0.195 & 13.5 & 0.342 \\
+SAFE + per-task timer$^\dagger$ & 1.000 & 0.042 & 0.202 & 14.0 & 0.389 \\
+\textbf{SAFE + timer} & 1.000 & 0.058 & 0.207 & 10.0 & 0.421 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=\columnwidth, height=4.2cm, xmin=0.3, xmax=1, ymin=0, ymax=1.02,
+  xlabel={elapsed fraction of the time limit $t/H_k$},
+  ylabel={failures alarmed (of 380)},
+  label style={font=\scriptsize}, tick label style={font=\scriptsize},
+  legend style={font=\scriptsize, at={(0.02,0.98)}, anchor=north west, draw=none, fill=none},
+  legend cell align=left, grid=major, grid style={gray!20}]
+\addplot[gray, dashed, thick] coordinates {(0.30,0.000) (0.90,0.000) (0.92,0.842) (0.94,1.000) (1.00,1.000)};
+\addlegendentry{Timer}
+\addplot[black, dotted, thick] coordinates {(0.30,0.000) (0.60,0.000) (0.62,0.026) (0.64,0.026) (0.66,0.053) (0.68,0.079) (0.70,0.079) (0.72,0.079) (0.74,0.105) (0.76,0.105) (0.78,0.158) (0.80,0.158) (0.82,0.184) (0.84,0.211) (0.86,0.237) (0.88,0.237) (0.90,0.237) (0.92,0.842) (0.94,1.000) (1.00,1.000)};
+\addlegendentry{Time risk + timer}
+\addplot[orange!80!black] coordinates {(0.30,0.000) (0.40,0.000) (0.42,0.026) (0.44,0.026) (0.46,0.026) (0.48,0.053) (0.50,0.053) (0.52,0.053) (0.54,0.053) (0.56,0.063) (0.58,0.066) (0.60,0.074) (0.62,0.100) (0.64,0.100) (0.66,0.132) (0.68,0.161) (0.70,0.192) (0.72,0.229) (0.74,0.305) (0.76,0.318) (0.78,0.387) (0.80,0.413) (0.82,0.471) (0.84,0.513) (0.86,0.579) (0.88,0.597) (0.90,0.613) (0.92,0.684) (0.94,0.750) (0.96,0.821) (0.98,0.895) (1.00,0.955)};
+\addlegendentry{SAFE + time risk}
+\addplot[blue!75!black, thick] coordinates {(0.30,0.000) (0.32,0.003) (0.34,0.003) (0.36,0.011) (0.38,0.021) (0.40,0.024) (0.42,0.024) (0.44,0.024) (0.46,0.034) (0.48,0.045) (0.50,0.079) (0.52,0.103) (0.54,0.126) (0.56,0.158) (0.58,0.187) (0.60,0.221) (0.62,0.247) (0.64,0.308) (0.66,0.342) (0.68,0.355) (0.70,0.379) (0.72,0.389) (0.74,0.400) (0.76,0.424) (0.78,0.437) (0.80,0.458) (0.82,0.466) (0.84,0.474) (0.86,0.487) (0.88,0.495) (0.90,0.500) (0.92,0.500) (0.94,0.500) (0.96,0.563) (0.98,1.000) (1.00,1.000)};
+\addlegendentry{SAFE + timer}
+\end{axis}
+\end{tikzpicture}
+\caption{Fraction of the 380 test failures alarmed by each elapsed fraction of the time
+limit. SAFE + timer catches half of the failures early and the rest at its timer fallback
+($c = 0.96$).}
+\label{fig:lead}
+\end{figure}
+
+\textbf{The timer is the baseline to beat.} The timer ($c = 0.903$) alarms on all 380 test
+failures at 0.047 FPR with a fixed lead of 0.090 (Table~\ref{tab:main}). The time-risk curve
+misses 140 failures, all in 14 tasks whose smoothed curve never reaches its threshold, so recall
+gains measured against it (to 0.90--0.96 for SAFE and four success-only scores) vanish here.
+
+\textbf{SAFE adds lead over a single timer.} SAFE + timer raises the mean lead to 0.207 (paired
+gain 0.117, CI 0.060--0.178; 20.2 against 11.7 inferences) and flags 42\% of failures by
+$0.75\,H_k$ (Figs.~\ref{fig:qualitative} and~\ref{fig:lead}), at 0.058 test FPR. Noise fused
+with the timer reaches 0.101, and the time risk with the timer 0.125. Among rollouts still
+running at 10, 25, 50 and 75\% of the limit, SAFE's within-task ROC-AUC is 0.55--0.60, against
+0.41--0.51 for noise. Bootstrapping calibration as well, with thresholds re-selected, keeps the
+gain positive (0.125, CI 0.031--0.246) but lets the fused test FPR reach 0.16, so threshold
+uncertainty dominates. On test-cohort frontiers, OR and AND fusion reach the same lead at 5\%
+FPR (0.208 and 0.211); OR keeps the timer's guaranteed alarm.
+
+\textbf{A per-task timer removes the gain (H1, exploratory).} The per-task timer reaches
+$\bar\ell = 0.195$ at 0.045 FPR without reading the policy. SAFE + timer leads it by an
+insignificant 0.012 (CI $-0.044$ to $0.063$), and by $-0.003$ against a per-task timer tuned on
+test to the same FPR. SAFE + per-task timer reaches 0.202, a gain of 0.007 (CI $-0.003$ to
+$0.019$), far below the 0.05 margin of H1. The two effects cancel across tasks:
+in the 14 tasks where the time risk never fires, SAFE + timer's mean lead is 0.405 against
+0.221 for the per-task timer; in the other 24 it is 0.092 against 0.180.
+The percentile matters: with the longest development success ($q = 1$) the per-task timer
+reaches only 0.125 and SAFE adds 0.057 (CI $-0.003$ to $0.119$); with $q = 0.90$, 0.169 and
+0.028 (CI $-0.012$ to $0.067$).
+
+\textbf{No early warning yet.} No detector flags more than 8\% of failures by half of the
+limit; whether a late warning is usable is H4.
+
+\section{Stage 2 Plan}
+\label{sec:plan}
+
+\textbf{E1: Confirmatory test of H1 and H2.} A fresh cohort of 760 rollouts (10 per class per
+task, new environment seeds) is being collected and has not been opened. Before opening it,
+we amend its preregistration with the per-task timer (95th percentile of development
+successes, margin by Proposition~\ref{prop:fpr}) as the primary comparator and $\Delta\bar\ell$ as
+the primary endpoint, with the H1 and H2 decision rules of Sec.~\ref{sec:hypotheses}. The
+earlier recall endpoint against the time risk becomes secondary. We enlarge calibration to
+10 successes per task ($n = 380$), apply Proposition~\ref{prop:fpr} with a path chosen on
+development data, and bootstrap the calibration cohort as well as the test cohort,
+re-selecting thresholds in each replicate, so the intervals include threshold
+uncertainty.\pending{merge the amendment (PR \#3) and name the calibration seed range before opening the confirmatory cohort.}
+
+\textbf{E2: Second policy (H3).} We repeat the timer, time-risk, SAFE and fused rows with
+$\pi_0$ or RLDX-1 on the same 38 tasks, reusing saved rollouts where hidden states were
+recorded. A policy with overlapping chunks also lets
+us run chunk-consistency monitors~\cite{agia2024sentinel,huang2026actprobe}.
+
+\textbf{E3: Closed-loop reset and retry (H4).} On 8 to 10 tasks with mid-range success, each
+episode gets a budget of $2H_k$ inferences. Under each monitor (none, timer, SAFE + timer),
+an alarm ends the attempt, resets the scene to its initial state and starts a new attempt
+while budget remains; without a monitor, the retry starts at the timeout. We compare success
+within the budget, paired by environment seed, and count successes aborted by false alarms.
+The gain is bounded by the failure rate times the retry
+success rate times the fraction of failures whose extra lead leaves room for a retry; a null
+result would bound the value of any such monitor on this benchmark.
+
+\textbf{E4: Stronger baselines and checks.} (i) Action-only monitors that need no hidden state:
+chunk magnitude and the disagreement of a second flow sample. (ii) Richer time baselines: a
+stall detector on end-effector motion and a discrete-time hazard model on simple
+observables, so that ``time'' means the best signal available without the policy's
+internals. (iii) OR- and AND-fusion compared on full recall--FPR curves rather than single
+points. (iv) SAFE faithfulness checks and precision at deployment
+prevalence. (v) An unseen-task split, holding
+tasks out of SAFE training and normalization; the timer needs only $H_k$ and transfers as is.
+
+\textbf{E5: Failures that end early.} Every failure here ends at the limit. We will label,
+on a subset, when a failure became unrecoverable (a dropped or displaced object), and report
+lead relative to that moment, since these are the failures a deployed robot most needs to
+catch early.
+
+\section{Limitations}
+
+The preliminary results come from one policy in simulation, on a cohort opened before the
+fused detectors and the timer were defined; only E1 can make them confirmatory. The
+two-threshold detectors exceed the FPR budget on test, which Proposition~\ref{prop:fpr} and
+a larger calibration cohort address. The timer, the time risk and the per-task normalization
+assume that the task and its time limit are known, and the policy score needs white-box
+access to the policy and development rollouts of each task; on our data, that access bought 0.007 of lead over the per-task timer. Test cohorts are balanced by
+quota, so recall and FPR are per class rather than at deployment prevalence.
+
+\section{Conclusion}
+
+When failure means timeout, a calibrated timer catches every failure, and the question for a
+learned monitor becomes how much earlier it can warn at the same false-alarm rate. On one VLA
+and 38 tasks, fusing a hidden-state failure score with a single timer more than doubled the
+mean warning lead, but a per-task timer built from development success durations matched
+it without reading the policy, and the hidden state added 0.007 on top of it. Stage~2 tests this against the
+per-task timer on a fresh cohort and a second policy, with a finite-sample FPR guarantee, and asks the question that decides
+its value: whether the extra warning lets a robot recover more often within the same time.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

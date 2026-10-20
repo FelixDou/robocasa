@@ -1,0 +1,9 @@
+# Large frozen prediction dumps (copies of cluster outputs; see README.md)
+review_data/*.jsonl
+# LaTeX build products and page previews
+*.aux
+*.bbl
+*.blg
+*.out
+*.log
+pg-*.png

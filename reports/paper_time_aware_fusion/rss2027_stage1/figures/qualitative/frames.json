@@ -1,0 +1,34 @@
+{
+ "task": "OpenCabinet",
+ "horizon": 66,
+ "fail_rollout": "ad40212bc300d3f410d0cf4c",
+ "fail_video": "/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_prospective_matched_fpr_20260815_163700/prospective_test_collection/official_safe_all_retained/env_records/rollout_00000589--ad40212bc300d3f410d0cf4c.mp4",
+ "success_rollout": "06cb36ea36d5dcff07a0ce0b",
+ "success_video": "/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_prospective_matched_fpr_20260815_163700/prospective_test_collection/official_safe_all_retained/env_records/rollout_00000566--06cb36ea36d5dcff07a0ce0b.mp4",
+ "success_length": 33,
+ "tau_s": 0.6476285379506899,
+ "timer_c": 0.9026548672566371,
+ "safe_alarm": 30,
+ "timer_alarm": 60,
+ "lead_safe_inferences": 36,
+ "lead_timer_inferences": 6,
+ "frames": {
+  "t_early": {
+   "inference": 10,
+   "env_step": 144
+  },
+  "t_safe_alarm": {
+   "inference": 30,
+   "env_step": 464
+  },
+  "t_timer_alarm": {
+   "inference": 60,
+   "env_step": 944
+  },
+  "t_end": {
+   "inference": 66,
+   "env_step": 1040
+  }
+ },
+ "total_env_steps": 1040
+}

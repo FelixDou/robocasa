@@ -1,0 +1,50 @@
+% Related Work for the RSS 2027 Stage 1 draft.
+% Merged from /mnt/project-files/paper/related_work.tex (related-work thread, 2026-10-17),
+% shortened for the 5-page limit and reframed around the timer and lead time.
+% Claims about other papers were checked by that thread against abstracts or proceedings
+% pages; RESCUE was read from its arXiv abstract only.
+
+\section{Related Work}
+\label{sec:related}
+
+\textbf{Failure detection from policy internals.}
+SAFE learns a failure score from a VLA's last-layer features and thresholds it with a
+functional conformal band~\cite{gu2025safe}; we reuse its implementation. Follow-ups change
+the training data~\cite{rajaprakash2026safecast}, labels~\cite{park2026hideseek,ma2026failurespot},
+features~\cite{yang2026triinfo,zhu2026vlascope} or policy~\cite{soddy2026memoryvla}. None
+reports an elapsed-time detector. SAFE removes the duration shortcut by truncating rollouts to
+equal length~\cite{gu2025safe}, which a deployed monitor cannot do. Duration is a shortcut
+feature~\cite{geirhos2020shortcut}, but its causal form is legitimate evidence online, so we
+make it the baseline.
+
+\textbf{Action-space and success-only detectors.}
+STAC~\cite{agia2024sentinel} and VLA-FAIL~\cite{seligmann2026vlafail} compare overlapping
+action chunks, and ActProbe~\cite{huang2026actprobe} feeds chunk consistency and magnitude to
+a task-conditioned LSTM, beating internal-feature baselines on RoboCasa. Our policy executes
+each chunk in full, so overlap signals are undefined; chunk magnitude and a second flow sample
+are Stage~2 baselines. A task-conditioned recurrent detector can also learn how long each task
+takes, which our timers make explicit. FAIL-Detect~\cite{xu2025faildetect} and
+FIPER~\cite{romer2025fiper} score inputs, outputs or embeddings against successful rollouts
+only. FIPER alarms when two conformal scores \emph{both} exceed their thresholds, which
+suppresses false alarms; we alarm when \emph{either} crosses, because the policy score and
+the timer catch failures at different times, and calibrate the pair jointly.
+
+\textbf{World-model verifiers and VLM monitors.}
+CheckVLA~\cite{liu2026checkvla} is the closest work on our benchmark. It checks each action
+chunk against an action-conditioned world model on RoboCasa365, calibrates a conformal
+threshold to a 5\% episode-level rate of unnecessary interventions, and repairs the chunk
+with the same VLA. Foresight~\cite{wang2026foresight} uses world-model latents. Neither compares against
+elapsed time, and either risk could be fused with a timer as we fuse SAFE. LLM and VLM
+monitors~\cite{agia2024sentinel,liu2023reflect,sinha2024realtime,zhou2025codeasmonitor,duan2025aha}
+are slower and complementary.
+
+\textbf{Time, calibration and intervention.}
+VLA confidence drifts over a task~\cite{zollo2026calibration}. Our time-risk baseline is a per-task
+survival-style estimate~\cite{kaplan1958,cox1972}, and lead time at a fixed false-alarm
+budget is the accuracy--earliness trade-off of early time-series
+classification~\cite{xing2012early}. Split-conformal thresholds give finite-sample
+false-positive control under exchangeability~\cite{angelopoulos2021gentle}; we extend the
+construction to a two-signal OR rule (Sec.~\ref{sec:guarantee}). RESCUE~\cite{ahmedt2026rescue}
+finds that good detection scores do not guarantee lower intervention cost, and CheckVLA and
+FLARE~\cite{zhao2026flare} couple detection to repair. Hence our closed-loop Stage~2 test: an
+earlier alarm matters only if acting on it raises success.

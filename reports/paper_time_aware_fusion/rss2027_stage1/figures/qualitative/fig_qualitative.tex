@@ -1,0 +1,51 @@
+% Qualitative figure: one failed OpenCabinet rollout (prospective test), frames + SAFE score.
+% Data: rollout_curves.csv and frames.json from make_qualitative_data.py.
+% Frames: put f1.png..f4.png in \qualdir/frames/ (see README.md); grey placeholders until then.
+% Needs: tikz, pgfplots, graphicx. Set \qualdir before \input if the folder is elsewhere.
+\providecommand{\qualdir}{figures/qualitative}
+\newcommand{\qualframe}[2]{%
+  \begin{minipage}[t]{0.235\columnwidth}\centering
+  \IfFileExists{\qualdir/frames/#1.png}%
+    {\includegraphics[width=\linewidth]{\qualdir/frames/#1.png}}%
+    {\tikz\node[draw=gray!60, fill=gray!12, minimum width=\linewidth, minimum height=0.75\linewidth,
+       font=\tiny, text=gray!70!black, inner sep=0]{frame #1};}\\[-1pt]
+  {\scriptsize #2}\end{minipage}}
+\begin{figure}[t]
+\centering
+\qualframe{f1}{$t=10$}\hfill
+\qualframe{f2}{$t=30$: SAFE}\hfill
+\qualframe{f3}{$t=60$: timer}\hfill
+\qualframe{f4}{$t=66$: limit}\\[3pt]
+\begin{tikzpicture}
+\begin{axis}[width=\columnwidth, height=3.6cm, xmin=0, xmax=1, ymin=-1.9, ymax=3.1,
+  xlabel={elapsed fraction of the time limit $t/H_k$}, ylabel={SAFE score $s_t$},
+  label style={font=\scriptsize}, tick label style={font=\scriptsize},
+  xlabel shift=-3pt, ylabel shift=-4pt,
+  legend style={font=\tiny, at={(0.01,0.99)}, anchor=north west, draw=none, fill=white, fill opacity=0.8, text opacity=1},
+  legend cell align=left, grid=major, grid style={gray!15}, unbounded coords=jump]
+\addplot[blue!75!black, thick] table[col sep=comma, x=frac, y=fail_score] {\qualdir/rollout_curves.csv};
+\addlegendentry{failed rollout}
+\addplot[green!50!black, thick, densely dashed] table[col sep=comma, x=frac, y=succ_score] {\qualdir/rollout_curves.csv};
+\addlegendentry{successful rollout, same task}
+\addplot[red, dashed, domain=0:1, samples=2] {0.648};
+\addlegendentry{SAFE threshold $\tau_s$}
+\draw[gray!70!black, thick, dotted] (axis cs:0.9027,-1.9) -- (axis cs:0.9027,3.1)
+  node[pos=0.93, left, font=\tiny, text=gray!40!black] {timer, $c=0.90$};
+\draw[orange!80!black, thick, dashdotted] (axis cs:0.5758,-1.9) -- (axis cs:0.5758,3.1)
+  node[pos=0.80, right, font=\tiny, text=orange!50!black] {per-task timer};
+\fill[red!80!black] (axis cs:0.4545,0.648) circle (1.6pt);
+\draw[<->, >=stealth, red!70!black] (axis cs:0.4545,-1.65) -- (axis cs:1,-1.65)
+  node[midway, above, font=\tiny] {lead 36 inferences ($\approx$29\,s)};
+\draw[<->, >=stealth, orange!70!black] (axis cs:0.5758,-0.85) -- (axis cs:1,-0.85)
+  node[midway, above, font=\tiny] {28};
+\draw[<->, >=stealth, gray!50!black] (axis cs:0.9091,0.0) -- (axis cs:1,0.0)
+  node[midway, above, font=\tiny] {6};
+\end{axis}
+\end{tikzpicture}
+\caption{One failed \emph{OpenCabinet} rollout from the prospective test (chosen to
+illustrate; the median SAFE-first lead is smaller). The SAFE score crosses its calibrated
+threshold at $t = 30$ of $H_k = 66$ inferences, 36 inferences before the time limit; the timer
+alarms at $t = 60$, and the per-task timer, which never reads the policy, at $t = 38$. Dashed: the longest of the 9 (out of 10) successful test rollouts of this task that stay
+below the threshold; it ends at $t = 33$.}
+\label{fig:qualitative}
+\end{figure}
