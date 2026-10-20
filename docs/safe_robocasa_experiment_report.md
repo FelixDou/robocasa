@@ -151,6 +151,20 @@ The task-then-rollout CI was [−0.021, +0.129], so the pre-declared rule gave
 **NO-GO**. The oracle reads privileged simulator stage predicates. A
 progress-detector methods paper is not pursued now.
 
+The preregistered lead-time test (Section 15.13; Amendment 1) then compared
+SAFE + P with P on the confirmatory cohort, using a new 760-rollout calibration
+cohort.
+- **H1 was not supported.** SAFE + P added **+0.030** of the time limit in mean
+  warning lead (0.255 against 0.225), with a decision-bootstrap CI of
+  [+0.007, +0.093] at FPR 0.061. The CI lies above zero, but the point gain falls
+  short of the registered 0.05 margin.
+- **H2 was supported.** Null scores fused with P added at most +0.009.
+- **Descriptively:**
+  - P leads a global timer by 0.10;
+  - the original fused SAFE + time-risk design gives 0.035 *less* lead than P;
+  - the SAFE gain is concentrated in atomic tasks (+0.081 against +0.012 on
+    composites).
+
 ## 1. Scope, labels, and evaluation rules
 
 ### 1.1 Raw SAFE target
@@ -1892,6 +1906,15 @@ The present evidence supports the following hierarchy of conclusions:
     the oracle reads privileged stage predicates, it is an upper bound for any
     deployable progress detector. The detection paper keeps the evaluation
     framing: warning lead over P at matched FPR.
+18. **Confirmatory lead test (Section 15.13): H1 not supported, H2 supported.**
+    Against the per-task timer P, SAFE + P added +0.030 of mean warning lead.
+    The decision CI [+0.007, +0.093] lies above zero, but the gain is below the
+    registered 0.05 margin. Fused null scores added at most +0.009. The policy's
+    hidden state therefore carries a small, real warning signal beyond per-task
+    duration; whether it reaches the declared practical margin was not shown.
+    Per-task timing provides most of the lead: P is 0.10 above a global timer,
+    and the original fused SAFE + time-risk design is 0.035 below P. The SAFE gain
+    is concentrated in atomic tasks (+0.081, descriptive).
 
 ## 15. Recommended next experiments
 
@@ -2961,6 +2984,178 @@ Output:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_stage_overdue_
 Log:       /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_stage_overdue_oracle_20261019_220017.log
 Worktree:  /gs/fs/tga-shinoda/felid/robocasa_stage_oracle_9a2a6ee3
 Code:      scripts/xr1_lead_time/stage_overdue_oracle.py and _plan.md (commit 9a2a6ee3)
+```
+
+### 15.13 Confirmatory lead-time test over the per-task timer (E1): H1 not supported, H2 supported
+
+#### Registration and status
+
+The endpoint, comparator, margins and decision rules are those of Amendment 1,
+[`xr1_confirmatory_amendment_1_lead_time.md`](xr1_confirmatory_amendment_1_lead_time.md)
+(FelixDou/robocasa PR #3, opened 2026-10-17 22:06 JST).
+
+The implementation details the amendment left open were committed before any
+lead-time quantity was computed on the confirmatory cohort, in
+[`xr1_lead_time_e1_implementation_note.md`](xr1_lead_time_e1_implementation_note.md)
+(commit `cb5ad443`). They are:
+- the calibration seed range;
+- the bootstrap that resamples calibration and test together and refits;
+- the H2 null rule.
+
+The confirmatory cohort was first scored on 2026-10-19 at 20:51 JST, by the
+recall test in Section 15.11. Its recall and FPR were therefore known. No timer,
+P or lead quantity had been computed on it before this run.
+
+- **Primary.** The comparator is the per-task quantile timer P (q = 0.95), and the
+  detector is SAFE + P (OR rule). Both are calibrated with Proposition 1 on a new
+  calibration cohort. The endpoint is mean warning lead (H_k − T)/H_k over failures,
+  with a miss counted as 0.
+- **H1** is supported if all of these hold:
+  - the 95% CI of the lead gain from the decision bootstrap lies above 0;
+  - the point gain is at least 0.05;
+  - the fused test FPR is at most 0.075, with a Wilson upper bound of at most 0.10.
+- **H2** is supported if noise + P and within-task resampled SAFE + P each gain
+  less than 0.05 over P, averaged over 20 draws.
+
+#### Data
+
+- **Calibration cohort (new).**
+  - Same frozen server, tasks and shards as the confirmatory cohort; collector code
+    from the pinned worktree at `4e82e5c8`.
+  - Official Xiaomi seed protocol with base seed 1400007, so seeds lie in
+    [1400007, 1425007).
+  - Quota of the first 10 successes and 10 failures per task, everything retained,
+    no videos.
+  - 1,522 rollouts retained (925 successes, 597 failures), seeds 1400007–1424529,
+    0 errors. All 38 tasks reached 10/10.
+  - One allocation boundary was crossed with `--resume`, which replays completed
+    resets so that seeds map to the same scenes; no rollout was quarantined.
+  - Scored by the frozen SAFE seeds 0/1/2 (group `lead_calibration`) and
+    assembled by `run_prospective_matched_fpr export`. Export checks passed: seed
+    range, frozen task coverage, and disjointness from development, the August
+    calibration, the August test and the confirmatory cohort.
+  - Primary: 760 rollouts (380/380).
+- **Test cohort.** The Section 15.11 confirmatory cohort, re-assembled from its
+  frozen scores: 1,526 retained, 760 primary.
+  - It matched `confirm/event_predictions.jsonl` rollout by rollout.
+  - The frozen SAFE normalization reproduced `safe_scores` exactly (max abs diff 0).
+  - Every test failure ran to H_k.
+- **Code checks.** `confirm_lead.py reproduce` matched the registered dry run
+  (`quantile_timer.json`) at every q, and made identical refits on 25 resampled
+  calibration sets.
+- **Input checksums** were unchanged before and after the run:
+  - `runtime_bundle.json`: `c4378ba0…`;
+  - `baseline_calibration.json`: `b5870590…`;
+  - `confirm/event_predictions.jsonl`: `572913a6…`.
+- **Run history.**
+  - The first run, at `cb5ad443`, printed the per-q point estimates and then
+    stopped on a descriptive row: it did not recognise the frozen fused threshold
+    names `early_safe` / `late_time`. It wrote no output.
+  - Only that key mapping was fixed, at `a82acc0c`.
+  - The rerun reproduced the four per-q lines exactly. Both runs are recorded in
+    the implementation note.
+
+#### Verdict
+
+**Table 15.13a — Registered criteria (primary cohort, q = 0.95).**
+
+| Criterion | Value | Result |
+|---|---|---|
+| Lead gain of SAFE + P over P, decision-bootstrap 95% CI above 0 | +0.030 [+0.007, +0.093] | pass |
+| Point gain ≥ 0.05 | +0.030 | **fail** |
+| Fused test FPR ≤ 0.075 | 0.061 (23/380) | pass |
+| Fused FPR Wilson upper bound ≤ 0.10 | [0.041, 0.089] | pass |
+| **H1** | | **not supported** |
+| H2: noise + P, gain over P (mean / max of 20 draws) | +0.002 / +0.009 | below 0.05 |
+| H2: resampled SAFE + P, gain over P (mean / max of 20 draws) | +0.002 / +0.007 | below 0.05 |
+| **H2** | | **supported** |
+
+**Table 15.13b — Mean warning lead on the primary test cohort (fraction of H_k,
+miss = 0).** Thresholds come from the new calibration cohort, except where
+marked. Gains are against P (q = 0.95), with a test-only task-then-rollout
+bootstrap (2,000 replicates); they are descriptive.
+
+| Detector | Lead | Recall | FPR | Gain vs P |
+|---|---:|---:|---:|---|
+| P, per-task timer (primary comparator) | 0.225 | 1.000 | 0.055 | — |
+| **SAFE + P (primary detector)** | **0.255** | 1.000 | 0.061 | +0.030 (decision CI [+0.007, +0.093]) |
+| Global timer | 0.123 | 1.000 | 0.024 | −0.102 [−0.147, −0.059] |
+| SAFE + global timer | 0.215 | 1.000 | 0.047 | −0.011 [−0.068, +0.045] |
+| Time risk + global timer | 0.154 | 1.000 | 0.040 | −0.072 [−0.114, −0.034] |
+| SAFE + time risk, joint lead search | 0.224 | 0.989 | 0.047 | −0.002 [−0.032, +0.026] |
+| SAFE + time risk, frozen (original fused design, Section 15.11) | 0.190 | 0.955 | 0.039 | −0.035 [−0.066, −0.007] |
+| Global timer tuned on test to SAFE + P's FPR | 0.231 | 1.000 | 0.055 | SAFE + P leads by +0.024 [−0.022, +0.074] |
+| P tuned on test to SAFE + P's FPR | 0.240 | 1.000 | 0.061 | SAFE + P leads by +0.015 [−0.007, +0.041] |
+
+**Table 15.13c — Quantile sensitivity (not decision-bearing).**
+
+| q | P lead (FPR) | SAFE + P lead (FPR) | Gain |
+|---|---|---|---:|
+| 0.75 | 0.219 (0.045) | 0.245 (0.047) | +0.026 |
+| 0.90 | 0.223 (0.061) | 0.251 (0.058) | +0.028 |
+| **0.95** | **0.225 (0.055)** | **0.255 (0.061)** | **+0.030** |
+| 1.00 | 0.164 (0.037) | 0.238 (0.050) | +0.074 |
+
+**Table 15.13d — Task-type strata (descriptive; FPR is not controlled per
+stratum).**
+
+| Stratum | P lead (FPR) | SAFE + P lead (FPR) | Gain |
+|---|---|---|---:|
+| Atomic (10 tasks, 100/100) | 0.291 (0.040) | 0.372 (0.050) | +0.081 |
+| Composite (28 tasks, 280/280) | 0.202 (0.061) | 0.213 (0.064) | +0.012 |
+
+#### Interpretation
+
+- **H1 is not supported, but the gain is not zero.** The policy's hidden state
+  adds warning lead over the per-task timer: +0.030 of the time limit, with a
+  decision CI above zero. The point estimate is below the 0.05 margin declared in
+  advance. The CI's upper end (0.093) does not rule out a gain above the margin,
+  so this is a failure to reach the margin, not evidence that the gain is
+  negligible. The opened-cohort dry run (+0.007) underestimated the gain.
+- **The gain is a policy signal.** Uninformative scores fused with P and
+  calibrated the same way add at most 0.009 (H2). SAFE's contribution is
+  therefore not an artifact of fusing any score with a timer.
+- **Per-task timing gives most of the lead.** P alone leads the global timer by
+  0.10. SAFE + global timer reaches about what P reaches without reading the
+  policy. Much of what SAFE adds to a global timer is task-specific duration
+  information.
+- **The original fused design (Section 15.11) loses to P on lead.** Frozen
+  SAFE + time risk, which was confirmed against the time-risk detector on recall,
+  gives 0.035 less lead than P, with a CI below zero. The recall result stands,
+  but the time-risk detector is not a strong comparator.
+- **Part of the gain is FPR budget.** SAFE + P ran at 0.061 test FPR against
+  P's 0.055. A P timer tuned on the test cohort to the same FPR closes half of
+  the gap (+0.015 left, CI includes 0). This comparison favours the timer by
+  construction.
+- **Atomic tasks carry the gain.** On atomic tasks SAFE + P adds 0.081, against
+  0.012 on composites. This matches the atomic pattern of Sections 15.6 and
+  15.11. It is a descriptive subgroup result.
+
+#### Scope
+
+- One policy (Xiaomi-Robotics-1) on 38 RoboCasa365 tasks.
+- Outcome-balanced cohorts (10/10 per task).
+- A shadow evaluation: the detectors never intervened.
+- Lead is a fraction of the task time limit; in seconds it depends on H_k
+  (16 control steps per inference).
+- Comparisons other than H1 and H2 are descriptive.
+
+#### Durable artifacts
+
+```text
+Root:      /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_lead_calibration_20261020_001108
+             shard0, shard1, merged_all_retained, official_safe_all_retained, frozen_mlp_scores,
+             session.env, tasks_shard{0,1}.txt
+Analysis:  <root>/lead_analysis/
+             calibration_predictions.jsonl (+ .summary.json), test_predictions.jsonl (+ .summary.json),
+             confirm_lead.json, inputs_sha256_before.txt, august_review_data/ (symlinks)
+Logs:      /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_lead_calibration_20261020_001108/
+           /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_lead_calibration_20261020_001108_confirm_lead.log (first run, stopped)
+           /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_lead_calibration_20261020_001108_confirm_lead_rerun.log
+Worktrees: /gs/fs/tga-shinoda/felid/robocasa_xr1_confirmatory_4e82e5c8 (collection)
+           /gs/fs/tga-shinoda/felid/robocasa_e1_lead_cb5ad443 (scoring, export, first run)
+           /gs/fs/tga-shinoda/felid/robocasa_e1_lead_a82acc0c (rerun)
+Code:      scripts/xr1_lead_time/confirm_lead.py; run_prospective_matched_fpr export
 ```
 
 ## 16. Limitations
