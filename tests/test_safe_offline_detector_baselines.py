@@ -527,6 +527,59 @@ class TestOfflineBaselineRunner(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "checksum"):
                 confirmation(registered, "confirm_edited")
 
+    def test_score_baselines_reproduces_confirm_trajectories_without_metrics(self):
+        from robocasa.recovery.safe.run_offline_detector_baselines import (
+            score_baselines,
+            synthetic_smoke,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            synthetic_smoke(argparse.Namespace(output_dir=str(root / "smoke"), seed=0, workers=1))
+            smoke = root / "smoke"
+            cache = next(
+                path.parent
+                for path in (smoke / "fixture").rglob("provenance.json")
+                if json.loads(path.read_text()).get("group") == "confirmatory_test"
+                and (path.parent / "features.npy").is_file()
+            )
+            predictions = smoke / "confirm" / "event_predictions.jsonl"
+            stripped = root / "stripped.jsonl"
+            rows = [json.loads(line) for line in predictions.read_text().splitlines() if line.strip()]
+            stripped.write_text(
+                "".join(json.dumps({k: v for k, v in row.items() if k != "baseline_scores"}) + "\n" for row in rows)
+            )
+
+            def run(output, group="confirmatory_test", source=stripped):
+                return score_baselines(
+                    argparse.Namespace(
+                        baseline_calibration=str(smoke / "calibrate_fused" / "baseline_calibration.json"),
+                        predictions=str(source),
+                        cache=str(cache),
+                        cache_group=group,
+                        output=str(root / output),
+                    )
+                )
+
+            summary = run("scored.jsonl")
+            self.assertEqual(summary["rollouts"], len(rows))
+            scored = {
+                row["rollout_id"]: row
+                for row in (json.loads(line) for line in (root / "scored.jsonl").read_text().splitlines())
+            }
+            for row in rows:
+                for name, trajectory in row["baseline_scores"].items():
+                    np.testing.assert_allclose(scored[row["rollout_id"]]["baseline_scores"][name], trajectory)
+            self.assertFalse(any("threshold" in key for key in summary))
+            with self.assertRaisesRegex(ValueError, "group"):
+                run("wrong_group.jsonl", group="lead_calibration")
+            with self.assertRaises(FileExistsError):
+                run("scored.jsonl")
+            partial = root / "partial.jsonl"
+            partial.write_text("".join(json.dumps(row) + "\n" for row in rows[:-1]))
+            with self.assertRaisesRegex(ValueError, "different rollouts"):
+                run("partial_out.jsonl", source=partial)
+
     def test_action_baseline_is_skipped_without_chunk_overlap(self):
         from robocasa.recovery.safe.run_offline_detector_baselines import (
             develop,

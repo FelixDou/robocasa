@@ -176,7 +176,8 @@ def boot_reselect(cal, te, rk, B=BOOT_SAMPLES, seed=BOOT_SEED):
         _, lp = evaluate_fast(e, rk, tm); _, lf = evaluate_fast(e, rk, fu)
         gains.append(float(np.mean(lf - lp))); leads_p.append(float(lp.mean())); leads_f.append(float(lf.mean()))
     pct = lambda v: np.round(np.percentile(v, [2.5, 97.5]), 4).tolist()
-    return dict(samples=B, seed=seed, gain_ci95=pct(gains), P_lead_ci95=pct(leads_p), fused_lead_ci95=pct(leads_f))
+    return dict(samples=B, seed=seed, gain_ci95=pct(gains), gain_sd=round(float(np.std(gains)), 4),
+                P_lead_ci95=pct(leads_p), fused_lead_ci95=pct(leads_f))
 
 
 # ---- null scores (H2) ----------------------------------------------------------------------

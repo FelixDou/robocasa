@@ -71,7 +71,7 @@ from .train_seen_tasks import load_outer_split_ids
 
 
 PROTOCOL = "offline_success_only_baselines_xr1_matched_fpr"
-CACHE_GROUPS = ("development", "calibration", "prospective_test", "confirmatory_test")
+CACHE_GROUPS = ("development", "calibration", "prospective_test", "confirmatory_test", "lead_calibration")
 REFERENCE_DETECTORS = ("time_only", "staged_safe_time", "fused_safe_time")
 EVALUATION_LANDMARKS = (0.10, 0.25, 0.50)
 PREDICTION_KEYS = (
@@ -2030,6 +2030,41 @@ def synthetic_smoke(args):
     return status
 
 
+def score_baselines(args):
+    """Attach frozen baseline trajectories to exported predictions; no thresholds or metrics."""
+    output = Path(args.output).resolve()
+    if output.exists():
+        raise FileExistsError(f"Output already exists: {output}")
+    artifacts, _, baseline, _ = _frozen_artifacts(args.baseline_calibration)
+    models = _load_baseline_models(baseline)
+    records = [
+        json.loads(line) for line in Path(args.predictions).read_text().splitlines() if line.strip()
+    ]
+    ids = [str(record["rollout_id"]) for record in records]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Duplicate rollout IDs in predictions")
+    cache = FeatureCache(args.cache, expected_group=args.cache_group)
+    if set(cache.by_id) != set(ids):
+        raise ValueError("Feature cache and predictions cover different rollouts")
+    score_records(records, cache, baseline, models)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    _write_jsonl(output, records)
+    summary = {
+        "status": "baseline_scores_attached",
+        "output": str(output),
+        "output_sha256": _sha256(output),
+        "predictions": str(Path(args.predictions).resolve()),
+        "predictions_sha256": _sha256(args.predictions),
+        "cache": str(cache.root),
+        "cache_group": args.cache_group,
+        "baselines": sorted(models),
+        "rollouts": len(records),
+        "frozen_artifacts": artifacts,
+    }
+    _write_json(output.with_suffix(".summary.json"), summary)
+    return summary
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -2122,6 +2157,13 @@ def build_parser():
     confirmation.add_argument("--test-cache", required=True)
     confirmation.add_argument("--output-dir", required=True)
 
+    scoring = subparsers.add_parser("score-baselines")
+    scoring.add_argument("--baseline-calibration", required=True)
+    scoring.add_argument("--predictions", required=True)
+    scoring.add_argument("--cache", required=True)
+    scoring.add_argument("--cache-group", choices=CACHE_GROUPS, required=True)
+    scoring.add_argument("--output", required=True)
+
     smoke = subparsers.add_parser("synthetic-smoke")
     smoke.add_argument("--output-dir", required=True)
     smoke.add_argument("--seed", type=int, default=0)
@@ -2136,6 +2178,7 @@ PHASES = {
     "evaluate": evaluate,
     "preregister": preregister,
     "confirm": confirm,
+    "score-baselines": score_baselines,
     "synthetic-smoke": synthetic_smoke,
 }
 
