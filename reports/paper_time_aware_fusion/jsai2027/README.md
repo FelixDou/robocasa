@@ -29,3 +29,13 @@ The official English package (`jsaiac_tex_en-2026.zip` from https://conf.ai-gakk
 - `analysis/timer_vs_detectors.py` is the earlier timer check. The paper no longer uses it.
 
 **Check against main.tex:** results.json gives noise within-task ROC-AUC of 0.45 and 0.47 at 25% and 50% of the horizon. `../main.tex` says 0.52 and 0.53. This draft uses the results.json values.
+
+## Update 2026-10-21: confirmatory test added
+
+- **New Sec. 7 (Confirmatory Test) and Table 4.** Numbers are from `docs/safe_robocasa_experiment_report.md` §15.13. SAFE + P has lead 0.255 against 0.225 for P, a gain of +0.030 (decision CI [+0.007, +0.093]), at FPR 0.061. The gain is below the declared 0.05 margin. The noise and resampled controls gain at most +0.009.
+- **The red PENDING note is gone.** The abstract (146 words), contributions, cohort table (new confirmatory-calibration row), protocol, discussion, limitations (i), (ii) and (vii), and conclusion now use the confirmatory result. The old Results section is now "Exploratory Results".
+- **Cuts to stay within 4 body pages.**
+  - The task-type table is folded into its paragraph.
+  - The percentile-sensitivity paragraph is gone; the confirmatory section gives the q-sensitivity instead.
+  - The sensitivity, time-risk, noise and conclusion paragraphs are shorter.
+- **The PDFs are preview builds.** Both `main.pdf` files (here and in `../rss2027_stage1`) were built with tectonic (XeTeX) and TeX Gyre Termes, because this machine has no pdflatex. Rebuild with pdflatex for submission. In this preview, the body ends on page 4 and the references are on page 5.

@@ -64,18 +64,17 @@ Evaluating VLA Failure Detectors Against Timers}
 \vspace{3mm}
 \begin{minipage}{0.86\textwidth}
 \small
-% Abstract: <= 150 words (JSAI rule). Current count: about 145.
+% Abstract: <= 150 words (JSAI rule). Current count: about 146.
 Online failure detectors for vision-language-action (VLA) robot policies are usually compared
 by recall at a fixed false-positive rate (FPR). On RoboCasa365, a failed rollout is one that
-reaches its time limit, so this comparison misses the obvious baseline: a timer. We evaluate
-a learned detector against timers on 760 prospective rollouts of Xiaomi-Robotics-1 on 38
-tasks. Calibrated at 5\% FPR, a single timer at 90\% of the limit flags all 380 failures, so
-only warning lead time can separate detectors. Fusing the SAFE failure score with this timer
-raises the mean lead from 0.090 to 0.207 of the limit (paired gain 0.117, 95\% CI
-0.060--0.178). But a per-task timer, set at the 95th percentile of each task's successful
-durations plus a calibrated margin, reaches 0.195 at 4.5\% FPR without reading the policy,
-and SAFE adds only 0.007 to it (CI $-0.003$ to 0.019). Failure detectors should be evaluated
-by their lead over a per-task timer.
+reaches its time limit, so this comparison misses the obvious baseline: a timer. Calibrated at
+5\% FPR, a single timer flags all 380 prospective failures of Xiaomi-Robotics-1 on 38 tasks,
+so only warning lead time can separate detectors. Fusing the SAFE failure score with this
+timer raises the mean lead from 0.090 to 0.207 of the limit, but a per-task timer built from
+each task's successful durations reaches 0.195 without reading the policy. On a fresh,
+preregistered cohort of 760 rollouts, SAFE adds 0.030 of the limit to the per-task timer
+(95\% CI 0.007--0.093): a real signal, but below the margin of 0.05 we declared in advance.
+Failure detectors should be evaluated by their lead over a per-task timer.
 \end{minipage}
 \vspace{5mm}
 \end{center}}]
@@ -107,8 +106,8 @@ Against the timer, a learned detector can add only one thing: an earlier alarm a
 false-alarm rate, which leaves more time to stop, reset or ask for help. This paper is an
 evaluation, not a new detector: we test one learned detector, SAFE~\cite{gu2025safe},
 against a single timer and a per-task timer. Detectors are developed on one cohort, their thresholds are frozen on a separate
-calibration cohort at 5\% FPR, and they are evaluated once on a disjoint prospective cohort.
-Our contributions are:
+calibration cohort at 5\% FPR, and they are evaluated once on a disjoint prospective cohort;
+the main comparison is then repeated on a fresh, preregistered cohort. Our contributions are:
 \begin{enumerate}[leftmargin=*,itemsep=1pt,topsep=2pt]
   \item \textbf{The timer baseline.} A calibrated timer flags every failure within the FPR
   budget, while a survival-style time-risk curve misses 37\%, and we show why.
@@ -116,7 +115,8 @@ Our contributions are:
   of the time limit left when the first alarm fires (zero for a missed failure).
   \item \textbf{How much the policy adds.} OR-fusing the SAFE score with a single timer
   more than doubles its mean lead, and noise does not; but a per-task timer that never reads
-  the policy matches it, and SAFE adds only 0.007 of the limit on top.
+  the policy nearly matches it. On a fresh preregistered cohort, SAFE adds 0.030 of the limit
+  to the per-task timer, above zero but below our declared margin of 0.05.
 \end{enumerate}
 
 \section{Related Work}
@@ -192,8 +192,9 @@ rounding to whole inferences, so any gain over it must come from alarms before $
 inferences over detected failures and the fraction of failures alarmed by $0.75\,H_k$.
 Detectors are compared at operating points fixed on a calibration cohort under
 FPR $\le \alpha = 0.05$. Confidence intervals come from a paired bootstrap that resamples
-tasks, then rollouts within each task (2,000 replicates). Only the SAFE + timer versus timer
-comparison was singled out in advance as the main comparison; all other intervals are
+tasks, then rollouts within each task (2,000 replicates). In the exploratory analysis, only
+the SAFE + timer versus timer comparison was singled out in advance; the confirmatory test
+has its own registered decision rules (Sec.~\ref{sec:confirm}). All other intervals are
 descriptive.
 
 \section{Detectors}
@@ -299,20 +300,21 @@ Cohort & Used to & Primary (S/F, $q$) \\
 Development & fit SAFE, scorers, time risk & 1,824 rollouts \\
 Calibration & set thresholds & 228 (114/114, 3) \\
 Prospective test & evaluate once & 760 (380/380, 10) \\
+Confirm.\ calibration & thresholds for Sec.~\ref{sec:confirm} & 760 (380/380, 10) \\
 Confirmatory & preregistered test & 760 (380/380, 10) \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Cohorts and protocol.} Four disjoint cohorts each serve one purpose
+\textbf{Cohorts and protocol.} Five disjoint cohorts each serve one purpose
 (Table~\ref{tab:cohorts}). Each evaluation cohort is collected from fresh environment seeds
 until every task has a fixed quota of successes and failures, and the primary cohort takes
 the first rollouts of each class per task in seed order. SAFE, the normalizations, the
 time-risk curves and an original staged detector were frozen before the prospective test
 was collected. The timer and all fused detectors were added afterwards and evaluated once
 on the opened cohort, with thresholds from calibration only; each analysis first reproduces
-the frozen results and checks the input checksums. The results below are therefore
-exploratory, and the confirmatory cohort has not been opened.
+the frozen results and checks the input checksums. The results in Sec.~\ref{sec:results} are
+therefore exploratory; Sec.~\ref{sec:confirm} reports the preregistered confirmatory test.
 
 % Qualitative example shared with the RSS draft, read from its folder so both papers stay in
 % sync. Frames stay grey placeholders until frames/f1.png..f4.png exist (see its README).
@@ -320,7 +322,8 @@ exploratory, and the confirmatory cohort has not been opened.
 \def\qualdir{../rss2027_stage1/figures/qualitative}
 \input{\qualdir/fig_qualitative}
 
-\section{Results}
+\section{Exploratory Results}
+\label{sec:results}
 
 \begin{table}[t]
 \centering
@@ -355,19 +358,14 @@ SAFE + per-task timer$^\dagger$ & \textbf{1.000} & 0.042 & 0.202 & 14.0 & 0.389 
 \textbf{The timer is the baseline to beat.} With $c = 0.903$ chosen on calibration
 (FPR 0.044 there), the timer alarms on all 380 test failures at 0.047 test FPR
 (Table~\ref{tab:main}). Its lead is fixed by construction: 0.090 of the limit, a mean of
-11.7 inferences or about 9\,s. In an earlier version of this analysis, we measured fused
-detectors against the time-risk curve and found recall gains from 0.632 to 0.90--0.96 for
-SAFE and the four success-only scorers. Against the timer, those recall gains vanish: no
-learned or fused detector has higher recall than 1.000, and none matches the timer's FPR at
-full recall.
+11.7 inferences or about 9\,s. Against the time-risk curve, SAFE and the four success-only
+scorers raised recall from 0.632 to 0.90--0.96; against the timer, those gains vanish.
 
 \textbf{Why the time risk misses.} All 140 failures the time risk misses come from the 14
 tasks with at most 14 failed development rollouts. With $f$ development failures, the curve
 can rise only to $(f+0.5)/(f+1)$, which stays below the shared threshold
-$\tau_r = 0.972$ unless $f \ge 17$. In the 24 tasks with 17 or more development failures, the
-time risk catches every failure; in the other 14, it catches none. Its misses are an
-artefact of the estimator's smoothing and of a threshold shared across tasks, not a
-limitation of elapsed time.
+$\tau_r = 0.972$ unless $f \ge 17$; it catches every failure in the other 24 tasks. Its
+misses come from smoothing and a shared threshold, not from elapsed time.
 
 \begin{figure}[t]
 \centering
@@ -406,12 +404,10 @@ concentrated in the failures SAFE flags early, and the remaining failures are fl
 than by the timer alone. The original SAFE + time-risk design also alarms before the timer
 on 233 failures, but it misses 17.
 
-\textbf{Sensitivity.} SAFE + timer's test FPR of 0.058 exceeds the budget (22 of 380 false
-alarms, Wilson 95\% interval 0.039--0.086). Against a timer tuned on the test cohort itself to the same 0.058 FPR
-($c = 0.86$, $\bar\ell = 0.136$), which favours the timer, the gain is 0.071. The result does
-not depend on how an alarm at the final inference is counted: if it does not count,
-calibration picks $c = 0.894$, and the timer reaches $\bar\ell = 0.104$ against 0.225 for
-SAFE + timer (gain 0.121, 95\% CI 0.062--0.184).
+\textbf{Sensitivity.} SAFE + timer's test FPR of 0.058 exceeds the budget (Wilson 95\%
+interval 0.039--0.086). Against a timer tuned on test to the same FPR, which favours the
+timer, the gain is 0.071. Not counting an alarm at the final inference leaves the gain at
+0.121 (95\% CI 0.062--0.184).
 
 \textbf{Where the lead comes from.} SAFE + timer warns earlier than the timer in 19 of
 the 38 tasks and slightly later in the other 19 (by about 0.06, the cost of its fallback at
@@ -428,56 +424,69 @@ risk never fires, SAFE + timer leads the per-task timer (0.405 against 0.221); e
 per-task timer leads (0.180 against 0.092). In Fig.~\ref{fig:qualitative}, the per-task timer
 alarms at $t = 38$, eight inferences after SAFE.
 
-\textbf{Sensitivity to the percentile.} We fixed the 95th percentile after the test cohort had
-been opened, so we report others. With the longest development success, the per-task timer
-reaches only 0.125 and SAFE adds 0.057 (CI $-0.003$ to $0.119$); with the 75th percentile, 0.132
-and 0.064 (CI 0.029--0.099); with the 90th, 0.169 and 0.028 (CI $-0.012$ to $0.067$). SAFE's
-added lead therefore shrinks as the time baseline improves, and is near zero against the
-best one we found.
-
 \textbf{Time alone and noise do not reproduce it.} Fusing the time risk with the timer, which
 uses every time signal we have, reaches $\bar\ell = 0.125$. Noise fused with the timer under
-the same search reaches 0.101 at a higher FPR (0.066). Both fall well short of 0.207. SAFE
-also separates outcomes among rollouts of equal length: among rollouts still running at 10,
-25, 50 and 75\% of the limit, its within-task ROC-AUC is 0.55, 0.60, 0.59 and 0.58, against
-0.51, 0.45, 0.47 and 0.41 for noise and exactly 0.5 for any time signal, which is constant
-within a task at a fixed step. The hidden state thus carries some outcome information
-beyond time, but at 5\% FPR a per-task timer captures nearly all the lead it adds.
+the same search reaches 0.101 at a higher FPR (0.066). SAFE also separates outcomes among
+rollouts of equal length: among rollouts still running at 10, 25, 50 and 75\% of the limit,
+its within-task ROC-AUC is 0.55--0.60, against 0.41--0.51 for noise and exactly 0.5 for any
+time signal.
 
-\begin{table}[t]
-\centering
-\caption{Recall / FPR / $\bar\ell$ by task type on the prospective test (atomic: 10 tasks,
-100 rollouts per class; composite: 28 tasks, 280 per class). Descriptive only: thresholds
-were set on the pooled calibration cohort, so per-type FPR is not controlled.}
-\label{tab:strata}
-\footnotesize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lcc@{}}
-\toprule
-Detector & Atomic & Composite \\
-\midrule
-Timer & 1.000 / 0.020 / 0.079 & 1.000 / 0.057 / 0.094 \\
-Time risk + timer & 1.000 / 0.020 / 0.086 & 1.000 / 0.061 / 0.138 \\
-SAFE + time risk & 0.980 / 0.030 / 0.217 & 0.946 / 0.068 / 0.172 \\
-SAFE + timer & 1.000 / 0.090 / 0.364 & 1.000 / 0.046 / 0.151 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\textbf{Atomic and composite tasks.} The lead gain is largest on atomic tasks, where SAFE +
-timer reaches $\bar\ell = 0.364$ against 0.079 for the timer, but at 0.090 FPR
-(Table~\ref{tab:strata}). On composite tasks, it reaches 0.151 against 0.094 at 0.046 FPR, and
-the time risk + timer comes close (0.138). A plausible reason is that a terminal failure
-label fits one atomic attempt, but marks the correct early work of a long composite task as
-failing. A first test did not support this: on five composite tasks, SAFE trained on
-segmented subtask labels ranked held-out stages no better than chance (ROC-AUC 0.49).
+\textbf{Atomic and composite tasks.} The lead gain is largest on the 10 atomic tasks, where
+SAFE + timer reaches $\bar\ell = 0.364$ against 0.079 for the timer, but at 0.090 FPR. On the
+28 composite tasks, it reaches 0.151 against 0.094 at 0.046 FPR, and the time risk + timer
+comes close (0.138). Per-type FPR is not controlled, so this is descriptive. A terminal
+failure label may fit one atomic attempt better than a long composite task, but SAFE trained
+on subtask labels did not help (held-out ROC-AUC 0.49 on five composite tasks).
 
 \textbf{Warnings remain late.} No detector alarms on more than 8\% of failures by half of the
 limit. The lead that SAFE adds lies mostly in the second half of the rollout.
 
-\pending{confirmatory test on 760 fresh rollouts (base seed 1300007), after amending its
-preregistration so that the per-task timer (95th percentile) is the primary comparator and
-$\Delta\bar\ell$ the primary endpoint.}
+\section{Confirmatory Test}
+\label{sec:confirm}
+
+\textbf{Protocol.} A fresh cohort of 760 rollouts (new seeds, 10 per class per task) was
+collected with SAFE frozen, first for a recall endpoint. Before any timer or lead was
+computed on it, we registered an amendment: the per-task timer P (95th percentile) is the
+comparator, the mean lead gain $\Delta\bar\ell$ of SAFE + P over P is the endpoint, and the
+gain counts as useful if its 95\% CI lies above zero, it is at least 0.05 of the limit, and
+SAFE + P's test FPR is at most 0.075; the cohort's recall and FPR were already known. A new
+calibration cohort sets both thresholds with the conformal rule, and the decision interval
+resamples calibration and test together, refitting thresholds each time.
+
+\begin{table}[t]
+\centering
+\caption{Confirmatory test (380 successes, 380 failures). Gain against the per-task timer P.
+The SAFE + P interval is the registered decision bootstrap; the others are descriptive.
+$^\ast$Mean (maximum) over 20 draws.}
+\label{tab:confirm}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lccl@{}}
+\toprule
+Detector & FPR & $\bar\ell$ & Gain vs P \\
+\midrule
+Global timer & 0.024 & 0.123 & $-0.102$ ($-0.147$, $-0.059$) \\
+SAFE + time risk (frozen) & 0.039 & 0.190 & $-0.035$ ($-0.066$, $-0.007$) \\
+SAFE + global timer & 0.047 & 0.215 & $-0.011$ ($-0.068$, $0.045$) \\
+Per-task timer P & 0.055 & 0.225 & -- \\
+Noise / resampled SAFE + P$^\ast$ & -- & -- & $0.002$ ($\le 0.009$) \\
+\textbf{SAFE + P} & 0.061 & \textbf{0.255} & $\mathbf{0.030}$ ($0.007$, $0.093$) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{A small real gain, below our margin.} Every test failure again ran to its limit, and
+P and SAFE + P caught all of them. SAFE + P leads P by 0.030 of the limit
+(Table~\ref{tab:confirm}), with a CI above zero and a test FPR of 0.061, but the gain is
+below the declared 0.05, so it does not count as useful by our own rule. Noise and
+within-task resampled SAFE scores fused with P gain at most 0.009, so the gain is policy
+evidence. Its CI reaches 0.093, so a useful gain is not ruled out, and the opened-cohort
+estimate (0.007) understated it. Part of it is FPR budget: a per-task timer tuned on test to
+SAFE + P's FPR leaves 0.015 (CI $-0.007$ to $0.041$). The gain is similar for the 75th and
+90th percentiles (0.026, 0.028). Task duration carries most of the lead: P leads the global
+timer by 0.102, and the original SAFE + time-risk design falls 0.035 behind P. As in the
+exploratory cohort, atomic tasks carry the gain (0.081, against 0.012 on composite tasks;
+descriptive).
 
 \section{Discussion and Limitations}
 
@@ -485,8 +494,9 @@ On benchmarks where failure means reaching a time limit, a calibrated timer alre
 every failure, so a learned VLA failure detector should be credited only for warning earlier
 than a timer at the same false-alarm rate. Against a single timer, OR-fusing the SAFE score
 more than doubles the mean lead, and noise does not. Against a per-task timer built from
-successful durations, SAFE adds 0.007 of the limit. On our data, what looked like policy
-evidence is mostly time calibration.
+successful durations, SAFE adds 0.030 of the limit on a fresh preregistered cohort: real,
+but below what we declared useful. On our data, most of what looked like policy evidence is
+time calibration.
 
 The finding also concerns benchmark design: when every failure is a timeout, recall at a
 fixed FPR rewards any score that grows with elapsed time. Papers on VLA failure detection
@@ -494,28 +504,26 @@ should report a per-task timer and the lead each detector gains over it, and ben
 should label failures that become unrecoverable before the time limit.
 
 \textbf{Limitations.} (i)~The timer and all fused detectors were defined after the
-prospective cohort had been opened, so these results are exploratory until the confirmatory
-test. (ii)~The two-threshold search is optimistic: fused detectors reach 0.050--0.066 test
-FPR against 0.044 on calibration, with only 114 calibration successes; a conformal
-calibration of the OR rule and a larger calibration cohort would address this.
+prospective cohort had been opened, and the confirmatory endpoint was registered after that
+cohort's recall and FPR were known (but before its lead). (ii)~The two-threshold search is
+optimistic: fused detectors reach 0.050--0.066 test FPR against 0.044 on calibration, with
+only 114 calibration successes. The conformal rule with 380 calibration successes still let
+SAFE + P run above P's FPR (0.061 against 0.055).
 (iii)~The gain is a dozen inferences on average, mostly late in the rollout, and whether an
 earlier alarm raises task success through reset and retry is untested. (iv)~The simulator
 ends failed episodes only at the time limit, so failures that become unrecoverable earlier
-(drops, collisions) are not labelled as such. (v)~SAFE needs white-box access to the
-policy's hidden state and per-task development data that includes failures; the timer
-needs only the time limit. (vi)~All results use one policy in simulation, and the task and
-its time limit are assumed known. (vii)~The per-task timer's percentile was chosen after the
-cohort was opened; with other percentiles, SAFE adds 0.03--0.06 of the limit.
+(drops, collisions) are not labelled as such. (v)~SAFE needs white-box access and per-task
+development failures; the timer needs only the time limit. (vi)~All results use one policy
+in simulation, with the task and its time limit known. (vii)~The per-task timer's percentile was chosen after the
+exploratory cohort was opened; on the confirmatory cohort, SAFE's gain is 0.026--0.030 for
+the 75th to 95th percentiles.
 
 \section{Conclusion}
 
 Elapsed time is the baseline a VLA failure detector must beat. When failures run to the time
-limit, a calibrated timer catches every failure within a 5\% FPR budget, so learned detectors
-should be judged by lead time. On 760 prospective rollouts across 38 RoboCasa365 tasks, SAFE
-fused with a single timer raised the mean warning lead from 0.090 to 0.207 of the limit, but
-a per-task timer built from successful durations reached 0.195 without reading the policy,
-and SAFE added 0.007 to it. Next steps are a preregistered test against the per-task timer, a
-second policy, and failures that end before the time limit.
+limit, learned detectors should be judged by their lead over a per-task timer; on fresh data,
+SAFE added 0.030 of the limit, a real signal below our declared margin. Next steps are a
+second policy, failures that end before the limit, and closed-loop retry tests.
 
 % ============================ END BODY ============================
 \clearpage

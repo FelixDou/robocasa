@@ -7,7 +7,8 @@ Set `\notesfalse` in the preamble to hide the red/orange notes for the submissio
 
 ## Before submitting
 - **Template.** The official RSS package (roboticsconference.org/docs/paper-template-latex.tar.gz) was blocked by the network here. The preamble reproduces the RSS template from memory (IEEEtran conference, `times`, `natbib[numbers]`, `plainnat`, anonymous author line, `\pdfinfo`). Diff it against the official `root.tex` and use its files if they differ.
-- **Preregistration (time-critical).** Amend the confirmatory preregistration (seed 1300007) with the timer as comparator and mean lead as primary endpoint *before* opening that cohort (paper Sec. VII, E1).
+- **Preregistration.** Done: Amendment 1 (PR #3) was opened before the lead endpoint was computed, and E1 has been run (see the 2026-10-21 update below).
+- **Stage 1 rules.** The draft now reports a completed confirmatory test (E1) and plans E2 to E5 for Stage 2. Check that the RSS 2027 Stage 1 rules allow completed confirmatory results.
 - **Control rate.** The seconds assume 16 steps x 20 Hz = 0.8 s per inference; confirm for the evaluation.
 - **Bibliography.** Two `% CHECK` comments in refs.bib (Foresight author order, RoboCasa365 authors). RSS desk-rejects hallucinated citations.
 - **Page limit.** 5 pages of content + references on page 6 (limit: 5 + 1).
@@ -42,3 +43,19 @@ The per-task timer is now P. It uses the 95th percentile of each task's developm
   - q = 0.75: 0.064 (CI 0.029 to 0.099)
 
 This replaces the 0.248 / 0.271 / 0.023 numbers above. Fig. 1 now shows P's alarm (t = 38). The amendment (PR #3) names P.
+
+## Update 2026-10-21: confirmatory test (E1) added
+
+E1 is in a new Sec. VII with Table III. Its numbers are from `docs/safe_robocasa_experiment_report.md` §15.13 (Tables 15.13a–d). Run root: `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_lead_calibration_20261020_001108`.
+
+- H1 is not supported. SAFE + P has lead 0.255 against 0.225 for P, a gain of +0.030 (decision CI [+0.007, +0.093]), at FPR 0.061 (Wilson upper bound 0.089). The CI is above zero, but the gain is below the 0.05 margin.
+- H2 is supported: noise + P and resampled SAFE + P gain at most +0.009.
+- Descriptive results:
+  - P leads the global timer by 0.102.
+  - Frozen SAFE + time risk is 0.035 below P.
+  - A P timer tuned on test to the same FPR leaves +0.015 [−0.007, +0.041].
+  - Atomic tasks gain +0.081, composite tasks +0.012.
+- To keep the page limit, the exploratory section lost the calibration-bootstrap sentence and the q-sensitivity sentence; q-sensitivity is now reported on the confirmatory cohort.
+- Updated: the abstract, contributions, hypotheses, setup, Stage 2 (E1 marked done), limitations and conclusion.
+- Page check: with tectonic/XeTeX and TeX Gyre Termes, content ends on page 5 and references fit on page 6. Confirm with pdflatex and the official template.
+- A red PENDING note in Stage 2 asks whether a registered atomic-only test (Amendment 2) belongs in the plan.
