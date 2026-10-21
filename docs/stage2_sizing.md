@@ -306,6 +306,227 @@ cat $S2_LOG/driver.log; cat $S2_LOG/e1b_all.log $S2_LOG/e1b_primary.log $S2_LOG/
 Paste back the whole output of step 3. The manifest line should read 1,522 rows and 597
 failures (report §15.13).
 
-## Results
+## Results (run 2026-10-21)
 
-To be filled from the cluster output.
+### Run record
+
+- Code: commit `9757e024`, pinned worktree `robocasa_stage2_sizing_9757e024`, CPU only,
+  8 workers.
+- Output: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/stage2_sizing_20261021_131345/`
+  (`e1b_all.json`, `e1b_primary.json`, `e2.json`, `e3.json`, `inputs_sha256_before.txt`).
+- Logs: `/gs/bs/tga-shinoda/felid/robocasa_logs/eval/stage2_sizing_20261021_131345/`.
+- Tests on the cluster: 16 passed (this file's tests plus the E1, dose-response and RLDX tests).
+- **Checks.**
+  - E1b reproduces D4: +0.0890 against +0.0890, MATCH (both pools).
+  - E2 reproduces the replication: +0.0342 against +0.0342, MATCH.
+  - E3's fits reproduce the registered leads: XR-1 P 0.2252 (FPR 0.0553) and
+    SAFE + P 0.2550 (0.0605); RLDX-1 0.2711 and 0.3053 (0.03).
+  - Pending: the manifest cross-check line and `INPUTS UNCHANGED` from step 3 were not in
+    the pasted output.
+- **Pools.**
+  - E1b, all retained: calibration 467 successes / 103 failures, test 373 / 105, over
+    10 atomic tasks. Primary rows: 100 / 100 in each cohort.
+  - E2, held-out: 160 successes / 100 failures over 20 tasks.
+
+### E1b: atomic-only XR-1 test
+
+**Table S1 — sampling distribution of the gain (plug-in, all-retained pool).** FPR pass is
+the fraction of simulated studies that meet the Amendment 1 FPR rule.
+
+| n per class per task | Mean gain | SD within task | SD with tasks | Mean fused test FPR | FPR pass |
+|---:|---:|---:|---:|---:|---:|
+| 10 | +0.066 | 0.036 | 0.042 | 0.061 | 0.39 |
+| 20 | +0.061 | 0.029 | 0.037 | 0.059 | 0.55 |
+| 30 | +0.060 | 0.027 | 0.034 | 0.059 | 0.66 |
+| 40 | +0.058 | 0.025 | 0.033 | 0.057 | 0.76 |
+| 50 | +0.058 | 0.023 | 0.033 | 0.058 | 0.79 |
+| 60 | +0.058 | 0.023 | 0.033 | 0.058 | 0.84 |
+
+**Table S2 — power at the assumed gains (all-retained pool, shift, within-task CI).**
+Each cell is "CI > 0 and point ≥ 0.05" / the full Amendment 1 rule (plus the FPR rule).
+
+| n | γ = 0.05 | γ = 0.0695 | γ = 0.089 |
+|---:|---|---|---|
+| 10 | 0.42 / 0.07 | 0.62 / 0.17 | 0.92 / 0.34 |
+| 20 | 0.43 / 0.10 | 0.66 / 0.27 | 0.98 / 0.54 |
+| 30 | 0.44 / 0.15 | 0.67 / 0.34 | 1.00 / 0.66 |
+| 40 | 0.45 / 0.23 | 0.67 / 0.44 | 1.00 / 0.76 |
+| 50 | 0.46 / 0.26 | 0.70 / 0.49 | 1.00 / 0.79 |
+| 60 | 0.48 / 0.32 | 0.70 / 0.55 | 1.00 / 0.84 |
+
+CI > 0 alone, γ = 0.0695: 0.77, 0.98, then 1.00 from n = 30. Because CI > 0 passes in
+(almost) every study from n = 20, "CI > 0 plus the FPR rule" at γ = 0.0695 equals the FPR
+pass rate of Table S1 there (0.55 at n = 20 to 0.84 at n = 60). With the task-level CI,
+"CI > 0 and point" is within 0.01 of the within-task value at every n and γ.
+
+**Dilution** is possible only at γ = 0.05 for this pool, because the plug-in gain is below
+0.0695. There it gives 0.39–0.43 for "CI > 0 and point", against 0.42–0.48 by shift.
+
+**Primary-pool sensitivity (100 / 100 per cohort).**
+- The plug-in gain is higher, +0.100 at n = 10 falling to +0.091 at n = 60, and so is the
+  spread: SD within task 0.042–0.027, with tasks 0.052–0.044.
+- At γ = 0.0695: "CI > 0 and point" by shift is 0.42, 0.68, 0.70, 0.67, 0.68, 0.72; by
+  dilution it is 0.55, 0.79, 0.83, 0.85, 0.87, 0.91. The full rule by shift is 0.13–0.61.
+  With the task-level CI it is 0.41 at n = 10, then 0.25–0.38.
+- At γ = 0.089, the full rule reaches 0.84 at n = 50.
+
+**Table S3 — nested check of the CI approximation (plug-in, all-retained pool;
+200 studies × 300 inner replicates).**
+
+| n | CI > 0, nested / approx | CI > 0 and point, nested / approx | Inner / outer SD |
+|---:|---|---|---|
+| 10 | 0.99 / 0.69 | 0.57 / 0.58 | 0.034 / 0.036 |
+| 30 | 1.00 / 0.93 | 0.57 / 0.57 | 0.025 / 0.027 |
+| 60 | 1.00 / 0.96 | 0.55 / 0.55 | 0.021 / 0.023 |
+
+- For the decision criterion ("CI > 0 and point") the approximation agrees within 0.01 at
+  every size.
+- For CI > 0 alone it is conservative at n = 10 (0.69 against 0.99). The inner percentile
+  interval sits higher than g − hw, so CI > 0 alone is understated at small n, not overstated.
+
+### E2: fresh RLDX-1 cohort with held-out calibration failures
+
+**Table S4 — plug-in sampling distribution and power (shift, within-task CI).** The power
+cells are "CI > 0 and point ≥ 0.05" / the full rule.
+
+| n | Mean gain | SD within | SD with tasks | FPR pass | CI > 0 at γ = 0.034 | γ = 0.034 | γ = 0.05 |
+|---:|---:|---:|---:|---:|---:|---|---|
+| 10 | +0.040 | 0.012 | 0.028 | 0.62 | 1.00 | 0.09 / 0.03 | 0.39 / 0.22 |
+| 20 | +0.036 | 0.007 | 0.024 | 0.92 | 1.00 | 0.03 / 0.02 | 0.43 / 0.40 |
+| 30 | +0.035 | 0.006 | 0.023 | 0.98 | 1.00 | 0.02 / 0.02 | 0.46 / 0.45 |
+| 40 | +0.034 | 0.005 | 0.022 | 0.99 | 1.00 | 0.01 / 0.01 | 0.47 / 0.47 |
+| 50 | +0.034 | 0.004 | 0.022 | 1.00 | 1.00 | 0.00 / 0.00 | 0.47 / 0.47 |
+| 60 | +0.034 | 0.004 | 0.022 | 1.00 | 1.00 | 0.00 / 0.00 | 0.48 / 0.48 |
+
+- **Dilution at γ = 0.034** (π = 0.15 to 0.01) gives the same margin-criterion power: 0.09
+  down to 0.00.
+- **Nested check:** it agrees exactly on both criteria at n = 10, 30 and 60. The inner SD is
+  larger than the outer SD (0.017 against 0.012 at n = 10), the expected sign of the
+  shared-pool optimism.
+- **The within-task SD is very small** (0.004–0.012), against 0.022–0.028 with tasks. Almost
+  all of the uncertainty is between tasks. Power for CI > 0 with a task-level CI was not
+  printed; it is in `e2.json` under `ci_only_task_ci`.
+
+### Collection cost
+
+**Table S5 — rollouts for calibration + test cohorts, everything retained.** Inferences are
+a GPU-time proxy. "Over cap" lists tasks above the 500-attempt cap in more than 5% of draws.
+
+| n | E1b (10 atomic XR-1 tasks): mean (p95) | E1b inferences | Over cap | E2 (20 RLDX-1 tasks): mean (p95) | E2 inferences |
+|---:|---|---:|---|---|---:|
+| 10 | 1,053 (1,248) | 22,754 | – | 1,253 (1,376) | 103,246 |
+| 20 | 2,102 (2,370) | 45,336 | – | 2,497 (2,672) | 205,746 |
+| 30 | 3,151 (3,476) | 67,903 | – | 3,745 (3,960) | 308,523 |
+| 40 | 4,197 (4,572) | 90,435 | OpenCabinet | 4,989 (5,234) | 411,104 |
+| 50 | 5,246 (5,664) | 113,023 | CloseToasterOvenDoor, OpenCabinet | 6,234 (6,512) | 513,602 |
+| 60 | 6,293 (6,746) | 135,561 | CloseToasterOvenDoor, OpenCabinet | 7,482 (7,788) | 616,196 |
+
+- **XR-1 atomic success rates:** 0.43–0.91 (OpenCabinet 0.91, CloseToasterOvenDoor 0.89).
+- **RLDX-1 natural rates:** 0.30–0.80, mean 0.56.
+- XR-1's cost is driven by the rarely failing tasks. RLDX-1's cost per rollout is higher in
+  inferences, because its time limits are longer.
+
+### E3: closed-loop retry bounds
+
+**Table S6 — success-rate gain over a single attempt (task-macro means), retry success
+r = p_k.** Each cell is the single-retry bound / the multi-retry Monte Carlo.
+
+| Policy, type | Budget | None | P | SAFE + P | P − none | SAFE + P − P |
+|---|---:|---|---|---|---|---|
+| XR-1, atomic (10) | 1.0 H | 0 / 0 | .037 / .024 | .097 / .068 | .037 / .024 | **.060 / .044** |
+| | 1.25 H | 0 / .015 | .150 / .120 | .150 / .125 | .150 / .105 | 0 / .006 |
+| | 2.0 H | .174 / .175 | .174 / .205 | .174 / .209 | 0 / .030 | 0 / .003 |
+| XR-1, composite (28) | 1.0 H | 0 / 0 | .041 / .003 | .046 / .006 | .041 / .003 | .005 / .003 |
+| | 1.25 H | .008 / .011 | .109 / .075 | .112 / .077 | .102 / .065 | .003 / .001 |
+| | 2.0 H | .209 / .210 | .209 / .232 | .209 / .233 | 0 / .022 | 0 / .001 |
+| RLDX-1, atomic (14) | 1.0 H | 0 / 0 | .134 / .118 | .137 / .130 | .134 / .118 | .003 / .011 |
+| | 1.25 H | .042 / .048 | .182 / .176 | .182 / .186 | .140 / .128 | 0 / .010 |
+| | 2.0 H | .213 / .212 | .213 / .271 | .213 / .275 | 0 / .059 | 0 / .004 |
+| RLDX-1, composite (6) | 1.0 H | 0 / 0 | 0 / −.012 | 0 / −.012 | 0 / −.012 | 0 / 0 |
+| | 2.0 H | .231 / .231 | .231 / .228 | .231 / .228 | 0 / −.003 | 0 / 0 |
+
+- **Single-retry bound at 2 H_k:** identical for all three arms on both policies, as
+  predicted.
+- **Multi-retry at 2 H_k** (the script's episodes-per-arm figure for SAFE + P vs P):
+  - XR-1: 93,510 per arm on atomic tasks and 1,520,098 on all tasks;
+  - RLDX-1: 73,749 on atomic tasks and 239,474 on all tasks.
+- **False-alarm exposure p·FPR:** XR-1 0.032 (P) and 0.036 (SAFE + P); RLDX-1 0.011 for both.
+- **Episodes per arm for other contrasts.** These were derived by hand from Table S6 with the
+  same two-proportion formula, using the task-macro mean p. They are lower bounds, because
+  the effects are upper bounds.
+  - SAFE + P vs P, XR-1 atomic, 1.0 H_k: about 1,450 per arm;
+  - SAFE + P vs P, RLDX-1 atomic, 1.0 H_k: about 23,000;
+  - P vs none, all tasks, 1.25 H_k: about 650 (XR-1) and 480 (RLDX-1);
+  - P vs none, all tasks, 2.0 H_k: about 4,500 (XR-1).
+
+### Decisions under the pre-stated rules
+
+- **E1b.**
+  - No n ≤ 60 reaches 0.8 for the full rule at γ = 0.0695. The power at n = 60 is 0.55
+    (all-retained pool), and "CI > 0 and point" alone levels off near 0.70.
+  - Dilution could not be run at this γ, and the nested check agrees on the decision
+    criterion.
+  - **By the rule, E1b is not registered with the 0.05 margin.**
+  - Even at the D4 point estimate (γ = 0.089), the full rule needs n ≈ 60 per class per task
+    (about 6,300 rollouts), and the binding part is the FPR rule, not the gain.
+- **E2.**
+  - The smallest n with power ≥ 0.8 for CI > 0 plus the FPR rule at γ = 0.034 is
+    **n = 20** (0.92; CI > 0 passes in every study, so the FPR pass rate decides it). That is
+    about 2,500 rollouts (p95 2,672) over 20 tasks.
+  - The 0.05 margin has power ≤ 0.09 at γ = 0.034 and does not exceed 0.48 even at a true
+    gain of 0.05. **E2 should register CI > 0 (superiority) as its replication criterion.**
+  - Caveat: this n rests on within-task inference and an optimistic shared pool. With a
+    task-level CI the SD is about four times larger, so check `ci_only_task_ci` before
+    committing to n = 20.
+- **E3.**
+  - Episodes per arm for SAFE + P vs P at 2 H_k exceed 2,000 on both policies, by one to
+    three orders of magnitude.
+  - **By the rule, E3 is proposed as a demonstration or as a P-vs-none comparison**: about
+    500–650 episodes per arm at 1.25 H_k on either policy.
+  - The one SAFE-specific contrast within reach is XR-1 atomic tasks at a 1.0 H_k budget
+    (retry within the original time limit): about 1,450 episodes per arm, on an optimistic
+    bound.
+
+### Expectations against results
+
+| Expectation (written before running) | Result |
+|---|---|
+| E1b check reproduces +0.089 | Yes |
+| E1b plug-in gain at n = 10 near 0.08–0.09, rising slightly with n | **No.** 0.066 with the all-retained pool, falling to 0.058 (primary pool 0.100 → 0.091) |
+| Within-task SD ≈ 0.03 at n = 10, shrinking as 1/sqrt(n); with-tasks SD ≈ 0.05, flat | 0.036, shrinking more slowly (0.023 at n = 60); with tasks 0.042 → 0.033 |
+| γ = 0.05: "CI > 0 and point" ≤ about 0.5 at every n | Yes (0.42–0.48) |
+| γ = 0.0695: 0.8 at n ≈ 30–40 within task | **No.** It levels off near 0.70 (0.55 with the FPR rule) |
+| γ = 0.089: 0.8 by n ≈ 20 | Yes for "CI > 0 and point" (0.98); the full rule needs n ≈ 60 |
+| FPR rule passes about 0.4 at n = 10 and stops binding by n ≈ 30 | 0.39 at n = 10, but **still binding**: 0.66 at n = 30, 0.84 at n = 60 |
+| Nested check within 0.10 | Yes on the decision criterion; CI > 0 alone at n = 10 is off by 0.30 (approximation conservative) |
+| Cost at n = 40 ≈ 4,000 rollouts, near the cap | 4,197; OpenCabinet over the cap |
+| E2 check reproduces +0.034; plug-in gain ≤ 0.034 | Yes; 0.040 at n = 10, 0.034 from n = 40 |
+| E2: margin power → 0; CI > 0 at 0.8 by n ≈ 20 | Yes; CI > 0 is already 1.00 at n = 10, and the FPR rule sets n = 20 |
+| E3 single-retry bound flat at 2 H_k | Yes, both policies |
+| E3: SAFE + P − P ≤ 0.01 at tight budgets, larger on atomic tasks | ≤ 0.013 except at 1.0 H_k on XR-1: **atomic 0.044–0.060**, which lifts the all-task mean to 0.014–0.020 |
+| E3 needs thousands of episodes per arm | Tens of thousands to over a million at 2 H_k |
+
+### Reading the results (exploratory)
+
+- **The 0.089 atomic estimate is optimistic.**
+  - The pool with all retained successes (467 calibration successes rather than 100) gives a
+    plug-in gain of about 0.06 at Stage 2 sizes. The primary rows give about 0.10.
+  - More distinct successes put more of them in the extreme tail, which pushes the SAFE
+    threshold up and removes early alarms. This is the finite-pool limit stated above, and it
+    points the same way as the subgroup selection.
+  - A planning value near 0.06 for the atomic gain is more defensible than 0.0695.
+- **At a planning gain near 0.06, the 0.05 margin is close to a coin flip at any n.**
+- **The test FPR runs above nominal.** It averages 0.057–0.061 rather than 0.05, as in E1
+  (0.061). The calibration and test cohorts are therefore not exchangeable in the success
+  tail, and the Wilson ≤ 0.10 limit binds more than its 380-success design assumed.
+- **For E2, the gain is stable, but nearly all the uncertainty is between tasks.**
+- **For E3, nearly all of the retry value comes from having a timer.** What the policy signal
+  adds over the timer is measurable in success rate only on XR-1 atomic tasks with no extra
+  budget.
+
+**What Stage 1 can cite**, as planning statements from opened cohorts:
+- E2 at 20 + 20 per task in calibration and test (about 2,500 rollouts) with a superiority
+  criterion;
+- E1b as a superiority (CI > 0) subgroup test, or dropped. Not with a 0.05 margin;
+- E3 as P vs none at 1.25 H_k (about 500–650 episodes per arm), with SAFE + P as a third arm
+  that is descriptive.
