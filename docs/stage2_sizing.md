@@ -404,8 +404,24 @@ cells are "CI > 0 and point ≥ 0.05" / the full rule.
   larger than the outer SD (0.017 against 0.012 at n = 10), the expected sign of the
   shared-pool optimism.
 - **The within-task SD is very small** (0.004–0.012), against 0.022–0.028 with tasks. Almost
-  all of the uncertainty is between tasks. Power for CI > 0 with a task-level CI was not
-  printed; it is in `e2.json` under `ci_only_task_ci`.
+  all of the uncertainty is between tasks.
+
+**Table S4b — power for CI > 0 alone, task-level CI against within-task CI (from
+`e2.json`, `ci_only_task_ci` and `ci_only`; read on the cluster after the run).**
+
+| n | γ = 0.034, task CI | γ = 0.034, within task | γ = 0.05, task CI |
+|---:|---:|---:|---:|
+| 10 | 0.44 | 1.00 | 0.99 |
+| 20 | 0.54 | 1.00 | 1.00 |
+| 30 | 0.80 | 1.00 | 1.00 |
+| 40 | 0.74 | 1.00 | 1.00 |
+| 50 | 0.90 | 1.00 | 1.00 |
+| 60 | 0.90 | 1.00 | 1.00 |
+
+The task-level column is not monotone (0.80 at n = 30, 0.74 at n = 40). Each n uses one
+half-width estimated from its own with-tasks simulation, and power is a step function of
+that half-width, so neighbouring sizes carry Monte Carlo noise of about ±0.05. Read the
+column as "about 0.5 up to n = 20, about 0.75–0.8 at n = 30–40, about 0.9 from n = 50".
 
 ### Collection cost
 
@@ -475,9 +491,14 @@ r = p_k.** Each cell is the single-retry bound / the multi-retry Monte Carlo.
     about 2,500 rollouts (p95 2,672) over 20 tasks.
   - The 0.05 margin has power ≤ 0.09 at γ = 0.034 and does not exceed 0.48 even at a true
     gain of 0.05. **E2 should register CI > 0 (superiority) as its replication criterion.**
-  - Caveat: this n rests on within-task inference and an optimistic shared pool. With a
-    task-level CI the SD is about four times larger, so check `ci_only_task_ci` before
-    committing to n = 20.
+  - **n = 20 holds only for inference conditional on these 20 tasks.** With a task-level CI
+    (tasks resampled, as in the E1 decision bootstrap), CI > 0 at γ = 0.034 has power 0.54
+    at n = 20 and reaches about 0.9 only at **n = 50** (Table S4b; the FPR rule passes in
+    every study at that size). That is about 6,200 rollouts (p95 6,512).
+  - Registering E2 therefore needs a choice of inference before Stage 1:
+    - within-task: n = 20, about 2,500 rollouts, a claim about these tasks;
+    - task-level: n = 50, about 6,200 rollouts, a claim that extends to tasks like these.
+  - The shared held-out pool (5 failures per task) makes both numbers optimistic.
 - **E3.**
   - Episodes per arm for SAFE + P vs P at 2 H_k exceed 2,000 on both policies, by one to
     three orders of magnitude.
@@ -519,14 +540,16 @@ r = p_k.** Each cell is the single-retry bound / the multi-retry Monte Carlo.
 - **The test FPR runs above nominal.** It averages 0.057–0.061 rather than 0.05, as in E1
   (0.061). The calibration and test cohorts are therefore not exchangeable in the success
   tail, and the Wilson ≤ 0.10 limit binds more than its 380-success design assumed.
-- **For E2, the gain is stable, but nearly all the uncertainty is between tasks.**
+- **For E2, the gain is stable, but nearly all the uncertainty is between tasks.** Going
+  from conditional to task-level inference raises the needed n from 20 to about 50.
 - **For E3, nearly all of the retry value comes from having a timer.** What the policy signal
   adds over the timer is measurable in success rate only on XR-1 atomic tasks with no extra
   budget.
 
 **What Stage 1 can cite**, as planning statements from opened cohorts:
-- E2 at 20 + 20 per task in calibration and test (about 2,500 rollouts) with a superiority
-  criterion;
+- E2 with a superiority criterion (CI > 0) at 20 + 20 per task in calibration and test,
+  about 2,500 rollouts, for inference conditional on the 20 tasks; or 50 + 50 per task,
+  about 6,200 rollouts, for a task-level CI;
 - E1b as a superiority (CI > 0) subgroup test, or dropped. Not with a 0.05 margin;
 - E3 as P vs none at 1.25 H_k (about 500–650 episodes per arm), with SAFE + P as a third arm
   that is descriptive.
