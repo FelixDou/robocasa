@@ -24,6 +24,14 @@ Protocol (same as rss2027_stage1/analysis/quantile_timer.py, alpha = 0.05):
 The confirmatory collection (environment seeds in [1300007, 1325007)) is never read: any
 record with a seed in that range is dropped before its action file is opened.
 
+Controls (added after the first run, where every signal "gained" while raising test FPR):
+  * matched FPR: each fused detector vs the timer alone with its margin loosened to the
+    same number of test false alarms (vs_matched_fpr_timer; post hoc, descriptive);
+  * noise null: the same fit with each signal replaced by i.i.d. N(0, 1) scores
+    (--noise-draws, default 20, seed 1, as in rss2027_stage1/analysis/extra.py). The chosen
+    signal is compared with the best-on-calibration of len(FEATURES) noise scores per draw,
+    each single signal with one noise score per draw. p = share of draws >= the observed gain.
+
 Usage (on TSUBAME, CPU only):
   python -u physical_signals.py inventory --roots ROOT [ROOT ...] \
       --calibration CAL.jsonl --test TEST.jsonl --bundle runtime_bundle.json
@@ -383,6 +391,8 @@ def main(argv=None):
     ap.add_argument("--bundle", required=True)
     ap.add_argument("--out")
     ap.add_argument("--max-dev-per-task", type=int, default=60)
+    ap.add_argument("--noise-draws", type=int, default=20, help="noise-null draws (0 = skip)")
+    ap.add_argument("--noise-seed", type=int, default=1)
     args = ap.parse_args(argv)
 
     bundle = json.load(open(args.bundle))
@@ -455,10 +465,86 @@ def main(argv=None):
     rk = rho(bundle, PRIMARY_Q)
     out = dict(alpha=ALPHA, q=PRIMARY_Q, coverage=cov, action_sources=dict(sources),
                note="test = August prospective cohort (exploratory, already opened); confirmatory seeds never read")
+    out.update(analyse(cal, te, rk, FEATURES, args.noise_draws, args.noise_seed))
 
+    txt = json.dumps(out, indent=1, default=float)
+    print(txt)
+    if args.out:
+        Path(args.out).write_text(txt)
+    print_summary(out)
+    return 0
+
+
+def matched_timer(te, rk, fp_target):
+    """Timer alone with its margin loosened (smallest delta) so that it raises at most
+    fp_target false alarms on the TEST successes. Post hoc and descriptive: it answers
+    "how much lead would the timer get if it spent the same false-alarm budget"."""
+    vs = sorted((V(r, None, rk, math.inf, 0.0) for r in te if not r["failed"]), reverse=True)
+    # A success is alarmed iff lam < V_i, so fp(lam) = #{V_i > lam}.
+    lam = 0.0 if fp_target >= len(vs) else vs[fp_target]
+    e, lv = evaluate(te, None, rk, lam, math.inf, 0.0)
+    return dict(delta=round(lam, 4), fp=e["fp"], fpr=e["fpr"], mean_lead=e["mean_lead"]), lv
+
+
+def gain_vs_matched(te, rk, e, lv, F_te):
+    mt, lm = matched_timer(te, rk, e["fp"])
+    return dict(target_fp=e["fp"], timer=mt, gain=boot(lv - lm, F_te))
+
+
+def noise_null(cal, te, rk, lP, F_te, n_features, draws, seed):
+    """Same fit as the physical signals, with each signal replaced by i.i.d. N(0, 1) per
+    inference (as in rss2027_stage1/analysis/extra.py). 'single' = one noise score;
+    'selected' = n_features noise scores, the best picked on calibration failures, which
+    mirrors how the physical signal was chosen."""
+    rng = np.random.default_rng(seed)
+    names = [f"_noise{i}" for i in range(n_features)]
+    single, selected = [], []
+    for d in range(draws):
+        for r in cal + te:
+            for nm in names:
+                r[nm] = rng.standard_normal(r["L"])
+        res = {}
+        for nm in names:
+            f = fit_fused(cal, nm, rk)
+            e, lv = evaluate(te, nm, rk, f["lam"], f["u"], f["s"])
+            mt, lm = matched_timer(te, rk, e["fp"])
+            res[nm] = dict(cal=f["cal_fail_lead"], fp=e["fp"], fpr=e["fpr"],
+                           gain=float((lv - lP).mean()), matched_gain=float((lv - lm).mean()))
+        best = max(names, key=lambda nm: res[nm]["cal"])
+        single.append(res[names[0]]); selected.append(res[best])
+        print(f"noise draw {d + 1}/{draws}: single gain {res[names[0]]['gain']:+.4f} "
+              f"(fp {res[names[0]]['fp']}), selected gain {res[best]['gain']:+.4f} (fp {res[best]['fp']})",
+              flush=True)
+    for r in cal + te:
+        for nm in names:
+            r.pop(nm, None)
+
+    def summ(rows):
+        g = np.array([x["gain"] for x in rows]); mg = np.array([x["matched_gain"] for x in rows])
+        fp = np.array([x["fp"] for x in rows])
+        return dict(gain_mean=round(float(g.mean()), 4), gain_min=round(float(g.min()), 4),
+                    gain_max=round(float(g.max()), 4), matched_gain_mean=round(float(mg.mean()), 4),
+                    matched_gain_max=round(float(mg.max()), 4), fp_mean=round(float(fp.mean()), 2),
+                    fpr_mean=round(float(fp.mean()) / sum(not r["failed"] for r in te), 4),
+                    gains=[round(float(x), 4) for x in g], matched_gains=[round(float(x), 4) for x in mg],
+                    fps=fp.tolist())
+    return dict(draws=draws, seed=seed, n_features_per_draw=n_features,
+                single=summ(single), selected=summ(selected))
+
+
+def p_upper(null, x):
+    """One-sided permutation-style p: share of null draws at least as large as x."""
+    null = np.asarray(null)
+    return round(float((1 + np.sum(null >= x - 1e-12)) / (len(null) + 1)), 4)
+
+
+def analyse(cal, te, rk, features, noise_draws=20, noise_seed=1):
+    """Everything after the per-inference scores are attached to the rows (rows carry
+    task_name, failed, horizon, L, safe and one array per feature)."""
+    out = {}
     # Dev+cal-only diagnostics: AUROC (failure vs success) of each score at fixed fractions of H_k.
     diag = {}
-    for k in FEATURES:
+    for k in features:
         d = {}
         for frac in (0.25, 0.5, 0.75):
             pos, neg = [], []
@@ -484,23 +570,66 @@ def main(argv=None):
     eS, lS = evaluate(te, "safe", rk, fs["lam"], fs["u"], fs["s"])
     out["safe_plus_timer"] = dict(path=fs, **eS, gain_over_timer=boot(lS - lP, F_te))
 
+    out["safe_plus_timer"]["vs_matched_fpr_timer"] = gain_vs_matched(te, rk, eS, lS, F_te)
+
     per = {}
-    for k in FEATURES:
+    for k in features:
         f = fit_fused(cal, k, rk)
         e, lv = evaluate(te, k, rk, f["lam"], f["u"], f["s"])
-        per[k] = dict(path=f, test=e, gain_over_timer=boot(lv - lP, F_te), _lv=lv)
-    chosen = max(FEATURES, key=lambda k: per[k]["path"]["cal_fail_lead"])
+        per[k] = dict(path=f, test=e, gain_over_timer=boot(lv - lP, F_te),
+                      vs_matched_fpr_timer=gain_vs_matched(te, rk, e, lv, F_te), _lv=lv)
+    chosen = max(features, key=lambda k: per[k]["path"]["cal_fail_lead"])
     out["chosen_on_calibration_failures"] = chosen
     out["chosen_gain_over_timer"] = per[chosen]["gain_over_timer"]
     out["chosen_test"] = per[chosen]["test"]
+    out["chosen_vs_matched_fpr_timer"] = per[chosen]["vs_matched_fpr_timer"]
     out["all_features_descriptive"] = {k: {kk: vv for kk, vv in v.items() if kk != "_lv"} for k, v in per.items()}
     out["chosen_minus_safe"] = boot(per[chosen]["_lv"] - lS, F_te)
 
-    txt = json.dumps(out, indent=1, default=float)
-    print(txt)
-    if args.out:
-        Path(args.out).write_text(txt)
-    return 0
+    # Controls. (1) matched FPR: above, each detector vs the timer at the same test false-alarm
+    # count. (2) noise null: does an uninformative score fused the same way gain as much?
+    if noise_draws > 0:
+        nn = noise_null(cal, te, rk, lP, F_te, len(features), noise_draws, noise_seed)
+        cg = per[chosen]["gain_over_timer"]["mean"]
+        cm = per[chosen]["vs_matched_fpr_timer"]["gain"]["mean"]
+        nn["chosen_vs_selected_null"] = dict(
+            gain=cg, p_gain=p_upper(nn["selected"]["gains"], cg),
+            matched_gain=cm, p_matched_gain=p_upper(nn["selected"]["matched_gains"], cm))
+        nn["per_feature_vs_single_null"] = {
+            k: dict(gain=per[k]["gain_over_timer"]["mean"],
+                    p_gain=p_upper(nn["single"]["gains"], per[k]["gain_over_timer"]["mean"]),
+                    matched_gain=per[k]["vs_matched_fpr_timer"]["gain"]["mean"],
+                    p_matched_gain=p_upper(nn["single"]["matched_gains"],
+                                           per[k]["vs_matched_fpr_timer"]["gain"]["mean"]))
+            for k in features}
+        out["noise_null"] = nn
+    return out
+
+
+def print_summary(out):
+    t = out["timer"]
+    print("\n=== summary (lead = fraction of H_k; gain = mean lead minus timer's) ===")
+    print(f"timer alone: fp {t['fp']}/{t['n_success']}  lead {t['mean_lead']:.4f}")
+    rows = [("safe", out["safe_plus_timer"], out["safe_plus_timer"]["gain_over_timer"],
+             out["safe_plus_timer"]["vs_matched_fpr_timer"])]
+    rows += [(k, v["test"], v["gain_over_timer"], v["vs_matched_fpr_timer"])
+             for k, v in out["all_features_descriptive"].items()]
+    nn = out.get("noise_null", {}).get("per_feature_vs_single_null", {})
+    print(f"{'signal':20s} {'fp':>4s} {'gain':>8s} {'95% CI':>18s} {'matched':>8s} {'95% CI':>18s} {'p_noise':>8s}")
+    for k, e, g, m in rows:
+        p = nn.get(k, {}).get("p_matched_gain", "")
+        print(f"{k:20s} {e['fp']:4d} {g['mean']:+8.4f} {str(g['ci95']):>18s} "
+              f"{m['gain']['mean']:+8.4f} {str(m['gain']['ci95']):>18s} {p!s:>8s}")
+    if "noise_null" in out:
+        n = out["noise_null"]
+        for kind in ("single", "selected"):
+            s = n[kind]
+            print(f"noise null ({kind}, {n['draws']} draws): gain mean {s['gain_mean']:+.4f} "
+                  f"[min {s['gain_min']:+.4f}, max {s['gain_max']:+.4f}], matched gain mean "
+                  f"{s['matched_gain_mean']:+.4f} (max {s['matched_gain_max']:+.4f}), fp mean {s['fp_mean']}")
+        c = n["chosen_vs_selected_null"]
+        print(f"chosen ({out['chosen_on_calibration_failures']}) vs selected noise null: gain {c['gain']:+.4f} "
+              f"p={c['p_gain']}, matched gain {c['matched_gain']:+.4f} p={c['p_matched_gain']}")
 
 
 if __name__ == "__main__":
