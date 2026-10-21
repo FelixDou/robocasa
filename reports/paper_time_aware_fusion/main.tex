@@ -434,7 +434,11 @@ None did, so we attribute the gain to fusing a policy-internal score with elapse
 Fused SAFE has the lowest test FPR among fused detectors (0.058 against 0.061--0.068), a
 difference we did not test. Fused kNN alarms 0.047 of the horizon earlier than fused SAFE
 (95\% CI 0.006--0.089) at a higher FPR. Inside the staged wrapper, the baselines trail SAFE
-by 0.002--0.029 recall, with every CI reaching zero.
+by 0.002--0.029 recall, with every CI reaching zero. The choice of score also matters little for warning lead, the
+fraction of the time limit left at the first alarm, measured against a per-task timer that
+alarms past the 95th percentile of each task's development success durations: in an
+exploratory follow-up on the confirmatory cohorts, the four success-only scores fused with
+that timer gain 0.020--0.034 of the time limit over it, against 0.030 for SAFE.
 
 \textbf{Null controls.} Fusion does not work with an uninformative score. Over 50 draws,
 noise fused with time reached 0.635 mean recall (range 0.632--0.650) at 0.054 mean FPR,
@@ -456,7 +460,10 @@ on composites the fused scores are close. One hypothesis is a label mismatch: a 
 outcome label fits one atomic attempt, but marks the correct early work of a long composite
 task as failing. A first test did not support it: on five composite tasks, SAFE trained on
 segmented subtask labels ranked held-out stages no better than chance (ROC-AUC 0.49 against
-0.65 for terminal labels).
+0.65 for terminal labels). The gap is also not specific to SAFE (exploratory): on lead over
+the per-task timer, all five scores fused with it gain more on atomic (0.045--0.081) than on
+composite tasks (0.008--0.027), and an offline check on RLDX-1 shows the same split (SAFE's
+LSTM head: 0.049 against 0).
 
 \subsection{No early warning}
 
@@ -502,8 +509,9 @@ on the test, with Wilson intervals that include 0.05; calibration had only 114 s
 rollouts. AND-fusion overshoots more (0.089). The null controls and AND-fusion were added
 after the cohort was opened. (iii)~Alarms come late in the rollout, which may leave little time to recover; whether an
 alarm improves task success through reset-and-retry is untested.
-(iv)~All results use one policy in simulation; earlier experiments with $\pi_0$ and RLDX-1
-showed the same atomic-versus-composite gap on smaller datasets. (v)~Task normalization and
+(iv)~All results are in simulation and use one policy prospectively; a second (RLDX-1) was
+checked only offline, on existing data with a small test set. Earlier experiments with
+$\pi_0$ and RLDX-1 showed the same atomic-versus-composite gap on smaller datasets. (v)~Task normalization and
 the time curves assume the deployed task and its horizon are known. (vi)~Test cohorts are
 balanced by quota, so recall and FPR are reported per class rather than at deployment
 prevalence.

@@ -39,3 +39,20 @@ The official English package (`jsaiac_tex_en-2026.zip` from https://conf.ai-gakk
   - The percentile-sensitivity paragraph is gone; the confirmatory section gives the q-sensitivity instead.
   - The sensitivity, time-risk, noise and conclusion paragraphs are shorter.
 - **The PDFs are preview builds.** Both `main.pdf` files (here and in `../rss2027_stage1`) were built with tectonic (XeTeX) and TeX Gyre Termes, because this machine has no pdflatex. Rebuild with pdflatex for submission. In this preview, the body ends on page 4 and the references are on page 5.
+
+## Update 2026-10-21 (b): §15.14 and §15.15 (exploratory)
+
+- **Sec. 7, confirmatory paragraph.** The four success-only scorers fused with P gain 0.020–0.034. All five scores gain more on atomic tasks (0.045–0.081) than on composite tasks (0.008–0.027). The oracle stage-overdue result (+0.071, task CI −0.021 to 0.129) is linked to "P lacks progress on composites". All of this is labelled exploratory.
+- **Discussion.** One sentence on the offline RLDX-1 check:
+  - every failure runs to the limit;
+  - P 0.271 against 0.032 for the global timer;
+  - SAFE's **LSTM** head + P +0.034 [0.008, 0.067] at the same FPR, atomic only.
+  - It also says the MLP head adds nothing, because this paper's SAFE is the MLP head.
+- **Limitation (vi).** It now reads: one policy prospectively, and a second (RLDX-1) only offline. No Stage 2 material was added.
+- **Cuts to stay within 4 body pages.**
+  - Fig. 3 is 3.4 cm tall.
+  - The captions of Tables 3 and 4 are shorter.
+  - Limitation (vii) no longer repeats the q-sensitivity, which is still in Sec. 7.
+  - Removed: the "233 failures, misses 17" sentence and the "high-success tasks such as opening a cabinet" sentence.
+  - The conclusion and the sensitivity paragraph are tighter.
+- **Page check (tectonic preview).** The body ends at the bottom of page 4, with no spare lines, and the references are on page 5.

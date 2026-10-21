@@ -15,3 +15,14 @@ run folder of the offline baseline suite
 or from an existing local copy before re-running the analyses.
 
 Confirmatory numbers (E1) come from `docs/safe_robocasa_experiment_report.md` section 15.13.
+
+## Update 2026-10-21: §15.14–15.15 in `main.tex`
+
+`main.tex` stays the older draft framed around recall. It received only small, labelled additions:
+- the success-only baselines' lead gain over a per-task timer (0.020–0.034 against 0.030 for SAFE);
+- the atomic/composite split across all five scores and on RLDX-1;
+- limitation (iv): one policy prospectively, and RLDX-1 offline.
+
+Its E1 `\pending` markers predate this update and were left unchanged.
+
+All three `main.pdf` files were rebuilt on 2026-10-21 as tectonic (XeTeX) previews, with `\usepackage{times}` swapped for TeX Gyre Termes and a no-op `\pdfinfo`, because this Mac has no pdflatex. Rebuild them with pdflatex before submitting.

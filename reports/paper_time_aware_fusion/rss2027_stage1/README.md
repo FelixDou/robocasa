@@ -59,3 +59,26 @@ E1 is in a new Sec. VII with Table III. Its numbers are from `docs/safe_robocasa
 - Updated: the abstract, contributions, hypotheses, setup, Stage 2 (E1 marked done), limitations and conclusion.
 - Page check: with tectonic/XeTeX and TeX Gyre Termes, content ends on page 5 and references fit on page 6. Confirm with pdflatex and the official template.
 - A red PENDING note in Stage 2 asks whether a registered atomic-only test (Amendment 2) belongs in the plan.
+
+## Update 2026-10-21 (b): exploratory follow-up (§15.14) and RLDX-1 offline (§15.15)
+
+Every new number is exploratory: §15.14 reuses the opened E1 cohorts, and §15.15 is offline on the existing RLDX-1 SAFE20 data. Sources: `docs/safe_robocasa_experiment_report.md` §15.14 (Tables 15.14a–b), §15.15 (Tables 15.15a–b) and §15.12 (oracle).
+
+- **Sec. VI, new paragraph "A second policy, offline (RLDX-1)".** All 438 failures run to the limit. P has lead 0.271 at 0.03 FPR, against 0.032 for the global timer. SAFE (LSTM) + P gains +0.034 [0.008, 0.067] at the same FPR. Atomic +0.049 [0.013, 0.097], composite 0. The MLP head adds nothing. The paragraph states the caveats: the fused path was chosen in-sample, the FPR margin rests on 60 successes, and noise + P matched the gain in 2 of 20 draws, both at 0.08 FPR. It ends with a post hoc, untested note: SAFE fired only above z = 7.93, which suggests extreme-tail separation.
+- **Sec. VII, "Atomic tasks carry the gain".**
+  - The four success-only baselines + P gain 0.020–0.034 (SAFE 0.030).
+  - All five scores gain more on atomic tasks (0.045–0.081) than on composite tasks (0.008–0.027), and RLDX-1 shows the same split.
+  - The oracle stage-overdue result (+0.071, task CI −0.021 to 0.129) is linked as "P likely lacks progress".
+  - Length-matched AUC is reported only as *not* explaining the gain (baselines 0.59–0.61 against SAFE 0.55).
+- **Stage 2.**
+  - E1 now points to Sec. VII.
+  - New E1b (Amendment 2) runs on atomic tasks only, with inference conditional on the 10 tasks, about 40/40 per task per cohort, and about 4,000 rollouts. kNN is not a secondary. A red `\pending` waits for the sample-size justification from the separate Stage 2 sizing session.
+  - E2 now names RLDX-1, run prospectively with held-out calibration failures. A `\pending` asks whether RLDX-1 can run the 38 tasks.
+- **H3.** An orange `\todo` proposes a rewording, because H1 failed its margin on XR-1. The registered text is unchanged; the author decides.
+- **Limitations.** They now read: one policy prospectively, and a second (RLDX-1) offline, on existing data with a small test set.
+- **Cuts to stay at 5 + 1 pages.**
+  - The Stage 2 items E3–E5 are shorter.
+  - So are the joint-search paragraph, the captions of Tables II and III, and the conclusion.
+  - Fig. 2 is 3.6 cm tall.
+  - Removed: the OR/AND frontier numbers (0.208/0.211), the per-task split behind "the two effects cancel" (0.092 against 0.180), and the limitations clause "that access bought 0.030".
+- **Page check (tectonic + TeX Gyre Termes).** With `\notesfalse` (the submission build), content ends on page 5 and references end on page 6, which is tight: about 1–2 spare lines. With notes on, the red and orange notes push the references about 7 lines onto page 7. The committed `main.pdf` is the notes-on preview.
