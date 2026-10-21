@@ -165,6 +165,14 @@ cohort.
   - the SAFE gain is concentrated in atomic tasks (+0.081 against +0.012 on
     composites).
 
+An exploratory follow-up (Section 15.14) fused the four frozen success-only
+baselines with P.
+- They gain +0.020 to +0.034, similar to SAFE.
+- All five scores gain more on atomic tasks than on composites.
+- Length-matched AUC does not predict which score or stratum gains.
+- A fresh atomic-only test passed its pre-declared gate (SAFE + P +0.089, CI
+  [+0.005, +0.195]) but is underpowered with 10 atomic tasks. It is not run.
+
 ## 1. Scope, labels, and evaluation rules
 
 ### 1.1 Raw SAFE target
@@ -1915,6 +1923,15 @@ The present evidence supports the following hierarchy of conclusions:
     Per-task timing provides most of the lead: P is 0.10 above a global timer,
     and the original fused SAFE + time-risk design is 0.035 below P. The SAFE gain
     is concentrated in atomic tasks (+0.081, descriptive).
+19. **Exploratory follow-up (Section 15.14).** Each frozen success-only
+    baseline fused with P gains +0.020 to +0.034 over P, similar to SAFE's
+    +0.030. Every score gains more on atomic tasks (+0.045 to +0.081) than on
+    composites (+0.008 to +0.027). Length-matched AUC does not explain this:
+    across detectors and strata its association with the gain is negative. With
+    atomic-only calibration, SAFE + P gains +0.089 on atomic tasks (decision CI
+    [+0.005, +0.195]). That passes the pre-declared gate, but no feasible size
+    for a fresh 10-task atomic test reaches 80% power, so that test remains a
+    candidate preregistered follow-up and has not been run.
 
 ## 15. Recommended next experiments
 
@@ -3156,6 +3173,101 @@ Worktrees: /gs/fs/tga-shinoda/felid/robocasa_xr1_confirmatory_4e82e5c8 (collecti
            /gs/fs/tga-shinoda/felid/robocasa_e1_lead_cb5ad443 (scoring, export, first run)
            /gs/fs/tga-shinoda/felid/robocasa_e1_lead_a82acc0c (rerun)
 Code:      scripts/xr1_lead_time/confirm_lead.py; run_prospective_matched_fpr export
+```
+
+### 15.14 Exploratory follow-up: fused baselines, length-matched signal and the atomic stratum
+
+#### Status
+
+Exploratory, on the cohorts of Section 15.13, which were already open for lead
+time.
+
+The plan, expectations and the gate for a fresh atomic test (Amendment 2) were
+committed before the run, in
+[`xr1_lead_time_dose_response_plan.md`](xr1_lead_time_dose_response_plan.md)
+(commit `e559e942`). The code is `scripts/xr1_lead_time/dose_response.py`.
+
+Baseline trajectories come from the frozen models of
+`xr1_offline_baselines_20261017_100820`, attached with `score-baselines` (no
+refit):
+- the new calibration cohort needed a new feature cache, `cache_lead_calibration`;
+- the test cohort's trajectories matched the confirm run.
+
+Every fused detector is fitted exactly like SAFE + P (q = 0.95).
+
+#### Results
+
+**Table 15.14a — Each score fused with P (pooled calibration, primary test
+cohort).** LM-AUC is the task-macro length-matched AUC on the calibration
+cohort: the at-risk AUC of the running-max score at 10/25/50/75% of H_k, averaged.
+D1 is Spearman's rho over 38 tasks between a task's calibration LM-AUC and its
+test lead gain, with a permutation p-value.
+
+| Score + P | Lead gain over P | Fused FPR | LM-AUC (cal.) | D1 rho (p) | Atomic gain | Composite gain |
+|---|---:|---:|---:|---|---:|---:|
+| SAFE | +0.030 | 0.061 | 0.552 | +0.358 (0.027) | +0.081 | +0.012 |
+| Cosine kNN | +0.021 | 0.058 | 0.592 | −0.036 (0.83) | +0.058 | +0.008 |
+| Mahalanobis | +0.034 | 0.055 | 0.596 | +0.086 (0.61) | +0.053 | +0.027 |
+| PCA-KMeans | +0.022 | 0.061 | 0.605 | −0.096 (0.57) | +0.050 | +0.012 |
+| RND | +0.020 | 0.058 | 0.589 | −0.194 (0.24) | +0.045 | +0.010 |
+
+D3: over the 10 detector × task-type cells, the Spearman correlation between
+calibration LM-AUC and gain is **−0.32**. Atomic and composite LM-AUC are
+similar for every score: SAFE 0.567 against 0.546; the baselines 0.559–0.615
+against 0.594–0.601.
+
+**Table 15.14b — D4, atomic stratum with atomic-only calibration (decision
+bootstrap: 10 atomic tasks, refitted per replicate).**
+
+| Score + P | Gain over P | Decision 95% CI | Fused / P FPR | Pre-declared gate |
+|---|---:|---|---|---|
+| SAFE | +0.089 | [+0.005, +0.195] | 0.05 / 0.04 | **passes** |
+| Cosine kNN | +0.034 | [+0.002, +0.143] | 0.04 / 0.04 | fails (point < 0.05) |
+
+The plan's power rule assumed a gain of 0.0695, the midpoint of 0.05 and
+0.089, with the bootstrap SD (0.052 at 10 per class per task) scaled by
+sqrt(10/n). Approximate power was 0.27, 0.48, 0.65 and 0.77 at 10, 20, 30 and
+40 per class per task, so no size in the plan reached 0.8. kNN is not eligible
+as the secondary (|0.034 − 0.089| > 0.02).
+
+#### Interpretation
+
+- **The length-matched-AUC mechanism is not supported.**
+  - Only SAFE shows a per-task association (D1, nominal p = 0.027, one of five
+    detectors).
+  - Across detectors and strata the association is negative (D3).
+  - The baselines rank failures better than SAFE among still-running rollouts,
+    yet gain less.
+  - Average length-matched ranking therefore does not explain where fusion
+    helps. A post hoc candidate, not tested: OR-fusion at a strict FPR budget
+    helps only through failures that score above essentially every success, so
+    extreme-tail separation, not average ranking, should matter.
+- **The atomic advantage holds for every detector.** All five scores gain more
+  on atomic tasks (+0.045 to +0.081) than on composite tasks (+0.008 to +0.027).
+  The pattern is a property of atomic tasks under the per-task timer, not of
+  SAFE. It fits Section 15.12: on multi-stage tasks, what the timer lacks is
+  progress information. This is a descriptive subgroup result.
+- **Amendment 2 is not run now.** The gate passed for SAFE, but the plan's
+  sizing rule found no feasible size, and that rule is optimistic: the decision
+  bootstrap resamples only 10 atomic tasks, and that between-task variance does
+  not shrink with more rollouts per task.
+  - A test that generalizes to atomic tasks in general is not feasible with the
+    current task set.
+  - A test about these 10 tasks, with rollouts resampled within task, would need
+    about 40/40 per task in both calibration and test: roughly 4,000 rollouts,
+    because several atomic tasks rarely fail.
+  - The atomic test is therefore recorded as a candidate preregistered follow-up,
+    for example in a Stage 2 protocol alongside a second policy, not as a run.
+
+#### Durable artifacts
+
+```text
+Analysis:  /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_lead_calibration_20261020_001108/lead_analysis/
+             calibration_with_baselines.jsonl, test_with_baselines.jsonl (+ .summary.json), dose_response.json
+Cache:     <root>/cache_lead_calibration (group lead_calibration)
+Logs:      /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_lead_calibration_20261020_001108/extract_lead_calibration.log
+           /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_lead_calibration_20261020_001108_dose_response.log
+Worktree:  /gs/fs/tga-shinoda/felid/robocasa_e1_lead_e559e942
 ```
 
 ## 16. Limitations
