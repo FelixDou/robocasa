@@ -82,3 +82,35 @@ Every new number is exploratory: §15.14 reuses the opened E1 cohorts, and §15.
   - Fig. 2 is 3.6 cm tall.
   - Removed: the OR/AND frontier numbers (0.208/0.211), the per-task split behind "the two effects cancel" (0.092 against 0.180), and the limitations clause "that access bought 0.030".
 - **Page check (tectonic + TeX Gyre Termes).** With `\notesfalse` (the submission build), content ends on page 5 and references end on page 6, which is tight: about 1–2 spare lines. With notes on, the red and orange notes push the references about 7 lines onto page 7. The committed `main.pdf` is the notes-on preview.
+
+## Update 2026-10-21 (c): Stage 2 rewritten with the author's design decisions
+
+The numbers come from `docs/stage2_sizing.md`, section Results, on branch `claude/stage2-sizing` (commit `173a0274`, not merged to main). The draft is anonymized, so it cites that file only in a source comment.
+
+- **E1b is gone as a separate experiment.**
+  - The sizing found at most 0.55 power at the 0.05 margin up to 60 per class per task.
+  - The 0.089 atomic estimate is optimistic: about 0.06 when all retained successes are used.
+  - The atomic motivation becomes a descriptive stratum of E2: the 14 atomic RLDX-1 tasks.
+- **E2 (RLDX-1, its 20 tasks).**
+  - Fresh calibration and test cohorts of 20/20 per task, about 2,500 rollouts (p95 2,672).
+  - Held-out calibration failures.
+  - Primary: SAFE + P vs P, superiority (decision CI > 0), within-task inference conditional on the 20 tasks. Power 0.92 at +0.034; CI > 0 passes in every simulated study, so the FPR rule decides.
+  - The 0.05 margin is dropped (power ≤ 0.09).
+  - Secondary: the task-level CI, with no power claim (about 0.54).
+  - Caveat in the text: the shared-pool estimate is optimistic, with 5 held-out failures per task.
+- **FPR rule (new paragraph, marked `\todo` as proposed).**
+  - Calibration target: conformal α = 0.05.
+  - Test check: the false alarms must not reject "true FPR ≤ 0.075" in a one-sided exact binomial test at 0.05, i.e. at most the 95th percentile of Binomial(n_s, 0.075). That is 39 of 400 in E2, against 30 under the old fixed rule.
+  - The rule is looser, so E2's power stays ≥ 0.92.
+  - H1's registered rule in Sec. IV is unchanged (E1 already ran under it).
+- **E3.**
+  - Registered contrast: P vs no monitor at a 1.25 H_k budget, about 650 episodes per arm on XR-1 (about 480 on RLDX-1).
+  - SAFE + P is a descriptive third arm. The one exception within reach is XR-1 atomic at 1.0 H_k, about 1,450 per arm, on an optimistic bound.
+  - A red `\pending` says the E3 policy is not chosen (XR-1 assumed).
+- **H3 and H4.** Orange `\todo`s now say both must be reworded to match E2 and E3, with proposals. The hypothesis text itself is unchanged.
+- **Cuts.**
+  - E4 and E5 are folded into one compact paragraph.
+  - The E3 description is shorter. It no longer says "count successes aborted by false alarms" or "a null result would bound…".
+  - The length-matched-AUC sentence in Sec. VII is removed.
+  - The RLDX-1 post hoc note is shorter.
+- **Page check (tectonic).** With `\notesfalse`, the content ends on page 5 and the references end on page 6. With notes on, the references spill to page 7.
