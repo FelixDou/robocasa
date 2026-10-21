@@ -165,6 +165,23 @@ cohort.
   - the SAFE gain is concentrated in atomic tasks (+0.081 against +0.012 on
     composites).
 
+An exploratory follow-up (Section 15.14) fused the four frozen success-only
+baselines with P.
+- They gain +0.020 to +0.034, similar to SAFE.
+- All five scores gain more on atomic tasks than on composites.
+- Length-matched AUC does not predict which score or stratum gains.
+- A fresh atomic-only test passed its pre-declared gate (SAFE + P +0.089, CI
+  [+0.005, +0.195]) but is underpowered with 10 atomic tasks. It is not run.
+
+An offline replication on RLDX-1 (Section 15.15) found the same pattern:
+- every failure runs to the time limit;
+- the per-task timer dominates the global timer;
+- the stronger SAFE model adds +0.034 lead over P at unchanged FPR, all of it on
+  atomic tasks.
+
+The sample is small, and noise matched that gain only by spending more FPR, so
+this is preliminary.
+
 ## 1. Scope, labels, and evaluation rules
 
 ### 1.1 Raw SAFE target
@@ -1915,6 +1932,21 @@ The present evidence supports the following hierarchy of conclusions:
     Per-task timing provides most of the lead: P is 0.10 above a global timer,
     and the original fused SAFE + time-risk design is 0.035 below P. The SAFE gain
     is concentrated in atomic tasks (+0.081, descriptive).
+19. **Exploratory follow-up (Section 15.14).** Each frozen success-only
+    baseline fused with P gains +0.020 to +0.034 over P, similar to SAFE's
+    +0.030. Every score gains more on atomic tasks (+0.045 to +0.081) than on
+    composites (+0.008 to +0.027). Length-matched AUC does not explain this:
+    across detectors and strata its association with the gain is negative. With
+    atomic-only calibration, SAFE + P gains +0.089 on atomic tasks (decision CI
+    [+0.005, +0.195]). That passes the pre-declared gate, but no feasible size
+    for a fresh 10-task atomic test reaches 80% power, so that test remains a
+    candidate preregistered follow-up and has not been run.
+20. **Second policy, offline (Section 15.15).** RLDX-1 failures also all run to
+    the time limit, and the per-task timer P again dominates the global timer
+    (0.271 against 0.032 lead). SAFE (LSTM) + P adds +0.034 [+0.008, +0.067] at
+    the same FPR as P (0.03), all of it on atomic tasks (+0.049; composite +0.000).
+    The weaker MLP adds nothing. Noise + P matched the gain only at a higher FPR
+    (2 of 20 draws, both at 0.08). This is preliminary evidence for H3, not a test.
 
 ## 15. Recommended next experiments
 
@@ -3156,6 +3188,201 @@ Worktrees: /gs/fs/tga-shinoda/felid/robocasa_xr1_confirmatory_4e82e5c8 (collecti
            /gs/fs/tga-shinoda/felid/robocasa_e1_lead_cb5ad443 (scoring, export, first run)
            /gs/fs/tga-shinoda/felid/robocasa_e1_lead_a82acc0c (rerun)
 Code:      scripts/xr1_lead_time/confirm_lead.py; run_prospective_matched_fpr export
+```
+
+### 15.14 Exploratory follow-up: fused baselines, length-matched signal and the atomic stratum
+
+#### Status
+
+Exploratory, on the cohorts of Section 15.13, which were already open for lead
+time.
+
+The plan, expectations and the gate for a fresh atomic test (Amendment 2) were
+committed before the run, in
+[`xr1_lead_time_dose_response_plan.md`](xr1_lead_time_dose_response_plan.md)
+(commit `e559e942`). The code is `scripts/xr1_lead_time/dose_response.py`.
+
+Baseline trajectories come from the frozen models of
+`xr1_offline_baselines_20261017_100820`, attached with `score-baselines` (no
+refit):
+- the new calibration cohort needed a new feature cache, `cache_lead_calibration`;
+- the test cohort's trajectories matched the confirm run.
+
+Every fused detector is fitted exactly like SAFE + P (q = 0.95).
+
+#### Results
+
+**Table 15.14a — Each score fused with P (pooled calibration, primary test
+cohort).** LM-AUC is the task-macro length-matched AUC on the calibration
+cohort: the at-risk AUC of the running-max score at 10/25/50/75% of H_k, averaged.
+D1 is Spearman's rho over 38 tasks between a task's calibration LM-AUC and its
+test lead gain, with a permutation p-value.
+
+| Score + P | Lead gain over P | Fused FPR | LM-AUC (cal.) | D1 rho (p) | Atomic gain | Composite gain |
+|---|---:|---:|---:|---|---:|---:|
+| SAFE | +0.030 | 0.061 | 0.552 | +0.358 (0.027) | +0.081 | +0.012 |
+| Cosine kNN | +0.021 | 0.058 | 0.592 | −0.036 (0.83) | +0.058 | +0.008 |
+| Mahalanobis | +0.034 | 0.055 | 0.596 | +0.086 (0.61) | +0.053 | +0.027 |
+| PCA-KMeans | +0.022 | 0.061 | 0.605 | −0.096 (0.57) | +0.050 | +0.012 |
+| RND | +0.020 | 0.058 | 0.589 | −0.194 (0.24) | +0.045 | +0.010 |
+
+D3: over the 10 detector × task-type cells, the Spearman correlation between
+calibration LM-AUC and gain is **−0.32**. Atomic and composite LM-AUC are
+similar for every score: SAFE 0.567 against 0.546; the baselines 0.559–0.615
+against 0.594–0.601.
+
+**Table 15.14b — D4, atomic stratum with atomic-only calibration (decision
+bootstrap: 10 atomic tasks, refitted per replicate).**
+
+| Score + P | Gain over P | Decision 95% CI | Fused / P FPR | Pre-declared gate |
+|---|---:|---|---|---|
+| SAFE | +0.089 | [+0.005, +0.195] | 0.05 / 0.04 | **passes** |
+| Cosine kNN | +0.034 | [+0.002, +0.143] | 0.04 / 0.04 | fails (point < 0.05) |
+
+The plan's power rule assumed a gain of 0.0695, the midpoint of 0.05 and
+0.089, with the bootstrap SD (0.052 at 10 per class per task) scaled by
+sqrt(10/n). Approximate power was 0.27, 0.48, 0.65 and 0.77 at 10, 20, 30 and
+40 per class per task, so no size in the plan reached 0.8. kNN is not eligible
+as the secondary (|0.034 − 0.089| > 0.02).
+
+#### Interpretation
+
+- **The length-matched-AUC mechanism is not supported.**
+  - Only SAFE shows a per-task association (D1, nominal p = 0.027, one of five
+    detectors).
+  - Across detectors and strata the association is negative (D3).
+  - The baselines rank failures better than SAFE among still-running rollouts,
+    yet gain less.
+  - Average length-matched ranking therefore does not explain where fusion
+    helps. A post hoc candidate, not tested: OR-fusion at a strict FPR budget
+    helps only through failures that score above essentially every success, so
+    extreme-tail separation, not average ranking, should matter.
+- **The atomic advantage holds for every detector.** All five scores gain more
+  on atomic tasks (+0.045 to +0.081) than on composite tasks (+0.008 to +0.027).
+  The pattern is a property of atomic tasks under the per-task timer, not of
+  SAFE. It fits Section 15.12: on multi-stage tasks, what the timer lacks is
+  progress information. This is a descriptive subgroup result.
+- **Amendment 2 is not run now.** The gate passed for SAFE, but the plan's
+  sizing rule found no feasible size, and that rule is optimistic: the decision
+  bootstrap resamples only 10 atomic tasks, and that between-task variance does
+  not shrink with more rollouts per task.
+  - A test that generalizes to atomic tasks in general is not feasible with the
+    current task set.
+  - A test about these 10 tasks, with rollouts resampled within task, would need
+    about 40/40 per task in both calibration and test: roughly 4,000 rollouts,
+    because several atomic tasks rarely fail.
+  - The atomic test is therefore recorded as a candidate preregistered follow-up,
+    for example in a Stage 2 protocol alongside a second policy, not as a run.
+
+#### Durable artifacts
+
+```text
+Analysis:  /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_lead_calibration_20261020_001108/lead_analysis/
+             calibration_with_baselines.jsonl, test_with_baselines.jsonl (+ .summary.json), dose_response.json
+Cache:     <root>/cache_lead_calibration (group lead_calibration)
+Logs:      /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_lead_calibration_20261020_001108/extract_lead_calibration.log
+           /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_lead_calibration_20261020_001108_dose_response.log
+Worktree:  /gs/fs/tga-shinoda/felid/robocasa_e1_lead_e559e942
+```
+
+### 15.15 Second policy, offline: RLDX-1 lead over the per-task timer
+
+#### Status
+
+Exploratory, with no new rollouts. This is preliminary evidence for H3 ahead of
+the preregistered E2. The plan was committed before the run
+([`rldx_lead_replication_plan.md`](rldx_lead_replication_plan.md), commit
+`67008c04`). The code is `scripts/xr1_lead_time/rldx_replication.py`, which
+uses the E1 fit `confirm_lead.fit_fast`.
+
+The data are the RLDX-1 SAFE20 natural-rate run of Section 8.3, with its
+existing splits:
+- development: 740 training rollouts;
+- calibration: 60 held-out successes, three per task;
+- test: 200 held-out rollouts, 5/5 per task over 20 tasks.
+
+Two caveats follow from those splits:
+- **The fused path is chosen on in-sample failures.** No held-out failures were
+  reserved for calibration, so the path (u, s) is chosen on the training
+  failures, where SAFE's scores are in-sample.
+- **The FPR margin uses only held-out data:** the 60 calibration successes.
+
+H_k is the longest training failure of task k. The SAFE score is the seed mean
+of each seed's running maximum of the full normalized trajectory.
+
+The input checksums were unchanged after the run.
+
+#### Results
+
+**C1 — failures run to the time limit.** All 338 training failures and all
+100 test failures have L = H_k. None ends early and none exceeds H_k, so the
+lead framing applies to RLDX-1 unchanged.
+
+**Table 15.15a — Mean warning lead on the test cohort (100 successes, 100
+failures).** Gains are against P (q = 0.95), with a test-only task-then-rollout
+bootstrap.
+
+| Detector | Lead | Recall | FPR | Gain vs P |
+|---|---:|---:|---:|---|
+| P, per-task timer | 0.271 | 1.000 | 0.03 | — |
+| **SAFE (LSTM) + P** | **0.305** | 1.000 | 0.03 | **+0.034 [+0.008, +0.067]** |
+| SAFE (MLP) + P | 0.271 | 1.000 | 0.03 | +0.000 (the fit fell back to the timer alone) |
+| Global timer | 0.032 | 1.000 | 0.01 | −0.239 [−0.325, −0.155] |
+| SAFE (LSTM) + global timer | 0.176 | 1.000 | 0.01 | −0.095 [−0.174, −0.021] |
+
+**Table 15.15b — SAFE (LSTM) + P by task type.**
+
+| Stratum | P lead (FPR) | SAFE + P lead (FPR) | Gain |
+|---|---|---|---|
+| Atomic | 0.343 (0.029) | 0.392 (0.029) | +0.049 [+0.013, +0.097] |
+| Composite | 0.103 (0.033) | 0.103 (0.033) | +0.000 (SAFE never alarms before P) |
+
+**Null control.**
+- Noise + P, 20 draws: mean gain +0.009.
+- Two draws reached or exceeded the LSTM gain (+0.049 and +0.038), but both ran
+  at FPR 0.08 against 0.03 for P and SAFE + P.
+- Among the six draws at P's FPR of 0.03, the largest gain was +0.016.
+- The unconditioned count, 2 of 20, gives an empirical p of about 0.14.
+
+**Fused path.**
+- SAFE (LSTM) + P keeps P's margin (lambda = 0.0421) and adds a fixed SAFE
+  threshold at z = 7.93 (s = 0).
+- SAFE therefore fires only on extreme scores, and adds earlier alarms without
+  adding false alarms, on calibration or on test.
+
+#### Interpretation
+
+- **The timer result generalizes to a second policy.**
+  - RLDX-1 failures also all run to the time limit.
+  - The per-task timer is again the baseline to beat, by an even wider margin:
+    the global timer is nearly useless across RLDX-1's widely varying task
+    durations.
+- **The stronger SAFE model adds about what it added on XR-1.**
+  - +0.034 of the time limit over P, against +0.030 on XR-1.
+  - Unlike XR-1, this gain comes at an unchanged FPR.
+  - The weaker MLP adds nothing.
+- **The gain is atomic-only on both policies.** On composite tasks, the
+  policy-internal score adds no lead over the per-task timer. This fits
+  Section 15.12 (what is missing on multi-stage tasks is progress) and the
+  across-detector pattern of Section 15.14.
+- **The evidence is weak on its own.**
+  - The sample is small.
+  - The path is chosen in-sample.
+  - The plain null comparison gives p of about 0.14.
+  - Noise only matched the gain by spending more false-alarm budget.
+  - This is preliminary support for H3, not a test of it.
+- **Fusion acts through the extreme tail, a post hoc reading.** The fused
+  detector used SAFE only above a very high fixed threshold. That fits the
+  extreme-tail reading of Section 15.14: OR-fusion helps through rare failures
+  that score far above every success.
+
+#### Durable artifacts
+
+```text
+Output:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_lead_replication_<timestamp>/
+             rldx_lead_lstm.json, rldx_lead_indep.json, *.log, inputs_sha256_before.txt
+Inputs:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530/calibration/{lstm,indep}/
+Worktree:  /gs/fs/tga-shinoda/felid/robocasa_rldx_lead_67008c04
 ```
 
 ## 16. Limitations
