@@ -321,8 +321,10 @@ failures (report §15.13).
   - E2 reproduces the replication: +0.0342 against +0.0342, MATCH.
   - E3's fits reproduce the registered leads: XR-1 P 0.2252 (FPR 0.0553) and
     SAFE + P 0.2550 (0.0605); RLDX-1 0.2711 and 0.3053 (0.03).
-  - Pending: the manifest cross-check line and `INPUTS UNCHANGED` from step 3 were not in
-    the pasted output.
+  - Manifest cross-check: `merged_all_retained/manifest.jsonl` has 1,522 rows and 597
+    failures, matching report §15.13.
+  - Input checksums unchanged after the run (`INPUTS UNCHANGED`). The driver log holds only
+    nohup's notice, and all four runs finished (`done.txt`).
 - **Pools.**
   - E1b, all retained: calibration 467 successes / 103 failures, test 373 / 105, over
     10 atomic tasks. Primary rows: 100 / 100 in each cohort.
