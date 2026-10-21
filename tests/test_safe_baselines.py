@@ -25,27 +25,27 @@ DIM = 8
 ACTION_DIM = 3
 
 
-def synthetic_rollout(rng, failed, length):
+def synthetic_rollout(rng, failed, length, replan=REPLAN):
     """Failures drift in feature space and produce inconsistent chunks."""
     drift = np.linspace(0.0, 3.0 if failed else 0.0, length)[:, None]
     # Real VLA features have a nonzero mean; keep one so cosine distance is meaningful.
     features = 1.0 + rng.normal(size=(length, FLOW, HORIZON, DIM)) * 0.3
     features[..., 0] += drift[:, :, None]
-    base = np.cumsum(rng.normal(scale=0.05, size=(length * REPLAN + HORIZON, ACTION_DIM)), axis=0)
-    chunks = np.stack([base[t * REPLAN : t * REPLAN + HORIZON] for t in range(length)])
+    base = np.cumsum(rng.normal(scale=0.05, size=(length * replan + HORIZON, ACTION_DIM)), axis=0)
+    chunks = np.stack([base[t * replan : t * replan + HORIZON] for t in range(length)])
     if failed:
         chunks = chunks + rng.normal(scale=0.5, size=chunks.shape) * np.linspace(0, 1, length)[:, None, None]
     return features.astype(np.float32), chunks.astype(np.float32)
 
 
-def make_dataset(root, per_task=8, tasks=("TaskA", "TaskB"), seed=0):
+def make_dataset(root, per_task=8, tasks=("TaskA", "TaskB"), seed=0, replan=REPLAN):
     rng = np.random.default_rng(seed)
     ids = {}
     for task in tasks:
         for index in range(per_task * 2):
             failed = index % 2 == 1
             length = 10 if failed else int(rng.integers(5, 9))
-            features, chunks = synthetic_rollout(rng, failed, length)
+            features, chunks = synthetic_rollout(rng, failed, length, replan)
             rollout_id = f"{task}_{index:03d}"
             metadata = SafeRolloutMetadata(
                 rollout_id=rollout_id,
@@ -55,15 +55,15 @@ def make_dataset(root, per_task=8, tasks=("TaskA", "TaskB"), seed=0):
                 policy_id="xr1",
                 checkpoint="ckpt",
                 failed=failed,
-                num_env_steps=length * REPLAN,
-                inference_env_steps=[t * REPLAN for t in range(length)],
+                num_env_steps=length * replan,
+                inference_env_steps=[t * replan for t in range(length)],
                 valid_sequence_length=length,
                 action_horizon=HORIZON,
-                replan_steps=REPLAN,
+                replan_steps=replan,
                 feature_layer=XIAOMI_ROBOTICS_1_FEATURE_LAYER,
                 model_family="xiaomi_robotics_1",
                 flow_steps=FLOW,
-                timeout_horizon=10 * REPLAN,
+                timeout_horizon=10 * replan,
             )
             save_rollout(root, metadata, features, policy_action_chunks=chunks)
             ids[rollout_id] = (task, failed, index)
@@ -93,6 +93,13 @@ class SignalTests(unittest.TestCase):
     def test_ema_and_matrix(self):
         np.testing.assert_allclose(exponential_moving_average([1, 0, 0], 0.5), [1, 0.5, 0.25])
         self.assertEqual(action_signal_matrix(np.ones((4, 6, 3)), 2).shape, (4, 3))
+
+    def test_matrix_without_overlap_keeps_chunk_magnitude_only(self):
+        # XR-1 layout: every chunk is executed in full, so chunks never overlap.
+        chunks = np.random.default_rng(0).normal(size=(4, 6, 3))
+        signals = action_signal_matrix(chunks, 6)
+        self.assertEqual(signals.shape, (4, 1))
+        np.testing.assert_allclose(signals[:, 0], np.linalg.norm(chunks, axis=-1).mean(axis=-1))
 
 
 class DetectorTests(unittest.TestCase):
@@ -126,6 +133,24 @@ class DetectorTests(unittest.TestCase):
             auc = np.mean([[f > s for s in successes] for f in failures])
             self.assertEqual(detector.score(test[0]).shape, (len(test[0]["features"]),), name)
             self.assertGreater(auc, 0.5, name)
+
+    def test_actprobe_runs_without_chunk_overlap(self):
+        rng = np.random.default_rng(2)
+        rollouts = []
+        for index in range(24):
+            failed = index % 2 == 1
+            features, chunks = synthetic_rollout(rng, failed, 10 if failed else 7, replan=HORIZON)
+            rollouts.append({
+                "rollout_id": str(index), "task_name": "TaskA", "failed": failed,
+                "features": features.mean(axis=(1, 2)), "actions": chunks,
+                "replan_steps": HORIZON,
+            })
+        detector = build_detector("actprobe", seed=0, epochs=5).fit(rollouts)
+        self.assertEqual(detector.config()["action_signals"], ["chunk_magnitude"])
+        self.assertEqual(detector.score(rollouts[0]).shape, (7,))
+        reason = DETECTOR_REGISTRY["action_consistency"].unsupported_reason(rollouts)
+        self.assertIn("share no step", reason)
+        self.assertIsNone(DETECTOR_REGISTRY["action_consistency"].unsupported_reason(self.rollouts))
 
     def test_action_detectors_require_actions(self):
         rollout = dict(self.rollouts[0], actions=None)
@@ -184,6 +209,49 @@ class RunnerTests(unittest.TestCase):
                     self.assertTrue(0.0 <= metrics["roc_auc"] <= 1.0)
             self.assertTrue((root / "out" / "summary.md").exists())
             self.assertTrue((root / "out" / "evaluation_predictions.jsonl").exists())
+
+    def test_runner_skips_action_consistency_without_overlap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ids = make_dataset(root / "data", per_task=12, replan=HORIZON)
+            by_split = {"train": [], "calibration": [], "evaluation": []}
+            for rollout_id, (task, failed, index) in sorted(ids.items()):
+                split = ("train", "train", "calibration", "evaluation")[(index // 2) % 4]
+                by_split[split].append(rollout_id)
+            horizon = 10  # inferences; failures run 10 inferences
+            bundle = {
+                "task_horizons": {"TaskA": horizon, "TaskB": horizon},
+                "time_risk_curves": {
+                    task: {"risk": np.linspace(0.1, 0.9, horizon).tolist()}
+                    for task in ("TaskA", "TaskB")
+                },
+                "target_fpr": 0.2,
+                "safe_eligibility_end_fraction": 0.5,
+                "time_eligibility_start_fraction": 0.6,
+                "development_rollout_ids": by_split["train"],
+                "primary_calibration_rollout_ids": by_split["calibration"],
+            }
+            (root / "bundle.json").write_text(json.dumps(bundle))
+            (root / "train.json").write_text(json.dumps(by_split["train"]))
+            (root / "eval.json").write_text(json.dumps(by_split["evaluation"]))
+            results = main([
+                "--dataset-dir", str(root / "data"),
+                "--runtime-bundle", str(root / "bundle.json"),
+                "--train-ids", str(root / "train.json"),
+                "--evaluation-ids", str(root / "eval.json"),
+                "--output-dir", str(root / "out"),
+                "--detectors", "action_consistency", "actprobe",
+                "--seeds", "0",
+                "--epochs", "5",
+                "--test-per-class", "3",
+            ])
+            self.assertEqual(set(results["skipped"]), {"action_consistency"})
+            self.assertEqual(set(results["detectors"]), {"actprobe"})
+            self.assertEqual(
+                results["detectors"]["actprobe"]["configs"]["0"]["action_signals"],
+                ["chunk_magnitude"],
+            )
+            self.assertIn("Skipped `action_consistency`", (root / "out" / "summary.md").read_text())
 
     def test_overlapping_splits_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

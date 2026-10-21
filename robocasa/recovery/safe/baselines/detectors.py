@@ -28,7 +28,25 @@ from __future__ import annotations
 
 import numpy as np
 
-from .signals import action_signal_matrix, exponential_moving_average, temporal_consistency_error
+from .signals import (
+    action_signal_matrix,
+    action_signal_names,
+    chunks_overlap,
+    exponential_moving_average,
+    temporal_consistency_error,
+)
+
+
+def chunk_layout(rollouts):
+    """The single ``(action_horizon, replan_steps)`` shared by these rollouts."""
+    layouts = {
+        (int(np.asarray(r["actions"]).shape[1]), int(r["replan_steps"]))
+        for r in rollouts
+        if r.get("actions") is not None
+    }
+    if len(layouts) > 1:
+        raise ValueError(f"Rollouts mix action-chunk layouts {sorted(layouts)}")
+    return next(iter(layouts)) if layouts else None
 
 
 def _require_actions(rollout, name):
@@ -77,6 +95,19 @@ class Detector:
 class ActionConsistencyDetector(Detector):
     name = "action_consistency"
     uses_actions = True
+
+    @staticmethod
+    def unsupported_reason(rollouts):
+        """Why this detector cannot run on these rollouts, or ``None``."""
+        layout = chunk_layout(rollouts)
+        if layout is not None and not chunks_overlap(*layout):
+            horizon, replan = layout
+            return (
+                f"action_horizon={horizon} and replan_steps={replan}: every chunk is "
+                "executed in full, so consecutive chunks share no step and STAC-Single "
+                "is undefined"
+            )
+        return None
 
     def __init__(self, seed=0, ema_alpha=0.9, action_dims=None, velocity_normalize=False):
         super().__init__(seed)
@@ -340,6 +371,8 @@ class ActProbeDetector(_SequenceDetector):
     def fit(self, rollouts):
         if self.tasks is None:
             self.tasks = sorted({str(r["task_name"]) for r in rollouts})
+        layout = chunk_layout(rollouts)
+        self.action_signals_ = None if layout is None else list(action_signal_names(*layout))
         return super().fit(rollouts)
 
     def _inputs(self, rollout):
@@ -360,7 +393,12 @@ class ActProbeDetector(_SequenceDetector):
         return (loss * mask).sum() / mask.sum()
 
     def config(self):
-        return {**super().config(), "action_dims": self.action_dims, "tasks": self.tasks}
+        return {
+            **super().config(),
+            "action_dims": self.action_dims,
+            "tasks": self.tasks,
+            "action_signals": getattr(self, "action_signals_", None),
+        }
 
 
 class HideAndSeekDetector(_SequenceDetector):

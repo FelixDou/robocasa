@@ -241,12 +241,19 @@ def run(args):
             "evaluation_all": len(evaluation),
         },
         "detectors": {},
+        "skipped": {},
     }
     summary_rows = []
     predictions = {}
     time_reference = None
     for name in args.detectors:
-        scores = {"train": defaultdict(dict), "calibration": defaultdict(dict),
+        check = getattr(DETECTOR_REGISTRY[name], "unsupported_reason", None)
+        reason = check((*train, *calibration, *evaluation)) if check else None
+        if reason:
+            print(f"Skipping {name}: {reason}")
+            results["skipped"][name] = reason
+            continue
+        scores ={"train": defaultdict(dict), "calibration": defaultdict(dict),
                   "evaluation": defaultdict(dict)}
         configs = {}
         for seed in args.seeds:
@@ -345,6 +352,8 @@ def run(args):
     ]
     for row in summary_rows:
         lines.append("| " + " | ".join([row[0], *[f"{value:.4f}" for value in row[1:]]]) + " |")
+    for name, reason in results["skipped"].items():
+        lines.append(f"\nSkipped `{name}`: {reason}.")
     (output / "summary.md").write_text("\n".join(lines) + "\n")
     results["elapsed_seconds"] = time.time() - started
     _write_json(output / "results.json", results)

@@ -89,14 +89,30 @@ def exponential_moving_average(values, alpha):
     return out
 
 
+def chunks_overlap(action_horizon, replan_steps):
+    """True when consecutive chunks predict some of the same future steps."""
+    return int(action_horizon) > int(replan_steps)
+
+
+def action_signal_names(action_horizon, replan_steps):
+    """Columns of :func:`action_signal_matrix` for this chunk layout.
+
+    When each chunk is executed in full (XR-1: 16-step chunks, replan every
+    16 steps), consecutive chunks share no step, so TCE is undefined and the
+    executed magnitude equals the chunk magnitude. Only ACM is kept then.
+    """
+    if chunks_overlap(action_horizon, replan_steps):
+        return ("temporal_consistency_error", "chunk_magnitude", "executed_magnitude")
+    return ("chunk_magnitude",)
+
+
 def action_signal_matrix(chunks, replan_steps, *, dims=None):
-    """Stack TCE, ACM and executed magnitude into ``(inferences, 3)``."""
+    """Stack the ActProbe signals named by :func:`action_signal_names`."""
     chunks = select_dims(chunks, dims)
-    return np.stack(
-        [
-            temporal_consistency_error(chunks, replan_steps),
-            chunk_magnitude(chunks),
-            executed_magnitude(chunks, replan_steps),
-        ],
-        axis=1,
-    )
+    columns = {
+        "temporal_consistency_error": lambda: temporal_consistency_error(chunks, replan_steps),
+        "chunk_magnitude": lambda: chunk_magnitude(chunks),
+        "executed_magnitude": lambda: executed_magnitude(chunks, replan_steps),
+    }
+    names = action_signal_names(chunks.shape[1], replan_steps)
+    return np.stack([columns[name]() for name in names], axis=1)
