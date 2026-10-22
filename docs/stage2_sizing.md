@@ -555,3 +555,91 @@ r = p_k.** Each cell is the single-retry bound / the multi-retry Monte Carlo.
 - E1b as a superiority (CI > 0) subgroup test, or dropped. Not with a 0.05 margin;
 - E3 as P vs none at 1.25 H_k (about 500–650 episodes per arm), with SAFE + P as a third arm
   that is descriptive.
+
+## E2 co-primary sizing (2026-10-23)
+
+**Why.** After the Hide-and-Seek results (report §15.20–15.22), the RSS Stage 1 draft makes
+SAFE + P and Hide-and-Seek + P co-primary in E2: on RLDX-1's 20 tasks, each against P, each
+supported if its decision CI lies above zero at 97.5% (Bonferroni over the two), under the
+E2 FPR rule, with no 0.05 margin. The draft's power figure (0.92) is SAFE alone at 95%. This
+section sizes the co-primary design. It is exploratory sizing on opened cohorts, like
+everything above. It was written, with the code and tests, before the script was run on
+real data.
+
+**Code.** `scripts/xr1_lead_time/e2_coprimary_sizing.py`, tests in
+`tests/test_e2_coprimary_sizing.py`. It reuses this document's E2 method:
+- **Pool.** The same held-out pool: 3 calibration successes plus 5/5 evaluation rollouts per
+  task, shared by the simulated calibration and test samples.
+- **Draws.** The same seed and the same cell and replicate numbering. SAFE's simulated
+  studies are therefore exactly those of Table S4 (the test checks this on synthetic data).
+- **Fits.** `confirm_lead.fit_fast` and `evaluate_fast`.
+
+**What is new.**
+- **Paired scoring.** Every simulated study is scored with both detectors on the same drawn
+  rollouts. P is fitted once per study.
+- **Hide-and-Seek scores.** Its trajectories are the §15.22 run's
+  (`rldx1_hide_and_seek_20261023_000418/scores`), for the same held-out rollouts and, for
+  the check, the training failures.
+- **Two CI levels.** The decision CI is approximated as above (g − hw), at 95% and 97.5%,
+  with hw = median minus the 2.5th or 1.25th percentile of the within-task sampling
+  distribution. The task-level variant uses the with-tasks distribution.
+- **Two FPR rules.**
+  - A1: FPR ≤ 0.075 and Wilson upper ≤ 0.10.
+  - E2: false alarms do not reject "true FPR ≤ 0.075" in a one-sided exact binomial test at
+    level 0.05 (at most 39 of 400 at n = 20).
+- **Assumed gains**, imposed by shift:
+  - SAFE: 0.034 (§15.15);
+  - Hide-and-Seek: 0.083 (§15.22), 0.052 (its gain against P at matched false alarms)
+    and 0.05;
+  - joint: (0.034, 0.083) and (0.034, 0.052).
+- **Reported:** power per detector, for at least one and for both, at n = 10–60 per class
+  per task.
+
+**Checks (stop conditions).** On the §15.15 / §15.22 fit (held-out successes, training
+failures, evaluation split):
+- SAFE + P must reproduce +0.0342 (`rldx_lead_lstm.json`);
+- Hide-and-Seek + P must reproduce +0.0833 (`rldx_hide_and_seek.json`).
+
+**Expectations, written before running.**
+- **SAFE at 97.5%.** The within-task SD at n = 20 is 0.007, so the CI half-width barely
+  changes and CI > 0 stays at about 1.00. SAFE's power stays the FPR pass rate: 0.92 under
+  A1, and at least that under E2.
+- **Hide-and-Seek.** The plug-in gain should be well above SAFE's (about 0.07–0.09), so CI > 0
+  should be about 1.00 at every n. Its power is then decided by false alarms. On the opened
+  cohort it used 4 of 100 against P's 3, so we expect a lower FPR pass rate than SAFE's at
+  n = 10, rising with n. We do not predict the value at n = 20.
+- **At least one co-primary passing.** Close to 1 at n = 20.
+- **Task-level CI.** Much lower power for both, as in Table S4b; we report it without a power
+  claim.
+
+### Cluster commands
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+source $STORAGE_BS/robocasa_logs/eval/rldx1_hide_and_seek_20261023_000418/paths.env
+export E2CO_SHA=<full SHA of the commit containing this section>
+export E2CO_REPO=$PROJECT_FS/robocasa_e2co_${E2CO_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin main
+test -e $E2CO_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $E2CO_REPO $E2CO_SHA
+test "$(git -C $E2CO_REPO rev-parse HEAD)" = "$E2CO_SHA" && echo "worktree OK" || echo "STOP: wrong HEAD"
+export E2CO_TAG=e2_coprimary_sizing_$(date +%Y%m%d_%H%M%S)
+export E2CO_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/$E2CO_TAG
+export E2CO_LOG=$STORAGE_BS/robocasa_logs/eval/$E2CO_TAG
+mkdir -p $E2CO_ROOT $E2CO_LOG
+sha256sum $RLDX_CAL/lstm_seed{0,1,2}/normalized_scores.jsonl $RLDXHS_ROOT/scores/{train,calibration,test}_predictions.jsonl \
+  $RLDX_LEAD_OUT/rldx_lead_lstm.json $RLDXHS_ROOT/rldx_hide_and_seek.json | tee $E2CO_LOG/frozen_inputs.sha256
+cd $E2CO_REPO
+"$SAFE_PY" -W ignore -m unittest tests.test_e2_coprimary_sizing tests.test_stage2_sizing 2>&1 | grep -E "^(Ran|OK|FAILED)"
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 nohup nice -n 10 \
+  "$SAFE_PY" -I -u scripts/xr1_lead_time/e2_coprimary_sizing.py --calibration-dir $RLDX_CAL \
+  --hs-scores-dir $RLDXHS_ROOT/scores --replication-json $RLDX_LEAD_OUT/rldx_lead_lstm.json \
+  --hs-result $RLDXHS_ROOT/rldx_hide_and_seek.json --workers 8 \
+  --output $E2CO_ROOT/e2_coprimary.json > $E2CO_LOG/e2_coprimary.log 2>&1 &
+echo "sizing PID: $! on $(hostname)"
+```
+
+When it exits: `cat $E2CO_LOG/e2_coprimary.log` and
+`sha256sum -c $E2CO_LOG/frozen_inputs.sha256`.
