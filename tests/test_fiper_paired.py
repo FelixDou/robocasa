@@ -111,8 +111,13 @@ class TestDump(unittest.TestCase):
 
 ANCHORS = {
     "evaluation/method_eval_classes/__init__.py": "from .base_eval_class import *\nfrom .logpzo_eval import *\n",
-    "configs/default.yaml": 'rnd_models: ["rnd_oe", "rnd_a"]\nmethods: ["entropy", "similarity", "tc", "logpzo"]\n'
-                            'implemented_methods: ["rnd_oe", "rnd_a", "entropy", "tc", "similarity", "logpzo"]\n',
+    # Mirrors FIPER's default.yaml, including the look-alike 'available_rnd_models' line.
+    "configs/default.yaml": 'tasks: ["sorting", "stacking", "push_t" ,"pretzel","push_chair"] \n'
+                            'rnd_models: ["rnd_oe", "rnd_a"]\nmethods: ["entropy", "similarity", "tc", "logpzo"]\n\n'
+                            'available_tasks: ["push_t", "pretzel", "push_chair", "sorting", "stacking"]\n'
+                            'implemented_methods: ["rnd_oe", "rnd_a", "entropy", "tc", "similarity", "logpzo"]\n'
+                            'available_rnd_models: ["rnd_oe", "rnd_a"]',
+
     "configs/results/base.yaml": "  Method:\n    - entropy\n    - rnd_oe_and_entropy\n    # - rnd_oe_or_entropy\n",
     "configs/eval/base.yaml": "window_sizes: [1]\n",
     "scripts/run_fiper.py": "import os\n\ndef main():\n    for task in []:\n        if True:\n            total_results[task] = results\n\n\ndef check_inputs(cfg):\n    return\n",
@@ -134,7 +139,10 @@ class TestSetup(unittest.TestCase):
                 (root / "data_all" / task / "rollouts" / "test").mkdir(parents=True)
             argv = ["--repo", str(repo), "--rollouts-root", str(root / "data_all"), "--run-dir", str(root / "run")]
             call(module, argv)
-            self.assertIn('methods: ["entropy", "time"]', (repo / "configs/default.yaml").read_text())
+            cfg = (repo / "configs/default.yaml").read_text()
+            self.assertIn('\nmethods: ["entropy", "time"]\n', cfg)
+            self.assertIn('\nrnd_models: ["rnd_oe"]\n', cfg)
+            self.assertIn('available_rnd_models: ["rnd_oe", "rnd_a"]', cfg)     # look-alike line untouched
             self.assertIn("    - time\n", (repo / "configs/results/base.yaml").read_text())
             run_py = (repo / "scripts/run_fiper.py").read_text()
             self.assertIn("_dump_first_alarms(results, task, seed)", run_py)

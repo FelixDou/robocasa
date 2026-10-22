@@ -106,10 +106,11 @@ def main():
     edit(repo / "evaluation/method_eval_classes/__init__.py", "from .logpzo_eval import *\n",
          "from .logpzo_eval import *\nfrom .time_eval import *\n")
     d = repo / "configs/default.yaml"
-    edit(d, 'rnd_models: ["rnd_oe", "rnd_a"]', 'rnd_models: ["rnd_oe"]')
-    edit(d, 'methods: ["entropy", "similarity", "tc", "logpzo"]', 'methods: ["entropy", "time"]')
-    edit(d, 'implemented_methods: ["rnd_oe", "rnd_a", "entropy", "tc", "similarity", "logpzo"]',
-         'implemented_methods: ["rnd_oe", "rnd_a", "entropy", "tc", "similarity", "logpzo", "time"]')
+    # Whole-line anchors: 'rnd_models: [...]' also occurs inside 'available_rnd_models: [...]'.
+    edit(d, '\nrnd_models: ["rnd_oe", "rnd_a"]\n', '\nrnd_models: ["rnd_oe"]\n')
+    edit(d, '\nmethods: ["entropy", "similarity", "tc", "logpzo"]\n', '\nmethods: ["entropy", "time"]\n')
+    edit(d, '\nimplemented_methods: ["rnd_oe", "rnd_a", "entropy", "tc", "similarity", "logpzo"]\n',
+         '\nimplemented_methods: ["rnd_oe", "rnd_a", "entropy", "tc", "similarity", "logpzo", "time"]\n')
     edit(repo / "configs/results/base.yaml", "    - rnd_oe_and_entropy\n", "    - rnd_oe_and_entropy\n    - time\n")
     r = repo / "scripts/run_fiper.py"
     edit(r, "            total_results[task] = results\n",
