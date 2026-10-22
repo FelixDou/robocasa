@@ -12,6 +12,10 @@ Outputs in --output-dir:
                               raw per-seed scores in ``per_seed_raw``, frozen time risk
   normalizations.json         detector -> seed -> task -> {location, scale}
   scoring.json                inputs with SHA-256, counts, configs, reference checks
+  train_predictions.jsonl     only with --score-train: the training rollouts' own
+                              (in-sample) trajectories, in the same format. The RLDX-1
+                              replication (docs/rldx_hide_and_seek_plan.md) chooses the fused
+                              path on training failures, as report section 15.15 did for SAFE.
 
 ``--reference COHORT FILE`` compares a cohort's trajectories with an earlier
 run_baselines predictions file (for every detector present in both) and exits with
@@ -93,6 +97,8 @@ def run(args):
         raise ValueError("Training IDs are not part of the bundle's development rollouts")
 
     names = [name for name, _ in args.cohort]
+    if args.score_train and "train" in names:
+        raise ValueError("A cohort cannot be named 'train' when --score-train is set")
     if len(set(names)) != len(names):
         raise ValueError(f"Cohort names repeat: {names}")
     cohort_ids = {name: list(dict.fromkeys(load_rollout_ids(path))) for name, path in args.cohort}
@@ -136,12 +142,15 @@ def run(args):
         "feature_aggregation": args.feature_aggregation,
         "seeds": list(args.seeds),
         "epochs": args.epochs,
+        "score_train": bool(args.score_train),
         "counts": {"train": len(train), **{name: len(rows) for name, rows in cohorts.items()}},
         "detectors": {},
         "skipped": {},
     }
     normalizations_out = {}
     streams = {name: (output / f"{name}_predictions.jsonl").open("w") for name in cohorts}
+    if args.score_train:
+        streams["train"] = (output / "train_predictions.jsonl").open("w")
     try:
         for detector_name in args.detectors:
             check = getattr(DETECTOR_REGISTRY[detector_name], "unsupported_reason", None)
@@ -180,6 +189,13 @@ def run(args):
                     streams[name].write(json.dumps({"detector": detector_name, **record},
                                                    default=_json_default) + "\n")
                 streams[name].flush()
+            if args.score_train:
+                for record in build_records(train, train_scores, normalizations, horizons, time_curves):
+                    rid = record["rollout_id"]
+                    record["per_seed_raw"] = {str(s): train_scores[s][rid] for s in args.seeds}
+                    streams["train"].write(json.dumps({"detector": detector_name, **record},
+                                                      default=_json_default) + "\n")
+                streams["train"].flush()
             meta["detectors"][detector_name] = {"configs": configs}
             _write_json(output / "scoring.json", meta)
     finally:
@@ -232,6 +248,8 @@ def build_parser():
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--score-train", action="store_true",
+                        help="also write train_predictions.jsonl (in-sample training trajectories)")
     parser.add_argument("--reference", nargs=2, action="append", metavar=("COHORT", "PREDICTIONS"),
                         help="earlier run_baselines predictions to reproduce exactly for this cohort")
     return parser
