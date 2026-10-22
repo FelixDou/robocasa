@@ -189,6 +189,14 @@ recoverable call was reproduced by a second labeler (11 of 12 videos, kappa
 0.80). The timing of the point of no return was not, so it should be read as
 rough.
 
+On FIPER's released rollouts (Section 15.18), length alone separates failures
+almost perfectly in four of five tasks. A timer calibrated like FIPER matches
+its accuracy but alarms about twice as late: the published benchmark has the
+same duration confound, and earliness is where a detector must earn its place.
+SAFE's real-robot release (Section 15.19) is the boundary case. Every rollout
+of a task stops at the same T regardless of outcome, so length carries no
+information there.
+
 ## 1. Scope, labels, and evaluation rules
 
 ### 1.1 Raw SAFE target
@@ -1962,6 +1970,17 @@ The present evidence supports the following hierarchy of conclusions:
     was pre-emptive on 2 of the 3 decided atomic failures and on none of the
     7 composite ones. A second labeler on 12 videos agreed on the recoverable
     call in 11 of 12 (kappa 0.80), but not on when decided failures were decided.
+22. **Published evaluation (Section 15.18, exploratory).** On FIPER's released
+    rollouts, length alone separates failures with ROC-AUC 0.92–1.00 in four of
+    five tasks. A timer calibrated like FIPER reaches higher mean accuracy than
+    FIPER's published value (0.83 against 0.78) but alarms later (DT 0.63
+    against 0.30). FIPER's advantage is earliness, which is what a lead-over-timer
+    evaluation credits.
+23. **Boundary case (Section 15.19).** SAFE's real-robot evaluation stops every
+    rollout of a task at the same T regardless of outcome, so length carries no
+    outcome information there. Whether elapsed time is a strong baseline is
+    decided by the termination rule: it is strong wherever successes stop at
+    completion. SAFE's failure-time annotations are not in its release.
 
 ## 15. Recommended next experiments
 
@@ -3683,6 +3702,162 @@ Key:       /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_no_return_labelin
 Labels:    /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_no_return_labeling/no_return_labels.json
 Results:   /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_no_return_labeling/no_return_results.{json,log}
 Worktree:  /gs/fs/tga-shinoda/felid/robocasa_no_return_ec4e7361
+```
+
+### 15.18 Published evaluation: an elapsed-time baseline on FIPER's released rollouts
+
+#### Status
+
+Exploratory re-analysis of data released by another group. The plan, and the
+choices fixed after inspecting the data but before any analysis, are in
+[`published_eval_reanalysis_plan.md`](published_eval_reanalysis_plan.md)
+(commits `ec4e7361` and `32133953`).
+
+**Data.** `fiper_data.zip` (sha256 `00922af4…`), linked from the FIPER
+repository (Römer et al., NeurIPS 2025): 1,719 rollout pickles over five
+tasks. Sorting, Stacking and PushT are simulated; Pretzel and PushChair are
+real-robot tasks.
+
+**Loading.** Every file was read through a restricted unpickler that admits
+only numpy and built-in containers (`scripts/published_eval/inspect_external.py`).
+No file was refused, and outcome labels never conflicted.
+
+**Timer.** It is calibrated exactly as FIPER calibrates its "CP constant"
+thresholds:
+- calibration uses the successful calibration rollouts (M per task);
+- the threshold is the 1 − δ quantile of their lengths, with the score s_t = t;
+- the alarm fires at the first step past the threshold;
+- every metric is averaged over 1 − δ ∈ {0.90, …, 0.99}.
+
+**Metrics.** These are FIPER's own:
+- TPR and TNR;
+- accuracy = (TPR + TNR) / 2;
+- DT = alarm step / T for detected failures, with T the task's longest rollout;
+- TWA, which counts a detected failure as 1 − DT instead of 1.
+
+The code is `scripts/published_eval/fiper_timer.py`.
+
+#### Results
+
+**Table 15.18a — Timer under FIPER's protocol and FIPER's published numbers.**
+The FIPER columns are from its Table 1 (mean over five seeds), not recomputed.
+
+| Task | T | M | Test S / F | ROC-AUC of length | Timer TWA / Acc / DT (TPR, TNR) | FIPER TWA / Acc / DT | Median length, success / failure |
+|---|---:|---:|---|---:|---|---|---|
+| Sorting | 75 | 50 | 255 / 145 | 0.617 | 0.49 / 0.68 / 0.68 (0.56, 0.80) | 0.54 / 0.66 / 0.32 | 43 / 75 |
+| Stacking | 120 | 50 | 315 / 485 | 0.994 | 0.58 / 0.83 / 0.71 (0.69, 0.96) | 0.62 / 0.73 / 0.28 | 48 / 100 |
+| PushT | 38 | 21 | 102 / 198 | 0.995 | 0.57 / 0.94 / 0.75 (1.00, 0.89) | 0.55 / 0.71 / 0.32 | 17 / 38 |
+| Pretzel (real) | 70 | 10 | 10 / 10 | 0.915 | 0.46 / 0.80 / 0.75 (0.90, 0.70) | 0.68 / 0.85 / 0.33 | 52 / 60 |
+| PushChair (real) | 22 | 10 | 10 / 10 | 1.000 | 0.76 / 0.90 / 0.27 (1.00, 0.80) | 0.83 / 0.96 / 0.27 | 5 / 13 |
+| **Average** | | | | | **0.57 / 0.83 / 0.63** | **0.65 / 0.78 / 0.30** | |
+
+- PushT's calibration folder also held 29 failures. They were excluded, leaving
+  M = 21.
+- **Sensitivity to the threshold rule.** With the finite-sample conformal rank
+  instead of the linear quantile, the timer's accuracy falls to 0.535 (Pretzel)
+  and 0.55 (PushChair). With M = 10 the rank exceeds M at most levels, so the
+  timer rarely alarms. The other tasks give 0.68–0.78, and the TWAs are
+  0.50–0.55.
+
+#### Interpretation
+
+- **The duration confound is present in a published benchmark.** In four of
+  FIPER's five tasks, two of them real-robot, rollout length alone separates
+  failures from successes with ROC-AUC 0.92–1.00. Sorting (0.62) is the
+  exception. The timer result is therefore not specific to RoboCasa.
+- **On accuracy, a calibrated timer is a strong baseline.** Calibrated exactly
+  like FIPER, the timer reaches mean accuracy 0.83 against FIPER's 0.78, and is
+  higher on Sorting, Stacking and PushT. No elapsed-time baseline appears in
+  FIPER's comparison.
+- **FIPER's real contribution is earliness.** Its detection time (0.30 of T) is
+  about half the timer's (0.63), which is why it wins on its time-weighted
+  accuracy (0.65 against 0.57). That is the evaluation this paper argues for:
+  credit a detector for warning earlier than a calibrated timer at a matched
+  false-alarm rate, not for accuracy a timer already achieves.
+
+#### Limits
+
+- **Published values against a computed timer.** FIPER's numbers are means over
+  five seeds, with a window and threshold type chosen on its side; the timer is
+  deterministic.
+- **T definition.** Here T is the longest rollout in the released data;
+  FIPER's maximum episode length may differ, which rescales DT and TWA.
+- **Threshold-rule sensitivity.** On the two real-robot tasks (M = 10) the
+  result depends on the threshold rule (see the sensitivity line above).
+- **Not paired.** A paired comparison would re-run FIPER's code on the same
+  rollouts; that is a possible follow-up.
+
+#### Durable artifacts
+
+```text
+Data:      /gs/bs/tga-shinoda/felid/robocasa_datasets/external/fiper/ (fiper_data.zip, download_record.txt, inspection.txt, extracted/)
+Output:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/fiper_timer_20261022_172902/
+             index.jsonl, index.log, fiper_timer.json, analyze.log
+Worktree:  /gs/fs/tga-shinoda/felid/robocasa_published_eval_32133953
+```
+
+### 15.19 Published evaluation, boundary case: SAFE's real-robot rollouts are fixed-length
+
+#### Status
+
+Exploratory check of data released by another group. Plan:
+[`published_eval_reanalysis_plan.md`](published_eval_reanalysis_plan.md), Q2.
+
+**Data.** `pi0fast_droid_0510_all.zip` (25 GB; 49 GB uncompressed; no unsafe
+paths), linked from the SAFE repository (Gu et al., NeurIPS 2025): π0-FAST on
+a real Franka, 13 tasks. Only the 1,464 per-episode files
+(`task<n>--ep<n>--succ<n>--meta.pkl`, 1 MB in total) were extracted. They were
+read through the restricted unpickler and none was refused. The ~70,000
+per-step feature files were not extracted. Each episode file records:
+- `task_description`;
+- `episode_success`;
+- `end_step`;
+- `replan_steps` (8).
+
+#### Results
+
+Each task has one fixed final step (199, 299, 349, 399 or 499).
+
+| | At the fixed final step | Ended early | Total |
+|---|---:|---:|---:|
+| Successes | 419 (≥ 30 per task) | 139 | 558 |
+| Failures | 887 (98%) | 19 | 906 |
+
+- **Early-ending successes by task:** 0 in "press the button" and "place the
+  green block on the yellow block"; 24 in "pick up the lid from the pot and
+  place it on the table".
+- **Failure-time annotations are not in the release.** SAFE's paper annotated
+  failure times from video. Its code reads them from a file on the authors'
+  machine (`.../video_annotator/results/pizero_fast_droid-0510.json`, set via
+  `cfg.dataset.failure_time_label_path`), and no such file is in the archive.
+
+#### Interpretation
+
+- **This is the boundary of the timer argument.** SAFE's real-robot evaluation
+  design (30 successes and 30 failures per task, all stopped at the same T
+  regardless of outcome, as stated in its paper) gives rollout length no
+  information about the outcome. The timer is uninformative by construction.
+  By the same construction, "lead before the end" means little, because a
+  success does not end when the task is done.
+- **Success termination brings duration back.** The release also contains 139
+  successes that stopped early, from sessions where an episode ended at success.
+  In those, length is again informative. They are not part of the paper's
+  evaluation design, so no length-only AUC is reported over the mixed set: it
+  would mostly measure how the sessions were run.
+- **Together with Section 15.18:** whether elapsed time is a strong baseline is
+  decided by the evaluation's termination rule. Where successes stop at
+  completion (FIPER's tasks, RoboCasa, deployment), it is. Where every rollout
+  runs to a fixed horizon (SAFE's real-robot set, SimplerEnv), it is not. In the
+  latter case, an evaluation of *early* warning should still report when the
+  failure became evident, which needs annotations of the kind SAFE collected but
+  did not release.
+
+#### Durable artifacts
+
+```text
+Data:      /gs/bs/tga-shinoda/felid/robocasa_datasets/external/safe_real/
+             pi0fast_droid_0510_all.zip, download_record.txt, episodes/ (1,464 meta files), inspection_episodes.txt
+Worktree:  /gs/fs/tga-shinoda/felid/robocasa_published_eval_32133953
 ```
 
 ## 16. Limitations

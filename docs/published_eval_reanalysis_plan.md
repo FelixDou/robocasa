@@ -70,3 +70,51 @@ decided.**
    keys, array shapes, the file-name pattern, and where success, length and T live.
 3. **Write the analysis.** Only after inspection, write the Q1/Q2 analysis against the
    observed structure. Its interpretation rules stay as stated above.
+
+## Observed structure and fixed analysis choices (2026-10-22, before analysis)
+
+**FIPER data.** `fiper_data.zip`, sha256 `00922af4…`.
+- 3,059 entries, no unsafe paths, 21.15 GB extracted to
+  `/gs/bs/tga-shinoda/felid/robocasa_datasets/external/fiper/extracted/data_all/`.
+- The restricted unpickler loaded every sampled file; no class was refused.
+- Layout: `<task>/rollouts/{calibration,test,calibration_unused}/episode_{s,f}_<n>.pkl`.
+  - Tasks: `sorting`, `stacking`, `push_t`, `pretzel`, `push_chair`.
+  - 30 files named `episode_<n>.pkl`, without `s`/`f`, carry `metadata.successful`.
+- Each file is `{"metadata", "rollout"}`. `rollout` is a list with one entry per policy
+  step (`step` 0 … L − 1, plus `timestamp`).
+
+**Choices fixed now.**
+- **Outcome:** `s`/`f` in the file name. Where absent, use `metadata.successful`. Where
+  both exist they must agree; a disagreement is a stop condition.
+- **Length L:** `len(rollout)`, in policy steps. **T per task:** the maximum L over that
+  task's calibration and test rollouts, FIPER's "maximum episode length".
+- **Cohorts:**
+  - Calibration: the *successful* rollouts in `calibration/`, matching FIPER's M
+    successful calibration rollouts. Failures found in `calibration/` are counted and
+    reported, never used.
+  - `calibration_unused/` is ignored.
+  - Test: everything in `test/`.
+- **Timer:** the score s_t = t (step index, 0-based), so a success's per-rollout maximum
+  is L − 1.
+  - Threshold γ_δ = the 1 − δ quantile of those maxima: numpy linear quantile as primary,
+    finite-sample conformal rank ⌈(M + 1)(1 − δ)⌉ as sensitivity.
+  - The alarm fires at the first t > γ_δ, i.e. t_alarm = ⌊γ_δ⌋ + 1. A rollout is flagged
+    if t_alarm ≤ L − 1.
+  - DT = t_alarm / T for detected failures.
+  - TWA = ½ (mean over failures of (1 − DT if detected, else 0) + TNR); Acc = ½ (TPR + TNR).
+  - Every metric is averaged over 1 − δ ∈ {0.90, …, 0.99}, as FIPER does.
+- **Also reported:**
+  - test ROC-AUC of L alone, per task;
+  - length quantiles by outcome;
+  - the same metrics by test sub-type (`rollout_subtype`), descriptive only.
+- **Comparison:** FIPER's own TWA / Acc / DT, transcribed from its Table 1 (FIPER column,
+  mean over five seeds). These are published values, not recomputed:
+  - Sorting 0.54 / 0.66 / 0.32;
+  - Stacking 0.62 / 0.73 / 0.28;
+  - PushT 0.55 / 0.71 / 0.32;
+  - Pretzel 0.68 / 0.85 / 0.33;
+  - PushChair 0.83 / 0.96 / 0.27;
+  - average 0.65 / 0.78 / 0.30.
+
+**SAFE archive sizes.** `pi0fast_droid_0510_all.zip` is 25 GB and `openvla_widowx.zip` is
+1.3 GB. Neither is downloaded yet; each needs a separate approval.
