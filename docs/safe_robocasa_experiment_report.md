@@ -197,6 +197,13 @@ SAFE's real-robot release (Section 15.19) is the boundary case. Every rollout
 of a task stops at the same T regardless of outcome, so length carries no
 information there.
 
+One published supervised baseline breaks the pattern so far (Section 15.20).
+Hide-and-Seek, an LSTM trained with failure labels on SAFE's features, adds
++0.083 [+0.022, +0.143] lead over P at matched FPR on the August cohort, where
+SAFE adds +0.008. It is exploratory and not yet explained: an LSTM can learn a
+per-task duration rule by itself, so controls with zeroed and same-task
+shuffled inputs are being run before the gain is attributed to policy state.
+
 ## 1. Scope, labels, and evaluation rules
 
 ### 1.1 Raw SAFE target
@@ -1981,6 +1988,13 @@ The present evidence supports the following hierarchy of conclusions:
     outcome information there. Whether elapsed time is a strong baseline is
     decided by the termination rule: it is strong wherever successes stop at
     completion. SAFE's failure-time annotations are not in its release.
+24. **Supervised published baselines (Section 15.20, exploratory).**
+    Hide-and-Seek, an LSTM trained with failure labels on the same DiT
+    features as SAFE, adds +0.083 [+0.022, +0.143] lead over P at matched FPR,
+    about ten times SAFE's +0.008 and above every noise draw. ActProbe, limited
+    to chunk magnitude on XR-1, matches SAFE. Because an LSTM can learn elapsed
+    time itself, the Hide-and-Seek gain is not yet attributed to policy state;
+    zero-input and same-task-shuffle controls are pending.
 
 ## 15. Recommended next experiments
 
@@ -3858,6 +3872,148 @@ Each task has one fixed final step (199, 299, 349, 399 or 499).
 Data:      /gs/bs/tga-shinoda/felid/robocasa_datasets/external/safe_real/
              pi0fast_droid_0510_all.zip, download_record.txt, episodes/ (1,464 meta files), inspection_episodes.txt
 Worktree:  /gs/fs/tga-shinoda/felid/robocasa_published_eval_32133953
+```
+
+### 15.20 Published supervised baselines: ActProbe and Hide-and-Seek against P
+
+#### Status
+
+Exploratory, on the August cohorts, which were already open:
+- calibration: the primary balanced cohort, 114/114;
+- test: the August prospective cohort, 380/380.
+
+No plan was committed before the runs. The two detectors are the published
+baselines trained with failure labels, which the success-only offline suite of
+Section 15.10 did not cover:
+- **ActProbe** (Huang et al., 2026): an LSTM on action-chunk signals plus a
+  task code. XR-1 executes each 16-step chunk in full before replanning, so
+  consecutive chunks never overlap. Only the chunk-magnitude signal remains,
+  and STAC-Single (`action_consistency`) is undefined and was skipped.
+- **Hide-and-Seek** (Park et al., 2026): an LSTM on a 128-dimensional PCA of
+  the same per-inference DiT vector the frozen SAFE MLP reads (last flow step,
+  last action position), trained with a peak-margin loss between failures and
+  successes and a proxy-onset loss within failures.
+
+Both were trained on the 1,824 final-refit training rollouts with seeds 0, 1
+and 2, 200 epochs and the default hyperparameters of the implementation; none
+was tuned on any cohort. Scores are normalized per task from training maxima
+and averaged over seeds, as for SAFE.
+
+Code:
+- detectors: `robocasa/recovery/safe/baselines/` (PR #2, merge `4b9d462e`,
+  including the non-overlapping-chunk fix `14c0141d`);
+- analysis: `scripts/xr1_lead_time/published_baselines_lead.py` (`fff544f3`).
+
+**Reproduction.** Before reporting, the analysis reproduced:
+- P alone: lead 0.1952 at 17/380 false alarms (Section 15.16);
+- SAFE + P: gain +0.0069 [−0.0026, +0.0193] (Section 15.16);
+- fused SAFE + time: 0.955 / 0.058 (Section 15.10);
+- the baseline run's own baseline-only rows.
+
+A second full training run gave bit-identical score trajectories (largest
+difference 0.0 over 1,643 rollouts for both detectors). The frozen inputs'
+SHA-256 sums were unchanged after the run.
+
+#### Results
+
+**Table 15.20a — Alone and in the frozen staged design, test cohort (760
+rollouts), thresholds from calibration at 5% FPR.** "Detection" is the
+missed-failure-adjusted detection fraction of H_k (lower is earlier; a missed
+failure counts as 1).
+
+| Detector | TPR | FPR | Detection | Recall by 25% |
+|---|---:|---:|---:|---:|
+| Time only | 0.632 | 0.047 | 0.880 | 0.000 |
+| ActProbe alone | 0.403 | 0.063 | 0.819 | 0.026 |
+| ActProbe staged + time | 0.647 | 0.053 | 0.869 | 0.013 |
+| Hide-and-Seek alone | 0.584 | 0.061 | 0.720 | 0.040 |
+| Hide-and-Seek staged + time | 0.697 | 0.071 | 0.822 | 0.074 |
+
+**Table 15.20b — Score OR global time risk over the whole rollout (the fused
+design of Section 15.10).** Paired task-then-rollout bootstrap, 2,000
+replicates, seed 0.
+
+| Detector | TPR | FPR (FP) | Detection | Δ TPR vs fused SAFE | Δ detection vs fused SAFE |
+|---|---:|---:|---:|---|---|
+| Fused SAFE + time | 0.955 | 0.058 (22) | 0.816 | — | — |
+| Fused ActProbe + time | 0.755 | 0.058 (22) | 0.827 | −0.202 [−0.321, −0.094] | +0.012 [−0.011, +0.036] |
+| Fused Hide-and-Seek + time | 0.976 | 0.076 (29) | 0.665 | +0.021 [−0.022, +0.078] | −0.152 [−0.209, −0.096] |
+
+**Table 15.20c — Each score fused with P, as in Table 15.16a.** The noise
+column is the share of 100 single-noise draws whose matched gain is at least as
+large.
+
+| Score + P | Test FP | Gain over P | Matched gain over P | p (noise) |
+|---|---:|---|---|---:|
+| P alone | 17 | — (lead 0.195) | — | |
+| SAFE | 16 | +0.007 [−0.003, +0.019] | +0.008 [−0.002, +0.020] | |
+| ActProbe | 19 | +0.020 [+0.004, +0.041] | +0.009 [−0.006, +0.030] | 0.02 |
+| **Hide-and-Seek** (chosen on calibration) | **21** | **+0.098 [+0.037, +0.158]** | **+0.083 [+0.022, +0.143]** | **0.01** |
+
+- Hide-and-Seek + P minus SAFE + P: +0.091 [+0.035, +0.146].
+- Noise null (single score, 100 draws): raw gain mean +0.006 (max +0.037),
+  matched gain mean −0.006 (max +0.016). Hide-and-Seek is above every draw on
+  both, and above the best-of-two selected null (p = 0.0099).
+- The fitted Hide-and-Seek + P path is u = 0.067, s = 2, with a conformal
+  margin of 0.266 (P's own is 0.107). The timer part of the fused detector is
+  therefore loose, and the score raises the alarm first on 215 of the 380
+  failures. ActProbe + P keeps P's margin (0.107) and alarms first on 31.
+
+#### Interpretation
+
+- **Hide-and-Seek is the first detector whose lead over P survives matched
+  FPR with a CI clear of zero.** Its matched gain (+0.083) is about ten times
+  SAFE's and above the 0.05 margin used in Amendment 1. Every earlier score,
+  physical signals included, fell to about +0.01 or below once P could spend
+  the same false-alarm budget.
+- **It is not yet evidence that policy-internal state predicts failure.** The
+  LSTM sees the whole sequence and is trained so that failure scores peak
+  above success scores. On XR-1 every failure runs to H_k, so a model that
+  learns "this task should have finished by now" scores well. With per-task
+  features it can learn a per-task duration rule, and possibly a sharper one
+  than P, which is a fixed 95th percentile of development success durations.
+  Such a gain would still be elapsed time, not state. Two controls with the
+  same LSTM and training are being run to separate the two (below).
+- **ActProbe matches SAFE.** With chunk magnitude as its only action signal,
+  its matched gain (+0.009) is SAFE's.
+- **The fused-with-time timing gain is partly false-alarm budget.** Fused
+  Hide-and-Seek + time alarms 0.15 of H_k earlier than fused SAFE, but at 29
+  false alarms against 22 (7.6%, above the 5% target). The matched-FPR P
+  comparison in Table 15.20c is the cleaner reading.
+- **Scope.** The test cohort was already open, two detectors were compared
+  (Hide-and-Seek was also the one chosen on calibration), and the result is
+  descriptive. Hide-and-Seek has never been scored on the E1 cohorts (lead
+  calibration and confirmatory test, Section 15.13). If the controls do not
+  explain the gain, a preregistered Hide-and-Seek + P test on those cohorts,
+  with the Amendment 1 margin, would be confirmatory.
+
+#### Controls (pending)
+
+Both use Hide-and-Seek's LSTM, losses, seeds and training unchanged, and are
+scored through the same analysis with paired contrasts against Hide-and-Seek:
+- `hide_and_seek_zero`: every input is zero, so only the number of inferences
+  so far is available (elapsed time alone, plus the per-task score
+  normalization);
+- `hide_and_seek_task_shuffle`: inference j of any rollout receives the features
+  of inference j of a random training rollout of the same task, never its own.
+  Task identity, elapsed time and the features typical of that task at that
+  time are kept; everything specific to the scored rollout is removed.
+
+Reading rule, written before the controls were run: if either control's
+matched gain over P comes within about 0.02 of Hide-and-Seek's (+0.083), or the
+Hide-and-Seek-minus-control matched contrast has a CI that includes 0, the gain
+is attributed to elapsed time and task identity rather than rollout state.
+
+#### Durable artifacts
+
+```text
+Baseline runs:  /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_published_baselines_<timestamp>/   (first run; smoke in ..._smoke)
+                /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_published_baselines_lead_<timestamp>/
+                  baselines/ (repeat with calibration trajectories), published_baselines_lead.json
+Logs:           /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_published_baselines_*/{smoke,full,full_attempt1_modulenotfound}.log
+                /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_published_baselines_lead_*/{baselines,lead}.log, paths.env, frozen_inputs.sha256
+Frozen inputs:  /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_physical_signals_20261021/inputs/ (a08794b0…, 0e87bb23…, c4378ba0…)
+Worktrees:      /gs/fs/tga-shinoda/felid/robocasa_baselines_4b9d462e, /gs/fs/tga-shinoda/felid/robocasa_baselines_lead_fff544f3
 ```
 
 ## 16. Limitations

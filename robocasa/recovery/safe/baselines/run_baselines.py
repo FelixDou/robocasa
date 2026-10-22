@@ -47,7 +47,7 @@ from ..prospective_matched_fpr import (
 from .detectors import DETECTOR_REGISTRY, build_detector
 
 
-TORCH_DETECTORS = {"actprobe", "hide_and_seek", "rnd"}
+TORCH_DETECTORS = {"actprobe", "hide_and_seek", "hide_and_seek_zero", "hide_and_seek_task_shuffle", "rnd"}
 
 
 def _json_default(value):

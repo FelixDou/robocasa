@@ -303,3 +303,96 @@ sha256sum -c "$XR1_LEAD_LOG/frozen_inputs.sha256"
 ```
 
 The last log line must be `REPRODUCTION OK`.
+
+## Learned-timer controls for Hide-and-Seek
+
+Two detectors keep Hide-and-Seek's LSTM, losses, seeds and training and change
+only its inputs (report section 15.20):
+
+- `hide_and_seek_zero`: all-zero inputs, so only elapsed inferences remain;
+- `hide_and_seek_task_shuffle`: inference j gets the features of inference j of
+  a random training rollout of the same task, never the scored rollout's own.
+
+Run them as a separate baseline run, then pass both runs to the analysis with
+paired contrasts.
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid
+export STORAGE_BS=/gs/bs/tga-shinoda/felid
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+export SAFE_PY="$STORAGE_BS/envs/vla_safe/bin/python"
+
+source "$(ls -d "$STORAGE_BS"/robocasa_logs/eval/xr1_published_baselines_lead_* | sort | tail -n 1)/paths.env"
+test -f "$XR1_LEAD_ROOT/baselines/calibration_predictions.jsonl" && echo "Hide-and-Seek run: $XR1_LEAD_ROOT/baselines"
+
+git -C "$PROJECT_FS/robocasa" fetch origin main
+export CTRL_SHA="$(git -C "$PROJECT_FS/robocasa" rev-parse FETCH_HEAD)"
+export CTRL_REPO="$PROJECT_FS/robocasa_baselines_controls_${CTRL_SHA:0:8}"
+test -d "$CTRL_REPO" || git -C "$PROJECT_FS/robocasa" worktree add --detach "$CTRL_REPO" "$CTRL_SHA"
+cd "$CTRL_REPO" && echo "code: $(git rev-parse HEAD)"
+
+export XR1_CTRL_TAG=xr1_published_baselines_controls_$(date +%Y%m%d_%H%M%S)
+export XR1_CTRL_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/$XR1_CTRL_TAG"
+export XR1_CTRL_LOG="$STORAGE_BS/robocasa_logs/eval/$XR1_CTRL_TAG"
+mkdir -p "$XR1_CTRL_LOG"
+cp "$XR1_LEAD_LOG/frozen_inputs.sha256" "$XR1_CTRL_LOG/frozen_inputs.sha256"
+sha256sum -c "$XR1_CTRL_LOG/frozen_inputs.sha256"
+{
+  printf 'export %s=%q\n' CTRL_REPO "$CTRL_REPO" XR1_CTRL_ROOT "$XR1_CTRL_ROOT" XR1_CTRL_LOG "$XR1_CTRL_LOG"
+  cat "$XR1_LEAD_LOG/paths.env"
+} > "$XR1_CTRL_LOG/paths.env"
+
+PYTHONPATH="$CTRL_REPO" "$SAFE_PY" -m unittest tests.test_safe_baselines tests.test_xr1_published_baselines_lead
+```
+
+Train the controls (about one hour on CPU):
+
+```bash
+cd "$CTRL_REPO"
+PYTHONPATH="$CTRL_REPO" CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 \
+nohup nice -n 10 "$SAFE_PY" -u -m robocasa.recovery.safe.baselines.run_baselines \
+  --dataset-dir "${XR1_RAW_DIRS[@]}" \
+  --runtime-bundle "$XR1_RUNTIME_BUNDLE" --train-ids "$XR1_TRAIN_IDS" --evaluation-ids "$XR1_EVAL_IDS" \
+  --output-dir "$XR1_CTRL_ROOT/baselines" \
+  --detectors hide_and_seek_zero hide_and_seek_task_shuffle \
+  --feature-aggregation last --seeds 0 1 2 \
+  > "$XR1_CTRL_LOG/baselines.log" 2>&1 &
+echo "controls PID: $! on $(hostname)"
+sleep 60; ps -p $! -o etime,%cpu,rss; tail -n 5 "$XR1_CTRL_LOG/baselines.log"
+```
+
+When `$XR1_CTRL_ROOT/baselines/summary.md` exists, score all three together:
+
+```bash
+cd "$CTRL_REPO"
+cat "$XR1_CTRL_ROOT/baselines/summary.md"
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+nohup nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/published_baselines_lead.py \
+  --baseline-run "$XR1_LEAD_ROOT/baselines" "$XR1_CTRL_ROOT/baselines" \
+  --detectors hide_and_seek hide_and_seek_zero hide_and_seek_task_shuffle \
+  --contrast hide_and_seek hide_and_seek_zero \
+  --contrast hide_and_seek hide_and_seek_task_shuffle \
+  --contrast hide_and_seek_task_shuffle hide_and_seek_zero \
+  --contrast hide_and_seek safe \
+  --calibration "$XR1_PS_INPUTS/calibration_predictions.jsonl" \
+  --test "$XR1_PS_INPUTS/event_predictions.jsonl" \
+  --bundle "$XR1_PS_INPUTS/runtime_bundle.json" \
+  --workers 8 --noise-draws 100 \
+  --out "$XR1_CTRL_ROOT/controls_lead.json" \
+  > "$XR1_CTRL_LOG/lead.log" 2>&1 &
+echo "lead PID: $! on $(hostname)"
+```
+
+When it exits:
+
+```bash
+sed -n '/=== A\./,/REPRODUCTION/p' "$XR1_CTRL_LOG/lead.log"
+sha256sum -c "$XR1_CTRL_LOG/frozen_inputs.sha256"
+```
+
+The last log line must be `REPRODUCTION OK`. Hide-and-Seek's gain and matched
+gain must equal Table 15.20c (+0.0977 and +0.0825), because its trajectories are
+read from the earlier run. Its noise p-value can differ slightly: with three
+detectors the noise draws come in a different order.

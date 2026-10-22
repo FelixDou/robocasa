@@ -83,6 +83,19 @@ def write_fixture(root, *, truncate=False):
     return run
 
 
+def split_run(root):
+    """Write run_a (safe_copy) and run_b (noise) from the combined fixture run."""
+    results = json.loads((root / "run" / "results.json").read_text())
+    for name, target in (("safe_copy", "run_a"), ("noise", "run_b")):
+        out = root / target
+        out.mkdir()
+        for filename in ("calibration_predictions.jsonl", "evaluation_predictions.jsonl"):
+            lines = [line for line in (root / "run" / filename).read_text().splitlines()
+                     if json.loads(line)["detector"] == name]
+            (out / filename).write_text("\n".join(lines) + "\n")
+        (out / "results.json").write_text(json.dumps({"detectors": {name: results["detectors"][name]}}))
+
+
 def argv(root, *extra):
     return ["--baseline-run", str(root / "run"), "--calibration", str(root / "cal.jsonl"),
             "--test", str(root / "test.jsonl"), "--bundle", str(root / "bundle.json"),
@@ -117,6 +130,43 @@ class PublishedBaselinesLeadTests(unittest.TestCase):
             self.assertEqual(same["counts"]["earlier"] + same["counts"]["later"], 0)
             self.assertEqual(same["bootstrap"]["tpr_delta"]["ci95"], [0.0, 0.0])
             self.assertIn("fused_noise_time_vs_time_only", fused["paired"])
+
+    def test_runs_merge_and_contrasts_are_paired(self):
+        module = load()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_fixture(root)
+            split_run(root)
+            args = argv(root, "--allow-reference-mismatch", "--contrast", "safe_copy", "safe",
+                        "--contrast", "noise", "safe_copy")
+            args[args.index(str(root / "run"))] = str(root / "run_a")
+            args.insert(args.index(str(root / "run_a")) + 1, str(root / "run_b"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(module.main(args), 0)
+            out = json.loads((root / "out.json").read_text())
+            self.assertEqual(out["detectors"], ["noise", "safe_copy"])
+            self.assertEqual(set(out["detector_runs"].values()),
+                             {str((root / "run_a").resolve()), str((root / "run_b").resolve())})
+            same = out["lead_over_P"]["contrasts"]["safe_copy_minus_safe"]
+            self.assertEqual(same["raw"], {"mean": 0.0, "ci95": [0.0, 0.0]})
+            self.assertEqual(same["matched"], {"mean": 0.0, "ci95": [0.0, 0.0]})
+            lead = out["lead_over_P"]
+            noise = lead["contrasts"]["noise_minus_safe_copy"]
+            expected = (lead["all_features_descriptive"]["noise"]["gain_over_timer"]["mean"]
+                        - lead["all_features_descriptive"]["safe_copy"]["gain_over_timer"]["mean"])
+            self.assertAlmostEqual(noise["raw"]["mean"], expected, places=3)
+            self.assertIn("fused_noise_time_vs_fused_safe_copy_time", out["fused_with_global_time"]["paired"])
+
+    def test_detector_in_two_runs_is_rejected(self):
+        module = load()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_fixture(root)
+            split_run(root)
+            args = argv(root, "--allow-reference-mismatch")
+            args.insert(args.index(str(root / "run")) + 1, str(root / "run_a"))
+            with self.assertRaises(ValueError):
+                module.main(args)
 
     def test_reference_mismatch_fails_but_keeps_output(self):
         module = load()

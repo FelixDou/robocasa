@@ -25,10 +25,15 @@ reproduces the P and SAFE + P numbers of section 15.16 and fused SAFE of section
 and the baseline-only rows of the baseline run's results.json; it stops if any differ.
 
 Usage (TSUBAME, CPU only):
-  python -I -u published_baselines_lead.py --baseline-run RUN_DIR \
+  python -I -u published_baselines_lead.py --baseline-run RUN_DIR [RUN_DIR ...] \
       --calibration calibration_predictions.jsonl --test event_predictions.jsonl \
       --bundle runtime_bundle.json --out OUT.json [--workers 8] [--noise-draws 100] \
-      [--compare-run EARLIER_RUN_DIR]
+      [--compare-run EARLIER_RUN_DIR] [--contrast A B ...]
+
+Controls (added 2026-10-22): hide_and_seek_zero (all-zero inputs: elapsed time only)
+and hide_and_seek_task_shuffle (same-task, same-step features of other training
+rollouts) come from a separate run. Pass both runs and contrast them with
+hide_and_seek, e.g. --contrast hide_and_seek hide_and_seek_zero.
 """
 from __future__ import annotations
 
@@ -155,7 +160,7 @@ def metric_row(m):
                 roc_auc=round(m["roc_auc"], 4))
 
 
-def fused_with_time(cal, te, names, target_fpr, safe_end, time_start, workers):
+def fused_with_time(cal, te, names, target_fpr, safe_end, time_start, workers, contrasts=()):
     specs = [spec(None), spec("safe")] + [spec(n) for n in names]
     jobs = [(s["name"], s["base"], views(cal, s), target_fpr, safe_end, time_start) for s in specs]
     selections = {name: sel for name, sel, _ in _run_jobs(jobs, workers)}
@@ -170,6 +175,8 @@ def fused_with_time(cal, te, names, target_fpr, safe_end, time_start, workers):
     pairs = [("fused_safe_time", "time_only")]
     for n in names:
         pairs += [(f"fused_{n}_time", "time_only"), (f"fused_{n}_time", "fused_safe_time")]
+    pairs += [(f"fused_{a}_time", f"fused_{b}_time") for a, b in contrasts
+              if (f"fused_{a}_time", f"fused_{b}_time") not in pairs]
     boot = task_rollout_bootstrap(te, outcomes, pairs, BOOT_SAMPLES, BOOT_SEED)
     for a, b in pairs:
         out["paired"][f"{a}_vs_{b}"] = dict(counts=paired_comparison(te, outcomes[a], outcomes[b]),
@@ -177,10 +184,36 @@ def fused_with_time(cal, te, names, target_fpr, safe_end, time_start, workers):
     return out
 
 
+# --------------------------------------------------------------------------- contrasts
+def lead_contrasts(cal, te, rk, contrasts):
+    """Per-failure lead of score A + P minus score B + P, each fitted as in part A.
+
+    ``raw`` compares the two fused detectors as fitted (they may spend different
+    false-alarm budgets). ``matched`` compares their gains over P loosened to each
+    detector's own test false-alarm count, which removes the budget difference.
+    """
+    F_te = [r for r in te if r["failed"]]
+    fits = {}
+    for key in sorted({k for pair in contrasts for k in pair}):
+        f = ps.fit_fused(cal, key, rk)
+        e, lv = ps.evaluate(te, key, rk, f["lam"], f["u"], f["s"])
+        _, lm = ps.matched_timer(te, rk, e["fp"])
+        fits[key] = dict(fp=e["fp"], lead=lv, matched=lv - lm)
+    out = {}
+    for a, b in contrasts:
+        out[f"{a}_minus_{b}"] = dict(
+            fp=[fits[a]["fp"], fits[b]["fp"]],
+            raw=ps.boot(fits[a]["lead"] - fits[b]["lead"], F_te),
+            matched=ps.boot(fits[a]["matched"] - fits[b]["matched"], F_te))
+    return out
+
+
 # --------------------------------------------------------------------------- main
-def compare_runs(run, earlier, names):
-    """Largest trajectory difference between this run and an earlier one (same IDs)."""
-    now = load_baseline_predictions(Path(run) / "evaluation_predictions.jsonl")
+def compare_runs(runs, earlier, names):
+    """Largest trajectory difference between these runs and an earlier one (same IDs)."""
+    now = {}
+    for run in runs:
+        now.update(load_baseline_predictions(Path(run) / "evaluation_predictions.jsonl"))
     before = load_baseline_predictions(Path(earlier) / "evaluation_predictions.jsonl")
     out = {}
     for n in names:
@@ -196,11 +229,12 @@ def run(args):
     out_path = Path(args.out)
     if out_path.exists():
         raise SystemExit(f"error: output exists: {out_path}")
-    run_dir = Path(args.baseline_run)
-    files = dict(calibration=Path(args.calibration), test=Path(args.test), bundle=Path(args.bundle),
-                 baseline_calibration=run_dir / "calibration_predictions.jsonl",
-                 baseline_evaluation=run_dir / "evaluation_predictions.jsonl",
-                 baseline_results=run_dir / "results.json")
+    run_dirs = [Path(d) for d in args.baseline_run]
+    files = dict(calibration=Path(args.calibration), test=Path(args.test), bundle=Path(args.bundle))
+    for i, d in enumerate(run_dirs):
+        files[f"run{i}_calibration"] = d / "calibration_predictions.jsonl"
+        files[f"run{i}_evaluation"] = d / "evaluation_predictions.jsonl"
+        files[f"run{i}_results"] = d / "results.json"
     for label, path in files.items():
         if not path.is_file():
             raise SystemExit(f"error: missing {label}: {path}")
@@ -216,27 +250,46 @@ def run(args):
     if {str(r["rollout_id"]) for r in cal} != primary:
         raise ValueError("Calibration selection differs from the bundle's primary calibration IDs")
 
-    pred_cal = load_baseline_predictions(files["baseline_calibration"])
-    pred_te = load_baseline_predictions(files["baseline_evaluation"])
+    # Merge the runs; a detector name may come from one run only.
+    pred_cal, pred_te, results, source = {}, {}, {}, {}
+    for i, d in enumerate(run_dirs):
+        run_cal = load_baseline_predictions(files[f"run{i}_calibration"])
+        run_te = load_baseline_predictions(files[f"run{i}_evaluation"])
+        run_results = json.loads(files[f"run{i}_results"].read_text())
+        for n in run_cal:
+            if n in source:
+                raise ValueError(f"Detector {n} appears in two runs: {source[n]} and {d}")
+            if n not in run_te:
+                raise ValueError(f"Detector {n} has calibration but no evaluation trajectories in {d}")
+            source[n] = str(d.resolve())
+            pred_cal[n], pred_te[n] = run_cal[n], run_te[n]
+            results[n] = run_results.get("detectors", {}).get(n)
     names = sorted(pred_cal)
     if args.detectors:
+        missing = sorted(set(args.detectors) - set(names))
+        if missing:
+            raise ValueError(f"Requested detectors not in the runs: {missing}")
         names = [n for n in names if n in args.detectors]
-    if not names or sorted(set(names) - set(pred_te)):
-        raise ValueError(f"Detectors missing from the baseline evaluation file: {names}")
+    contrasts = [tuple(pair) for pair in (args.contrast or [])]
+    for pair in contrasts:
+        unknown = [k for k in pair if k != "safe" and k not in names]
+        if unknown:
+            raise ValueError(f"Contrast {pair} names unknown detectors {unknown}")
     attach(cal, pred_cal, names, "calibration")
     attach(te, pred_te, names, "test")
     print(f"cohorts: calibration {len(cal)}, test {len(te)}; detectors {names}", flush=True)
 
     failures = []
     checks = {}
-    # The baseline-only rows of results.json must come back from these trajectories.
-    results = json.loads(files["baseline_results"].read_text())
+    # The baseline-only rows of each run's results.json must come back from these trajectories.
     for n in names:
         sel = select_single_threshold(views(cal, spec(n)), "safe_only", target_fpr=target_fpr,
                                       safe_end=safe_end, time_start=time_start)
         m = event_metrics(views(te, spec(n)), "safe_only", sel["thresholds"],
                           safe_end=safe_end, time_start=time_start)
-        ref = results["detectors"][n]["evaluation"]["baseline_only"]
+        if results[n] is None:
+            raise ValueError(f"{n} is missing from results.json in {source[n]}")
+        ref = results[n]["evaluation"]["baseline_only"]
         checks[f"{n}_baseline_only_tpr"] = check(f"{n} baseline-only TPR", m["true_positive_rate"],
                                                  ref["true_positive_rate"], 1e-9, failures)
         checks[f"{n}_baseline_only_fpr"] = check(f"{n} baseline-only FPR", m["false_positive_rate"],
@@ -249,20 +302,24 @@ def run(args):
     checks["timer_fp"] = check("P false alarms", lead["timer"]["fp"], REFERENCE["timer_fp"], 0, failures)
     checks["safe_gain_over_timer"] = check("SAFE + P gain", lead["safe_plus_timer"]["gain_over_timer"]["mean"],
                                            REFERENCE["safe_gain_over_timer"], 1e-4, failures)
+    if contrasts:
+        lead["contrasts"] = lead_contrasts(cal, te, rk, contrasts)
 
     # B. Fused with the global time risk.
-    fused = fused_with_time(cal, te, names, target_fpr, safe_end, time_start, args.workers)
+    fused = fused_with_time(cal, te, names, target_fpr, safe_end, time_start, args.workers,
+                            [pair for pair in contrasts if "safe" not in pair])
     fs = fused["detectors"]["fused_safe_time"]["test"]
     checks["fused_safe_tpr"] = check("fused SAFE TPR", fs["tpr"], REFERENCE["fused_safe_tpr"], 6e-4, failures)
     checks["fused_safe_fpr"] = check("fused SAFE FPR", fs["fpr"], REFERENCE["fused_safe_fpr"], 6e-4, failures)
 
     out = dict(status="exploratory (August cohorts, already opened)",
                note="scripts/xr1_lead_time/published_baselines_lead.py", inputs=inputs,
-               counts=dict(calibration=len(cal), test=len(te)), detectors=names, checks=checks,
+               counts=dict(calibration=len(cal), test=len(te)), detectors=names, detector_runs=source,
+               contrasts=[list(c) for c in contrasts], checks=checks,
                reproduction_failures=failures, lead_over_P=lead, fused_with_global_time=fused)
     if args.compare_run:
         out["compare_run"] = dict(path=str(Path(args.compare_run).resolve()),
-                                  evaluation=compare_runs(run_dir, args.compare_run, names))
+                                  evaluation=compare_runs(run_dirs, args.compare_run, names))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out, indent=1, default=float) + "\n")
     print_summary(out)
@@ -288,6 +345,9 @@ def print_summary(out):
         p = nn.get(k, {}).get("p_matched_gain", "")
         print(f"{k:16s} {e['fp']:4d} {g['mean']:+8.4f} {str(g['ci95']):>18s} "
               f"{m['gain']['mean']:+8.4f} {str(m['gain']['ci95']):>18s} {p!s:>8s}")
+    for pair, c in lead.get("contrasts", {}).items():
+        print(f"contrast {pair} (fp {c['fp'][0]} vs {c['fp'][1]}): raw {c['raw']['mean']:+.4f} {c['raw']['ci95']}"
+              f"  matched {c['matched']['mean']:+.4f} {c['matched']['ci95']}")
     if "noise_null" in lead:
         s = lead["noise_null"]["single"]
         print(f"noise null (single, {lead['noise_null']['draws']} draws): gain mean {s['gain_mean']:+.4f} "
@@ -311,12 +371,15 @@ def print_summary(out):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--baseline-run", required=True, help="run_baselines output directory")
+    ap.add_argument("--baseline-run", required=True, nargs="+",
+                    help="run_baselines output directories (detector names must not repeat)")
     ap.add_argument("--calibration", required=True, help="frozen August calibration_predictions.jsonl")
     ap.add_argument("--test", required=True, help="frozen August prospective event_predictions.jsonl")
     ap.add_argument("--bundle", required=True, help="frozen runtime_bundle.json")
     ap.add_argument("--out", required=True)
     ap.add_argument("--detectors", nargs="+", help="subset of the run's detectors (default: all)")
+    ap.add_argument("--contrast", nargs=2, action="append", metavar=("A", "B"),
+                    help="also report lead(A + P) minus lead(B + P) with bootstrap CIs; 'safe' is allowed")
     ap.add_argument("--noise-draws", type=int, default=100)
     ap.add_argument("--noise-seed", type=int, default=1)
     ap.add_argument("--workers", type=int, default=1, help="processes for the joint threshold search")
