@@ -193,6 +193,9 @@ On FIPER's released rollouts (Section 15.18), length alone separates failures
 almost perfectly in four of five tasks. A timer calibrated like FIPER matches
 its accuracy but alarms about twice as late: the published benchmark has the
 same duration confound, and earliness is where a detector must earn its place.
+SAFE's real-robot release (Section 15.19) is the boundary case. Every rollout
+of a task stops at the same T regardless of outcome, so length carries no
+information there.
 
 ## 1. Scope, labels, and evaluation rules
 
@@ -1973,6 +1976,11 @@ The present evidence supports the following hierarchy of conclusions:
     FIPER's published value (0.83 against 0.78) but alarms later (DT 0.63
     against 0.30). FIPER's advantage is earliness, which is what a lead-over-timer
     evaluation credits.
+23. **Boundary case (Section 15.19).** SAFE's real-robot evaluation stops every
+    rollout of a task at the same T regardless of outcome, so length carries no
+    outcome information there. Whether elapsed time is a strong baseline is
+    decided by the termination rule: it is strong wherever successes stop at
+    completion. SAFE's failure-time annotations are not in its release.
 
 ## 15. Recommended next experiments
 
@@ -3785,6 +3793,70 @@ The FIPER columns are from its Table 1 (mean over five seeds), not recomputed.
 Data:      /gs/bs/tga-shinoda/felid/robocasa_datasets/external/fiper/ (fiper_data.zip, download_record.txt, inspection.txt, extracted/)
 Output:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/fiper_timer_20261022_172902/
              index.jsonl, index.log, fiper_timer.json, analyze.log
+Worktree:  /gs/fs/tga-shinoda/felid/robocasa_published_eval_32133953
+```
+
+### 15.19 Published evaluation, boundary case: SAFE's real-robot rollouts are fixed-length
+
+#### Status
+
+Exploratory check of data released by another group. Plan:
+[`published_eval_reanalysis_plan.md`](published_eval_reanalysis_plan.md), Q2.
+
+**Data.** `pi0fast_droid_0510_all.zip` (25 GB; 49 GB uncompressed; no unsafe
+paths), linked from the SAFE repository (Gu et al., NeurIPS 2025): π0-FAST on
+a real Franka, 13 tasks. Only the 1,464 per-episode files
+(`task<n>--ep<n>--succ<n>--meta.pkl`, 1 MB in total) were extracted. They were
+read through the restricted unpickler and none was refused. The ~70,000
+per-step feature files were not extracted. Each episode file records:
+- `task_description`;
+- `episode_success`;
+- `end_step`;
+- `replan_steps` (8).
+
+#### Results
+
+Each task has one fixed final step (199, 299, 349, 399 or 499).
+
+| | At the fixed final step | Ended early | Total |
+|---|---:|---:|---:|
+| Successes | 419 (≥ 30 per task) | 139 | 558 |
+| Failures | 887 (98%) | 19 | 906 |
+
+- **Early-ending successes by task:** 0 in "press the button" and "place the
+  green block on the yellow block"; 24 in "pick up the lid from the pot and
+  place it on the table".
+- **Failure-time annotations are not in the release.** SAFE's paper annotated
+  failure times from video. Its code reads them from a file on the authors'
+  machine (`.../video_annotator/results/pizero_fast_droid-0510.json`, set via
+  `cfg.dataset.failure_time_label_path`), and no such file is in the archive.
+
+#### Interpretation
+
+- **This is the boundary of the timer argument.** SAFE's real-robot evaluation
+  design (30 successes and 30 failures per task, all stopped at the same T
+  regardless of outcome, as stated in its paper) gives rollout length no
+  information about the outcome. The timer is uninformative by construction.
+  By the same construction, "lead before the end" means little, because a
+  success does not end when the task is done.
+- **Success termination brings duration back.** The release also contains 139
+  successes that stopped early, from sessions where an episode ended at success.
+  In those, length is again informative. They are not part of the paper's
+  evaluation design, so no length-only AUC is reported over the mixed set: it
+  would mostly measure how the sessions were run.
+- **Together with Section 15.18:** whether elapsed time is a strong baseline is
+  decided by the evaluation's termination rule. Where successes stop at
+  completion (FIPER's tasks, RoboCasa, deployment), it is. Where every rollout
+  runs to a fixed horizon (SAFE's real-robot set, SimplerEnv), it is not. In the
+  latter case, an evaluation of *early* warning should still report when the
+  failure became evident, which needs annotations of the kind SAFE collected but
+  did not release.
+
+#### Durable artifacts
+
+```text
+Data:      /gs/bs/tga-shinoda/felid/robocasa_datasets/external/safe_real/
+             pi0fast_droid_0510_all.zip, download_record.txt, episodes/ (1,464 meta files), inspection_episodes.txt
 Worktree:  /gs/fs/tga-shinoda/felid/robocasa_published_eval_32133953
 ```
 
