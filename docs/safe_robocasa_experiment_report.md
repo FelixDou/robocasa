@@ -185,7 +185,9 @@ this is preliminary.
 Point-of-no-return labels on 48 XR-1 failures (Section 15.16) found 79% still
 recoverable when the time limit was reached. On this benchmark, failure mostly
 means not finishing in time, which is why elapsed time is so informative. The
-labels come from a single labeler, with no reliability check yet.
+recoverable call was reproduced by a second labeler (11 of 12 videos, kappa
+0.80). The timing of the point of no return was not, so it should be read as
+rough.
 
 ## 1. Scope, labels, and evaluation rules
 
@@ -1958,7 +1960,8 @@ The present evidence supports the following hierarchy of conclusions:
     this benchmark failure mostly means "did not finish in time". The timer
     alarmed after the point of no return in all 10 decided failures. SAFE + P
     was pre-emptive on 2 of the 3 decided atomic failures and on none of the
-    7 composite ones. There was one labeler and no reliability check yet.
+    7 composite ones. A second labeler on 12 videos agreed on the recoverable
+    call in 11 of 12 (kappa 0.80), but not on when decided failures were decided.
 
 ## 15. Recommended next experiments
 
@@ -3502,8 +3505,23 @@ Categories:
 - One labeler, who is also the author.
 - 48 videos. The decided subset is small (3 atomic, 7 composite).
 - The labels are judgments of recoverability made from video alone.
-- **Reliability check.** The planned check, a second labeler on 12 videos, has
-  not been done yet. The 79% figure is the result most in need of it.
+- **Reliability check (done 2026-10-22).** A second labeler (AH) independently
+  labeled 12 of the 48 videos: 6 atomic and 6 composite, drawn with seed 1. AH
+  had the guide's definitions only, and saw neither the first labels nor the
+  overall result.
+  - **The recoverable call agrees** on 11 of 12 videos (Cohen's kappa 0.80).
+    The first labeler called 8 of 12 recoverable, AH 9 of 12. The one
+    disagreement was a failure the first labeler marked decided at 0.13 H_k and
+    AH marked recoverable, with low confidence.
+  - **Categories agree** on 9 of 12.
+  - **The timing of t_u does not agree.** On the three videos that both
+    labelers called decided, t_u differed by 0.24–0.34 of H_k.
+  - The *fraction* of recoverable failures is therefore a reliable label. The
+    *timing* of the point of no return, and so the wasted-time figures in
+    Table 15.16b, should be read as rough.
+  - Computed from the two exported label files
+    (`no_return_labels.json` and the second labeler's `bundle_id`
+    `second_labeler_v1` export).
 
 #### Durable artifacts
 
