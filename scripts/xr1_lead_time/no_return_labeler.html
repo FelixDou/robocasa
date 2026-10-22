@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>No-Return Labeler</title>
+<style>
+  :root { --bg:#f7f7f5; --panel:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#ddddd6; --accent:#2f5d8a; --warn:#b4541a; --ok:#2e7d4f; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#171716; --panel:#212120; --ink:#ecece8; --muted:#a3a39c; --line:#3a3a37; --accent:#7fb0e0; --warn:#e39a62; --ok:#7cc79a; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 -apple-system, system-ui, sans-serif; }
+  header { padding:12px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 12px 0 0; }
+  main { display:grid; grid-template-columns:220px 1fr 340px; gap:12px; padding:12px 16px; }
+  @media (max-width: 1000px) { main { grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  #list { max-height:80vh; overflow:auto; padding:0; }
+  #list button { display:flex; justify-content:space-between; width:100%; border:0; border-bottom:1px solid var(--line); background:none; color:var(--ink); padding:8px 12px; text-align:left; cursor:pointer; font:inherit; }
+  #list button.active { background:color-mix(in srgb, var(--accent) 15%, transparent); }
+  .done { color:var(--ok); } .todo { color:var(--muted); }
+  video { width:100%; background:#000; border-radius:6px; }
+  .readout { font-variant-numeric:tabular-nums; color:var(--muted); margin:8px 0; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin:6px 0; align-items:center; }
+  .act { display:inline-block; border:1px solid var(--line); background:var(--panel); color:var(--ink); border-radius:6px; padding:6px 10px; cursor:pointer; font:inherit; }
+  .act.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  label.block { display:block; margin:10px 0 4px; font-weight:600; }
+  select, textarea { width:100%; font:inherit; background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:6px; }
+  .mark { font-variant-numeric:tabular-nums; }
+  .warn { color:var(--warn); }
+  .muted { color:var(--muted); }
+  kbd { border:1px solid var(--line); border-radius:4px; padding:0 4px; font-size:12px; }
+  #timeline { position:relative; height:14px; background:var(--line); border-radius:7px; margin-top:6px; cursor:pointer; }
+  #timeline .tick { position:absolute; top:-3px; width:3px; height:20px; border-radius:2px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Point-of-no-return labeler</h1>
+  <label class="act">Choose bundle folder <input id="folder" type="file" webkitdirectory directory multiple hidden></label>
+  <span class="muted">Labeler</span><input id="labeler" placeholder="initials" size="6">
+  <button class="act" id="export">Export labels</button>
+  <label class="act">Import labels <input id="import" type="file" accept=".json" hidden></label>
+  <span id="progress" class="muted"></span>
+</header>
+<main>
+  <div class="panel" id="list"></div>
+  <div class="panel">
+    <div id="title"><b>Choose the bundle folder to start.</b> Detector alarms are not shown here; do not open <code>key/</code> until every video is labeled.</div>
+    <div id="instruction" class="muted"></div>
+    <video id="video" controls preload="auto"></video>
+    <div id="timeline"></div>
+    <div class="readout" id="readout"></div>
+    <div class="row muted">
+      <span><kbd>Space</kbd> play/pause</span><span><kbd>←</kbd>/<kbd>→</kbd> one frame</span>
+      <span><kbd>Shift</kbd>+arrows 1 s</span><span><kbd>[</kbd>/<kbd>]</kbd> speed</span>
+      <span><kbd>E</kbd> mark t_e</span><span><kbd>U</kbd> mark t_u</span>
+    </div>
+  </div>
+  <div class="panel">
+    <label class="block">First visible error (t_e)</label>
+    <div class="row"><button class="act primary" id="markE">Mark here (E)</button><button class="act" id="goE">Go</button><button class="act" id="clearE">Clear</button></div>
+    <div class="mark" id="valE">—</div>
+    <label class="block">Point of no return (t_u)</label>
+    <div class="row"><button class="act primary" id="markU">Mark here (U)</button><button class="act" id="goU">Go</button><button class="act" id="clearU">Clear</button></div>
+    <div class="mark" id="valU">—</div>
+    <div class="row"><label><input type="checkbox" id="recoverable"> Recoverable until timeout (t_u = end)</label></div>
+    <label class="block">Category</label>
+    <select id="category">
+      <option value="">— choose —</option>
+      <option value="dropped_or_lost_object">Dropped or lost object</option>
+      <option value="knocked_over_or_displaced">Knocked over / displaced scene object</option>
+      <option value="wrong_object_or_target">Wrong object or wrong target</option>
+      <option value="stuck_or_collision">Stuck or collision</option>
+      <option value="no_progress_or_wandering">Never made progress / wandered</option>
+      <option value="slow_or_nearly_succeeded">Slow or nearly succeeded</option>
+      <option value="other">Other (explain in note)</option>
+    </select>
+    <label class="block">Confidence in t_u</label>
+    <div class="row">
+      <label><input type="radio" name="conf" value="high"> high</label>
+      <label><input type="radio" name="conf" value="medium"> medium</label>
+      <label><input type="radio" name="conf" value="low"> low</label>
+    </div>
+    <label class="block">Note</label>
+    <textarea id="note" rows="3"></textarea>
+    <div id="status" class="row"></div>
+    <div class="row"><button class="act" id="prev">← Previous</button><button class="act primary" id="next">Next →</button></div>
+  </div>
+</main>
+<script>
+const STORE = "xr1_no_return_labels_v1";
+let store = STORE;   // per-bundle key: a bundle with a bundle_id never sees another bundle's labels
+let manifest = null, files = {}, idx = 0, labels = {};
+const $ = id => document.getElementById(id);
+const video = $("video");
+function loadStore() {
+  try { labels = JSON.parse(localStorage.getItem(store) || "{}"); } catch (e) { labels = {}; }
+  try { $("labeler").value = localStorage.getItem(store + "_labeler") || ""; } catch (e) {}
+}
+
+function save() {
+  try { localStorage.setItem(store, JSON.stringify(labels)); localStorage.setItem(store + "_labeler", $("labeler").value); } catch (e) {}
+  renderList(); renderStatus();
+}
+function item() { return manifest ? manifest.videos[idx] : null; }
+function cur() { const it = item(); if (!it) return null; return labels[it.id] || (labels[it.id] = {}); }
+function frameNow(it) { return Math.round(video.currentTime * it.fps); }
+function envStep(it, frame) { return frame * it.video_frame_stride; }
+function describe(it, step) {
+  if (step == null) return "—";
+  const inf = step / it.steps_per_inference + 1;
+  const frac = step / (it.horizon_inferences * it.steps_per_inference);
+  return `env step ${step} · inference ${inf.toFixed(1)} · ${(100 * frac).toFixed(1)}% of time limit · video ${(step / it.video_frame_stride / it.fps).toFixed(2)} s`;
+}
+function complete(l) {
+  return l && (l.t_u_env_step != null || l.recoverable_until_timeout) && l.category && l.confidence;
+}
+function renderList() {
+  if (!manifest) return;
+  $("list").innerHTML = "";
+  let n = 0;
+  manifest.videos.forEach((v, i) => {
+    const ok = complete(labels[v.id]); if (ok) n++;
+    const b = document.createElement("button");
+    b.className = i === idx ? "active" : "";
+    b.innerHTML = `<span>${v.id} · ${v.task_name}</span><span class="${ok ? "done" : "todo"}">${ok ? "✓" : "•"}</span>`;
+    b.onclick = () => load(i);
+    $("list").appendChild(b);
+  });
+  $("progress").textContent = `${n} / ${manifest.videos.length} labeled`;
+}
+function renderMarks() {
+  const it = item(), l = cur(); if (!it) return;
+  $("valE").textContent = describe(it, l.t_e_env_step);
+  $("valU").textContent = l.recoverable_until_timeout ? "recoverable until timeout (t_u = end)" : describe(it, l.t_u_env_step);
+  $("recoverable").checked = !!l.recoverable_until_timeout;
+  $("category").value = l.category || "";
+  document.querySelectorAll("input[name=conf]").forEach(r => r.checked = r.value === l.confidence);
+  $("note").value = l.note || "";
+  const tl = $("timeline"); tl.innerHTML = "";
+  const total = it.horizon_inferences * it.steps_per_inference;
+  [["t_e_env_step", "var(--warn)"], ["t_u_env_step", "var(--accent)"]].forEach(([k, c]) => {
+    if (l[k] == null) return;
+    const t = document.createElement("div"); t.className = "tick"; t.style.background = c;
+    t.style.left = `${Math.min(100, 100 * l[k] / total)}%`; tl.appendChild(t);
+  });
+  renderStatus();
+}
+function renderStatus() {
+  const l = cur(); if (!l) return;
+  const msgs = [];
+  if (l.t_e_env_step != null && l.t_u_env_step != null && l.t_u_env_step < l.t_e_env_step) msgs.push('<span class="warn">t_u is before t_e</span>');
+  if (l.recoverable_until_timeout && l.t_u_env_step != null) msgs.push('<span class="warn">both a t_u mark and "recoverable" are set</span>');
+  msgs.push(complete(l) ? '<span class="done">complete</span>' : '<span class="todo">needs t_u (or recoverable), category and confidence</span>');
+  $("status").innerHTML = msgs.join(" · ");
+}
+function load(i) {
+  idx = i; const it = item();
+  $("title").innerHTML = `<b>${it.id}</b> · ${it.task_name} · time limit ${it.horizon_inferences} inferences (${it.horizon_inferences * it.steps_per_inference} env steps) · rollout ${it.length_inferences} inferences`;
+  $("instruction").textContent = it.instruction ? `Instruction: "${it.instruction}"` : "";
+  const f = files[it.file];
+  if (f) { video.src = URL.createObjectURL(f); } else { video.removeAttribute("src"); $("title").innerHTML += ' <span class="warn">video file not found in folder</span>'; }
+  renderList(); renderMarks();
+}
+video.addEventListener("timeupdate", () => {
+  const it = item(); if (!it) return;
+  $("readout").textContent = `frame ${frameNow(it)} · ${describe(it, envStep(it, frameNow(it)))} · speed ${video.playbackRate}×`;
+});
+function mark(key) {
+  const it = item(); if (!it) return; const l = cur();
+  l[key] = envStep(it, frameNow(it));
+  if (key === "t_u_env_step") l.recoverable_until_timeout = false;
+  renderMarks(); save();
+}
+function go(key) { const it = item(), l = cur(); if (it && l[key] != null) video.currentTime = l[key] / it.video_frame_stride / it.fps; }
+$("markE").onclick = () => mark("t_e_env_step"); $("markU").onclick = () => mark("t_u_env_step");
+$("goE").onclick = () => go("t_e_env_step"); $("goU").onclick = () => go("t_u_env_step");
+$("clearE").onclick = () => { delete cur().t_e_env_step; renderMarks(); save(); };
+$("clearU").onclick = () => { delete cur().t_u_env_step; renderMarks(); save(); };
+$("recoverable").onchange = e => { const l = cur(); l.recoverable_until_timeout = e.target.checked; if (e.target.checked) delete l.t_u_env_step; renderMarks(); save(); };
+$("category").onchange = e => { cur().category = e.target.value; save(); };
+document.querySelectorAll("input[name=conf]").forEach(r => r.onchange = () => { cur().confidence = r.value; save(); });
+$("note").oninput = e => { cur().note = e.target.value; save(); };
+$("labeler").oninput = save;
+$("prev").onclick = () => manifest && idx > 0 && load(idx - 1);
+$("next").onclick = () => manifest && idx < manifest.videos.length - 1 && load(idx + 1);
+document.addEventListener("keydown", e => {
+  if (["TEXTAREA", "INPUT", "SELECT"].includes(document.activeElement.tagName)) return;
+  const it = item(); if (!it) return;
+  const step = e.shiftKey ? 1 : 1 / it.fps;
+  if (e.key === " ") { e.preventDefault(); video.paused ? video.play() : video.pause(); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); video.pause(); video.currentTime += step; }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); video.pause(); video.currentTime = Math.max(0, video.currentTime - step); }
+  else if (e.key === "]") video.playbackRate = Math.min(8, video.playbackRate * 2);
+  else if (e.key === "[") video.playbackRate = Math.max(0.25, video.playbackRate / 2);
+  else if (e.key === "e" || e.key === "E") mark("t_e_env_step");
+  else if (e.key === "u" || e.key === "U") mark("t_u_env_step");
+});
+$("folder").onchange = async e => {
+  files = {}; let mf = null;
+  for (const f of e.target.files) {
+    const rel = f.webkitRelativePath.split("/").slice(1).join("/");
+    files[rel] = f; if (rel === "manifest.json") mf = f;
+  }
+  if (!mf) { alert("manifest.json not found: choose the bundle folder itself."); return; }
+  manifest = JSON.parse(await mf.text());
+  store = manifest.bundle_id ? `${STORE}_${manifest.bundle_id}` : STORE;
+  loadStore();
+  load(Math.max(0, manifest.videos.findIndex(v => !complete(labels[v.id]))));
+};
+$("export").onclick = () => {
+  if (!manifest) return;
+  const out = { plan: manifest.plan, bundle_id: manifest.bundle_id || null, labeler: $("labeler").value, exported_at: new Date().toISOString(), sample_seed: manifest.sample_seed, labels: {} };
+  manifest.videos.forEach(v => {
+    const l = labels[v.id] || {};
+    out.labels[v.id] = { ...l, complete: !!complete(l), fps: v.fps, video_frame_stride: v.video_frame_stride, steps_per_inference: v.steps_per_inference, horizon_inferences: v.horizon_inferences };
+  });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: "application/json" }));
+  a.download = "no_return_labels.json"; a.click();
+};
+$("import").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  const d = JSON.parse(await f.text());
+  for (const [k, v] of Object.entries(d.labels || {})) { const { complete: _, fps, video_frame_stride, steps_per_inference, horizon_inferences, ...rest } = v; labels[k] = rest; }
+  if (d.labeler) $("labeler").value = d.labeler;
+  save(); if (manifest) load(idx);
+};
+</script>
+</body>
+</html>
