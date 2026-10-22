@@ -89,14 +89,17 @@
 </main>
 <script>
 const STORE = "xr1_no_return_labels_v1";
+let store = STORE;   // per-bundle key: a bundle with a bundle_id never sees another bundle's labels
 let manifest = null, files = {}, idx = 0, labels = {};
 const $ = id => document.getElementById(id);
 const video = $("video");
-try { labels = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch (e) { labels = {}; }
-try { $("labeler").value = localStorage.getItem(STORE + "_labeler") || ""; } catch (e) {}
+function loadStore() {
+  try { labels = JSON.parse(localStorage.getItem(store) || "{}"); } catch (e) { labels = {}; }
+  try { $("labeler").value = localStorage.getItem(store + "_labeler") || ""; } catch (e) {}
+}
 
 function save() {
-  try { localStorage.setItem(STORE, JSON.stringify(labels)); localStorage.setItem(STORE + "_labeler", $("labeler").value); } catch (e) {}
+  try { localStorage.setItem(store, JSON.stringify(labels)); localStorage.setItem(store + "_labeler", $("labeler").value); } catch (e) {}
   renderList(); renderStatus();
 }
 function item() { return manifest ? manifest.videos[idx] : null; }
@@ -201,11 +204,13 @@ $("folder").onchange = async e => {
   }
   if (!mf) { alert("manifest.json not found: choose the bundle folder itself."); return; }
   manifest = JSON.parse(await mf.text());
+  store = manifest.bundle_id ? `${STORE}_${manifest.bundle_id}` : STORE;
+  loadStore();
   load(Math.max(0, manifest.videos.findIndex(v => !complete(labels[v.id]))));
 };
 $("export").onclick = () => {
   if (!manifest) return;
-  const out = { plan: manifest.plan, labeler: $("labeler").value, exported_at: new Date().toISOString(), sample_seed: manifest.sample_seed, labels: {} };
+  const out = { plan: manifest.plan, bundle_id: manifest.bundle_id || null, labeler: $("labeler").value, exported_at: new Date().toISOString(), sample_seed: manifest.sample_seed, labels: {} };
   manifest.videos.forEach(v => {
     const l = labels[v.id] || {};
     out.labels[v.id] = { ...l, complete: !!complete(l), fps: v.fps, video_frame_stride: v.video_frame_stride, steps_per_inference: v.steps_per_inference, horizon_inferences: v.horizon_inferences };

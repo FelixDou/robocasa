@@ -78,6 +78,37 @@ class TestNoReturnSample(unittest.TestCase):
                 call(module, argv)
 
 
+class TestNoReturnSubset(unittest.TestCase):
+    def test_subset_keeps_ids_balances_types_and_hides_key(self):
+        module = load("no_return_subset")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "bundle" / "videos").mkdir(parents=True)
+            videos, key = [], {}
+            for i in range(1, 21):
+                vid = f"v{i:02d}"
+                (root / "bundle" / "videos" / f"{vid}.mp4").write_bytes(b"x")
+                videos.append({"id": vid, "file": f"videos/{vid}.mp4", "task_name": f"T{i}"})
+                key[vid] = {"task_type": "atomic" if i % 2 else "composite", "alarm_P_inference": 5}
+            (root / "bundle" / "manifest.json").write_text(json.dumps({"plan": "p", "sample_seed": 0, "videos": videos}))
+            (root / "key.json").write_text(json.dumps({"videos": key}))
+            (root / "page.html").write_text("<html></html>")
+            argv = ["--bundle", str(root / "bundle"), "--key", str(root / "key.json"),
+                    "--labeler-page", str(root / "page.html"), "--output", str(root / "second")]
+            call(module, argv)
+            m = json.loads((root / "second" / "manifest.json").read_text())
+            ids = [v["id"] for v in m["videos"]]
+            self.assertEqual(len(ids), 12)
+            self.assertEqual(sum(key[i]["task_type"] == "atomic" for i in ids), 6)
+            self.assertEqual(m["bundle_id"], "second_labeler_v1")
+            self.assertTrue(all((root / "second" / v["file"]).is_file() for v in m["videos"]))
+            self.assertTrue((root / "second" / "LABELING_GUIDE.md").is_file())
+            self.assertFalse(any("alarm" in json.dumps(v) for v in m["videos"]))
+            self.assertFalse((root / "second" / "key.json").exists())
+            with self.assertRaises(SystemExit):
+                call(module, argv)
+
+
 class TestNoReturnAnalysis(unittest.TestCase):
     def test_timing_arithmetic_and_completeness(self):
         module = load("no_return_analysis")
