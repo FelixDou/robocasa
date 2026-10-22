@@ -183,6 +183,18 @@ class DetectorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             detector.score(dict(rollout, task_name="UnseenTask"))
 
+    def test_first_inference_control_ignores_later_features(self):
+        train, test = self.rollouts[:16], self.rollouts[16:]
+        detector = build_detector("hide_and_seek_first", seed=0, epochs=5, pca_components=4).fit(train)
+        rollout = test[0]
+        later = rollout["features"].copy()
+        later[1:] += 50.0
+        np.testing.assert_array_equal(detector.score(rollout), detector.score(dict(rollout, features=later)))
+        first = rollout["features"].copy()
+        first[0] += 50.0
+        self.assertFalse(np.array_equal(detector.score(rollout), detector.score(dict(rollout, features=first))))
+        self.assertEqual(detector.config()["control"], "first_inference_repeated")
+
     def test_action_detectors_require_actions(self):
         rollout = dict(self.rollouts[0], actions=None)
         with self.assertRaises(ValueError):

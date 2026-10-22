@@ -4078,6 +4078,13 @@ What they do not show:
 - **One policy.** The RLDX-1 replication (Section 15.15) has not been run with
   Hide-and-Seek.
 
+**Next: preregistered test.** Amendment 2
+([`xr1_confirmatory_amendment_2_hide_and_seek.md`](xr1_confirmatory_amendment_2_hide_and_seek.md))
+tests Hide-and-Seek + P against P on the E1 cohorts with the registered E1 procedure
+and margin. It declares the first-inference difficulty control (S1) and a replication of
+both learned-timer controls (S2) as secondaries. It was committed before any
+Hide-and-Seek score was computed on those cohorts.
+
 #### Durable artifacts
 
 ```text

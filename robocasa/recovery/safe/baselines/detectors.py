@@ -18,9 +18,11 @@ Implemented, with the paper each one follows:
   half of FIPER; also a FAIL-Detect score).
 * ``hide_and_seek``: LSTM on features with inter-trajectory peak margin and
   intra-trajectory onset losses (Park et al. 2026).
-* ``hide_and_seek_zero`` and ``hide_and_seek_task_shuffle``: controls with the
-  same LSTM and training, on all-zero inputs (elapsed time only) and on
-  same-task, same-step features of other training rollouts.
+* ``hide_and_seek_zero``, ``hide_and_seek_task_shuffle`` and
+  ``hide_and_seek_first``: controls with the same LSTM and training, on all-zero
+  inputs (elapsed time only), on same-task, same-step features of other
+  training rollouts, and on the rollout's own first-inference features repeated
+  (episode-difficulty prior).
 
 Sampling-based scores (full STAC, FIPER action entropy, Tri-Info, ACE) need
 several action samples per inference and are not recoverable from recorded
@@ -614,6 +616,26 @@ class HideAndSeekTaskShuffleDetector(HideAndSeekDetector):
         return {**super().config(), "control": "same_task_same_step_shuffle"}
 
 
+class HideAndSeekFirstDetector(HideAndSeekDetector):
+    """Control: every inference gets the rollout's own first-inference features.
+
+    Same LSTM, PCA and training as Hide-and-Seek. The episode's initial
+    appearance (scene, objects, task) and the elapsed time are kept; everything
+    that happens after the first inference is removed. Hide-and-Seek's gain over
+    this control is warning that develops during the rollout, as opposed to an
+    episode-difficulty prior visible from the start.
+    """
+
+    name = "hide_and_seek_first"
+
+    def _inputs(self, rollout):
+        rows = HideAndSeekDetector._inputs(self, rollout)
+        return np.repeat(rows[:1], len(rows), axis=0)
+
+    def config(self):
+        return {**super().config(), "control": "first_inference_repeated"}
+
+
 DETECTOR_REGISTRY = {
     detector.name: detector
     for detector in (
@@ -626,6 +648,7 @@ DETECTOR_REGISTRY = {
         HideAndSeekDetector,
         HideAndSeekZeroDetector,
         HideAndSeekTaskShuffleDetector,
+        HideAndSeekFirstDetector,
     )
 }
 
