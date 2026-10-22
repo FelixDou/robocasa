@@ -182,6 +182,11 @@ An offline replication on RLDX-1 (Section 15.15) found the same pattern:
 The sample is small, and noise matched that gain only by spending more FPR, so
 this is preliminary.
 
+Point-of-no-return labels on 48 XR-1 failures (Section 15.16) found 79% still
+recoverable when the time limit was reached. On this benchmark, failure mostly
+means not finishing in time, which is why elapsed time is so informative. The
+labels come from a single labeler, with no reliability check yet.
+
 ## 1. Scope, labels, and evaluation rules
 
 ### 1.1 Raw SAFE target
@@ -1947,6 +1952,13 @@ The present evidence supports the following hierarchy of conclusions:
     the same FPR as P (0.03), all of it on atomic tasks (+0.049; composite +0.000).
     The weaker MLP adds nothing. Noise + P matched the gain only at a higher FPR
     (2 of 20 draws, both at 0.08). This is preliminary evidence for H3, not a test.
+21. **Point of no return (Section 15.16, exploratory).** In 38 of 48 labeled XR-1
+    failures, the robot was still recoverable when the time limit was reached.
+    Only 10 failures became irreversible earlier, all before 75% of H_k. On
+    this benchmark failure mostly means "did not finish in time". The timer
+    alarmed after the point of no return in all 10 decided failures. SAFE + P
+    was pre-emptive on 2 of the 3 decided atomic failures and on none of the
+    7 composite ones. There was one labeler and no reliability check yet.
 
 ## 15. Recommended next experiments
 
@@ -3383,6 +3395,124 @@ Output:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_lead_replica
              rldx_lead_lstm.json, rldx_lead_indep.json, *.log, inputs_sha256_before.txt
 Inputs:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530/calibration/{lstm,indep}/
 Worktree:  /gs/fs/tga-shinoda/felid/robocasa_rldx_lead_67008c04
+```
+
+### 15.16 When do XR-1 failures become hopeless? Point-of-no-return labels
+
+#### Status
+
+Exploratory, on the confirmatory cohort, which was already open for lead time.
+The plan, definitions and expectations were committed before any video was
+labeled ([`no_return_labeling_plan.md`](no_return_labeling_plan.md), commit
+`ec4e7361`).
+
+**Sample.** 48 failures from the primary confirmatory test cohort, drawn with
+seed 0:
+- 2 per atomic task (20 videos);
+- 1 per composite task (28 videos).
+
+**Blinding.** The videos were shown in random order under anonymous IDs. The
+labeler (one person, the author) saw only the video, the task, its instruction
+and the time limit. The detector alarm times were kept in a separate key, which
+was joined only after all 48 labels were exported.
+
+**Labels per video:**
+- t_e, the first visible error;
+- t_u, the point of no return, or "recoverable until timeout";
+- a category;
+- the labeler's confidence in t_u.
+
+The tools are `scripts/xr1_lead_time/no_return_sample.py`,
+`no_return_labeler.html` and `no_return_analysis.py`. P and SAFE + P are fitted
+exactly as in E1.
+
+#### Results
+
+**Table 15.16a — When failures are decided (fraction of the time limit H_k).**
+
+| Stratum | n | Recoverable until timeout | Decided by 25% / 50% / 75% of H_k | Median t_u / H_k |
+|---|---:|---:|---|---:|
+| All | 48 | **0.79** (38) | 0.04 / 0.15 / 0.21 | 1.0 |
+| Atomic | 20 | 0.85 (17) | 0.00 / 0.10 / 0.15 | 1.0 |
+| Composite | 28 | 0.75 (21) | 0.07 / 0.18 / 0.25 | 1.0 |
+
+Every one of the 10 decided failures was decided before 75% of H_k.
+
+Categories:
+
+| Category | Count |
+|---|---:|
+| Slow or nearly succeeded | 13 |
+| Wrong object or target | 10 |
+| Knocked over or displaced | 8 |
+| Never made progress or wandered | 6 |
+| Stuck or collision | 5 |
+| Other | 5 |
+| Dropped object | 1 |
+
+**Table 15.16b — Alarms against the point of no return.**
+- "Wasted" and "pre-emptive" cover only the 10 decided failures (3 atomic,
+  7 composite). Wasted time is T_alarm − t_u as a fraction of H_k.
+- "Usable lead" covers all 48. For a decided failure it is the time left after
+  max(T_alarm, t_u); for a recoverable one it is the lead.
+
+| Stratum | Detector | Wasted, median (mean) | Pre-emptive | Mean usable lead |
+|---|---|---|---:|---:|
+| All | P | 0.31 (0.35) | 0/10 | 0.254 |
+| All | SAFE + P | 0.32 (0.33) | 2/10 | 0.302 |
+| Atomic | P | 0.24 (0.22) | 0/3 | 0.317 |
+| Atomic | SAFE + P | −0.02 (0.11) | 2/3 | 0.405 |
+| Composite | P | 0.46 (0.41) | 0/7 | 0.209 |
+| Composite | SAFE + P | 0.47 (0.42) | 0/7 | 0.228 |
+
+#### Comparison with the expectations written in the plan
+
+| Expectation | Result |
+|---|---|
+| Median t_u / H_k ≤ 0.6 | **No.** The median is 1.0; 79% of failures were still recoverable at the timeout. |
+| Atomic failures decided earlier than composite ones | Not supported: 85% of atomic and 75% of composite failures were recoverable until the timeout. |
+| Both detectors alarm after t_u for most decided failures; SAFE + P reduces wasted time mainly on atomic tasks | Yes, but only 10 failures were decided. SAFE + P was pre-emptive on 2 of 3 decided atomic failures and on none of 7 composite ones. |
+| At least 15% recoverable until timeout | Yes, far more: 79%. |
+
+#### Interpretation
+
+- **Most XR-1 failures are not irreversible before the limit.**
+  - In about four out of five failures, the labeler judged that the robot could
+    still have succeeded when time ran out: it was slow, hesitating, or in a
+    correctable wrong state.
+  - On this benchmark "failure" therefore mostly means "did not finish within
+    the time limit". Elapsed time is the natural signal for that, which answers
+    the objection that the timer result is only an artifact of timeout-based
+    termination.
+  - A detector that reports an early "failure" here is mostly predicting
+    slowness.
+- **The irreversible failures are few.** Early warning matters for those 10,
+  and the timer always alarms after the point of no return (about 0.35 H_k
+  later on average). SAFE + P alarmed at or before the point of no return on 2
+  of the 3 decided atomic failures and on none of the 7 composite ones. That
+  fits the atomic concentration of SAFE's gain (Sections 15.13–15.15), but
+  with 3 and 7 videos it is an illustration, not evidence.
+- **Consequence for the closed-loop design (E3).** If most failures are still
+  recoverable at the timeout, resetting at an alarm can do worse than letting
+  the attempt continue. A "more time, no reset" arm is therefore the natural
+  comparator for alarm-triggered reset and retry.
+
+#### Limits
+
+- One labeler, who is also the author.
+- 48 videos. The decided subset is small (3 atomic, 7 composite).
+- The labels are judgments of recoverability made from video alone.
+- **Reliability check.** The planned check, a second labeler on 12 videos, has
+  not been done yet. The 79% figure is the result most in need of it.
+
+#### Durable artifacts
+
+```text
+Bundle:    /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_no_return_labeling/bundle/ (48 videos, manifest.json)
+Key:       /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_no_return_labeling/key/key.json
+Labels:    /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_no_return_labeling/no_return_labels.json
+Results:   /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_no_return_labeling/no_return_results.{json,log}
+Worktree:  /gs/fs/tga-shinoda/felid/robocasa_no_return_ec4e7361
 ```
 
 ## 16. Limitations
