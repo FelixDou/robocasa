@@ -156,7 +156,52 @@ change anything above. The dry run uses the registered grid and decision bootstr
 while §15.20 used the physical-signals grid and a test-only bootstrap, so its point gain
 may differ from +0.098.
 
-Dry run result: *to be filled in from the run log.*
+**Dry run result (2026-10-22, code `7abfd271`, recorded before step 4).**
+
+Run folder: `xr1_amend2_hide_and_seek_20261022_214209`.
+
+**Integrity and reference checks:**
+- Scoring reproduced the §15.20 August trajectories exactly: Hide-and-Seek and both
+  learned-timer controls, 228 calibration and 1,643 test rollouts, largest difference
+  0.0.
+- SAFE + P reproduced `quantile_timer.json`: P 0.1952 at 17 false alarms, SAFE + P
+  0.2021 at 16.
+
+August calibration 114/114, test 380/380. Gains are over P; CIs are from the decision
+bootstrap.
+
+| Score + P | Lead | FP (FPR, Wilson upper) | Gain | Decision CI | Path (λ, u, s) |
+|---|---:|---|---:|---|---|
+| P | 0.195 | 17 (0.045) | — | — | (0.107) |
+| SAFE | 0.202 | 16 (0.042, 0.067) | +0.007 | [+0.005, +0.191] | (0.112, 0.852, 5) |
+| **Hide-and-Seek** | **0.293** | **21 (0.055, 0.083)** | **+0.098** | **[+0.050, +0.269]** | (0.266, 0.067, 2) |
+| First-inference control | 0.207 | 18 (0.047, 0.074) | +0.012 | [+0.000, +0.092] | (0.107, 1.130, 10) |
+| Zero inputs | 0.214 | 23 (0.061, 0.089) | +0.018 | [+0.006, +0.156] | (0.107, 0.554, 10) |
+| Same-task shuffle | 0.202 | 18 (0.047, 0.074) | +0.007 | [+0.004, +0.146] | (0.107, 1.512, 0) |
+
+**Rules applied to the August cohort** (descriptive only, since the cohort was opened):
+- H1-HS: all four criteria met.
+- H2-HS: mean null gains +0.005 (noise) and +0.011 (resampled), maxima +0.027 and
+  +0.017.
+- S1: Hide-and-Seek − first +0.086, decision CI [+0.018, +0.217].
+- S2: Hide-and-Seek − zero +0.079 [+0.009, +0.181]; Hide-and-Seek − shuffle +0.091
+  [+0.017, +0.175].
+- S3: Hide-and-Seek − SAFE +0.091 [+0.007, +0.158].
+- By task type: atomic gain +0.153, composite +0.078.
+- Against P tuned on the test cohort to Hide-and-Seek's FPR: +0.083 [+0.022, +0.143].
+
+**Notes, written before the confirmatory run.**
+- **The registered grid gives the same fit as the exploratory run.** Hide-and-Seek's
+  path is the same as in §15.20 (λ 0.266, u 0.067, s 2), and so is its gain.
+- **With 3 + 3 calibration rollouts per task, the decision CIs are wide and skewed
+  upward.** Even SAFE's +0.007 gets [+0.005, +0.191], and the controls' lower bounds sit
+  just above 0. Resampling three rollouts per class and refitting the conformal margin
+  makes the refit unstable.
+- **The 10 + 10 calibration of the E1 cohorts reduces this but does not remove it.**
+  SAFE's E1 interval was [+0.007, +0.093] around +0.030. Under the H1-HS rule, the
+  0.05 point margin is therefore the more demanding criterion, and the CI-above-0
+  criterion should not be read as strong evidence by itself.
+- **None of this changes any rule above.**
 
 ## Expected outcome, written before scoring
 
