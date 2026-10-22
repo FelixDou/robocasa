@@ -160,3 +160,20 @@ Sources: `docs/safe_robocasa_experiment_report.md` §15.18–15.19 and `docs/pub
   - E3 and E5 are shorter, and E5 is merged into the E4 paragraph.
   - Limitations and the conclusion are shorter. The conclusion no longer lists "early-decided failures" as a Stage 2 item; E5 still has it.
 - **Page check.** With `\notesfalse` the build is 6 pages, with content ending on page 5 and the references ending on page 6.
+
+## Update 2026-10-22: Hide-and-Seek and Amendment 2
+
+Numbers are from `docs/safe_robocasa_experiment_report.md` §15.20 (exploratory, August cohort) and §15.21 (preregistered Amendment 2, E1 cohorts).
+
+- **Framing.** Elapsed time explains how well monitors *separate* failures. Lead over a per-task timer shows which ones also warn *earlier*. SAFE adds 0.030 (below the margin). Hide-and-Seek, an LSTM trained for early separation on the same features, adds 0.071 [0.022, 0.157] and passes H1 and H2.
+- **Edits:**
+  - Abstract, contributions, hypotheses note, conclusion: new framing and the Amendment 2 result.
+  - Method: new paragraph "Sequence score and controls" (zero-input, same-task shuffle and first-inference controls; ActProbe reduces to chunk magnitude).
+  - Exploratory evidence: new paragraph "A sequence detector does warn earlier".
+  - Table II: added the three controls and Hide-and-Seek + P.
+  - Sec. VII: new paragraph "Amendment 2", including that Hide-and-Seek − SAFE is not significant and that the decision bootstrap skews upward.
+  - Limitations: Hide-and-Seek's selection and the registration timing.
+  - Related work: one clause pointing to the controls.
+- **Cut for the page limit:** the cumulative-lead figure (old Fig. 2), the within-task ROC-AUC sentence, and shorter RLDX-1, FIPER, duration and atomic/composite paragraphs.
+- **E2.** A `\todo` asks whether to make Hide-and-Seek + P co-primary on RLDX-1. An offline RLDX-1 check is running in a separate session.
+- **Pages (tectonic preview).** Content still ends on page 5. The references already ran to page 7 before this update (limit 5 + 1). Check with pdflatex and the official template, and trim the bibliography if needed.

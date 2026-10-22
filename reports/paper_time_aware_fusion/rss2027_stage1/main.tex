@@ -47,24 +47,19 @@
 
 \begin{abstract}
 On RoboCasa365, a failed vision-language-action (VLA) rollout is one that reaches its time
-limit. A runtime failure monitor therefore competes with a timer that alarms at a fixed
-fraction of that limit. Calibrated at a 5\% false-positive rate (FPR), such a timer flags
-every one of 380 prospective failures, about 12 policy inferences before the timeout. Recall
-cannot separate a learned monitor from this timer; only lead time can. We test whether alarming
-when \emph{either} a policy-internal score or the timer crosses its threshold warns earlier
-than time signals alone at a matched FPR, and calibrate this rule with a finite-sample FPR
-guarantee. On one VLA and 38 tasks, fusing the
-SAFE failure score with a single timer more than doubles the mean warning lead (0.090 to 0.207
-of the time limit, exploratory), but most of that gain is task duration: a per-task timer,
-which alarms past the 95th percentile of each task's development success durations, nearly
-closes the gap without reading the policy. A preregistered test on a fresh cohort of 760
-rollouts finds a small real gain over this
-per-task timer: 0.255 against 0.225 of the time limit (gain 0.030, 95\% CI 0.007--0.093) at
-0.061 FPR. Noise and within-task resampled scores fused the same way gain at most 0.009. The
-gain is above zero but below the margin of 0.05 we declared in advance, so the primary
-hypothesis is not supported. Stage~2 tests a second VLA, measures lead from the moment a
-failure becomes unrecoverable, and asks whether earlier alarms raise task success within a
-fixed time budget when they trigger a reset and retry.
+limit. Calibrated at a 5\% false-positive rate (FPR), a timer flags every one of 380
+prospective failures, so recall cannot separate a learned monitor from elapsed time; only
+warning lead can. We alarm when \emph{either} a policy-internal score or a timer crosses its
+threshold, calibrate the pair with a finite-sample FPR guarantee, and compare with a per-task
+timer P built from each task's success durations. On one VLA and 38 tasks, P nearly matches
+the SAFE failure score fused with a single timer, and on a fresh preregistered cohort of 760
+rollouts SAFE adds 0.030 of the time limit to P (95\% CI 0.007--0.093), below the margin of
+0.05 we declared in advance. A sequence detector trained for early separation on the same
+features, Hide-and-Seek, passes the same registered test: it adds 0.071 (CI 0.022--0.157) at
+0.061 FPR. Retrained on zero inputs, the same model matches its ROC-AUC but adds no lead; given
+only each rollout's first inference, it adds none either. Elapsed time explains how well
+monitors separate failures; the extra warning develops during the rollout. Stage~2 tests a
+second VLA and whether earlier alarms raise success when they trigger a retry.
 \end{abstract}
 
 \section{Introduction}
@@ -89,15 +84,16 @@ contributions.
   policy-internal score or the timer crosses its threshold, and calibrate both thresholds
   along a nested path with a split-conformal rule that bounds the FPR on a new successful
   rollout by $\alpha$ in finite samples (Proposition~\ref{prop:fpr}).
-  \item \textbf{Exploratory and confirmatory evidence.} SAFE fused with a single timer more
-  than doubles its lead, but a per-task timer nearly matches it, and most failures are still
-  recoverable at the limit (Sec.~\ref{sec:evidence}). On a fresh preregistered cohort the
-  policy adds 0.030 of the limit over the per-task timer, below our 0.05 margin
+  \item \textbf{Exploratory and confirmatory evidence.} A per-task timer nearly matches SAFE
+  fused with a single timer, and most failures are still recoverable at the limit
+  (Sec.~\ref{sec:evidence}). On fresh preregistered cohorts SAFE adds 0.030 of the limit over
+  the per-task timer, below our 0.05 margin, while Hide-and-Seek~\cite{park2026hideseek} adds
+  0.071, and controls show that its extra warning is not learned elapsed time
   (Sec.~\ref{sec:confirm}).
 \end{enumerate}
-The result is a small policy signal, not a useful one by our own standard: on
-timeout-defined benchmarks, policy internals add little to duration statistics, and monitors
-should be compared with a per-task timer and evaluated on failures that end early.
+Elapsed time explains most of how well monitors \emph{separate} failures; lead over a
+per-task timer shows which ones also warn \emph{earlier}. On timeout-defined benchmarks,
+monitors should be compared with a per-task timer and evaluated on failures that end early.
 
 \input{sections/related_work}
 
@@ -133,7 +129,8 @@ and early-warning claims need failure-time annotations, which SAFE did not relea
 
 We test four hypotheses. H1 and H2 were evaluated on a fresh confirmatory cohort with the
 decision rules below, registered as an amendment before any timer or lead quantity was
-computed on that cohort (Sec.~\ref{sec:confirm}); H3 and H4 are the Stage~2 extensions
+computed on that cohort, and registered again for a second score before that score was
+computed on it (Sec.~\ref{sec:confirm}); H3 and H4 are the Stage~2 extensions
 (Sec.~\ref{sec:plan}).
 
 \textbf{H1 (lead time, primary).} At thresholds calibrated for FPR $\le 0.05$, OR-fusing a
@@ -162,8 +159,9 @@ reset and retry triggered by P yields a higher success rate than no monitor; SAF
 P is descriptive.}
 
 Only H1 and H2 are confirmatory; every other interval in this paper is descriptive. We
-expected H1 to fail (opened-data gain 0.007); it did, with a gain of 0.030 whose CI excludes
-zero (Sec.~\ref{sec:confirm}).
+expected H1 to fail for SAFE (opened-data gain 0.007); it did, with a gain of 0.030 whose CI
+excludes zero. A second amendment then applied the same rules to Hide-and-Seek, which gained
+0.083 at matched FPR on the opened cohort; it passed (Sec.~\ref{sec:confirm}).
 
 \section{Method}
 \label{sec:method}
@@ -182,6 +180,16 @@ The running maximum makes $s_t$ monotone and does not change when a threshold is
 crossed. Success-only alternatives (Mahalanobis~\cite{lee2018mahalanobis},
 kNN~\cite{sun2022knn}, PCA-KMeans and RND~\cite{burda2019rnd}) are fitted on successful
 development rollouts and aggregated the same way.
+
+\textbf{Sequence score and controls.} Hide-and-Seek~\cite{park2026hideseek} trains an LSTM on
+a 128-dimensional PCA of the same hidden state with rollout labels only: a margin loss pushes
+each failure's peak score above every success's, and an onset loss acts within failures. Its
+scores are normalized and aggregated like SAFE's. A recurrent model can learn how long each
+task takes, so we retrain it unchanged on (i) zero inputs, (ii) the features of a random
+same-task training rollout at the same inference, and (iii) the rollout's own first-inference
+features, repeated. They see (i) elapsed time, (ii) also the task's typical trajectory, and
+(iii) also the episode's initial appearance. ActProbe~\cite{huang2026actprobe} reduces to chunk
+magnitude here, as our chunks never overlap.
 
 \textbf{Timers.} The global timer alarms once $t \ge c\,H_k$ for a fraction $c \in (0, 1]$
 shared by all tasks; it uses only the task's time limit. The per-task timer uses
@@ -296,30 +304,6 @@ SAFE + per-task timer$^\dagger$ & 1.000 & 0.042 & 0.202 & 14.0 & 0.389 \\
 \end{tabular}
 \end{table}
 
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}
-\begin{axis}[width=\columnwidth, height=3.6cm, ytick={0,0.5,1}, xmin=0.3, xmax=1, ymin=0, ymax=1.02,
-  xlabel={elapsed fraction of the time limit $t/H_k$},
-  ylabel={failures alarmed (of 380)},
-  label style={font=\scriptsize}, tick label style={font=\scriptsize},
-  legend style={font=\scriptsize, at={(0.02,0.98)}, anchor=north west, draw=none, fill=none},
-  legend cell align=left, grid=major, grid style={gray!20}]
-\addplot[gray, dashed, thick] coordinates {(0.30,0.000) (0.90,0.000) (0.92,0.842) (0.94,1.000) (1.00,1.000)};
-\addlegendentry{Timer}
-\addplot[black, dotted, thick] coordinates {(0.30,0.000) (0.60,0.000) (0.62,0.026) (0.64,0.026) (0.66,0.053) (0.68,0.079) (0.70,0.079) (0.72,0.079) (0.74,0.105) (0.76,0.105) (0.78,0.158) (0.80,0.158) (0.82,0.184) (0.84,0.211) (0.86,0.237) (0.88,0.237) (0.90,0.237) (0.92,0.842) (0.94,1.000) (1.00,1.000)};
-\addlegendentry{Time risk + timer}
-\addplot[orange!80!black] coordinates {(0.30,0.000) (0.40,0.000) (0.42,0.026) (0.44,0.026) (0.46,0.026) (0.48,0.053) (0.50,0.053) (0.52,0.053) (0.54,0.053) (0.56,0.063) (0.58,0.066) (0.60,0.074) (0.62,0.100) (0.64,0.100) (0.66,0.132) (0.68,0.161) (0.70,0.192) (0.72,0.229) (0.74,0.305) (0.76,0.318) (0.78,0.387) (0.80,0.413) (0.82,0.471) (0.84,0.513) (0.86,0.579) (0.88,0.597) (0.90,0.613) (0.92,0.684) (0.94,0.750) (0.96,0.821) (0.98,0.895) (1.00,0.955)};
-\addlegendentry{SAFE + time risk}
-\addplot[blue!75!black, thick] coordinates {(0.30,0.000) (0.32,0.003) (0.34,0.003) (0.36,0.011) (0.38,0.021) (0.40,0.024) (0.42,0.024) (0.44,0.024) (0.46,0.034) (0.48,0.045) (0.50,0.079) (0.52,0.103) (0.54,0.126) (0.56,0.158) (0.58,0.187) (0.60,0.221) (0.62,0.247) (0.64,0.308) (0.66,0.342) (0.68,0.355) (0.70,0.379) (0.72,0.389) (0.74,0.400) (0.76,0.424) (0.78,0.437) (0.80,0.458) (0.82,0.466) (0.84,0.474) (0.86,0.487) (0.88,0.495) (0.90,0.500) (0.92,0.500) (0.94,0.500) (0.96,0.563) (0.98,1.000) (1.00,1.000)};
-\addlegendentry{SAFE + timer}
-\end{axis}
-\end{tikzpicture}
-\caption{Fraction of the 380 test failures alarmed by each elapsed fraction of the time
-limit. SAFE + timer catches half of the failures early and the rest at its timer fallback
-($c = 0.96$).}
-\label{fig:lead}
-\end{figure}
 
 \textbf{The timer is the baseline to beat.} The timer ($c = 0.903$) alarms on all 380 test
 failures at 0.047 FPR with a fixed lead of 0.090 (Table~\ref{tab:main}). The time-risk curve
@@ -327,17 +311,21 @@ misses 140 failures, all in 14 tasks whose smoothed curve never reaches its thre
 gains measured against it (to 0.90--0.96 for SAFE and four success-only scores) vanish here.
 
 \textbf{SAFE adds lead over a single timer.} SAFE + timer raises the mean lead to 0.207 (paired
-gain 0.117, CI 0.060--0.178; 20.2 against 11.7 inferences) and flags 42\% of failures by
-$0.75\,H_k$ (Figs.~\ref{fig:qualitative} and~\ref{fig:lead}), at 0.058 test FPR. Noise fused
-with the timer reaches 0.101, and the time risk with the timer 0.125. Among rollouts still
-running at 10, 25, 50 and 75\% of the limit, SAFE's within-task ROC-AUC is 0.55--0.60, against
-0.41--0.51 for noise.
+gain 0.117, CI 0.060--0.178) and flags 42\% of failures by $0.75\,H_k$
+(Fig.~\ref{fig:qualitative}), at 0.058 test FPR; noise fused with the timer reaches 0.101.
 
 \textbf{A per-task timer removes the gain (H1, exploratory).} The per-task timer reaches
 $\bar\ell = 0.195$ at 0.045 FPR without reading the policy. SAFE + timer leads it by an
 insignificant 0.012 (CI $-0.044$ to $0.063$). SAFE + per-task timer reaches 0.202, a gain of 0.007 (CI $-0.003$ to
-$0.019$), far below the 0.05 margin of H1. The two effects cancel across tasks: SAFE + timer
-leads where the time risk never fires (0.405 against 0.221), and trails elsewhere.
+$0.019$), far below the 0.05 margin of H1.
+
+\textbf{A sequence detector does warn earlier (exploratory).} Fused with P under
+Proposition~\ref{prop:fpr}, Hide-and-Seek gains 0.098 over P (CI 0.037--0.158), and 0.083
+(0.022--0.143) against P loosened to its own 21 test false alarms. In that matched comparison
+SAFE gains 0.008, ActProbe 0.009, and the best of 100 noise draws 0.016. The zero-input
+control matches Hide-and-Seek's ROC-AUC (0.888 against 0.878) and its recall when fused with
+the time risk (0.974 against 0.976), yet adds 0.001 over P at matched FPR, and the same-task
+shuffle $-0.004$: elapsed time explains separation, not earliness.
 
 \textbf{No early warning, and mostly no early failure (exploratory).} No detector flags over
 8\% of failures by half the limit. Is timeout-defined failure then trivial by construction? One
@@ -350,24 +338,18 @@ an early ``failure'' alarm mostly predicts slowness. On the 10 decided failures,
 after the point of no return on all, SAFE + P at or before it on 2 of 3 atomic and 0 of 7
 composite ones (an illustration).
 
-\textbf{A second policy, offline (RLDX-1, exploratory).} On existing RLDX-1 data (20 tasks;
-740 development rollouts, 60 held-out calibration successes, 100/100 test rollouts), all 438 failures ran to the time limit. P reaches
-$\bar\ell = 0.271$ at 0.03 test FPR, the global timer 0.032. SAFE (LSTM head) + P gains 0.034
-over P (CI 0.008--0.067) at the \emph{same} FPR, so unlike on XR-1 none of it is extra FPR
-budget; the MLP head adds nothing. The gain is atomic (0.049, CI 0.013--0.097); on composite
-tasks it is 0, as SAFE never alarms before P. Caveats: the fused path was chosen on in-sample
-development failures, the FPR margin rests on 60 successes, and noise + P matched the gain
-in 2 of 20 draws, both at 0.08 FPR.
+\textbf{A second policy, offline (RLDX-1, exploratory).} On existing RLDX-1 data (20 tasks,
+100/100 test rollouts), all failures ran to the time limit, P reaches $\bar\ell = 0.271$
+against 0.032 for the global timer, and SAFE (LSTM head) + P gains 0.034 over P (CI
+0.008--0.067) at the same FPR, all on atomic tasks; the fused path was chosen in sample and
+noise + P matched the gain in 2 of 20 draws at a higher FPR.
 
 \textbf{The confound in a published benchmark (exploratory).} In FIPER's released
-rollouts~\cite{romer2025fiper} (five tasks, two on a real robot), length alone separates
-failures with ROC-AUC 0.92--1.00 in four tasks (0.62 in the fifth). A timer calibrated like
-FIPER's conformal thresholds and scored with its metrics reaches mean accuracy 0.83 against
-FIPER's published 0.78, but alarms at 0.63 of the horizon against 0.30, so FIPER wins on
-time-weighted accuracy (0.65 against 0.57): its advantage is earliness, the comparison we
-argue for. Caveats: published against computed numbers, not a paired re-run; our horizon is
-the longest released rollout; on the real-robot tasks (10 calibration successes) a
-finite-sample conformal rank cuts the timer's accuracy to about 0.54.
+rollouts~\cite{romer2025fiper}, length alone separates failures with ROC-AUC 0.92--1.00 in
+four of five tasks. A timer calibrated like FIPER's thresholds exceeds its published mean
+accuracy (0.83 against 0.78) but alarms at 0.63 of the horizon against 0.30: FIPER's advantage
+is earliness, the comparison we argue for (published against computed numbers, not a paired
+re-run).
 
 \section{Confirmatory Test of H1 and H2}
 \label{sec:confirm}
@@ -384,8 +366,9 @@ again ran to $H_k$.
 \begin{table}[t]
 \centering
 \caption{Confirmatory test (380 successes, 380 failures). P = per-task timer ($q = 0.95$).
-H1 interval: registered decision bootstrap; others: test only. $^\ast$Mean of 20 draws
-[maximum]. $^\dagger$Frozen original thresholds.}
+Intervals from P down: registered decision bootstrap; above P: test only. $^\ast$Mean of 20
+draws [maximum]; resampled: SAFE, H\&S. $^\dagger$Frozen original thresholds. H\&S:
+Hide-and-Seek.}
 \label{tab:confirm}
 \footnotesize
 \setlength{\tabcolsep}{3pt}
@@ -398,38 +381,43 @@ SAFE + time risk$^\dagger$ & 0.955 & 0.039 & 0.190 & $-0.035$ ($-0.066$, $-0.007
 SAFE + global timer & 1.000 & 0.047 & 0.215 & $-0.011$ ($-0.068$, $0.045$) \\
 P & 1.000 & 0.055 & 0.225 & -- \\
 Noise + P$^\ast$ & -- & -- & -- & $0.002$ [$0.009$] \\
-Resampled SAFE + P$^\ast$ & -- & -- & -- & $0.002$ [$0.007$] \\
+Resampled + P$^\ast$ & -- & -- & -- & $0.002$, $0.000$ [$0.007$] \\
 \textbf{SAFE + P (H1)} & 1.000 & 0.061 & \textbf{0.255} & $\mathbf{0.030}$ ($0.007$, $0.093$) \\
+First-inference + P & 1.000 & 0.055 & 0.226 & $0.001$ ($-0.015$, $0.036$) \\
+Zero-input + P & 1.000 & 0.061 & 0.237 & $0.012$ ($0.001$, $0.044$) \\
+Shuffle + P & 1.000 & 0.063 & 0.236 & $0.011$ ($0.000$, $0.064$) \\
+\textbf{H\&S + P (Am.~2)} & 1.000 & 0.061 & \textbf{0.296} & $\mathbf{0.071}$ ($0.022$, $0.157$) \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{H1 is not supported, but the gain is not zero.} SAFE + P leads P by 0.030 of the time
+\textbf{H1 fails for SAFE, but the gain is not zero.} SAFE + P leads P by 0.030 of the time
 limit (Table~\ref{tab:confirm}). Its decision CI lies above zero and its test FPR (0.061,
 Wilson 95\% upper bound 0.089) meets the FPR rules, but the point gain is below the 0.05
-margin, so H1 fails. The CI (upper end 0.093) does not show the gain is negligible, and the
-opened-cohort estimate (0.007) understated it.
+margin, so H1 fails.
 
 \textbf{H2 is supported.} Noise and within-task resampled SAFE scores, fused with P and
 calibrated the same way, gain at most 0.009 over P in 20 draws each. What SAFE adds is
 policy evidence, not an artifact of fusing any score with a timer.
 
-\textbf{Task duration carries most of the lead.} P alone leads the global timer by 0.102,
-about what SAFE + global timer reaches, and the original SAFE + time-risk design, which beat
-the time risk on recall here, gives 0.035 \emph{less} lead than P. Part of the H1 gain is FPR budget: a per-task timer tuned on
-the test cohort to SAFE + P's FPR leaves a gain of only 0.015 (CI $-0.007$ to $0.041$), and a
-global timer tuned the same way 0.024 (CI $-0.022$ to $0.074$), so the secondary check of H1
-also fails. The gain is 0.026--0.030 for $q = 0.75$--0.95 and 0.074 at $q = 1$, where P itself is
-weaker (0.164).
+\textbf{Task duration carries most of SAFE's lead.} P alone leads the global timer by 0.102,
+and the original SAFE + time-risk design, which beat the time risk on recall here, gives 0.035
+\emph{less} lead than P. A per-task timer tuned on the test cohort to SAFE + P's FPR leaves
+SAFE a gain of 0.015 (CI $-0.007$ to $0.041$). Descriptively, the four success-only scores
+fused with P gain 0.020--0.034, and all five scores gain more on the 10 atomic tasks
+(0.045--0.081) than on the 28 composite ones (0.008--0.027).
 
-\textbf{Atomic tasks carry the gain (descriptive).} On the 10 atomic tasks SAFE + P gains
-0.081 (0.372 against 0.291); on the 28 composite tasks, 0.012. Exploratory, on the same
-cohorts: the four frozen success-only scores fused with P gain 0.020--0.034 (SAFE 0.030), so
-on lead, as on recall, the choice of score matters little; and all five gain more on atomic
-(0.045--0.081) than on composite tasks (0.008--0.027). The split is a property of atomic tasks
-under the per-task timer, not of SAFE, and RLDX-1 shows it too. On composite tasks P likely
-lacks progress: on five, an oracle reading subtask predicates gained 0.071 over P (task-level
-CI $-0.021$ to $0.129$). FPR is not controlled per stratum.
+\textbf{Amendment 2: Hide-and-Seek passes H1 and H2.} It was registered before any
+Hide-and-Seek score was computed on these cohorts. The retrained detector reproduced its
+exploratory scores exactly, and the analysis reproduced SAFE + P before reporting.
+Hide-and-Seek + P leads P by 0.071 (decision CI 0.022--0.157) at 0.061 FPR (Wilson bound
+0.089), meeting every rule; noise and resampled scores gain at most 0.012. The three controls
+gain 0.001--0.012. Hide-and-Seek beats the first-inference control by 0.070 (CI
+0.014--0.153), so its warning develops during the rollout rather than reflecting a
+hard-looking scene, and beats the zero-input and shuffle controls by 0.059 and 0.060 (CIs
+above zero). Against SAFE + P its advantage, 0.041 (CI $-0.011$ to 0.103), is not significant.
+The decision bootstrap skews upward (SAFE: 0.007--0.093 around 0.030), so here the point gain,
+not the interval, carries the decision.
 
 \section{Stage 2 Plan}
 \label{sec:plan}
@@ -440,7 +428,8 @@ CI $-0.021$ to $0.129$). FPR is not controlled per stratum.
 calibration and test cohorts of 20 successes and 20 failures per task (about 2,500 rollouts),
 with held-out calibration failures. Primary: SAFE + P against P, superiority (decision 95\% CI
 above zero), conditional on these 20 tasks (rollouts resampled within task), under the FPR rule
-below. Offline sizing gives power 0.92 at the offline gain of 0.034 (the CI excludes zero in every
+below.\todo{Author's call: make Hide-and-Seek + P co-primary (an offline RLDX-1 check is
+running), with the first-inference control as secondary.} Offline sizing gives power 0.92 at the offline gain of 0.034 (the CI excludes zero in every
 simulated study, so the FPR rule decides); a 0.05 margin would have power $\le 0.09$, so we
 drop it. Secondary, no power claim: the CI with tasks resampled (power
 about 0.54). Descriptive stratum: the 14 atomic tasks. It replaces an atomic-only XR-1 test,
@@ -475,7 +464,9 @@ that moment.
 All results are simulated shadow evaluations (monitors never intervened), from one policy
 prospectively; a second (RLDX-1) was checked only offline, on existing data with a small test
 set. Timers and fused detectors were defined after the exploratory cohort was
-opened, and the confirmatory endpoint after that cohort's recall and FPR were known. Part of SAFE + P's gain is its higher test FPR (0.061 against 0.055). Timers and normalization assume a known task and limit; the policy
+opened, and the confirmatory endpoint after that cohort's recall and FPR were known.
+Hide-and-Seek was chosen as the better of two supervised baselines on the opened cohort, and
+registered after SAFE's confirmatory result was known, on cohorts already opened for SAFE. Part of SAFE + P's gain is its higher test FPR (0.061 against 0.055). Timers and normalization assume a known task and limit; the policy
 score needs white-box access. Test
 cohorts are balanced by quota, so recall and FPR are per class, not at deployment prevalence.
 Point-of-no-return labels are one labeler's video judgments,
@@ -484,10 +475,11 @@ checked on 12 videos; only 10 failures were decided.
 \section{Conclusion}
 
 When failure means timeout, and mostly slowness, a learned monitor can only warn earlier than
-a timer at the same false-alarm rate, here and on a published benchmark. A per-task timer
-nearly matched a hidden-state score fused with a single timer; on a fresh preregistered
-cohort the hidden state added 0.030 of the time limit, below our declared margin. Stage~2
-tests a second policy and closed-loop retry.
+a timer at the same false-alarm rate, here and on a published benchmark. Elapsed time explains
+how well monitors separate failures. On fresh preregistered cohorts, SAFE's hidden-state score
+added 0.030 of the time limit to a per-task timer, below our margin, while a sequence detector
+trained for early separation on the same features added 0.071, a warning that develops during
+the rollout. Stage~2 tests a second policy and closed-loop retry.
 
 \bibliographystyle{plainnat}
 \bibliography{refs}

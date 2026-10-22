@@ -30,3 +30,10 @@ All three `main.pdf` files were rebuilt on 2026-10-21 as tectonic (XeTeX) previe
 `main.tex` (2026-10-22): one exploratory paragraph on the point-of-no-return labels (report §15.17), placed after "No early warning". The draft is still 6 pages.
 
 `main.tex` (2026-10-22, b): one exploratory paragraph after the point-of-no-return paragraph covers the FIPER re-analysis, its caveats and the SAFE fixed-horizon boundary case (report §15.18–15.19). The draft is still 6 pages.
+
+## Update 2026-10-22: Hide-and-Seek and Amendment 2 (RSS and JSAI drafts)
+
+Both drafts now report Hide-and-Seek (report §15.20 exploratory, §15.21 preregistered: +0.071 [0.022, 0.157] over P, H1-HS and H2-HS supported) and the learned-timer and first-inference controls. The framing is now "time explains separation; an early-separation sequence model warns earlier". `main.tex` (the older recall-framed draft) is unchanged.
+
+- **JSAI.** The abstract is 140 words and the body is still 4 pages. Cuts: the cumulative-lead figure, the sensitivity and "where the lead comes from" paragraphs, the video frame-rate sentence, a shorter atomic/composite paragraph, and the next-steps sentence of the conclusion.
+- **Bibliography.** `refs.bib` lists Hide-and-Seek as an ICML 2026 workshop paper (arXiv:2605.30834). Verify the venue before submission: the project page cites only the arXiv version.
