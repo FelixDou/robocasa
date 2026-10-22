@@ -143,7 +143,7 @@ intervention cost, so the value of an earlier alarm must eventually be shown in 
 
 \section{Problem Setting}
 
-\textbf{Time.} We measure time in four units (Table~\ref{tab:time}). The simulator advances
+\textbf{Time.} We measure time in four units. The simulator advances
 in \emph{control steps} at 20\,Hz, RoboCasa's default control rate, which our collection
 code does not change. The policy is queried once per 16-step action chunk and executes the
 whole chunk, so one \emph{policy inference} covers 16 control steps, or 0.8\,s. Inferences
@@ -154,26 +154,6 @@ inferences it is $H_k = \lceil T_k/16 \rceil$, between 29 and 272 for our tasks 
 real time; we use them only for figures. Every fraction of time in this paper, such as
 $t/H_k$, the timer fraction $c$ and the lead $\ell$, is a fraction of $H_k$.
 
-\begin{table}[t]
-\centering
-\caption{Units of time, with the failed \emph{OpenCabinet} rollout of
-Fig.~\ref{fig:qualitative} as an example.}
-\label{tab:time}
-\footnotesize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.25\columnwidth}>{\raggedright\arraybackslash}p{0.5\columnwidth}>{\raggedright\arraybackslash}p{0.17\columnwidth}@{}}
-\toprule
-Unit & Definition & Example \\
-\midrule
-Control step & one simulator action, 20\,Hz (50\,ms) & 1{,}050 \\
-Policy inference $t$ & one 16-step action chunk (0.8\,s) & 66 \\
-Time limit $T_k$, $H_k$ & official limit, control steps; $H_k = \lceil T_k/16\rceil$ in inferences & 1{,}050; 66 \\
-Video frame & every 2nd step, at 20\,fps & 526 \\
-Elapsed fraction & $t/H_k$ (SAFE alarm) & 30/66 \\
-Warning lead $\ell$ & $(H_k - T)/H_k$ at alarm $T$ & 36/66 = 0.55 \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 \textbf{Monitoring.} A detector watches one rollout of a known task $k$ and decides at each
 inference $t$ whether to alarm, using only the policy features so far, $t$, the task and
@@ -495,7 +475,13 @@ successful durations, SAFE adds 0.030 of the limit on a fresh preregistered coho
 but below what we declared useful. On our data, most of what looked like policy evidence is
 time calibration. Video labels of 48 confirmatory failures, made blind to alarms, suggest why
 (exploratory): 79\% were still recoverable at the limit, mostly slow rather than irreversibly
-wrong (second-labeler agreement on 12 videos: Cohen's $\kappa = 0.80$). Offline, on existing data for a second policy (RLDX-1, 20 tasks, 100 test
+wrong (second-labeler agreement on 12 videos: Cohen's $\kappa = 0.80$). The confound is not
+specific to RoboCasa (exploratory, on data released by others): in FIPER's
+rollouts~\cite{romer2025fiper}, length alone separates failures with ROC-AUC 0.92--1.00 in four
+of five tasks, and a timer calibrated like FIPER's thresholds exceeds its published mean
+accuracy (0.83 against 0.78) but alarms about twice as late. Where every rollout runs to a
+fixed horizon, as in SAFE's real-robot set, the timer is uninformative: the termination rule
+decides whether time is a strong baseline. Offline, on existing data for a second policy (RLDX-1, 20 tasks, 100 test
 failures), all failures run to the limit, P beats a single timer (lead 0.271 against 0.032),
 and SAFE's LSTM head + P gains 0.034 (CI 0.008--0.067) at the same FPR, only on atomic tasks;
 the MLP head adds nothing.

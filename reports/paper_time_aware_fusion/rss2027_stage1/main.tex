@@ -104,32 +104,13 @@ should be compared with a per-task timer and evaluated on failures that end earl
 \section{Problem Setting}
 \label{sec:setting}
 
-\textbf{Time} (Table~\ref{tab:time}). The simulator runs \emph{control steps} at RoboCasa's
+\textbf{Time.} The simulator runs \emph{control steps} at RoboCasa's
 default 20\,Hz. The policy executes each 16-step action chunk in full, so \emph{policy
 inferences} $t = 1, 2, \dots$ (0.8\,s each) are our clock, and a monitor decides only at an
 inference. Task $k$'s limit of $T_k$ control steps is $H_k = \lceil T_k/16 \rceil$ inferences
 (29 to 272, or 22.5 to 217.5\,s). Every fraction of time ($t/H_k$, $c$, $\ell$) is a fraction
 of $H_k$.
 
-\begin{table}[t]
-\centering
-\caption{Units of time, with the failed \emph{OpenCabinet} rollout of Fig.~\ref{fig:qualitative} as an example.}
-\label{tab:time}
-\footnotesize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.25\columnwidth}>{\raggedright\arraybackslash}p{0.5\columnwidth}>{\raggedright\arraybackslash}p{0.17\columnwidth}@{}}
-\toprule
-Unit & Definition & Example \\
-\midrule
-Control step & one simulator action, 20\,Hz (50\,ms) & 1{,}050 \\
-Policy inference $t$ & one 16-step action chunk (0.8\,s) & 66 \\
-Time limit $T_k$, $H_k$ & official limit, control steps; $H_k = \lceil T_k/16\rceil$ in inferences & 1{,}050; 66 \\
-Video frame & every 2nd step, at 20\,fps & 526 \\
-Elapsed fraction & $t/H_k$ (SAFE alarm) & 30/66 \\
-Warning lead $\ell$ & $(H_k - T)/H_k$ at alarm $T$ & 36/66 = 0.55 \\
-\bottomrule
-\end{tabular}
-\end{table}
 
 \textbf{Monitoring.} A monitor watches a rollout of a known task $k$ and decides at each
 inference $t$ whether to alarm, using only the policy features so far, $t$, the task and
@@ -140,6 +121,12 @@ alarm at the final inference counts with $\ell = 0$. The mean lead $\bar\ell$ co
 and earliness. Detectors are compared at operating points fixed on a calibration cohort under
 FPR $\le \alpha = 0.05$. Confidence intervals come from a paired bootstrap that resamples
 tasks, then rollouts within each task (2,000 replicates).
+
+\textbf{Scope.} Whether elapsed time is a strong baseline depends on the termination rule.
+Where successes stop at completion (RoboCasa, FIPER's tasks, deployment), it is. Where every
+rollout runs to one fixed horizon, as in SAFE's real-robot set (in its release, 98\% of
+failures and $\ge 30$ successes per task stop at one step) or SimplerEnv, it is uninformative,
+and early-warning claims need failure-time annotations, which SAFE did not release.
 
 \section{Hypotheses}
 \label{sec:hypotheses}
@@ -364,14 +351,23 @@ after the point of no return on all, SAFE + P at or before it on 2 of 3 atomic a
 composite ones (an illustration).
 
 \textbf{A second policy, offline (RLDX-1, exploratory).} On existing RLDX-1 data (20 tasks;
-740 development rollouts, 60 held-out calibration successes, a test of 100 successes and
-100 failures), all 438 failures ran to the time limit. P reaches
+740 development rollouts, 60 held-out calibration successes, 100/100 test rollouts), all 438 failures ran to the time limit. P reaches
 $\bar\ell = 0.271$ at 0.03 test FPR, the global timer 0.032. SAFE (LSTM head) + P gains 0.034
 over P (CI 0.008--0.067) at the \emph{same} FPR, so unlike on XR-1 none of it is extra FPR
 budget; the MLP head adds nothing. The gain is atomic (0.049, CI 0.013--0.097); on composite
 tasks it is 0, as SAFE never alarms before P. Caveats: the fused path was chosen on in-sample
 development failures, the FPR margin rests on 60 successes, and noise + P matched the gain
 in 2 of 20 draws, both at 0.08 FPR.
+
+\textbf{The confound in a published benchmark (exploratory).} In FIPER's released
+rollouts~\cite{romer2025fiper} (five tasks, two on a real robot), length alone separates
+failures with ROC-AUC 0.92--1.00 in four tasks (0.62 in the fifth). A timer calibrated like
+FIPER's conformal thresholds and scored with its metrics reaches mean accuracy 0.83 against
+FIPER's published 0.78, but alarms at 0.63 of the horizon against 0.30, so FIPER wins on
+time-weighted accuracy (0.65 against 0.57): its advantage is earliness, the comparison we
+argue for. Caveats: published against computed numbers, not a paired re-run; our horizon is
+the longest released rollout; on the real-robot tasks (10 calibration successes) a
+finite-sample conformal rank cuts the timer's accuracy to about 0.54.
 
 \section{Confirmatory Test of H1 and H2}
 \label{sec:confirm}
@@ -432,8 +428,8 @@ cohorts: the four frozen success-only scores fused with P gain 0.020--0.034 (SAF
 on lead, as on recall, the choice of score matters little; and all five gain more on atomic
 (0.045--0.081) than on composite tasks (0.008--0.027). The split is a property of atomic tasks
 under the per-task timer, not of SAFE, and RLDX-1 shows it too. On composite tasks P likely
-lacks progress: on five of them, an oracle reading the simulator's subtask predicates gained
-0.071 over P (task-level CI $-0.021$ to $0.129$). FPR is not controlled per stratum.
+lacks progress: on five, an oracle reading subtask predicates gained 0.071 over P (task-level
+CI $-0.021$ to $0.129$). FPR is not controlled per stratum.
 
 \section{Stage 2 Plan}
 \label{sec:plan}
@@ -444,61 +440,54 @@ lacks progress: on five of them, an oracle reading the simulator's subtask predi
 calibration and test cohorts of 20 successes and 20 failures per task (about 2,500 rollouts),
 with held-out calibration failures. Primary: SAFE + P against P, superiority (decision 95\% CI
 above zero), conditional on these 20 tasks (rollouts resampled within task), under the FPR rule
-below. Offline sizing on the existing data gives power 0.92 at the offline gain of 0.034 (the
-CI excludes zero in every simulated study, so the FPR rule decides); a 0.05 margin would have
-power at most 0.09, so we drop it. Secondary, no power claim: the CI with tasks resampled (power
+below. Offline sizing gives power 0.92 at the offline gain of 0.034 (the CI excludes zero in every
+simulated study, so the FPR rule decides); a 0.05 margin would have power $\le 0.09$, so we
+drop it. Secondary, no power claim: the CI with tasks resampled (power
 about 0.54). Descriptive stratum: the 14 atomic tasks. It replaces an atomic-only XR-1 test,
-which reached at most 0.55 power at the 0.05 margin up to 60 per class per task, and whose
-0.089 estimate is optimistic (about 0.06 with all retained successes). With 5 held-out failures
+with at most 0.55 power at the 0.05 margin up to 60 per class per task and an optimistic
+0.089 estimate (about 0.06 with all retained successes). With 5 held-out failures
 per task, all sizing figures are optimistic.
 
 \textbf{FPR rule.}\todo{Proposed rule; author to confirm.} Calibration keeps the conformal
 target $\alpha = 0.05$. H1's fixed limit (FPR $\le 0.075$, Wilson bound $\le 0.10$) rejects
-good detectors in small cohorts; instead, the test false alarms must not reject ``true FPR $\le
+good detectors in small cohorts; instead, false alarms must not reject ``true FPR $\le
 0.075$'' in a one-sided exact binomial test at level 0.05: at most the 95th percentile of
-Binomial($n_s$, 0.075) for $n_s$ test successes (39 of 400 in E2). This is looser, so E2's power
-is at least 0.92.
+Binomial($n_s$, 0.075) for $n_s$ test successes (39 of 400 in E2). This is looser, so E2's power stays $\ge 0.92$.
 
 \textbf{E3: Reset and retry (H4).} On XR-1's 38 tasks\pending{E3 policy not chosen; XR-1
 assumed (RLDX-1: about 480 per arm)}, an alarm ends the attempt and resets the scene while a
-budget of $1.25\,H_k$ remains. Registered: success under P against no monitor, paired by seed
-(about 650 episodes per arm, by offline retry bounds). SAFE + P is a descriptive arm:
-separating it from P needs thousands to over a million episodes per arm, except on XR-1 atomic
-tasks at $1.0\,H_k$ (about 1,450, on an optimistic bound). As most failures are still
-recoverable at the limit (Sec.~\ref{sec:evidence}), a reset can do worse than more time, so a
-``more time, no reset'' arm (run to $1.25\,H_k$) is the natural comparator for alarm-triggered
-reset.\pending{sample size of the no-reset arm}
+budget of $1.25\,H_k$ remains. Registered: P against no monitor, paired by seed (about 650
+episodes per arm). SAFE + P is descriptive: separating it from P needs thousands to over a
+million episodes per arm (about 1,450 on XR-1 atomic tasks at $1.0\,H_k$, on an optimistic
+bound). As most failures are still recoverable at the limit, a ``more time, no reset'' arm
+(run to $1.25\,H_k$) is the natural comparator for reset.\pending{sample size of the no-reset arm}
 
 \textbf{E4: Checks.} Action-only monitors (chunk magnitude, second-sample disagreement);
 richer time baselines (end-effector stall, discrete-time hazard); OR vs AND on full curves;
-SAFE faithfulness; precision at deployment prevalence; unseen tasks.
-\textbf{E5: Failures decided early.} Most failures have no early point of no return
-(Sec.~\ref{sec:evidence}), so E5 targets the minority that do: several labelers mark it
-under a written protocol, with adjudication, since our two labelers' timings differed by
-0.24--0.34 $H_k$ on the 3 failures both called decided; we report lead from that moment.
+SAFE faithfulness; precision at deployment prevalence; unseen tasks; FIPER's code re-run
+with the timer. \textbf{E5: Failures decided early.} Most failures have no early point of no
+return, so E5 targets the minority that do, with several labelers, a written protocol and
+adjudication (our two labelers' timings differed by 0.24--0.34 $H_k$), and reports lead from
+that moment.
 
 \section{Limitations}
 
 All results are simulated shadow evaluations (monitors never intervened), from one policy
 prospectively; a second (RLDX-1) was checked only offline, on existing data with a small test
-set. The exploratory cohort was opened before the timers and fused detectors were
-defined, and the confirmatory endpoint was registered after that cohort's recall and FPR
-were known. SAFE + P ran at a higher test FPR than P (0.061 against 0.055), and part of its
-gain is that budget. The timers and per-task normalization assume a known task and time
-limit, and the policy score needs white-box access and development rollouts of each task. Test
+set. Timers and fused detectors were defined after the exploratory cohort was
+opened, and the confirmatory endpoint after that cohort's recall and FPR were known. Part of SAFE + P's gain is its higher test FPR (0.061 against 0.055). Timers and normalization assume a known task and limit; the policy
+score needs white-box access. Test
 cohorts are balanced by quota, so recall and FPR are per class, not at deployment prevalence.
-Point-of-no-return labels are video judgments by one labeler, checked on 12 videos by a
-second; only 10 failures were decided.
+Point-of-no-return labels are one labeler's video judgments,
+checked on 12 videos; only 10 failures were decided.
 
 \section{Conclusion}
 
-When failure means timeout, and mostly slowness rather than an irreversible error, a
-learned monitor can only warn earlier than a timer at the same false-alarm rate. On one VLA and 38 tasks, a per-task timer
-built from development success durations nearly matched a hidden-state score fused with a
-single timer. On a fresh preregistered cohort, the hidden state added 0.030 of the time limit
-to that timer: a real signal, below our declared margin. Stage~2 tests a second policy,
-failures that become unrecoverable early, and whether earlier warnings help a robot recover
-within the same time.
+When failure means timeout, and mostly slowness, a learned monitor can only warn earlier than
+a timer at the same false-alarm rate, here and on a published benchmark. A per-task timer
+nearly matched a hidden-state score fused with a single timer; on a fresh preregistered
+cohort the hidden state added 0.030 of the time limit, below our declared margin. Stage~2
+tests a second policy and closed-loop retry.
 
 \bibliographystyle{plainnat}
 \bibliography{refs}

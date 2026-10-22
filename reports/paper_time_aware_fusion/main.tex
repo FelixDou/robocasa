@@ -484,6 +484,20 @@ time, which is why elapsed time is so informative, and a detector that reports f
 is mostly predicting slowness. All 10 decided failures were decided before 75\% of the
 horizon.
 
+\textbf{The confound in a published benchmark (exploratory).} In FIPER's released
+rollouts~\cite{romer2025fiper} (five tasks, two on a real robot), rollout length alone
+separates failures from successes with ROC-AUC 0.92--1.00 in four tasks (0.62 in the fifth).
+A timer calibrated like FIPER's conformal thresholds and scored with FIPER's own metrics
+reaches mean accuracy 0.83 against FIPER's published 0.78, but alarms at 0.63 of the horizon
+against 0.30, so FIPER wins on time-weighted accuracy (0.65 against 0.57): its advantage is
+earliness. These are published values against our computed timer, not a paired re-run; our
+horizon is the longest released rollout; and on the two real-robot tasks, with 10
+calibration successes each, a finite-sample conformal threshold lowers the timer's accuracy
+to about 0.54. The boundary case is a fixed-horizon evaluation: in SAFE's real-robot
+release~\cite{gu2025safe}, 98\% of failures and at least 30 successes per task stop at one
+fixed step, so elapsed time carries no outcome information there. Whether time is a strong
+baseline is decided by the termination rule.
+
 \subsection{Sensitivity to the test FPR}
 
 Fused detectors exceed the 0.05 budget on test (fused SAFE: 22 of 380, Wilson 95\% interval

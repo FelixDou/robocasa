@@ -138,3 +138,25 @@ Source: `docs/safe_robocasa_experiment_report.md` §15.17 and `docs/no_return_la
     - the OR/AND frontier sentence;
     - the RLDX-1 post hoc z = 7.93 note.
 - **Page check.** With `\notesfalse` the build is 6 pages, with content ending on page 5. With notes on it is 7.
+
+## Update 2026-10-22 (b): published evaluations (report §15.18 FIPER, §15.19 SAFE boundary; exploratory)
+
+Sources: `docs/safe_robocasa_experiment_report.md` §15.18–15.19 and `docs/published_eval_reanalysis_plan.md`. The FIPER numbers are its published Table 1; the timer was computed by us.
+
+- **Sec. VI, new paragraph "The confound in a published benchmark".**
+  - On FIPER's released rollouts, rollout length alone separates failures with ROC-AUC 0.92–1.00 in 4 of 5 tasks (0.62 in Sorting).
+  - The timer was calibrated like FIPER's thresholds. It reaches mean accuracy 0.83 against FIPER's 0.78, but DT 0.63 against 0.30, so FIPER wins on TWA (0.65 against 0.57).
+  - All caveats are in the text: published against computed numbers, not a paired re-run, T is the longest released rollout, and the conformal rank gives about 0.54 on the real-robot tasks.
+- **Sec. III, new "Scope" paragraph.** The termination rule decides whether time is a strong baseline:
+  - when successes stop at completion, it is;
+  - when every rollout runs to a fixed horizon (SAFE's real-robot release, where 98% of failures and ≥ 30 successes per task stop at one step, or SimplerEnv), it is uninformative, and early-warning claims need failure-time annotations, which SAFE did not release.
+- **Related Work.**
+  - SAFE also uses a fixed horizon on its real robot.
+  - FIPER reports no elapsed-time baseline, although length separates most of its tasks.
+- **E4.** Adds a re-run of FIPER's code with the timer, a few words.
+- **Cuts to stay within 5 + 1.**
+  - **Table I (units of time) is removed.** The "Time" paragraph defines every unit, and the figure labels its frames in inferences.
+  - Related Work is tighter: the CheckVLA description, the Stage 2 baselines clause and the RESCUE sentence.
+  - E3 and E5 are shorter, and E5 is merged into the E4 paragraph.
+  - Limitations and the conclusion are shorter. The conclusion no longer lists "early-decided failures" as a Stage 2 item; E5 still has it.
+- **Page check.** With `\notesfalse` the build is 6 pages, with content ending on page 5 and the references ending on page 6.

@@ -65,3 +65,12 @@ The official English package (`jsaiac_tex_en-2026.zip` from https://conf.ai-gakk
   - The "by about 0.06" fallback detail is gone.
   - The conclusion is shorter.
 - **Page check.** The body still ends on page 4.
+
+## Update 2026-10-22 (b): FIPER and the SAFE boundary case (§15.18–15.19, exploratory)
+
+- **Discussion.** Two sentences:
+  - On FIPER's released rollouts, length alone separates failures with ROC-AUC 0.92–1.00 in 4 of 5 tasks.
+  - A timer calibrated like FIPER's exceeds its published mean accuracy (0.83 against 0.78) but alarms about twice as late.
+  - On fixed-horizon evaluations such as SAFE's real-robot set, the timer is uninformative, so the termination rule decides.
+- **Cut.** Table 1 (units of time) is removed, as in RSS. The "Time" paragraph still defines all four units.
+- **Page check.** The body ends on page 4, with a few lines to spare.
