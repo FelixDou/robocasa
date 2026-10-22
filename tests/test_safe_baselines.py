@@ -209,6 +209,15 @@ class RunnerTests(unittest.TestCase):
                     self.assertTrue(0.0 <= metrics["roc_auc"] <= 1.0)
             self.assertTrue((root / "out" / "summary.md").exists())
             self.assertTrue((root / "out" / "evaluation_predictions.jsonl").exists())
+            calibration_rows = [
+                json.loads(line)
+                for line in (root / "out" / "calibration_predictions.jsonl").read_text().splitlines()
+            ]
+            self.assertEqual(
+                {(row["detector"], row["rollout_id"]) for row in calibration_rows},
+                {(name, rid) for name in ("action_consistency", "mahalanobis", "actprobe")
+                 for rid in by_split["calibration"]},
+            )
 
     def test_runner_skips_action_consistency_without_overlap(self):
         with tempfile.TemporaryDirectory() as directory:

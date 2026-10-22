@@ -174,8 +174,11 @@ sha256sum -c "$XR1_BASELINES_LOG/frozen_inputs.sha256"
   horizon, plus the time-only reference.
 - `results.json`: configs, calibration thresholds, calibration and evaluation
   metrics, and paired detection-time comparisons against time-only.
-- `evaluation_predictions.jsonl`: per-rollout normalized score and time-risk
-  trajectories for every detector.
+- `evaluation_predictions.jsonl` and `calibration_predictions.jsonl`: per-rollout
+  normalized score and time-risk trajectories for every detector, on the
+  evaluation and calibration rollouts. (Runs made before the calibration file
+  was added, such as the first XR-1 run of 2026-10-22, wrote only the evaluation
+  file.)
 
 Each detector is reported twice: alone (`baseline only`) and in your staged
 design (`staged baseline time`: the baseline may alarm before 25% of the
@@ -184,3 +187,119 @@ fallback helps every detector or only SAFE.
 
 The evaluation cohort was already opened for SAFE, so these numbers compare
 methods on a shared test set; they are not a new confirmatory test.
+
+## Lead over the per-task timer P and fusion with time
+
+`scripts/xr1_lead_time/published_baselines_lead.py` scores the baselines of one
+run with the two protocols already used for SAFE on the same August cohorts
+(calibration 114/114, test 380/380, already opened, so the results are
+descriptive):
+
+- **A. Lead over P** (report section 15.16, `physical_signals.analyse`): each
+  score fused with the per-task 95th-percentile timer P on the nested (u, s)
+  path. It reports the lead gain over P with a task-then-rollout bootstrap CI,
+  the gain over P loosened to the same number of test false alarms (matched
+  FPR), and a noise null fitted the same way (100 draws by default).
+- **B. Fused with the global time risk** (sections 15.10–15.11): the score OR
+  the frozen time risk over the whole rollout, thresholds chosen jointly on
+  calibration at the 5% target. It reports TPR, FPR, detection timing, and
+  paired task-then-rollout bootstrap CIs (2000 replicates, seed 0) against
+  time-only and against fused SAFE.
+
+Before writing results it reproduces P alone (lead 0.1952, 17 false alarms),
+SAFE + P (+0.0069), fused SAFE + time (0.955 / 0.058) and the run's own
+baseline-only rows, and exits with `REPRODUCTION FAILED` otherwise.
+
+It needs `calibration_predictions.jsonl`, so a run made before that file was
+added must be repeated. The repeated run also checks determinism:
+`--compare-run` reports the largest difference between the two runs'
+evaluation trajectories.
+
+### Commands
+
+In a fresh terminal, restore the earlier run's variables, then pin the new code:
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid
+export STORAGE_BS=/gs/bs/tga-shinoda/felid
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+export SAFE_PY="$STORAGE_BS/envs/vla_safe/bin/python"
+
+export XR1_BASELINES_LOG="$(ls -d "$STORAGE_BS"/robocasa_logs/eval/xr1_published_baselines_* | grep -v _lead | sort | tail -n 1)"
+source "$XR1_BASELINES_LOG/paths.env"
+export XR1_FIRST_RUN="$XR1_BASELINES_ROOT"
+test -f "$XR1_FIRST_RUN/results.json" && echo "first run: $XR1_FIRST_RUN"
+
+git -C "$PROJECT_FS/robocasa" fetch origin main
+export LEAD_SHA="$(git -C "$PROJECT_FS/robocasa" rev-parse FETCH_HEAD)"
+export LEAD_REPO="$PROJECT_FS/robocasa_baselines_lead_${LEAD_SHA:0:8}"
+test -d "$LEAD_REPO" || git -C "$PROJECT_FS/robocasa" worktree add --detach "$LEAD_REPO" "$LEAD_SHA"
+cd "$LEAD_REPO" && echo "code: $(git rev-parse HEAD)"
+test -f scripts/xr1_lead_time/published_baselines_lead.py && echo "code OK"
+
+export XR1_LEAD_TAG=xr1_published_baselines_lead_$(date +%Y%m%d_%H%M%S)
+export XR1_LEAD_ROOT="$STORAGE_BS/robocasa_checkpoints/safe/$XR1_LEAD_TAG"
+export XR1_LEAD_LOG="$STORAGE_BS/robocasa_logs/eval/$XR1_LEAD_TAG"
+export XR1_PS_INPUTS="$STORAGE_BS/robocasa_checkpoints/safe/xr1_physical_signals_20261021/inputs"
+mkdir -p "$XR1_LEAD_LOG"
+sha256sum "$XR1_PS_INPUTS"/calibration_predictions.jsonl "$XR1_PS_INPUTS"/event_predictions.jsonl \
+  "$XR1_PS_INPUTS"/runtime_bundle.json "$XR1_RUNTIME_BUNDLE" | tee "$XR1_LEAD_LOG/frozen_inputs.sha256"
+{
+  printf 'export %s=%q\n' LEAD_REPO "$LEAD_REPO" XR1_LEAD_ROOT "$XR1_LEAD_ROOT" XR1_LEAD_LOG "$XR1_LEAD_LOG" \
+    XR1_PS_INPUTS "$XR1_PS_INPUTS" XR1_FIRST_RUN "$XR1_FIRST_RUN"
+  cat "$XR1_BASELINES_LOG/paths.env"
+} > "$XR1_LEAD_LOG/paths.env"
+
+PYTHONPATH="$LEAD_REPO" "$SAFE_PY" -m unittest tests.test_safe_baselines tests.test_xr1_published_baselines_lead
+```
+
+The hashes must start with `a08794b0`, `0e87bb23`, `c4378ba0` and
+`c4378ba0`. To resume in a new terminal, run the module and conda lines, then
+`source` the newest `xr1_published_baselines_lead_*/paths.env` and `cd "$LEAD_REPO"`.
+
+Repeat the baseline run with the same arguments (about one hour on CPU):
+
+```bash
+cd "$LEAD_REPO"
+PYTHONPATH="$LEAD_REPO" CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 \
+nohup nice -n 10 "$SAFE_PY" -u -m robocasa.recovery.safe.baselines.run_baselines \
+  --dataset-dir "${XR1_RAW_DIRS[@]}" \
+  --runtime-bundle "$XR1_RUNTIME_BUNDLE" --train-ids "$XR1_TRAIN_IDS" --evaluation-ids "$XR1_EVAL_IDS" \
+  --output-dir "$XR1_LEAD_ROOT/baselines" \
+  --detectors actprobe hide_and_seek \
+  --feature-aggregation last --seeds 0 1 2 \
+  > "$XR1_LEAD_LOG/baselines.log" 2>&1 &
+echo "baselines PID: $! on $(hostname)"
+sleep 60; ps -p $! -o etime,%cpu,rss && tail -n 5 "$XR1_LEAD_LOG/baselines.log"
+```
+
+When `$XR1_LEAD_ROOT/baselines/summary.md` exists, compare it with the first
+run's `summary.md` and run the analysis:
+
+```bash
+cd "$LEAD_REPO"
+diff "$XR1_FIRST_RUN/summary.md" "$XR1_LEAD_ROOT/baselines/summary.md" && echo "summary identical to first run"
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+nohup nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/published_baselines_lead.py \
+  --baseline-run "$XR1_LEAD_ROOT/baselines" \
+  --calibration "$XR1_PS_INPUTS/calibration_predictions.jsonl" \
+  --test "$XR1_PS_INPUTS/event_predictions.jsonl" \
+  --bundle "$XR1_PS_INPUTS/runtime_bundle.json" \
+  --compare-run "$XR1_FIRST_RUN" \
+  --workers 8 --noise-draws 100 \
+  --out "$XR1_LEAD_ROOT/published_baselines_lead.json" \
+  > "$XR1_LEAD_LOG/lead.log" 2>&1 &
+echo "lead PID: $! on $(hostname)"
+```
+
+When it exits, inspect the result and verify the frozen inputs:
+
+```bash
+grep -A40 "=== A." "$XR1_LEAD_LOG/lead.log"
+tail -n 3 "$XR1_LEAD_LOG/lead.log"
+sha256sum -c "$XR1_LEAD_LOG/frozen_inputs.sha256"
+```
+
+The last log line must be `REPRODUCTION OK`.

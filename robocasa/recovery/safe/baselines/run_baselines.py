@@ -245,6 +245,7 @@ def run(args):
     }
     summary_rows = []
     predictions = {}
+    calibration_predictions = {}
     time_reference = None
     for name in args.detectors:
         check = getattr(DETECTOR_REGISTRY[name], "unsupported_reason", None)
@@ -330,6 +331,7 @@ def run(args):
             "evaluation_rollouts": len(evaluation_records),
         }
         predictions[name] = evaluation_all
+        calibration_predictions[name] = calibration_records
         for label, metrics in evaluated.items():
             if label == "time_only" and summary_rows and any(r[0] == "time_only" for r in summary_rows):
                 continue
@@ -342,10 +344,14 @@ def run(args):
             ))
         _write_json(output / "results.json", results)
 
-    with (output / "evaluation_predictions.jsonl").open("w") as stream:
-        for name, records in predictions.items():
-            for record in records:
-                stream.write(json.dumps({"detector": name, **record}, default=_json_default) + "\n")
+    # Calibration trajectories too, so later analyses (e.g. lead over the per-task
+    # timer) can refit on calibration without retraining the detectors.
+    for filename, store in (("evaluation_predictions.jsonl", predictions),
+                            ("calibration_predictions.jsonl", calibration_predictions)):
+        with (output / filename).open("w") as stream:
+            for name, records in store.items():
+                for record in records:
+                    stream.write(json.dumps({"detector": name, **record}, default=_json_default) + "\n")
     lines = [
         "| Detector | ROC-AUC | TPR | FPR | Bal. acc. | Miss-adj. detection | Recall by 25% |",
         "| --- | --- | --- | --- | --- | --- | --- |",
