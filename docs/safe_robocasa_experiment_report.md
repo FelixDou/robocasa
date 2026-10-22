@@ -4429,11 +4429,11 @@ false alarms: Hide-and-Seek's gain is +0.052 [+0.002, +0.106].
 ```text
 Plan:      docs/rldx_hide_and_seek_plan.md (6f617d51)
 Code:      scripts/xr1_lead_time/rldx_hide_and_seek.py; score_cohorts --score-train (6f617d51)
-Run root:  /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_<timestamp>/
+Run root:  /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/
              inputs/ (rldx_bundle.json, {train,calibration,test}_ids.json),
              scores/ ({train,calibration,test}_predictions.jsonl, normalizations.json, scoring.json),
              rldx_hide_and_seek.json
-Logs:      /gs/bs/tga-shinoda/felid/robocasa_logs/eval/rldx1_hide_and_seek_<timestamp>/
+Logs:      /gs/bs/tga-shinoda/felid/robocasa_logs/eval/rldx1_hide_and_seek_20261023_000418/
              prepare.log, score.log, run.log, frozen_inputs.sha256, paths.env
 Inputs:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530/calibration/lstm/
            /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_lead_replication_20261021_123506/rldx_lead_lstm.json
