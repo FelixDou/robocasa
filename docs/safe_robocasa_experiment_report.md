@@ -182,7 +182,7 @@ An offline replication on RLDX-1 (Section 15.15) found the same pattern:
 The sample is small, and noise matched that gain only by spending more FPR, so
 this is preliminary.
 
-Point-of-no-return labels on 48 XR-1 failures (Section 15.16) found 79% still
+Point-of-no-return labels on 48 XR-1 failures (Section 15.17) found 79% still
 recoverable when the time limit was reached. On this benchmark, failure mostly
 means not finishing in time, which is why elapsed time is so informative. The
 recoverable call was reproduced by a second labeler (11 of 12 videos, kappa
@@ -1954,7 +1954,7 @@ The present evidence supports the following hierarchy of conclusions:
     the same FPR as P (0.03), all of it on atomic tasks (+0.049; composite +0.000).
     The weaker MLP adds nothing. Noise + P matched the gain only at a higher FPR
     (2 of 20 draws, both at 0.08). This is preliminary evidence for H3, not a test.
-21. **Point of no return (Section 15.16, exploratory).** In 38 of 48 labeled XR-1
+21. **Point of no return (Section 15.17, exploratory).** In 38 of 48 labeled XR-1
     failures, the robot was still recoverable when the time limit was reached.
     Only 10 failures became irreversible earlier, all before 75% of H_k. On
     this benchmark failure mostly means "did not finish in time". The timer
@@ -3400,7 +3400,159 @@ Inputs:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_safe20_natur
 Worktree:  /gs/fs/tga-shinoda/felid/robocasa_rldx_lead_67008c04
 ```
 
-### 15.16 When do XR-1 failures become hopeless? Point-of-no-return labels
+### 15.16 Physical (action-based) signals against the per-task timer
+
+#### Status
+
+Exploratory, answering a question from the 2026-10-20 progress meeting. Do
+physical signals add warning lead over the per-task timer P (q = 0.95)? Such
+signals include whether the robot is moving or stalling, and whether its actions
+look like those of successful rollouts.
+
+The code is `scripts/xr1_lead_time/physical_signals.py`:
+- the analysis was merged from PR #4 (merge commit `fa740022`);
+- the matched-FPR and noise-null controls were added after the first run
+  (commit `2c377234`), because that run showed every signal "gaining" while
+  raising test FPR.
+
+No plan was committed before either run.
+
+#### Data and signals
+
+- **Cohorts.** These are the same cohorts as the `quantile_timer.py` dry run,
+  which set the 0.195 timer lead and the +0.007 SAFE gain:
+  - calibration: the primary balanced cohort, 3 successes and 3 failures per
+    task (114/114);
+  - test: the August prospective cohort, 10/10 per task (380/380), already
+    opened.
+- **Confirmatory data were never read.** Records with a seed in
+  [1300007, 1325007) are dropped before any action file is opened.
+- **Reference statistics.** These come from development successes only: 1,056
+  of the 1,900 development rollouts, capped at 60 per task, with at least 5
+  required. For example, PortionHotDogs had 8 and OpenCabinet 46.
+- **Action coverage was complete.** Every development, calibration and test
+  rollout had its executed-action file (`actions/<task>/<id>.npz`, one action
+  per control step) and its tensor file.
+- **Signals use commanded actions.** XR-1 rollouts did not log proprioception or
+  end-effector poses, so every signal is computed from commanded motion (OSC
+  end-effector deltas, gripper, base), not from measured motion.
+- **Signals are causal.** Each inference's statistics use only the actions
+  executed since the previous inference.
+- **The nine signals:**
+  - current stall run (`stall_run`);
+  - cumulative stalled time (`stall_total`);
+  - low commanded speed (`low_motion`);
+  - step-to-step action change (`action_delta`);
+  - back-and-forth motion (`dither`);
+  - excess gripper toggles (`gripper_toggles`);
+  - distance from success actions at the same phase (`success_distance`);
+  - chunk disagreement;
+  - base motion.
+- **Chunk disagreement is empty by construction.** XR-1 executes all 16 steps
+  of each chunk before replanning, so consecutive chunks never overlap.
+- **Fitting.** Each signal is fused with P exactly like SAFE + P:
+  - the OR rule on the nested path (u, s);
+  - the path is chosen on calibration failures;
+  - the conformal margin is set on calibration successes, alpha = 0.05.
+- **The chosen signal.** The single "chosen" signal is the one with the best
+  calibration-failure lead.
+
+#### Results
+
+**Table 15.16a — Each signal fused with P, August test cohort (380 successes,
+380 failures).** "Gain" is the mean lead over P, with a task-then-rollout
+bootstrap 95% CI. The other columns are defined as follows:
+- *Matched* is the gain over P with its margin loosened, on the test cohort, to
+  the same number of false alarms (post hoc, descriptive).
+- *p (noise)* is the share of 100 single-noise draws whose matched gain is at
+  least as large.
+
+| Signal + P | Test FP | Gain over P | Matched gain over P | p (noise) |
+|---|---:|---|---|---:|
+| P alone | 17 | — (lead 0.195) | — | |
+| SAFE | 16 | +0.007 [−0.003, +0.019] | +0.008 [−0.002, +0.020] | |
+| **stall_total (chosen)** | **24** | **+0.035 [+0.021, +0.053]** | **+0.003 [−0.012, +0.022]** | 0.03 |
+| stall_run | 20 | +0.025 [+0.012, +0.042] | +0.014 [+0.000, +0.031] | 0.01 |
+| success_distance | 20 | +0.021 [+0.005, +0.046] | +0.010 [−0.007, +0.035] | 0.01 |
+| base_motion | 19 | +0.018 [+0.004, +0.037] | +0.008 [−0.007, +0.025] | 0.02 |
+| action_delta | 22 | +0.017 [+0.005, +0.032] | +0.000 [−0.012, +0.015] | 0.11 |
+| gripper_toggles | 18 | +0.016 [+0.008, +0.025] | +0.005 [−0.004, +0.015] | 0.02 |
+| low_motion | 19 | +0.014 [+0.001, +0.030] | +0.003 [−0.009, +0.018] | 0.02 |
+| dither | 19 | +0.006 [+0.000, +0.015] | −0.005 [−0.011, +0.004] | 0.52 |
+| chunk_disagreement | 17 | +0.000 (empty) | −0.001 [−0.003, −0.000] | 0.44 |
+
+The table reproduces the earlier baselines exactly: P lead 0.1952 at 17/380
+false alarms, and SAFE + P gain +0.0069 [−0.0026, +0.0193].
+
+**Diagnostics on the calibration cohort.** Every signal separates failures from
+still-running successes only weakly. The AUROC at 25%, 50% and 75% of H_k stays
+between 0.45 and 0.64.
+- `stall_total` is at chance: 0.51, 0.50 and 0.50.
+- The highest values are `base_motion` (0.64 at 50%), `gripper_toggles` (0.63 at
+  75%) and `action_delta` (0.62 at 50%).
+
+**Table 15.16b — Noise null (100 draws, i.i.d. N(0, 1) per inference, seed 1,
+fused and fitted the same way).** *Selected* draws nine noise scores and keeps
+the best on calibration failures, as the chosen signal was picked.
+
+| Null | Raw gain: mean [min, max] | Matched gain: mean (max) | Mean test FP |
+|---|---|---|---:|
+| Single noise score | +0.005 [+0.000, +0.028] | −0.007 (+0.009) | 19.6 |
+| Best of nine on calibration | +0.013 [+0.001, +0.042] | −0.011 (+0.007) | 23.2 |
+
+Against the selected null, the chosen `stall_total` gives:
+- raw gain +0.035, p = 0.040;
+- matched gain +0.003, p = 0.069.
+
+#### Interpretation
+
+- **The raw gains are mostly false-alarm budget.**
+  - `stall_total` keeps P's conformal margin (lambda = 0.1067). On calibration,
+    it alarms only within the slack of the order statistic.
+  - On test, it raises false alarms from 17 to 24, and its gain falls from
+    +0.035 to +0.003 once P may spend the same budget.
+  - Pure noise fused the same way reaches raw gains up to +0.042.
+  - Raw lead gains at unequal FPR are therefore not evidence for a signal.
+- **No physical signal adds clear lead over P at matched FPR.**
+  - The pre-chosen signal adds +0.003, with a CI that includes 0.
+  - Only `stall_run` has a matched CI above 0, and only barely
+    (+0.014 [+0.000, +0.031]).
+  - It is one of nine signals and was not the one chosen on calibration, so it
+    is a hypothesis for a fresh cohort, not a finding.
+  - The small p (noise) values mostly reflect that noise at matched FPR falls
+    *below* P (mean −0.007), not that the signals beat P.
+- **Physical signals sit in the same range as SAFE.** On this cohort, SAFE + P's
+  matched gain is +0.008 [−0.002, +0.020]. This agrees with Section 15.13, where
+  P tuned to SAFE + P's FPR left +0.015 [−0.007, +0.041].
+- **The answer to the meeting question is "no clear added lead".**
+  - On XR-1, commanded-motion signals add no clear warning lead beyond a good
+    per-task duration timer at an equal false-alarm rate.
+  - This supports the paper's framing that elapsed time explains most of the
+    warning lead.
+- **Scope.**
+  - Measured physical signals cannot be tested with this data: an arm or object
+    that does not move although it was commanded to, or contact forces.
+    Proprioception was not logged.
+  - The test cohort was already opened and nine signals were compared, so every
+    result here is descriptive.
+  - The matched-FPR timer is tuned on the test cohort, which favours P slightly:
+    by 0.001 at P's own 17 false alarms.
+
+#### Durable artifacts
+
+```text
+First run: /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_physical_signals_20261021/
+             inputs/ (calibration_predictions.jsonl, event_predictions.jsonl, runtime_bundle.json),
+             inputs.sha256, physical_signals.json
+Controls:  /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_physical_signals_controls_20261021/physical_signals.json
+Logs:      /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_physical_signals_20261021_{inventory,evaluate}.log
+           /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_physical_signals_controls_20261021.log
+Actions:   /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/**/actions/<task>/<rollout_id>.npz (117 manifests)
+Worktrees: /gs/fs/tga-shinoda/felid/physical_signals_fa740022, /gs/fs/tga-shinoda/felid/physical_signals_2c377234
+Input sha256: calibration a08794b0…, event 0e87bb23…, bundle c4378ba0…
+```
+
+### 15.17 When do XR-1 failures become hopeless? Point-of-no-return labels
 
 #### Status
 
@@ -3431,7 +3583,7 @@ exactly as in E1.
 
 #### Results
 
-**Table 15.16a — When failures are decided (fraction of the time limit H_k).**
+**Table 15.17a — When failures are decided (fraction of the time limit H_k).**
 
 | Stratum | n | Recoverable until timeout | Decided by 25% / 50% / 75% of H_k | Median t_u / H_k |
 |---|---:|---:|---|---:|
@@ -3453,7 +3605,7 @@ Categories:
 | Other | 5 |
 | Dropped object | 1 |
 
-**Table 15.16b — Alarms against the point of no return.**
+**Table 15.17b — Alarms against the point of no return.**
 - "Wasted" and "pre-emptive" cover only the 10 decided failures (3 atomic,
   7 composite). Wasted time is T_alarm − t_u as a fraction of H_k.
 - "Usable lead" covers all 48. For a decided failure it is the time left after
@@ -3518,7 +3670,7 @@ Categories:
     labelers called decided, t_u differed by 0.24–0.34 of H_k.
   - The *fraction* of recoverable failures is therefore a reliable label. The
     *timing* of the point of no return, and so the wasted-time figures in
-    Table 15.16b, should be read as rough.
+    Table 15.17b, should be read as rough.
   - Computed from the two exported label files
     (`no_return_labels.json` and the second labeler's `bundle_id`
     `second_labeler_v1` export).
