@@ -37,3 +37,10 @@ Both drafts now report Hide-and-Seek (report §15.20 exploratory, §15.21 prereg
 
 - **JSAI.** The abstract is 140 words and the body is still 4 pages. Cuts: the cumulative-lead figure, the sensitivity and "where the lead comes from" paragraphs, the video frame-rate sentence, a shorter atomic/composite paragraph, and the next-steps sentence of the conclusion.
 - **Bibliography.** `refs.bib` lists Hide-and-Seek as an ICML 2026 workshop paper (arXiv:2605.30834). Verify the venue before submission: the project page cites only the arXiv version.
+
+## Update 2026-10-23: RLDX-1 Hide-and-Seek replication (report §15.22)
+
+- **RSS.** The RLDX-1 paragraph in the evidence section now includes Hide-and-Seek + P: +0.083 [0.033, 0.138] at 0.04 FPR, and +0.052 [0.002, 0.106] at matched false alarms. Its controls gain at most 0.018, and the gain is atomic only. The abstract and conclusion each gained a short clause. Content still ends on page 5.
+- **JSAI.**
+  - The abstract (147 words) and the discussion now include the RLDX-1 numbers.
+  - To keep the body at 4 pages, the "Warnings remain late" paragraph was folded into limitation (iii), and the FIPER and conclusion sentences were shortened.

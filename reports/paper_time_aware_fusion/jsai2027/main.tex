@@ -64,7 +64,7 @@ Evaluating VLA Failure Detectors Against Timers}
 \vspace{3mm}
 \begin{minipage}{0.86\textwidth}
 \small
-% Abstract: <= 150 words (JSAI rule). Current count: about 140.
+% Abstract: <= 150 words (JSAI rule). Current count: about 147.
 Online failure detectors for vision-language-action (VLA) robot policies are usually compared
 by recall at a fixed false-positive rate (FPR). On RoboCasa365, a failed rollout is one that
 reaches its time limit, so a timer calibrated at 5\% FPR flags all 380 prospective failures of
@@ -72,7 +72,8 @@ Xiaomi-Robotics-1 on 38 tasks, and only warning lead can separate detectors. A p
 built from each task's successful durations nearly matches the SAFE score fused with a single
 timer. On fresh preregistered cohorts, SAFE adds 0.030 of the time limit to the per-task timer,
 below our declared margin of 0.05, while Hide-and-Seek, a sequence detector trained for early
-separation on the same features, adds 0.071 (95\% CI 0.022--0.157). Controls show that elapsed
+separation on the same features, adds 0.071 (95\% CI 0.022--0.157), and 0.083 offline on a
+second VLA. Controls show that elapsed
 time explains how well detectors separate failures, but not this earlier warning. Detectors
 should be evaluated by their lead over a per-task timer.
 \end{minipage}
@@ -390,9 +391,6 @@ time signal.
 timer 0.364 against 0.079 for the timer, at 0.090 FPR) and smaller on the 28 composite tasks
 (0.151 against 0.094); per-type FPR is not controlled, so this is descriptive.
 
-\textbf{Warnings remain late.} No detector alarms on more than 8\% of failures by half of the
-limit; SAFE's lead lies mostly in the second half.
-
 \section{Confirmatory Tests}
 \label{sec:confirm}
 
@@ -464,15 +462,15 @@ early warning: Hide-and-Seek, trained for early separation on SAFE's features, a
 that warning develops during the rollout. The lead-over-timer evaluation reveals this
 difference; recall does not. Video labels of 48 confirmatory failures, made blind to alarms, suggest why
 (exploratory): 79\% were still recoverable at the limit, mostly slow rather than irreversibly
-wrong (second-labeler agreement on 12 videos: Cohen's $\kappa = 0.80$). The confound is not
-specific to RoboCasa (exploratory, on data released by others): in FIPER's
-rollouts~\cite{romer2025fiper}, length alone separates failures with ROC-AUC 0.92--1.00 in four
-of five tasks, and a timer calibrated like FIPER's thresholds exceeds its published mean
-accuracy (0.83 against 0.78) but alarms about twice as late. Where every rollout runs to a
+wrong (Cohen's $\kappa = 0.80$ with a second labeler on 12). The confound is not specific to
+RoboCasa: in FIPER's released rollouts~\cite{romer2025fiper}, length alone separates failures
+with ROC-AUC 0.92--1.00 in four of five tasks, and a timer calibrated like FIPER alarms about
+twice as late as FIPER at higher accuracy. Where every rollout runs to a
 fixed horizon, as in SAFE's real-robot set, the timer is uninformative: the termination rule
-decides whether time is a strong baseline. Offline, on a second policy (RLDX-1), all failures
-also run to the limit, and SAFE's LSTM head + P gains 0.034 (CI 0.008--0.067), only on atomic
-tasks.
+decides whether time is a strong baseline. Offline, on a second policy (RLDX-1, 100 test
+failures), all failures also run to the limit; SAFE's LSTM head + P gains 0.034 (CI
+0.008--0.067) and Hide-and-Seek + P 0.083 (0.033--0.138; 0.052 at matched FPR), both only on
+atomic tasks.
 
 For benchmark design: when every failure is a timeout, recall rewards any score that grows
 with time, so papers should report lead over a per-task timer, and benchmarks should label
@@ -483,7 +481,8 @@ prospective cohort had been opened, and the confirmatory endpoint was registered
 cohort's recall and FPR were known (but before its lead). (ii)~The two-threshold search is
 optimistic (test FPR 0.050--0.066 against 0.044 on calibration), and even the conformal rule
 let SAFE + P and Hide-and-Seek + P run above P's FPR (0.061 against 0.055).
-(iii)~The gain is a dozen inferences on average, mostly late in the rollout, and whether an
+(iii)~The gain is a dozen inferences on average, mostly late in the rollout (no detector flags
+over 8\% of failures by half the limit), and whether an
 earlier alarm raises task success through reset and retry is untested. (iv)~The simulator
 ends failed episodes only at the time limit, so failures that become unrecoverable earlier
 (drops, collisions) are not labelled. (v)~SAFE needs white-box access and per-task
@@ -496,8 +495,8 @@ opened for SAFE.
 
 \section{Conclusion}
 
-Elapsed time is the baseline a VLA failure detector must beat. On fresh data, SAFE added 0.030
-of the limit to a per-task timer and Hide-and-Seek 0.071.
+Elapsed time is the baseline to beat: on fresh data, SAFE added 0.030 to a per-task timer,
+Hide-and-Seek 0.071.
 
 % ============================ END BODY ============================
 \clearpage

@@ -56,7 +56,7 @@ the SAFE failure score fused with a single timer, and on a fresh preregistered c
 rollouts SAFE adds 0.030 of the time limit to P (95\% CI 0.007--0.093), below the margin of
 0.05 we declared in advance. A sequence detector trained for early separation on the same
 features, Hide-and-Seek, passes the same registered test: it adds 0.071 (CI 0.022--0.157) at
-0.061 FPR. Retrained on zero inputs, the same model matches its ROC-AUC but adds no lead; given
+0.061 FPR, and 0.083 offline on a second VLA. Retrained on zero inputs, the same model matches its ROC-AUC but adds no lead; given
 only each rollout's first inference, it adds none either. Elapsed time explains how well
 monitors separate failures; the extra warning develops during the rollout. Stage~2 tests a
 second VLA and whether earlier alarms raise success when they trigger a retry.
@@ -339,10 +339,13 @@ after the point of no return on all, SAFE + P at or before it on 2 of 3 atomic a
 composite ones (an illustration).
 
 \textbf{A second policy, offline (RLDX-1, exploratory).} On existing RLDX-1 data (20 tasks,
-100/100 test rollouts), all failures ran to the time limit, P reaches $\bar\ell = 0.271$
-against 0.032 for the global timer, and SAFE (LSTM head) + P gains 0.034 over P (CI
-0.008--0.067) at the same FPR, all on atomic tasks; the fused path was chosen in sample and
-noise + P matched the gain in 2 of 20 draws at a higher FPR.
+100/100 test rollouts), all failures ran to the time limit, and P reaches $\bar\ell = 0.271$
+against 0.032 for the global timer. SAFE (LSTM head) + P gains 0.034 over P (CI
+0.008--0.067). Hide-and-Seek + P, planned before scoring with Amendment~2's settings, gains
+0.083 (CI 0.033--0.138) at 0.04 FPR, and 0.052 (0.002--0.106) against P loosened to its four
+false alarms; its three controls gain at most 0.018. Both gains are atomic: on composite tasks
+no score adds clear lead (Hide-and-Seek 0.010). The fused paths were chosen on in-sample
+training failures.
 
 \textbf{The confound in a published benchmark (exploratory).} In FIPER's released
 rollouts~\cite{romer2025fiper}, length alone separates failures with ROC-AUC 0.92--1.00 in
@@ -481,7 +484,8 @@ a timer at the same false-alarm rate, here and on a published benchmark. Elapsed
 how well monitors separate failures. On fresh preregistered cohorts, SAFE's hidden-state score
 added 0.030 of the time limit to a per-task timer, below our margin, while a sequence detector
 trained for early separation on the same features added 0.071, a warning that develops during
-the rollout. Stage~2 tests a second policy and closed-loop retry.
+the rollout, and 0.083 offline on a second policy. Stage~2 tests that policy prospectively and
+closed-loop retry.
 
 \bibliographystyle{plainnat}
 \bibliography{refs}
