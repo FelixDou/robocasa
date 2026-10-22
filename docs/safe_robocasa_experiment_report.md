@@ -205,9 +205,18 @@ the same model was retrained on zero inputs and on same-task, same-step
 features of other rollouts. Both controls gain about 0, and Hide-and-Seek beats
 each by +0.08 (CIs exclude 0). Elapsed time explains how well a learned score
 separates failures, but rollout-specific features explain the extra warning
-lead. This is the first sign in the study that internal state adds warning
-beyond duration; it is exploratory until a preregistered test on unopened
-cohorts.
+lead.
+
+The preregistered test (Section 15.21, Amendment 2) confirmed it on the E1
+cohorts, which Hide-and-Seek had never scored. Hide-and-Seek + P adds +0.071
+[+0.022, +0.157] lead over the per-task timer, at the same FPR as SAFE + P,
+whose gain is +0.030. This clears the 0.05 margin that SAFE missed. A control
+that sees only each rollout's first inference adds nothing (+0.001), so the
+warning develops during the rollout and is not a difficulty prior. The direct
+Hide-and-Seek − SAFE contrast (+0.041) has a CI that includes 0. The
+conclusion is that elapsed time explains how well detectors separate failures,
+while a sequence model trained for early separation on the policy's internal
+features warns earlier than duration alone.
 
 ## 1. Scope, labels, and evaluation rules
 
@@ -2001,8 +2010,13 @@ The present evidence supports the following hierarchy of conclusions:
     same-task, same-step features of other rollouts gains about 0 at matched
     FPR; Hide-and-Seek minus either control is +0.08 (CIs exclude 0). Elapsed
     time explains the separation, not the earlier warning: rollout-specific
-    features carry lead beyond P. Exploratory (opened cohort); a preregistered
-    test on the E1 cohorts is the next step.
+    features carry lead beyond P. Exploratory (opened cohort).
+25. **Confirmatory test, Amendment 2 (Section 15.21, preregistered).** On the
+    E1 cohorts, Hide-and-Seek + P adds +0.071 lead over P (decision CI
+    [+0.022, +0.157], FPR 0.061); H1-HS and H2-HS are supported. SAFE + P on the
+    same cohorts adds +0.030 and missed the margin. The first-inference control
+    adds +0.001, so the warning develops during the rollout; the learned-timer
+    controls replicate. Hide-and-Seek − SAFE is +0.041 with a CI that includes 0.
 
 ## 15. Recommended next experiments
 
@@ -4078,7 +4092,7 @@ What they do not show:
 - **One policy.** The RLDX-1 replication (Section 15.15) has not been run with
   Hide-and-Seek.
 
-**Next: preregistered test.** Amendment 2
+**Preregistered test: done (Section 15.21, H1-HS supported).** Amendment 2
 ([`xr1_confirmatory_amendment_2_hide_and_seek.md`](xr1_confirmatory_amendment_2_hide_and_seek.md))
 tests Hide-and-Seek + P against P on the E1 cohorts with the registered E1 procedure
 and margin. It declares the first-inference difficulty control (S1) and a replication of
@@ -4099,6 +4113,131 @@ Logs:           /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_published_baseli
 Frozen inputs:  /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_physical_signals_20261021/inputs/ (a08794b0…, 0e87bb23…, c4378ba0…)
 Worktrees:      /gs/fs/tga-shinoda/felid/robocasa_baselines_4b9d462e, /gs/fs/tga-shinoda/felid/robocasa_baselines_lead_fff544f3,
                 /gs/fs/tga-shinoda/felid/robocasa_baselines_controls_fa5b41a9
+```
+
+### 15.21 Confirmatory test (Amendment 2): Hide-and-Seek + P against P
+
+#### Status
+
+Preregistered. The plan
+([`xr1_confirmatory_amendment_2_hide_and_seek.md`](xr1_confirmatory_amendment_2_hide_and_seek.md),
+commit `7abfd271`, 2026-10-22 21:35 JST) was pushed before any Hide-and-Seek or
+control score was computed on the E1 cohorts. The August dry run was recorded in the
+plan (`cf1b2e1e`) before the confirmatory analysis was run. This was the one run, from
+the pinned worktree at `7abfd271`.
+
+- **Cohorts:** the E1 lead-calibration cohort (380/380, seeds [1400007, 1425007)) and
+  the confirmatory test cohort (380/380, seeds [1300007, 1325007)).
+- **Detector:** the frozen Hide-and-Seek of Section 15.20 (seeds 0–2, 200 epochs, PCA
+  128, feature aggregation `last`, trained on the 1,824 final-refit rollouts).
+- **Procedure:** the registered E1 procedure, with the same P, nested fused path,
+  decision bootstrap, margin and FPR limits.
+
+**Checks, all passed:**
+- **Integrity.** The retrained Hide-and-Seek, zero-input and shuffle detectors
+  reproduced their August trajectories exactly (228 + 1,643 rollouts each, largest
+  difference 0.0).
+- **SAFE reference.** SAFE + P on the same cohorts reproduced the registered E1 result:
+  P 0.2252, SAFE + P 0.2550, gain +0.0298, decision CI [+0.007, +0.093].
+- **Inputs.** The test predictions matched `confirm/event_predictions.jsonl` rollout by
+  rollout, and all seven frozen input files were unchanged after the run.
+
+#### Results
+
+**Table 15.21a — Lead over P on the confirmatory test cohort.** Lead is the mean of
+(H_k − T)/H_k over the 380 failures, with a miss counted as 0. Gains are over P.
+
+| Score + P | Lead | Test FPR | Gain over P | Decision 95% CI |
+|---|---:|---:|---:|---|
+| P (q = 0.95) | 0.225 | 0.055 | — | — |
+| SAFE | 0.255 | 0.061 | +0.030 | [+0.007, +0.093] |
+| **Hide-and-Seek** | **0.296** | **0.061 (23/380)** | **+0.071** | **[+0.022, +0.157]** |
+| First-inference control | 0.226 | 0.055 | +0.001 | [−0.015, +0.036] |
+| Zero inputs | 0.237 | 0.061 | +0.012 | [+0.001, +0.044] |
+| Same-task shuffle | 0.236 | 0.063 | +0.011 | [+0.000, +0.064] |
+
+**Decisions.**
+
+| Rule | Value | Outcome |
+|---|---|---|
+| H1-HS: decision CI above 0 | [+0.022, +0.157] | pass |
+| H1-HS: point gain ≥ 0.05 | +0.071 | pass |
+| H1-HS: test FPR ≤ 0.075 | 0.061 | pass |
+| H1-HS: Wilson upper ≤ 0.10 | 0.089 | pass |
+| **H1-HS** | | **supported** |
+| H2-HS: noise + P, mean (max) gain over 20 draws | +0.002 (+0.012) | below 0.05 |
+| H2-HS: resampled Hide-and-Seek + P | +0.000 (+0.004) | below 0.05 |
+| **H2-HS** | | **supported** |
+
+**Declared secondaries.**
+
+| Contrast (A + P minus B + P) | Point | Decision CI | Test-only CI | Rule |
+|---|---:|---|---|---|
+| S1: Hide-and-Seek − first-inference | +0.070 | [+0.014, +0.153] | [+0.001, +0.133] | develops during the rollout: **yes** |
+| S2: Hide-and-Seek − zero inputs | +0.059 | [+0.013, +0.131] | [−0.006, +0.120] | |
+| S2: Hide-and-Seek − same-task shuffle | +0.060 | [+0.004, +0.127] | [−0.000, +0.117] | not elapsed time or task: **yes** |
+| S3: Hide-and-Seek − SAFE | +0.041 | [−0.011, +0.103] | [−0.014, +0.094] | descriptive |
+
+#### Interpretation
+
+- **The preregistered result.** On fresh cohorts, Hide-and-Seek + P adds +0.071 of the
+  time limit in warning lead over the per-task timer P, at the same FPR as SAFE + P
+  (0.061). That is more than twice SAFE's +0.030, and it clears the 0.05 margin that
+  SAFE missed. Uninformative scores fitted the same way gain at most +0.012.
+- **The gain shrank from the exploratory estimate, as expected.** It fell from +0.098
+  on the opened August cohort to +0.071, but stayed above the margin.
+- **The warning develops during the rollout.** The first-inference control, which sees
+  the episode's initial appearance and the elapsed time, adds nothing over P (+0.001).
+  Hide-and-Seek beats it by +0.070. The signal is not an episode-difficulty prior
+  visible at the start.
+- **The learned-timer controls replicate.** Zero inputs and same-task shuffled inputs
+  add about +0.01, and Hide-and-Seek beats both by about +0.06 (decision CIs above 0).
+- **This replication is weaker than the primary.** The test-only CIs of the S2
+  contrasts touch 0 (lower bounds −0.006 and −0.000).
+- **Read the CI criterion with care.** The decision bootstrap is skewed upward (SAFE:
+  [+0.007, +0.093] around +0.030; Amendment 2 dry-run note). Here the point gain
+  (+0.071) clears the margin by itself, so the H1-HS decision does not rest on the
+  interval.
+- **Hide-and-Seek is not shown to beat SAFE directly.** Its advantage over SAFE + P is
+  +0.041, with a CI that includes 0. The registered claim is against the timer: of the
+  two policy-internal scores on the same features, only Hide-and-Seek clears the
+  margin over P.
+
+**What this changes for the paper.** The earlier summary was that elapsed time explains
+most of the warning lead. A more precise version:
+- elapsed time explains how well learned scores *separate* failures from successes (the
+  zero-input LSTM matches Hide-and-Seek's ROC-AUC and fused recall);
+- a lead-over-timer evaluation shows whether a detector warns *earlier* than duration
+  alone;
+- on XR-1, a sequence model trained for early separation on the policy's internal
+  features does warn earlier, by a preregistered margin, and SAFE's per-inference MLP
+  does not.
+
+#### Limits
+
+- **Cohorts already open for SAFE.** Both were opened for SAFE (E1), for the
+  success-only baselines (Section 15.14) and, in part, for video labels
+  (Section 15.17). They were not opened for Hide-and-Seek.
+- **One policy and one benchmark.** RLDX-1 (Section 15.15) has not been tested with
+  Hide-and-Seek.
+- **Upward-skewed decision CIs.** See the interpretation above.
+- **One detector per test.** Hide-and-Seek was chosen as the better of two supervised
+  baselines on the August cohort. This test is confirmatory for that one detector, not
+  for supervised sequence detectors in general.
+- **The descriptive outputs are in the JSON.** The atomic and composite strata,
+  quantile sensitivity and P tuned on the test cohort are in
+  `confirm_hide_and_seek.json` and are not tabulated here.
+
+#### Durable artifacts
+
+```text
+Plan:      docs/xr1_confirmatory_amendment_2_hide_and_seek.md (7abfd271; dry run recorded in cf1b2e1e)
+Run root:  /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_amend2_hide_and_seek_20261022_214209/
+             august_calibration_ids.json, scores/ (four cohorts, normalizations.json, scoring.json),
+             dry_run_august.json, confirm_hide_and_seek.json
+Logs:      /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/
+             score.log, dry_run.log, confirm.log, frozen_inputs.sha256, paths.env
+Worktree:  /gs/fs/tga-shinoda/felid/robocasa_amend2_7abfd271
 ```
 
 ## 16. Limitations

@@ -203,6 +203,9 @@ bootstrap.
   criterion should not be read as strong evidence by itself.
 - **None of this changes any rule above.**
 
+**Result:** H1-HS and H2-HS supported; see report Section 15.21. This file is
+otherwise unchanged since the dry run was recorded.
+
 ## Expected outcome, written before scoring
 
 - **The gain will likely shrink.** Hide-and-Seek was picked as the better of two
