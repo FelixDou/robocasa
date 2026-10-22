@@ -146,11 +146,11 @@ test FPR, which favours the timer.
 evidence (Gaussian noise, or SAFE scores resampled within task, each fused with the per-task
 timer) gain less than $0.05$ of the time limit over the per-task timer.
 
-\textbf{H3 (generality).} H1 holds for a second VLA with a different architecture.%
-\todo{Must change to match E2, which drops the 0.05 margin; author's call. Proposal: on
-RLDX-1's 20 tasks, (a) every failure runs to the time limit, (b) P leads the global timer, and
-(c) SAFE + P gains lead over P with a within-task 95\% CI above zero, under the FPR rule of
-Sec.~\ref{sec:plan}.}
+\textbf{H3 (generality).} On a second VLA with a different architecture (RLDX-1, 20 tasks),
+every failure runs to the time limit, P leads the global timer, and a policy score fused with
+P gains lead over P. SAFE + P and Hide-and-Seek + P are co-primary: each is \emph{supported} if
+its decision CI lies above zero (97.5\%, Bonferroni over the two) under the FPR rule of
+Sec.~\ref{sec:plan}; there is no 0.05 margin.
 
 \textbf{H4 (utility).} When an alarm triggers a reset and retry, the OR-fused monitor yields
 a higher task success rate than the timer within the same per-task time budget.%
@@ -426,13 +426,15 @@ not the interval, carries the decision.
 % Offline: resample the opened cohorts, refit, count. Design decisions by the author, 2026-10-21.
 \textbf{E2: Second policy (H3).} RLDX-1 on its 20 tasks (Sec.~\ref{sec:evidence}), fresh
 calibration and test cohorts of 20 successes and 20 failures per task (about 2,500 rollouts),
-with held-out calibration failures. Primary: SAFE + P against P, superiority (decision 95\% CI
-above zero), conditional on these 20 tasks (rollouts resampled within task), under the FPR rule
-below.\todo{Author's call: make Hide-and-Seek + P co-primary (an offline RLDX-1 check is
-running), with the first-inference control as secondary.} Offline sizing gives power 0.92 at the offline gain of 0.034 (the CI excludes zero in every
-simulated study, so the FPR rule decides); a 0.05 margin would have power $\le 0.09$, so we
-drop it. Secondary, no power claim: the CI with tasks resampled (power
-about 0.54). Descriptive stratum: the 14 atomic tasks. It replaces an atomic-only XR-1 test,
+with held-out calibration failures. Co-primary: SAFE + P and Hide-and-Seek + P, each against
+P, superiority (decision 97.5\% CI above zero), conditional on these 20 tasks (rollouts
+resampled within task), under the FPR rule below. Declared secondary: Hide-and-Seek + P against
+the first-inference control + P (Sec.~\ref{sec:method}), whose CI above zero would show the
+warning develops during the rollout. At 95\%, offline sizing gave SAFE power 0.92 at its
+offline gain of 0.034 (the CI excluded zero in every simulated study, so the FPR rule decided);
+a 0.05 margin would have power $\le 0.09$, so we drop it.\pending{power at 97.5\% for both
+scores, from the offline RLDX-1 Hide-and-Seek check} Also secondary, with no power claim: each
+co-primary's CI with tasks resampled (SAFE: power about 0.54 at 95\%). Descriptive stratum: the 14 atomic tasks. It replaces an atomic-only XR-1 test,
 with at most 0.55 power at the 0.05 margin up to 60 per class per task and an optimistic
 0.089 estimate (about 0.06 with all retained successes). With 5 held-out failures
 per task, all sizing figures are optimistic.

@@ -175,5 +175,5 @@ Numbers are from `docs/safe_robocasa_experiment_report.md` §15.20 (exploratory,
   - Limitations: Hide-and-Seek's selection and the registration timing.
   - Related work: one clause pointing to the controls.
 - **Cut for the page limit:** the cumulative-lead figure (old Fig. 2), the within-task ROC-AUC sentence, and shorter RLDX-1, FIPER, duration and atomic/composite paragraphs.
-- **E2.** A `\todo` asks whether to make Hide-and-Seek + P co-primary on RLDX-1. An offline RLDX-1 check is running in a separate session.
+- **E2 (decided 2026-10-23).** SAFE + P and Hide-and-Seek + P are co-primary on RLDX-1, each with a 97.5% decision CI above zero (Bonferroni over the two), and Hide-and-Seek − first-inference control is the declared secondary. H3 was rewritten to match, and the E2 todo was removed. A `\pending` note remains for power at 97.5% for both scores, to come from the offline RLDX-1 Hide-and-Seek check.
 - **Pages (tectonic preview).** Content still ends on page 5. The references already ran to page 7 before this update (limit 5 + 1). Check with pdflatex and the official template, and trim the bibliography if needed.
