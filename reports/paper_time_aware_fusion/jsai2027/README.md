@@ -56,3 +56,12 @@ The official English package (`jsaiac_tex_en-2026.zip` from https://conf.ai-gakk
   - Removed: the "233 failures, misses 17" sentence and the "high-success tasks such as opening a cabinet" sentence.
   - The conclusion and the sensitivity paragraph are tighter.
 - **Page check (tectonic preview).** The body ends at the bottom of page 4, with no spare lines, and the references are on page 5.
+
+## Update 2026-10-22: point-of-no-return labels (§15.17, exploratory)
+
+- **Discussion.** One sentence: 79% of 48 labeled confirmatory failures were still recoverable at the limit, with second-labeler kappa 0.80 on 12 videos.
+- **Cuts to make room.**
+  - The RLDX-1 and benchmark-design sentences are shorter.
+  - The "by about 0.06" fallback detail is gone.
+  - The conclusion is shorter.
+- **Page check.** The body still ends on page 4.

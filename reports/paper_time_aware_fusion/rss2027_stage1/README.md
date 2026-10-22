@@ -114,3 +114,27 @@ The numbers come from `docs/stage2_sizing.md`, section Results, on branch `claud
   - The length-matched-AUC sentence in Sec. VII is removed.
   - The RLDX-1 post hoc note is shorter.
 - **Page check (tectonic).** With `\notesfalse`, the content ends on page 5 and the references end on page 6. With notes on, the references spill to page 7.
+
+## Update 2026-10-22: point-of-no-return labels (report §15.17, exploratory)
+
+Source: `docs/safe_robocasa_experiment_report.md` §15.17 and `docs/no_return_labeling_plan.md`. Main's other new section, §15.16 (physical signals), is not used.
+
+- **Sec. VI.** "No early warning yet" became "No early warning, and mostly no early failure":
+  - 38 of 48 labeled confirmatory failures (79%) were still recoverable at the limit: atomic 17/20, composite 21/28.
+  - A second labeler agreed on 11 of 12 videos, kappa 0.80.
+  - So failure here mostly means slowness, and the paragraph answers the "trivial by construction" objection.
+  - The 2/3 vs 0/7 pre-emptive split is given only as an illustration.
+  - The rough 0.35 H_k "wasted time" figure is left out, because the t_u timing is unreliable.
+- **E3.** New "more time, no reset" arm, which runs to 1.25 H_k, as the comparator for alarm-triggered reset. Its sample size is `\pending`: the existing 1.25 H_k sizing covers only P vs none.
+- **E5.** Reframed: it targets the minority of failures that have an early point of no return, with several labelers, a written protocol and adjudication. The two labelers' t_u timings differed by 0.24–0.34 H_k.
+- **Limitations.** One labeler, a 12-video reliability check, and only 10 decided failures.
+- **Contributions and conclusion.** Each now mentions the finding in a few words.
+- **Cuts to stay at 5 + 1.**
+  - The abstract's hypothesis sentence, the "Time" paragraph (its video detail now lives only in Table I), and the confirmatory protocol paragraph are shorter.
+  - The "Task duration" paragraph is tighter.
+  - Removed:
+    - the sentence on the deployed FPR's Beta distribution;
+    - the per-task timer tuned on test (−0.003);
+    - the OR/AND frontier sentence;
+    - the RLDX-1 post hoc z = 7.93 note.
+- **Page check.** With `\notesfalse` the build is 6 pages, with content ending on page 5. With notes on it is 7.

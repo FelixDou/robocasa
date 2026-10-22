@@ -474,6 +474,16 @@ horizon and 61\% by 90\%, against 21\% and 37\% for time only; the remaining thi
 caught in the last tenth. Fusion improves detection before the rollout ends, not early
 warning.
 
+\textbf{Most failures are never decided (exploratory).} One labeler, blind to detector
+alarms, marked the point of no return (after which the policy could not finish in time
+without help) on 48 failures of the later confirmatory cohort (2 per atomic, 1 per composite
+task). 38 (79\%) were still recoverable at the time limit (atomic 17/20, composite 21/28),
+most often slow or nearly successful; a second labeler agreed on this call for 11 of 12
+videos (Cohen's $\kappa = 0.80$). On this benchmark, failure mostly means not finishing in
+time, which is why elapsed time is so informative, and a detector that reports failure early
+is mostly predicting slowness. All 10 decided failures were decided before 75\% of the
+horizon.
+
 \subsection{Sensitivity to the test FPR}
 
 Fused detectors exceed the 0.05 budget on test (fused SAFE: 22 of 380, Wilson 95\% interval

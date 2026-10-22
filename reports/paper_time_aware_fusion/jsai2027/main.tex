@@ -405,8 +405,7 @@ interval 0.039--0.086). Against a timer tuned on test to that FPR, the gain is 0
 counting a final-inference alarm, 0.121 (95\% CI 0.062--0.184).
 
 \textbf{Where the lead comes from.} SAFE + timer warns earlier than the timer in 19 of
-the 38 tasks and slightly later in the other 19 (by about 0.06, the cost of its fallback at
-$c = 0.96$). The gain is largest in the tasks with few development failures, exactly those
+the 38 tasks and slightly later in the other 19. The gain is largest in the tasks with few development failures, exactly those
 where the time risk never fires (Spearman $\rho = -0.84$ between per-task gain and
 development failure count).
 
@@ -494,15 +493,16 @@ than a timer at the same false-alarm rate. Against a single timer, OR-fusing the
 more than doubles the mean lead, and noise does not. Against a per-task timer built from
 successful durations, SAFE adds 0.030 of the limit on a fresh preregistered cohort: real,
 but below what we declared useful. On our data, most of what looked like policy evidence is
-time calibration. An offline check on a second policy, RLDX-1 (existing data, 20 tasks, 100 test
-failures), shows the same pattern: all failures run to the limit, the per-task timer beats a
-single timer (lead 0.271 against 0.032), and SAFE's LSTM head + P gains 0.034 (CI
-0.008--0.067) at the same FPR, only on atomic tasks; its MLP head adds nothing.
+time calibration. Video labels of 48 confirmatory failures, made blind to alarms, suggest why
+(exploratory): 79\% were still recoverable at the limit, mostly slow rather than irreversibly
+wrong (second-labeler agreement on 12 videos: Cohen's $\kappa = 0.80$). Offline, on existing data for a second policy (RLDX-1, 20 tasks, 100 test
+failures), all failures run to the limit, P beats a single timer (lead 0.271 against 0.032),
+and SAFE's LSTM head + P gains 0.034 (CI 0.008--0.067) at the same FPR, only on atomic tasks;
+the MLP head adds nothing.
 
-The finding also concerns benchmark design: when every failure is a timeout, recall at a
-fixed FPR rewards any score that grows with elapsed time. Papers on VLA failure detection
-should report a per-task timer and the lead each detector gains over it, and benchmarks
-should label failures that become unrecoverable early.
+For benchmark design: when every failure is a timeout, recall at a fixed FPR rewards any
+score that grows with time. Papers should report each detector's lead over a per-task timer,
+and benchmarks should label failures that become unrecoverable early.
 
 \textbf{Limitations.} (i)~The timer and all fused detectors were defined after the
 prospective cohort had been opened, and the confirmatory endpoint was registered after that
@@ -521,10 +521,9 @@ exploratory cohort was opened.
 
 \section{Conclusion}
 
-Elapsed time is the baseline a VLA failure detector must beat: when failures run to the time
-limit, detectors should be judged by their lead over a per-task timer. On fresh data, SAFE
-added 0.030 of the limit: real, but below our margin. Next: a prospective second
-policy, failures that end early, closed-loop retry.
+Elapsed time is the baseline a VLA failure detector must beat: detectors should be judged by
+their lead over a per-task timer. On fresh data, SAFE added 0.030 of the limit, below our
+margin. Next: a second policy, early-decided failures, retry tests.
 
 % ============================ END BODY ============================
 \clearpage
