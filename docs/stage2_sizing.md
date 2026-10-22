@@ -598,7 +598,8 @@ real data.
 **Checks (stop conditions).** On the §15.15 / §15.22 fit (held-out successes, training
 failures, evaluation split):
 - SAFE + P must reproduce +0.0342 (`rldx_lead_lstm.json`);
-- Hide-and-Seek + P must reproduce +0.0833 (`rldx_hide_and_seek.json`).
+- Hide-and-Seek + P must reproduce the gain stored in `rldx_hide_and_seek.json`
+  (+0.0834; §15.22 rounds it to +0.083).
 
 **Expectations, written before running.**
 - **SAFE at 97.5%.** The within-task SD at n = 20 is 0.007, so the CI half-width barely
@@ -643,3 +644,68 @@ echo "sizing PID: $! on $(hostname)"
 
 When it exits: `cat $E2CO_LOG/e2_coprimary.log` and
 `sha256sum -c $E2CO_LOG/frozen_inputs.sha256`.
+
+### Results (2026-10-23)
+
+**Run.** Code `a21e0c0c`, folder `e2_coprimary_sizing_<timestamp>` (under
+`robocasa_checkpoints/safe/`, log under `robocasa_logs/eval/`). 2,000 replicates per cell,
+seed 20261021.
+
+**Checks, both passed.**
+- The replication fits reproduce SAFE + P +0.0342 (§15.15) and Hide-and-Seek + P +0.0834
+  (`rldx_hide_and_seek.json`).
+- All eight frozen input files were unchanged after the run.
+- SAFE's plug-in rows equal Table S4 (mean gain, SD, A1 FPR pass at every n), as the shared
+  draws require.
+
+**Table S5 — plug-in sampling distribution (within task).** FPR pass is the share of
+simulated studies meeting each FPR rule.
+
+| n | SAFE mean gain (SD) | SAFE FPR pass A1 / E2 | Hide-and-Seek mean gain (SD) | Hide-and-Seek FPR pass A1 / E2 |
+|---:|---|---|---|---|
+| 10 | +0.040 (0.012) | 0.62 / 0.99 | +0.083 (0.017) | 0.61 / 0.99 |
+| 20 | +0.036 (0.007) | 0.92 / 1.00 | +0.080 (0.011) | 0.90 / 1.00 |
+| 30 | +0.035 (0.006) | 0.98 / 1.00 | +0.080 (0.009) | 0.98 / 1.00 |
+| 40 | +0.034 (0.005) | 0.99 / 1.00 | +0.080 (0.008) | 0.99 / 1.00 |
+| 50 | +0.034 (0.004) | 1.00 / 1.00 | +0.081 (0.008) | 1.00 / 1.00 |
+| 60 | +0.034 (0.004) | 1.00 / 1.00 | +0.081 (0.007) | 1.00 / 1.00 |
+
+**Table S6 — co-primary power at 97.5% (shift, within-task CI).** Each cell is power under
+the E2 FPR rule / under the A1 rule.
+
+| n | SAFE, γ = 0.034 | Hide-and-Seek, γ = 0.083 | Hide-and-Seek, γ = 0.052 | Hide-and-Seek, γ = 0.05 |
+|---:|---|---|---|---|
+| 10 | 0.99 / 0.62 | 0.99 / 0.61 | 0.91 / 0.56 | 0.88 / 0.53 |
+| 20 | 1.00 / 0.92 | 1.00 / 0.90 | 0.99 / 0.89 | 0.98 / 0.89 |
+| 30 | 1.00 / 0.98 | 1.00 / 0.98 | 1.00 / 0.98 | 1.00 / 0.98 |
+| 60 | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
+
+- **Joint (97.5%, E2 rule).** At least one co-primary passes in every simulated study at
+  every n. Both pass in 0.98 (n = 10) and 1.00 (n ≥ 20) of studies at (0.034, 0.083). At
+  (0.034, 0.052), both pass in 0.90 at n = 10 and 0.99 at n = 20.
+- **95% against 97.5%.** The CI changes power only at n = 10 and at the lower Hide-and-Seek
+  gains. For example, Hide-and-Seek at γ = 0.05 has CI > 0 in 0.93 of studies at 95% and
+  0.89 at 97.5%. From n = 20, CI > 0 is at least 0.99 everywhere.
+- **Task-level CI (secondary, no power claim), 97.5%, E2 rule, n = 20.**
+  - SAFE at 0.034: 0.33.
+  - Hide-and-Seek: 0.99 at 0.083, 0.34 at 0.052, 0.27 at 0.05.
+
+**Against the expectations.**
+- **SAFE.** It behaved as written: the 97.5% level changes nothing, and power equals the FPR
+  pass rate (0.92 under A1, 1.00 under E2 at n = 20).
+- **Hide-and-Seek.** The plug-in gain is 0.080–0.083 with CI > 0 in every study, as
+  expected. Its FPR pass rate is about SAFE's (0.90 against 0.92 under A1 at n = 20), not
+  clearly lower as we expected.
+- **At least one co-primary passing.** Equal to 1, as expected.
+
+**Reading.**
+- **The co-primary design costs almost nothing at E2's size.** At n = 20, power under the
+  E2 rule is 1.00 for SAFE and at least 0.98 for Hide-and-Seek, even at its matched-FPR gain
+  (0.052). Under H1's stricter fixed FPR limit it is 0.89–0.92.
+- **What actually limits power is the FPR rule.** The E2 rule allows up to 39 of 400 false
+  alarms (9.75% observed FPR), so it almost never fails here. Under the A1 rule, false alarms
+  decide, at about 0.9 from n = 20.
+- **These figures are optimistic.** Calibration and test samples come from one small
+  held-out pool (8 successes and 5 failures per task), and inference is conditional on the
+  20 tasks. With tasks resampled, power drops sharply for SAFE and for Hide-and-Seek at
+  0.052. The task-level CI is reported without a power claim, as before.
