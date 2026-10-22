@@ -10,6 +10,10 @@
   SAFE + P was compared with P on them (§15.15). The result is therefore exploratory,
   whatever it is. It supports, but cannot replace, the preregistered E2.
 
+**Result (recorded after the run):** R1 met (Hide-and-Seek + P +0.083 [+0.033, +0.138]
+over P at 4 of 100 false alarms; +0.052 at matched FPR). The prediction below was wrong.
+See report Section 15.22. This file is otherwise unchanged since commit `6f617d51`.
+
 ## What has already been seen on these data
 
 - SAFE (MLP and LSTM) discrimination and conformal operating points (§8.3).
