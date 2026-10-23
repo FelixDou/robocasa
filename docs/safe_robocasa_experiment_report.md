@@ -234,6 +234,11 @@ over-alarms (FPR 0.35 against 0.09). At matched FPR, FIPER still warns about
 benchmark and Hide-and-Seek on XR-1, but not SAFE. It separates genuine early-warning
 signals from duration, which accuracy and TWA do not.
 
+A same-scene retry pilot for the Stage 2 closed-loop test (Section 15.24) failed its
+registered scene gate. Post hoc, retrying a scene the policy had just failed succeeded only
+0.245 of the time, against a 0.486 task success rate. Failure scenes are persistently hard,
+so reset-and-retry is worth about half what E3 assumed.
+
 ## 1. Scope, labels, and evaluation rules
 
 ### 1.1 Raw SAFE target
@@ -2046,6 +2051,12 @@ The present evidence supports the following hierarchy of conclusions:
     [+0.104, +0.188], significantly on four of five tasks. Like Hide-and-Seek
     on XR-1 (Section 15.21), and unlike SAFE (Section 15.13), FIPER passes the
     lead-over-timer test on its own benchmark.
+28. **Same-scene retry pilot (Section 15.24, post hoc).** The registered scene gate failed
+    (93.8% of first frames within tolerance, against 95% required), so the pilot is void as
+    specified. Seed replay reproduced 192 of 194 scenes. Post hoc, on those 192: retrying an
+    originally failed scene succeeded 24 of 98 times (0.245), about half the task success
+    rate (0.486), on every task. E3's retry benefit and sample size must be recomputed, and
+    reset against continuation is the natural decisive contrast.
 
 ## 15. Recommended next experiments
 
@@ -4581,6 +4592,89 @@ Run:       /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/fiper_paired_20261
 FIPER:     /gs/fs/tga-shinoda/felid/external/fiper_13d79c5c (pinned 13d79c5c, plus our additions)
 Worktree:  /gs/fs/tga-shinoda/felid/robocasa_fiper_paired_c520befc (at 92c84427)
 Env:       /gs/bs/tga-shinoda/felid/envs/fiper_overlay (vla_safe + zarr 2.18.3)
+```
+
+### 15.24 Same-scene retry pilot for E3 (void under its registered gate; post hoc estimate)
+
+#### Status
+
+A pilot for sizing the RSS Stage 2 E3 experiment. It tests nothing that Stage 2 registers.
+The plan was committed before any collection
+([`xr1_retry_pilot_plan.md`](xr1_retry_pilot_plan.md), commit `c03d6d10`; fixes
+`d969ef13`, `9fd9925a`).
+
+**Question.** E3's sample size (at least about 650 episodes per arm) assumed that a retry
+after an alarm succeeds at the task's ordinary success rate p_k. A retry restarts the
+*same* scene. The pilot measures how often such a retry succeeds.
+
+**Design.**
+- The collector re-ran the confirmatory collection's own seeds, with base seed 1300007 and
+  the same settings. The only addition was the opt-in `--attempt-limits`.
+- Under the official Xiaomi protocol this re-creates the same scenes under the same
+  rollout IDs. The policy samples stochastically, so each run is a new attempt.
+- Tasks: the 10 with confirmatory success rate closest to 0.5 (4 atomic, 6 composite;
+  p = 0.40–0.62).
+- Each task was re-run up to its 10th original failure: 194 attempts, 0 errors.
+
+#### Gates
+
+- **Identity: passed.** Every rollout ID, seed and episode matched.
+- **Scene: failed under the registered rule.** Only 93.8% of first-frame pairs were within
+  a mean absolute difference of 2.0; the rule required 95%. **The pilot is void as
+  specified.**
+- A frames-only diagnostic, run before any outcome was read:
+  - all pairs differ slightly (median 1.31), which looks like rendering or compression
+    noise;
+  - 10 exceedances lie between 2.0 and 4.0, in RinseSinkBasin and CloseBlenderLid;
+  - 2 are different scenes: TurnOffStove episode 17 (47.5) and CloseBlenderLid
+    episode 8 (22.2).
+  - Seed replay therefore reproduced 192 of 194 scenes.
+
+#### Post hoc estimate
+
+This analysis excludes only the two mismatched pairs, using a cutoff of 10 chosen from the
+diagnostic. It was recorded in the plan before outcomes were read.
+
+| Retry of a scene that originally… | Retry successes | Rate | 95% CI (Wilson / task cluster) |
+|---|---:|---:|---|
+| failed | 24 / 98 | **0.245** | [0.170, 0.339] / [0.190, 0.303] |
+| succeeded | 66 / 94 | 0.702 | [0.603, 0.785] / [0.547, 0.832] |
+
+The selected tasks' confirmatory success rate is p = 0.486 (task-macro), so
+**r_fail − p = −0.241** [−0.283, −0.195].
+
+On every one of the ten tasks, the retry success on originally failed scenes is below
+that task's p:
+- atomic tasks, failed scenes: 2/9, 2/10, 2/9 and 3/10;
+- composite tasks, failed scenes: 1/10 to 4/10.
+
+#### Interpretation
+
+- **Scene difficulty persists.** A retry of a scene the policy has just failed succeeds
+  about half as often as a fresh attempt. A scene it succeeded on succeeds again 70% of the
+  time. E3's assumption r = p_k is too optimistic by about a factor of two.
+- **Consequence for E3's size.** Retry benefits are about halved. Since the required size
+  scales roughly with the inverse square of the effect, "at least about 650 per arm" becomes
+  several times larger. The Stage 2 sizing is being recomputed with r = 0.245, and with its
+  lower bound as a sensitivity.
+- **Consequence for E3's design.**
+  - Together with Section 15.17 (79% of failures still recoverable at the timeout), this
+    favours registering alarm-triggered reset against continuation (more time, no reset)
+    as E3's decisive contrast.
+  - Seed replay reproduced 192 of 194 scenes, so an E3 that resets by replay needs a
+    scene-identity check, or a reset that restores the recorded initial state.
+- **Status.** Post hoc and descriptive. Nothing is registered from it. The protocol states
+  that same-scene retry success is measured in Stage 2.
+
+#### Durable artifacts
+
+```text
+Root:      /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_retry_pilot_20261023_103019/
+             selection.json, attempt_limits*.json, tasks_shard{0,1}.txt, collection/shard{0,1}/,
+             frame_diagnostic/ (diagnostic.log, three side-by-side PNGs), retry_pilot_post_hoc.json
+Logs:      /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_retry_pilot_20261023_103019/
+             server_*.log, collection_shard*.log, analyze.log (gate failure), analyze_post_hoc.log
+Worktree:  /gs/fs/tga-shinoda/felid/robocasa_retry_pilot_c03d6d10 (at 9fd9925a)
 ```
 
 ## 16. Limitations
