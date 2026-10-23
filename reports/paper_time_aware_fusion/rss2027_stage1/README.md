@@ -180,3 +180,55 @@ Source: `docs/safe_robocasa_experiment_report.md` §15.23 and `docs/fiper_paired
   - The conclusion's first sentence, E2's sentence on the replaced atomic test, the FPR-rule paragraph, E3 and E5 are tighter.
 - **Not folded in (needs a decision).** Main's §15.20–15.22 report that Hide-and-Seek + P passed a preregistered "Amendment 2" test on the same E1 cohorts: +0.071, CI [0.022, 0.157]. That clashes with this draft's text, which still describes the dropped atomic test as an "Amendment 2"-style item and uses SAFE as the only policy score.
 - **Page check.** With `\notesfalse` the build is 6 pages.
+
+## Update 2026-10-23 (b): Stage 2 protocol pass (mock review concerns 1, 2, 5, 6)
+
+Sources: `mock_review.md` on `origin/claude/rss-stage1-mock-review`, and `docs/stage2_sizing.md` on main, section "E2 co-primary sizing".
+
+- **H3** now states the conditional superiority claim that E2 tests:
+  - on RLDX-1's 20 tasks, each co-primary (SAFE + P, Hide-and-Seek + P) beats P;
+  - 97.5% decision CI above zero, Bonferroni over the two;
+  - no 0.05 margin;
+  - generalization to other tasks is a secondary with no power claim.
+
+  The TODO is removed.
+- **H4** now states the contrast that E3 tests: reset and retry on a P alarm vs continuing to the same 1.25 H_k budget. The TODO is removed.
+- **E2.**
+  - Names its frozen components: SAFE's LSTM head (the MLP falls back to the timer), Hide-and-Seek with three seeds, H_k as the longest development failure, and ρ_k as the 95th percentile of development success durations.
+  - The cohort is fresh, with held-out calibration failures.
+  - Motivation: Hide-and-Seek + P gained +0.071 (§15.21) and +0.083 on RLDX-1 offline (§15.22).
+  - Decision rule: the CI is above 0, and so is the gain against P tuned on test to the fused detector's own FPR. That second condition is proposed (Amendment 1's secondary).
+  - Type I error, power with this condition, and the final n are `\pending`. Without the condition, power at n = 20 is ≥ 0.98 for each co-primary.
+- **FPR rule.** Still the binomial rule, now marked with a red `\pending` until the author confirms it.
+- **E3.**
+  - Primary (proposed): P-triggered reset vs continuation to 1.25 H_k. Secondary: P vs no monitor.
+  - Paired by environment seed; a retry reuses the scene with a new policy sampling seed; McNemar's test on discordant pairs.
+  - SAFE + P is descriptive (at least about 1,450 episodes per arm).
+  - The secondary needs "at least about 650 per arm" under r = p_k. A pilot of about 100 same-scene re-attempts sets the final size (`\pending`).
+  - Policy: XR-1, proposed (`\pending`).
+- **E4 and E5** are now explicitly exploratory, with no decision rules.
+  - E4 is cut to one clause.
+  - E5 is sized at about 250–500 labeled failures (50–100 decided), with third-labeler adjudication. It is reported only if a pilot of ≥ 20 doubly labeled decided failures reaches mean |Δt_u|/H_k ≤ 0.10.
+  - Registering E5 instead is a `\todo` for the author.
+- **Abstract and conclusion.** Both now describe Stage 2 as two monitors on a second policy plus reset vs continuation.
+- **Cuts.**
+  - The "SAFE adds lead over a single timer" and per-task-timer exploratory paragraphs are shorter. The 0.405/0.221 split and the 20.2/11.7-inference detail are gone.
+  - The time-risk paragraph, two contribution items, Limitations and the conclusion are tighter.
+- **Page check.** With `\notesfalse` the build is 6 pages.
+
+**Open items in the file:** eight in Stage 2, all hidden by `\notesfalse`.
+
+| Line | Kind | Text |
+|---|---|---|
+| 437 | `\pending` | checkpoint hashes |
+| 441 | `\todo` | matched-FPR condition proposed; author to confirm |
+| 443 | `\pending` | type I error, power, final n |
+| 448 | `\pending` | author to confirm the FPR rule |
+| 452 | `\pending` | policy: XR-1 proposed, author to confirm |
+| 456 | `\todo` | primary contrast proposed; author to confirm |
+| 462 | `\pending` | pilot result; final size |
+| 468 | `\todo` | E5 exploratory proposed; registering it is the author's call |
+
+Also still open: the two `% CHECK` comments in `refs.bib` (Foresight author order, RoboCasa365 authors), and the qualitative figure's frames, which stay grey placeholders until the frame images exist.
+
+**Not yet updated (outside this brief).** §15.21 (Hide-and-Seek + P passed a preregistered test on XR-1, +0.071) appears only as E2 motivation. The Preliminary Evidence and Confirmatory sections, the contributions and the FIPER paragraph ("finds SAFE's gain on XR-1 small") still present SAFE as the only learned monitor tested.
