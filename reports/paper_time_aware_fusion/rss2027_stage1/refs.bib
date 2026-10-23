@@ -1,4 +1,7 @@
-% Bibliography for related_work.tex.
+% Bibliography for the RSS 2027 Stage 1 draft.
+% 2026-10-23: re-checked against the arXiv API and venue pages; cut ten entries the argument does
+% not need; author lists of 4+ names shortened to "First and others" (printed "et al.") so the
+% references fit on page 6.
 % Every entry checked on 2026-10-17 against arXiv listings, proceedings pages
 % (NeurIPS, ICLR, ICML, CVF, RSS) or arXiv mirrors (alphaXiv, Pith, chatpaper)
 % where arXiv rate-limited us. Keys shared with paper_review_fixes/refs.bib are
@@ -7,14 +10,14 @@
 % ---------------------------------------------------------------- hidden-state probes
 @inproceedings{gu2025safe,
   title     = {{SAFE}: Multitask Failure Detection for Vision-Language-Action Models},
-  author    = {Gu, Qiao and Ju, Yuanliang and Sun, Shengxiang and Gilitschenski, Igor and Nishimura, Haruki and Itkina, Masha and Shkurti, Florian},
+  author    = {Gu, Qiao and others},
   booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
   year      = {2025}
 }
 
 @misc{rajaprakash2026safecast,
   title         = {{SAFECAST}: Robust Failure Detection for {VLA} Policies with Contrast-Set Training and Calibration},
-  author        = {Rajaprakash, Harshitha and Prajapati, Aditeya and Xue, Rong and Anwar, Abrar and Thomason, Jesse},
+  author        = {Rajaprakash, Harshitha and others},
   year          = {2026},
   eprint        = {2608.04246},
   archivePrefix = {arXiv},
@@ -23,9 +26,11 @@
 }
 
 % FIXED: fourth author is Min-Hsuan Yeh (was "Samuel Yeh"); venue is an ICML 2026 workshop.
+% Verified 2026-10-23 on icml.cc/virtual/2026/77872 (workshop poster). arXiv v2's comment says
+% "NeurIPS 2026"; no NeurIPS listing found yet. CHECK before submission and update if accepted.
 @inproceedings{park2026hideseek,
   title     = {Hide-and-Seek in Trajectories: Discovering Failure Signals for {VLA} Runtime Monitoring},
-  author    = {Park, Seongheon and Li, Wendi and Oh, Changdae and Yeh, Min-Hsuan and Kira, Zsolt and Hagenow, Michael and Li, Sharon},
+  author    = {Park, Seongheon and others},
   booktitle = {ICML Workshop on Failure Modes in Agentic AI},
   year      = {2026},
   note      = {arXiv:2605.30834}
@@ -41,29 +46,10 @@
   note          = {arXiv:2609.04277}
 }
 
-@misc{yang2026triinfo,
-  title         = {{Tri-Info}: Generalizable, Interpretable Failure Prediction for {VLA} Models via Information Theory},
-  author        = {Yang, Jinghan and Zhang, Yunchao and Yuan, Wang and Wan, Haolun and Zhang, Jiaming and Hu, Zhengyang and Yang, Yanchao},
-  year          = {2026},
-  eprint        = {2606.19998},
-  archivePrefix = {arXiv},
-  primaryClass  = {cs.RO},
-  note          = {arXiv:2606.19998}
-}
-
-@misc{zhu2026vlascope,
-  title         = {{VLA-Scope}: Shift-Aware Failure Prediction for Vision-Language-Action Models},
-  author        = {Zhu, Kaiwen and Liu, Dongfang and Liu, Liangkai},
-  year          = {2026},
-  eprint        = {2609.21246},
-  archivePrefix = {arXiv},
-  primaryClass  = {cs.RO},
-  note          = {arXiv:2609.21246}
-}
-
+% Verified 2026-10-23: NeurIPS 2026 PTA workshop poster (neurips.cc/virtual/2026/161954).
 @inproceedings{soddy2026memoryvla,
   title     = {Predictable Before Action, Resistant to Correction: Failure Signals in Vision-Language-Action Models},
-  author    = {Soddy, Michael and Ganesan, Karthikeyan and Stemp, Roman and Deo, Ved and Babey, Nicholas},
+  author    = {Soddy, Michael and others},
   booktitle = {NeurIPS Workshop on From Pretrained Representations to Acting Agents (PTA)},
   year      = {2026}
 }
@@ -71,7 +57,7 @@
 % ---------------------------------------------------------------- action-space and success-only
 @misc{huang2026actprobe,
   title         = {{ActProbe}: Action-Space Probe for Early Failure Detection of Generative Robot Policies},
-  author        = {Huang, Bingjia and Li, Xiangyu and Wang, Xiang and Mi, Liang and Hao, Zixu and Wang, Weijun and Wu, Hao and Li, Kun and Liu, Yunxin and Cao, Ting},
+  author        = {Huang, Bingjia and others},
   year          = {2026},
   eprint        = {2606.08508},
   archivePrefix = {arXiv},
@@ -79,9 +65,10 @@
   note          = {arXiv:2606.08508}
 }
 
+% 2026-10-23: arXiv v2's comment says "CoRL 2026"; no proceedings listing found. CHECK.
 @misc{seligmann2026vlafail,
   title         = {{VLA-FAIL}: Efficient Task Failure Detection for Finetuned Vision-Language-Action Models},
-  author        = {Seligmann, Florian and Gospodinov, Emiliyan and Dincer, Enes Ulas and Neumann, Gerhard},
+  author        = {Seligmann, Florian and others},
   year          = {2026},
   eprint        = {2606.21386},
   archivePrefix = {arXiv},
@@ -91,7 +78,7 @@
 
 @inproceedings{agia2024sentinel,
   title     = {Unpacking Failure Modes of Generative Policies: Runtime Monitoring of Consistency and Progress},
-  author    = {Agia, Christopher and Sinha, Rohan and Yang, Jingyun and Cao, Zi-ang and Antonova, Rika and Pavone, Marco and Bohg, Jeannette},
+  author    = {Agia, Christopher and others},
   booktitle = {Conference on Robot Learning (CoRL)},
   series    = {PMLR},
   volume    = {270},
@@ -100,14 +87,14 @@
 
 @inproceedings{xu2025faildetect,
   title     = {Can We Detect Failures Without Failure Data? {U}ncertainty-Aware Runtime Failure Detection for Imitation Learning Policies},
-  author    = {Xu, Chen and Nguyen, Tony Khuong and Dixon, Emma and Rodriguez, Christopher and Miller, Patrick and Lee, Robert and Shah, Paarth and Ambrus, Rares and Nishimura, Haruki and Itkina, Masha},
+  author    = {Xu, Chen and others},
   booktitle = {Robotics: Science and Systems (RSS)},
   year      = {2025}
 }
 
 @inproceedings{romer2025fiper,
   title     = {Failure Prediction at Runtime for Generative Robot Policies},
-  author    = {R{\"o}mer, Ralf and Kobras, Adrian and Worbis, Luca and Schoellig, Angela P.},
+  author    = {R{\"o}mer, Ralf and others},
   booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
   year      = {2025}
 }
@@ -115,7 +102,7 @@
 % ---------------------------------------------------------------- world-model verifiers
 @misc{liu2026checkvla,
   title         = {{CheckVLA}: Execution-Time Verification with Action-Conditioned World Model for Long-Horizon Mobile Manipulation},
-  author        = {Liu, Yushan and Sun, Peibo and Chao, Xintao and Yang, Zhenyang and Xie, Yifan and Zhang, Lingfeng and Li, Shoujie and Tang, Chenyu and Chen, Fang and Zhang, Xiao-Ping and Ding, Wenbo},
+  author        = {Liu, Yushan and others},
   year          = {2026},
   eprint        = {2607.26789},
   archivePrefix = {arXiv},
@@ -123,64 +110,10 @@
   note          = {arXiv:2607.26789}
 }
 
-@misc{wang2026foresight,
-  title         = {Foresight: Failure Detection for Long-Horizon Robotic Manipulation with Action-Conditioned World Model Latents},
-  author        = {Wang, Boyang and Zhang, Haoran and Wang, Mengdi and Jenkins, Odest Chadwicke and Kang, Xuhui and Kuo, Yen-Ling and Lu, Yifu and Cheng, Zezhou},
-  year          = {2026},
-  eprint        = {2606.23085},
-  archivePrefix = {arXiv},
-  primaryClass  = {cs.RO},
-  note          = {arXiv:2606.23085}
-}
-% CHECK: Foresight author order taken from a listing that may be alphabetical; verify against the PDF.
-
-% ---------------------------------------------------------------- VLM / LLM monitors
-% FIXED: full author list (was "Duan, Jiafei and others").
-@inproceedings{duan2025aha,
-  title     = {{AHA}: A Vision-Language-Model for Detecting and Reasoning Over Failures in Robotic Manipulation},
-  author    = {Duan, Jiafei and Pumacay, Wilbert and Kumar, Nishanth and Wang, Yi Ru and Tian, Shulin and Yuan, Wentao and Krishna, Ranjay and Fox, Dieter and Mandlekar, Ajay and Guo, Yijie},
-  booktitle = {International Conference on Learning Representations (ICLR)},
-  year      = {2025}
-}
-
-@inproceedings{liu2023reflect,
-  title     = {{REFLECT}: Summarizing Robot Experiences for Failure Explanation and Correction},
-  author    = {Liu, Zeyi and Bahety, Arpit and Song, Shuran},
-  booktitle = {Conference on Robot Learning (CoRL)},
-  year      = {2023}
-}
-
-% FIXED: author list confirmed, DOI added.
-@inproceedings{sinha2024realtime,
-  title     = {Real-Time Anomaly Detection and Reactive Planning with Large Language Models},
-  author    = {Sinha, Rohan and Elhafsi, Amine and Agia, Christopher and Foutter, Matthew and Schmerling, Edward and Pavone, Marco},
-  booktitle = {Robotics: Science and Systems (RSS)},
-  year      = {2024},
-  doi       = {10.15607/RSS.2024.XX.114}
-}
-
-% FIXED: full author list and pages (was "Zhou, Enshen and others").
-@inproceedings{zhou2025codeasmonitor,
-  title     = {Code-as-Monitor: Constraint-aware Visual Programming for Reactive and Proactive Robotic Failure Detection},
-  author    = {Zhou, Enshen and Su, Qi and Chi, Cheng and Zhang, Zhizheng and Wang, Zhongyuan and Huang, Tiejun and Sheng, Lu and Wang, He},
-  booktitle = {IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
-  pages     = {6919--6929},
-  year      = {2025}
-}
-
-% ---------------------------------------------------------------- calibration over time
-@inproceedings{zollo2026calibration,
-  title     = {Confidence Calibration in Vision-Language-Action Models},
-  author    = {Zollo, Tom and Zemel, Richard},
-  booktitle = {ICML Workshop on Statistical Frameworks for Uncertainty in Agentic Systems},
-  year      = {2026},
-  note      = {arXiv:2507.17383}
-}
-
 % ---------------------------------------------------------------- from detection to recovery
 @misc{ahmedt2026rescue,
   title         = {{RESCUE}: Is This Alarm Worth Acting On? {C}ounterfactual Evaluation of {VLA} Runtime Monitors},
-  author        = {Ahmedt-Aristizabal, David and Khamis, Abdelwahed and Armin, Mohammad Ali and Petersson, Lars},
+  author        = {Ahmedt-Aristizabal, David and others},
   year          = {2026},
   eprint        = {2610.13516},
   archivePrefix = {arXiv},
@@ -188,18 +121,10 @@
   note          = {arXiv:2610.13516}
 }
 
-@inproceedings{zhao2026flare,
-  title     = {{FLARE}: A Failure-Aware Framework for Autonomous Correction and Recovery in Visual-Language Robotic Manipulation},
-  author    = {Zhao, Ganlong and Tang, Zijia and Chen, Xingping and Kuang, Zhanghui and Tian, Ye and Li, Guanbin},
-  booktitle = {IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
-  pages     = {22391--22401},
-  year      = {2026}
-}
-
 % ---------------------------------------------------------------- time-to-event, shortcuts, conformal
 @article{geirhos2020shortcut,
   title   = {Shortcut Learning in Deep Neural Networks},
-  author  = {Geirhos, Robert and Jacobsen, J{\"o}rn-Henrik and Michaelis, Claudio and Zemel, Richard and Brendel, Wieland and Bethge, Matthias and Wichmann, Felix A.},
+  author  = {Geirhos, Robert and others},
   journal = {Nature Machine Intelligence},
   volume  = {2},
   number  = {11},
@@ -217,16 +142,6 @@
   year    = {1958}
 }
 
-@article{cox1972,
-  title   = {Regression Models and Life-Tables},
-  author  = {Cox, David R.},
-  journal = {Journal of the Royal Statistical Society: Series B},
-  volume  = {34},
-  number  = {2},
-  pages   = {187--220},
-  year    = {1972}
-}
-
 % FIXED: DOI confirmed (10.1007/s10115-011-0400-x), TODO removed.
 @article{xing2012early,
   title   = {Early Classification on Time Series},
@@ -239,30 +154,33 @@
   doi     = {10.1007/s10115-011-0400-x}
 }
 
-@article{angelopoulos2021gentle,
-  title   = {A Gentle Introduction to Conformal Prediction and Distribution-Free Uncertainty Quantification},
-  author  = {Angelopoulos, Anastasios N. and Bates, Stephen},
-  journal = {arXiv preprint arXiv:2107.07511},
-  year    = {2021}
+@misc{angelopoulos2021gentle,
+  title         = {A Gentle Introduction to Conformal Prediction and Distribution-Free Uncertainty Quantification},
+  author        = {Angelopoulos, Anastasios N. and Bates, Stephen},
+  year          = {2021},
+  eprint        = {2107.07511},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LG},
+  note          = {arXiv:2107.07511}
 }
 
 @inproceedings{lee2018mahalanobis,
   title     = {A Simple Unified Framework for Detecting Out-of-Distribution Samples and Adversarial Attacks},
-  author    = {Lee, Kimin and Lee, Kibok and Lee, Honglak and Shin, Jinwoo},
+  author    = {Lee, Kimin and others},
   booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
   year      = {2018}
 }
 
 @inproceedings{sun2022knn,
   title     = {Out-of-Distribution Detection with Deep Nearest Neighbors},
-  author    = {Sun, Yiyou and Ming, Yifei and Zhu, Xiaojin and Li, Yixuan},
+  author    = {Sun, Yiyou and others},
   booktitle = {International Conference on Machine Learning (ICML)},
   year      = {2022}
 }
 
 @inproceedings{burda2019rnd,
   title     = {Exploration by Random Network Distillation},
-  author    = {Burda, Yuri and Edwards, Harrison and Storkey, Amos and Klimov, Oleg},
+  author    = {Burda, Yuri and others},
   booktitle = {International Conference on Learning Representations (ICLR)},
   year      = {2019}
 }
@@ -271,22 +189,26 @@
 % ---- benchmark and policy (from the earlier draft's refs.bib)
 @inproceedings{nasiriany2024robocasa,
   title     = {{RoboCasa}: Large-Scale Simulation of Everyday Tasks for Generalist Robots},
-  author    = {Nasiriany, Soroush and Maddukuri, Abhiram and Zhang, Lance and Parikh, Adeet and Lo, Aaron and Joshi, Abhishek and Mandlekar, Ajay and Zhu, Yuke},
+  author    = {Nasiriany, Soroush and others},
   booktitle = {Robotics: Science and Systems (RSS)},
   year      = {2024}
 }
 
 @inproceedings{robocasa365,
   title     = {{RoboCasa365}: A Large-Scale Simulation Framework for Training and Benchmarking Generalist Robots},
-  author    = {Nasiriany, Soroush and Nasiriany, Sepehr and Maddukuri, Abhiram and Zhu, Yuke},
+  author    = {Nasiriany, Soroush and others},
   booktitle = {International Conference on Learning Representations (ICLR)},
-  year      = {2026}
+  year      = {2026},
+  note      = {arXiv:2603.04356}
 }
-% CHECK: verify the RoboCasa365 author list.
+% Verified 2026-10-23 against arXiv:2603.04356 and the ICLR 2026 poster page.
 
 @misc{xiaomi2026robotics,
-  title  = {{Xiaomi-Robotics-1}: Scaling Vision-Language-Action Models with over 100{K} Hours of Real-World Trajectories},
-  author = {{Xiaomi Robotics Team}},
-  year   = {2026},
-  note   = {arXiv:2607.15330}
+  title         = {{Xiaomi-Robotics-1}: Scaling Vision-Language-Action Models with over 100{K} Hours of Real-World Trajectories},
+  author        = {{Xiaomi Robotics Team}},
+  year          = {2026},
+  eprint        = {2607.15330},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.RO},
+  note          = {arXiv:2607.15330}
 }

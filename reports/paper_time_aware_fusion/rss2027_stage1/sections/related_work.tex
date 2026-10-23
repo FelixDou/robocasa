@@ -1,6 +1,9 @@
 % Related Work for the RSS 2027 Stage 1 draft.
 % Merged from /mnt/project-files/paper/related_work.tex (related-work thread, 2026-10-17),
 % shortened for the 5-page limit and reframed around the timer and lead time.
+% 2026-10-23: trimmed to citations tied to the problem and the novelty claim (Stage 1 judges
+% relevance, not coverage). Cut: Tri-Info, VLA-Scope, Foresight, REFLECT, Sinha et al.,
+% Code-as-Monitor, AHA, Zollo & Zemel, Cox, FLARE.
 % Claims about other papers were checked by that thread against abstracts or proceedings
 % pages; RESCUE was read from its arXiv abstract only.
 
@@ -11,7 +14,7 @@
 SAFE learns a failure score from a VLA's last-layer features and thresholds it with a
 functional conformal band~\cite{gu2025safe}; we reuse its implementation. Follow-ups change
 the training data~\cite{rajaprakash2026safecast}, labels~\cite{park2026hideseek,ma2026failurespot},
-features~\cite{yang2026triinfo,zhu2026vlascope} or policy~\cite{soddy2026memoryvla}. None
+or policy~\cite{soddy2026memoryvla}. None
 reports an elapsed-time detector. SAFE removes the duration shortcut by truncating rollouts to
 equal length and, on its real robot, by running every rollout to a fixed
 horizon~\cite{gu2025safe}; a deployed monitor can do neither. Duration is a shortcut
@@ -28,21 +31,19 @@ suppresses false alarms; in its own pipeline an elapsed-time method matches its 
 FIPER warns earlier at a matched false-alarm rate (Sec.~\ref{sec:evidence}). We alarm when \emph{either} crosses, as the two signals catch failures
 at different times.
 
-\textbf{World-model verifiers and VLM monitors.}
+\textbf{World-model verifiers.}
 CheckVLA~\cite{liu2026checkvla} is the closest work on our benchmark. It verifies each action
 chunk with an action-conditioned world model on RoboCasa365, at a conformal 5\% rate of
-unnecessary interventions, and repairs it with the same VLA. Foresight~\cite{wang2026foresight} uses world-model latents; neither compares against
-elapsed time. LLM and VLM
-monitors~\cite{agia2024sentinel,liu2023reflect,sinha2024realtime,zhou2025codeasmonitor,duan2025aha}
-are slower and complementary.
+unnecessary interventions, and repairs it with the same VLA. It does not compare against
+elapsed time.
 
 \textbf{Time, calibration and intervention.}
-VLA confidence drifts over a task~\cite{zollo2026calibration}; our time-risk baseline is a per-task
-survival-style estimate~\cite{kaplan1958,cox1972}, and lead time at a fixed false-alarm
+Our time-risk baseline is a per-task
+survival-style estimate~\cite{kaplan1958}, and lead time at a fixed false-alarm
 budget is the accuracy--earliness trade-off of early time-series
 classification~\cite{xing2012early}. Split-conformal thresholds give finite-sample
 false-positive control under exchangeability~\cite{angelopoulos2021gentle}; we extend the
 construction to a two-signal OR rule (Sec.~\ref{sec:guarantee}). RESCUE~\cite{ahmedt2026rescue}
-finds that good detection scores do not guarantee lower intervention cost, and CheckVLA and
-FLARE~\cite{zhao2026flare} couple detection to repair; an earlier alarm matters only if acting
+finds that good detection scores do not guarantee lower intervention cost, and CheckVLA
+couples detection to repair; an earlier alarm matters only if acting
 on it raises success.

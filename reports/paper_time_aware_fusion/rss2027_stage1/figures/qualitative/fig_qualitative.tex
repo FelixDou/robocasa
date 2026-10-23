@@ -34,12 +34,13 @@
 \draw[orange!80!black, thick, dashdotted] (axis cs:0.5758,-1.9) -- (axis cs:0.5758,3.1)
   node[pos=0.80, right, font=\tiny, text=orange!50!black] {per-task timer};
 \fill[red!80!black] (axis cs:0.4545,0.648) circle (1.6pt);
-\draw[<->, >=stealth, red!70!black] (axis cs:0.4545,-1.65) -- (axis cs:1,-1.65)
-  node[midway, above, font=\tiny] {lead 36 inferences ($\approx$29\,s)};
-\draw[<->, >=stealth, orange!70!black] (axis cs:0.5758,-0.85) -- (axis cs:1,-0.85)
-  node[midway, above, font=\tiny] {28};
-\draw[<->, >=stealth, gray!50!black] (axis cs:0.9091,0.0) -- (axis cs:1,0.0)
-  node[midway, above, font=\tiny] {6};
+% Lead arrows, one row per alarm, each label above its own arrow and in its color.
+\draw[<->, >=stealth, red!70!black] (axis cs:0.4545,-0.45) -- (axis cs:1,-0.45)
+  node[midway, above, font=\tiny, inner sep=1pt] {SAFE lead: 36 inferences ($\approx$29\,s)};
+\draw[<->, >=stealth, orange!70!black] (axis cs:0.5758,-1.05) -- (axis cs:1,-1.05)
+  node[midway, above, font=\tiny, inner sep=1pt] {per-task timer: 28};
+\draw[<->, >=stealth, gray!50!black] (axis cs:0.9091,-1.65) -- (axis cs:1,-1.65)
+  node[pos=0, left, font=\tiny, inner sep=1pt, xshift=-2pt, text=gray!40!black] {timer: 6};
 \end{axis}
 \end{tikzpicture}
 \caption{One failed \emph{OpenCabinet} rollout from the prospective test (chosen to

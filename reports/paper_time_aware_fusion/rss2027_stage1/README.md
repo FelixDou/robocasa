@@ -6,12 +6,12 @@ Build: `pdflatex main && bibtex main && pdflatex main && pdflatex main` (pdflate
 Set `\notesfalse` in the preamble to hide the red/orange notes for the submission build.
 
 ## Before submitting
-- **Template.** The official RSS package (roboticsconference.org/docs/paper-template-latex.tar.gz) was blocked by the network here. The preamble reproduces the RSS template from memory (IEEEtran conference, `times`, `natbib[numbers]`, `plainnat`, anonymous author line, `\pdfinfo`). Diff it against the official `root.tex` and use its files if they differ.
+- **Template.** Done 2026-10-23. The official RSS package is in `template/`, and its `IEEEtran.cls` (v1.7a) is in this folder; keep it, since a newer system class changes the layout. The preamble starts with the template's block word for word (no `fontenc`) and adds `\IEEEpeerreviewmaketitle` and anonymous `\hypersetup` metadata.
 - **Preregistration.** Done: Amendment 1 (PR #3) was opened before the lead endpoint was computed, and E1 has been run (see the 2026-10-21 update below).
 - **Stage 1 rules.** The draft now reports a completed confirmatory test (E1) and plans E2 to E5 for Stage 2. Check that the RSS 2027 Stage 1 rules allow completed confirmatory results.
 - **Control rate.** The seconds assume 16 steps x 20 Hz = 0.8 s per inference; confirm for the evaluation.
-- **Bibliography.** Two `% CHECK` comments in refs.bib (Foresight author order, RoboCasa365 authors). RSS desk-rejects hallucinated citations.
-- **Page limit.** 5 pages of content + references on page 6 (limit: 5 + 1).
+- **Bibliography.** Re-checked 2026-10-23 against arXiv and the venue pages: 22 entries, "et al." for 4+ authors. Two `% CHECK` comments remain. Hide-and-Seek: the ICML 2026 workshop is confirmed, but arXiv v2 says NeurIPS 2026. VLA-FAIL: arXiv v2 says CoRL 2026. Update both if the venues confirm. RSS desk-rejects hallucinated citations.
+- **Page limit.** 5 pages of content and 1 page of references. A `\clearpage` before the bibliography puts the references alone on page 6; the preview with notes on is 6 pages.
 
 ## New numbers in this draft (exploratory, opened cohort)
 From `analysis/lead_time.py` (run: `python3 -I analysis/lead_time.py review_data/`) and `analysis/extra.py` (noise+timer null, 20 draws; curves). The convention matches review_controls.py: an alarm at the final inference counts. `lead_time_strict.py` repeats it without that alarm (the JSAI/mock-review convention, timer c = 0.894).
@@ -293,3 +293,12 @@ How each part was combined:
 | 443 | `\todo` | E3 primary contrast |
 | 448 | `\pending` | pilot result, final size |
 | 455 | `\todo` | E5 registered or exploratory |
+
+## Update 2026-10-23: official template, references, tables
+
+- **Template.** The official RSS package and class are in place (see "Before submitting").
+- **References.** Ten citations the argument does not need were cut: Tri-Info, VLA-Scope, Foresight, REFLECT, Sinha et al., Code-as-Monitor, AHA, Zollo & Zemel, Cox and FLARE. Long author lists use "et al.", and the references sit alone on page 6.
+- **Guarantee wording.** `confirm_lead.py` (`fit_fast`) and `quantile_timer.py` choose `(u, s)` by lead at each path's lambda-hat, which comes from the calibration successes. Proposition 1 therefore bounds each candidate path, not the selected one. Sec. V-C now says so and points to the registered empirical FPR rules. The abstract and contribution 2 are qualified the same way. No number changed. A TODO asks whether E2 should choose its fused paths on held-out rollouts.
+- **Tables.** Tables I and II have one-line captions, with notes under the table and labelled row groups. Table II keeps its row order, with explicit headers for test-only intervals and the decision bootstrap. Bold marks the H1 comparisons.
+- **Figures.** New Fig. 2 shows alarm curves of the timer, SAFE + timer, P and SAFE + P on the exploratory cohort. It reproduces Table I's @.75 column (`analysis/lead_curves.py` writes `figures/lead_curves.csv`). In Fig. 1 each lead arrow now has its own label.
+- **Not rebuilt.** The committed `main.pdf` was not rebuilt. Rebuild it with pdflatex (tectonic previews embed Type 1C fonts, and RSS wants Type 1).

@@ -1,17 +1,19 @@
-% RSS 2027 Stage 1 extended abstract (due 2026-12-04 AoE). Limit: 5 pages of content + 1 page
-% of references. Anonymized: no author names, affiliations, acknowledgements or links.
-% Preamble follows the RSS LaTeX template (IEEEtran conference, Times, natbib numbers,
-% plainnat). The official template (roboticsconference.org/docs/paper-template-latex.tar.gz)
-% could not be downloaded from the drafting environment: before submission, diff this
-% preamble against the official root.tex and use its .cls/.bst if they differ.
+% RSS 2027 Stage 1 extended abstract (due 2026-12-04 AoE). Limit: 6 pages, up to 5 pages of
+% content and 1 page of references. Anonymized: no author names, affiliations,
+% acknowledgements or links; PDF metadata anonymized too.
+% Template: official RSS LaTeX package (roboticsconference.org/docs/paper-template-latex.tar.gz,
+% downloaded 2026-10-23, copy in template/). The first block below is its preamble verbatim,
+% and IEEEtran.cls in this folder is the template's v1.7a (do not swap it for a newer one).
 % Compile with pdflatex (Type-1 fonts): pdflatex main; bibtex main; pdflatex main; pdflatex main
 \documentclass[conference]{IEEEtran}
 \usepackage{times}
+
+% numbers option provides compact numerical references in the text.
 \usepackage[numbers]{natbib}
 \usepackage{multicol}
 \usepackage[bookmarks=true]{hyperref}
 
-\usepackage[T1]{fontenc}
+% Content packages (no layout, font or spacing changes).
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{array}
@@ -36,6 +38,8 @@
    /Subject (Robot learning; failure detection)
    /Keywords (vision-language-action;failure detection;conformal calibration;runtime monitoring)
 }
+% hyperref overwrites \pdfinfo at \begin{document}; keep the anonymous metadata explicit.
+\hypersetup{pdfauthor={}, pdftitle={Time Is the Baseline to Beat: Lead Time over a Timer as the Test for VLA Failure Monitors}}
 
 \begin{document}
 
@@ -50,7 +54,7 @@ On RoboCasa365, a failed vision-language-action (VLA) rollout is one that reache
 limit. Calibrated at a 5\% false-positive rate (FPR), a timer flags every one of 380
 prospective failures, so recall cannot separate a learned monitor from elapsed time; only
 warning lead can. We alarm when \emph{either} a policy-internal score or a timer crosses its
-threshold, calibrate the pair with a finite-sample FPR guarantee, and compare with a per-task
+threshold, calibrate the pair with a split-conformal FPR bound, and compare with a per-task
 timer P built from each task's success durations. On one VLA and 38 tasks, P nearly matches
 the SAFE failure score fused with a single timer, and on a fresh preregistered cohort of 760
 rollouts SAFE adds 0.030 of the time limit to P (95\% CI 0.007--0.093), below the margin of
@@ -61,6 +65,8 @@ only each rollout's first inference, it adds none either. Elapsed time explains 
 monitors separate failures; the extra warning develops during the rollout. Stage~2 tests a
 second VLA and whether earlier alarms raise success when they trigger a retry.
 \end{abstract}
+
+\IEEEpeerreviewmaketitle
 
 \section{Introduction}
 
@@ -81,8 +87,8 @@ contributions.
   decision rules fixed in advance (Sec.~\ref{sec:hypotheses}).
   \item \textbf{Calibrated OR-fusion with a guarantee.} We alarm when either a
   policy-internal score or the timer crosses its threshold, and calibrate both thresholds
-  along a nested path with a split-conformal rule that bounds the FPR on a new successful
-  rollout by $\alpha$ in finite samples (Proposition~\ref{prop:fpr}).
+  along a nested path with a split-conformal rule that, for a path fixed in advance, bounds the
+  FPR on a new successful rollout by $\alpha$ in finite samples (Proposition~\ref{prop:fpr}).
   \item \textbf{Exploratory and confirmatory evidence.} A per-task timer nearly matches SAFE
   fused with a single timer, and most failures are still recoverable at the limit
   (Sec.~\ref{sec:evidence}). On fresh preregistered cohorts SAFE adds 0.030 of the limit over
@@ -138,7 +144,7 @@ monitor we know, increases the mean warning lead over that timer alone.
 point gain is at least $0.05$ of the time limit, and the fused test FPR is at most $0.075$
 with a Wilson 95\% upper bound at most $0.10$. As a secondary check, the fused detector must
 also beat a timer whose fraction is tuned \emph{on the test cohort} to the fused detector's
-test FPR, which favours the timer.
+test FPR, which favors the timer.
 
 \textbf{H2 (the gain needs policy evidence).} Fusions that contain no policy-internal
 evidence (Gaussian noise, or SAFE scores resampled within task, each fused with the per-task
@@ -251,7 +257,13 @@ calibration maxima with calibration FPR $\le \alpha$, keep the one with the larg
 (highest recall for time-risk fusions). This best-of-many selection on 114 successes has no
 guarantee and is optimistic (test FPR 0.058--0.068 against 0.044 on calibration). The
 per-task timer rows, and the confirmatory test, use Proposition~\ref{prop:fpr} with the path
-$\delta = \lambda$, $\tau_s = u + s\lambda$ and $(u, s)$ chosen on calibration failures.
+$\delta = \lambda$, $\tau_s = u + s\lambda$. There $(u, s)$ is the grid point with the largest
+mean lead on calibration failures, each point placed at its own $\hat\lambda$ from the
+calibration successes. The selected path thus depends on those successes:
+Proposition~\ref{prop:fpr} bounds the FPR of each candidate path, not of the one chosen among
+them, which is why the registered rules also check the test FPR (Sec.~\ref{sec:hypotheses}).
+Choosing the path on rollouts disjoint from the calibration successes restores the
+bound.\todo{decide whether E2 chooses its fused paths on held-out rollouts}
 
 \section{Preliminary Evidence}
 \label{sec:evidence}
@@ -272,10 +284,8 @@ are exploratory.
 
 \begin{table}[t]
 \centering
-\caption{Prospective test (380 successes, 380 failures), thresholds from calibration at FPR
-$\le 0.05$. $\bar\ell$: mean lead (miss = 0); Med: median lead (inferences) of detected
-failures; @.75: failures alarmed by $0.75\,H_k$. $^\ast$Mean of 20 draws ($\bar\ell$
-0.088--0.134). $^\dagger$Margin by Proposition~\ref{prop:fpr}.}
+\caption{Exploratory prospective test: 380 successes and 380 failures, thresholds from
+calibration at FPR $\le 0.05$.}
 \label{tab:main}
 \footnotesize
 \setlength{\tabcolsep}{3pt}
@@ -283,18 +293,55 @@ failures; @.75: failures alarmed by $0.75\,H_k$. $^\ast$Mean of 20 draws ($\bar\
 \toprule
 Detector & Recall & FPR & $\bar\ell$ & Med & @.75 \\
 \midrule
+\multicolumn{6}{@{}l}{\emph{Time only (no policy access)}} \\
 Timer ($c = 0.903$) & 1.000 & 0.047 & 0.090 & 11.5 & 0.000 \\
 Time risk & 0.632 & 0.047 & 0.120 & 16.5 & 0.211 \\
 Time risk + timer & 1.000 & 0.050 & 0.125 & 11.0 & 0.105 \\
+\textbf{Per-task timer}$^\dagger$ & 1.000 & 0.045 & \textbf{0.195} & 13.5 & 0.342 \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Policy score, alone or fused}} \\
 Noise + timer$^\ast$ & 1.000 & 0.066 & 0.101 & -- & -- \\
 SAFE only & 0.566 & 0.039 & 0.190 & 23.0 & 0.421 \\
 SAFE + time risk & 0.955 & 0.058 & 0.184 & 12.0 & 0.311 \\
-Per-task timer$^\dagger$ & 1.000 & 0.045 & 0.195 & 13.5 & 0.342 \\
-SAFE + per-task timer$^\dagger$ & 1.000 & 0.042 & 0.202 & 14.0 & 0.389 \\
-\textbf{SAFE + timer} & 1.000 & 0.058 & 0.207 & 10.0 & 0.421 \\
+SAFE + timer & 1.000 & 0.058 & 0.207 & 10.0 & 0.421 \\
+\textbf{SAFE + per-task timer}$^\dagger$ & 1.000 & 0.042 & \textbf{0.202} & 14.0 & 0.389 \\
 \bottomrule
 \end{tabular}
+
+\vspace{2pt}
+\parbox{\columnwidth}{\scriptsize $\bar\ell$: mean warning lead as a fraction of the time
+limit (miss = 0). Med: median lead in inferences over detected failures. @.75: fraction of
+failures alarmed by $0.75\,H_k$. Bold: the H1 comparison. $^\ast$Gaussian noise, mean of 20
+draws ($\bar\ell$ range 0.088--0.134). $^\dagger$Margin by Proposition~\ref{prop:fpr}.}
 \end{table}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+% Data: figures/lead_curves.csv, written by analysis/lead_curves.py from ../review_data/.
+\begin{axis}[width=\columnwidth, height=4.6cm, xmin=0.3, xmax=1, ymin=0, ymax=1.02,
+  xlabel={elapsed fraction of the time limit $t/H_k$},
+  ylabel={fraction of failures alarmed},
+  label style={font=\scriptsize}, tick label style={font=\scriptsize},
+  xlabel shift=-3pt, ylabel shift=-4pt,
+  legend style={font=\scriptsize, at={(0.02,0.98)}, anchor=north west, draw=none, fill=none},
+  legend cell align=left, grid=major, grid style={gray!20}, const plot]
+\addplot[blue!70!black, densely dashed, thick] table[col sep=comma, x=frac, y=timer] {figures/lead_curves.csv};
+\addlegendentry{Timer}
+\addplot[blue!70!black, thick] table[col sep=comma, x=frac, y=safe_timer] {figures/lead_curves.csv};
+\addlegendentry{SAFE + timer}
+\addplot[orange!85!black, densely dashed, thick] table[col sep=comma, x=frac, y=per_task_timer] {figures/lead_curves.csv};
+\addlegendentry{Per-task timer}
+\addplot[orange!85!black, thick] table[col sep=comma, x=frac, y=safe_per_task_timer] {figures/lead_curves.csv};
+\addlegendentry{SAFE + per-task timer}
+\end{axis}
+\end{tikzpicture}
+\caption{Fraction of the 380 exploratory test failures alarmed by each elapsed fraction of the
+time limit (Table~\ref{tab:main}). Color marks the time baseline; solid lines add SAFE.
+SAFE moves many alarms before the global timer (blue), but few before the per-task timer
+(orange).}
+\label{fig:lead}
+\end{figure}
 
 
 \textbf{The timer is the baseline to beat.} The timer ($c = 0.903$) alarms on all 380 test
@@ -308,7 +355,7 @@ gain 0.117, CI 0.060--0.178) and flags 42\% of failures by $0.75\,H_k$
 
 \textbf{A per-task timer removes the gain (H1, exploratory).} The per-task timer reaches
 $\bar\ell = 0.195$ at 0.045 FPR without reading the policy. SAFE + per-task timer reaches 0.202, a gain of 0.007 (CI $-0.003$ to
-$0.019$), far below the 0.05 margin of H1.
+$0.019$), far below the 0.05 margin of H1 (Fig.~\ref{fig:lead}).
 
 \textbf{A sequence detector does warn earlier (exploratory).} Fused with P under
 Proposition~\ref{prop:fpr}, Hide-and-Seek gains 0.098 over P (CI 0.037--0.158), and 0.083
@@ -361,10 +408,8 @@ again ran to $H_k$.
 
 \begin{table}[t]
 \centering
-\caption{Confirmatory test (380 successes, 380 failures). P = per-task timer ($q = 0.95$).
-Intervals from P down: registered decision bootstrap; above P: test only. $^\ast$Mean of 20
-draws [maximum]; resampled: SAFE, H\&S. $^\dagger$Frozen original thresholds. H\&S:
-Hide-and-Seek.}
+\caption{Confirmatory test: 380 successes and 380 failures. P is the per-task timer
+($q = 0.95$).}
 \label{tab:confirm}
 \footnotesize
 \setlength{\tabcolsep}{3pt}
@@ -372,9 +417,12 @@ Hide-and-Seek.}
 \toprule
 Detector & Recall & FPR & $\bar\ell$ & Gain vs P \\
 \midrule
+\multicolumn{5}{@{}l}{\emph{Intervals over the test cohort only}} \\
 Global timer & 1.000 & 0.024 & 0.123 & $-0.102$ ($-0.147$, $-0.059$) \\
 SAFE + time risk$^\dagger$ & 0.955 & 0.039 & 0.190 & $-0.035$ ($-0.066$, $-0.007$) \\
 SAFE + global timer & 1.000 & 0.047 & 0.215 & $-0.011$ ($-0.068$, $0.045$) \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Registered decision bootstrap (both cohorts, thresholds refitted)}} \\
 P & 1.000 & 0.055 & 0.225 & -- \\
 Noise + P$^\ast$ & -- & -- & -- & $0.002$ [$0.009$] \\
 Resampled + P$^\ast$ & -- & -- & -- & $0.002$, $0.000$ [$0.007$] \\
@@ -385,6 +433,11 @@ Shuffle + P & 1.000 & 0.063 & 0.236 & $0.011$ ($0.000$, $0.064$) \\
 \textbf{H\&S + P (Am.~2)} & 1.000 & 0.061 & \textbf{0.296} & $\mathbf{0.071}$ ($0.022$, $0.157$) \\
 \bottomrule
 \end{tabular}
+
+\vspace{2pt}
+\parbox{\columnwidth}{\scriptsize Gain vs P: paired difference in $\bar\ell$ with its 95\% CI.
+Bold: the registered H1 tests. H\&S: Hide-and-Seek. $^\ast$Mean of 20 draws [maximum];
+resampled scores are SAFE and H\&S. $^\dagger$Frozen original thresholds.}
 \end{table}
 
 \textbf{H1 fails for SAFE, but the gain is not zero.} SAFE + P leads P by 0.030 of the time
@@ -471,6 +524,8 @@ matched-FPR timer, as FIPER does. On fresh preregistered cohorts SAFE added 0.03
 limit to a per-task timer, Hide-and-Seek 0.071; Stage~2 tests both on a second policy, and
 closed-loop retry.
 
+% References start on page 6 (RSS: up to 5 pages of content and 1 page of references).
+\clearpage
 \bibliographystyle{plainnat}
 \bibliography{refs}
 
