@@ -38,7 +38,10 @@ def write_collection(root, outcomes_by_task, prefix="orig"):
                          "environment_seed": 1000 + 500 * ti + ep, "environment_reset_index": ep, "failed": bool(failed),
                          "video_path": f"videos/{task}-{ep}.mp4"})
     (root / "shard0").mkdir(parents=True, exist_ok=True)
-    (root / "shard0" / "manifest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    # Real manifests carry no task_type; the shard summary records it in its config.
+    (root / "shard0" / "manifest.jsonl").write_text(
+        "".join(json.dumps({k: v for k, v in r.items() if k != "task_type"}) + "\n" for r in rows))
+    (root / "shard0" / "summary.json").write_text(json.dumps({"config": {"task_types": {r["task_name"]: r["task_type"] for r in rows}}}))
     return rows
 
 
@@ -66,6 +69,7 @@ class TestPlan(unittest.TestCase):
             s0 = (root / "pilot" / "tasks_shard0.txt").read_text().split()
             s1 = (root / "pilot" / "tasks_shard1.txt").read_text().split()
             self.assertEqual(sorted(s0 + s1), sorted(limits))
+            self.assertEqual(sum(sel["types"].values()), 10)               # task types resolved from summaries
             with self.assertRaises(SystemExit):
                 call(module, [str(root / "coll"), "--output", str(root / "pilot")])
 

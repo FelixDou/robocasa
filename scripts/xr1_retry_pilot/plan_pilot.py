@@ -17,15 +17,22 @@ N_TASKS, N_FAIL = 10, 10
 
 
 def load(collection):
-    rows = []
+    """Manifest rows plus task types; manifest rows do not carry task_type, the shard
+    summaries record it in their config."""
+    rows, types = [], {}
     for shard in sorted(Path(collection).glob("shard*")):
         m = shard / "manifest.jsonl"
         if m.is_file():
             for line in m.read_text().splitlines():
                 if line.strip():
                     rows.append(json.loads(line))
+        summary = shard / "summary.json"
+        if summary.is_file():
+            types.update(json.loads(summary.read_text()).get("config", {}).get("task_types") or {})
     if not rows:
         raise SystemExit(f"error: no shard manifests under {collection}")
+    for r in rows:
+        r.setdefault("task_type", types.get(r["task_name"]))
     return rows
 
 
@@ -74,7 +81,7 @@ def main():
     (out / "selection.json").write_text(json.dumps(sel, indent=1, sort_keys=True) + "\n")
     for t in tasks:
         s = stats[t]
-        print(f"{t:40s} {s['task_type']:9s} p={s['p']:.2f}  limit={s['limit']:3d}")
+        print(f"{t:40s} {str(s['task_type']):9s} p={s['p']:.2f}  limit={s['limit']:3d}")
     print(f"attempts: {sel['attempts_total']} | shard0 {s0} | shard1 {s1} | types {sel['types']}")
 
 
