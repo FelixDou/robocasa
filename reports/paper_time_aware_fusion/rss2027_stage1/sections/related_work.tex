@@ -23,12 +23,11 @@ feature~\cite{geirhos2020shortcut}, but its causal form is legitimate online evi
 \textbf{Action-space and success-only detectors.}
 STAC~\cite{agia2024sentinel} and VLA-FAIL~\cite{seligmann2026vlafail} compare overlapping
 action chunks, and ActProbe~\cite{huang2026actprobe} feeds chunk consistency and magnitude to
-a task-conditioned LSTM, beating internal-feature baselines on RoboCasa. A task-conditioned recurrent detector can also learn how long each task
-takes, which our timers make explicit and our controls test (Sec.~\ref{sec:method}). FAIL-Detect~\cite{xu2025faildetect} and
+a task-conditioned LSTM, beating internal-feature baselines on RoboCasa. FAIL-Detect~\cite{xu2025faildetect} and
 FIPER~\cite{romer2025fiper} score inputs, outputs or embeddings against successful rollouts
 only. FIPER alarms when two conformal scores \emph{both} exceed their thresholds, which
 suppresses false alarms; in its own pipeline an elapsed-time method matches its accuracy, but
-FIPER warns earlier at a matched false-alarm rate (Sec.~\ref{sec:evidence}). We alarm when \emph{either} crosses, as the two signals catch failures
+FIPER warns earlier at a matched false-alarm rate (Sec.~\ref{sec:results}). We alarm when \emph{either} crosses, as the two signals catch failures
 at different times.
 
 \textbf{World-model verifiers.}

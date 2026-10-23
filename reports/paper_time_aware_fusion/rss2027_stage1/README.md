@@ -302,3 +302,32 @@ How each part was combined:
 - **Tables.** Tables I and II have one-line captions, with notes under the table and labelled row groups. Table II keeps its row order, with explicit headers for test-only intervals and the decision bootstrap. Bold marks the H1 comparisons.
 - **Figures.** New Fig. 2 shows alarm curves of the timer, SAFE + timer, P and SAFE + P on the exploratory cohort. It reproduces Table I's @.75 column (`analysis/lead_curves.py` writes `figures/lead_curves.csv`). In Fig. 1 each lead arrow now has its own label.
 - **Not rebuilt.** The committed `main.pdf` was not rebuilt. Rebuild it with pdflatex (tectonic previews embed Type 1C fonts, and RSS wants Type 1).
+
+## Update 2026-10-23 (b): conference-style restructure
+
+Rewritten to read like SAFE and FIPER (NeurIPS 2025). Claims, numbers, registered hypotheses and Stage 2 author items are unchanged.
+
+- **Structure:** Introduction (hypothesis in prose, Fig. 1 teaser, contribution bullets) → Related Work → Problem Formulation → Method → Hypotheses → Experimental Setup → Results → Stage 2 → Conclusion and Limitations.
+- **Results:** organized under question headings, as in SAFE §6:
+  - How much does elapsed time explain?
+  - Do policy-internal scores warn earlier than P?
+  - Is the extra warning learned elapsed time?
+  - Does it transfer to another policy and benchmark?
+  - When do failures become irreversible?
+- **Vocabulary.** Changed:
+  - "exploratory/prospective cohort" → *validation set*
+  - "confirmatory cohort" → *held-out test set (preregistered)*
+  - "development rollouts" → *training set*
+  - "decision rules" → *criteria*
+  - "co-primary" → *each of the two detectors*
+  - "registered decision bootstrap" → *bootstrap that also resamples the calibration set and refits thresholds*
+
+  Removed: "primary", "secondary", "Amendment" and "endpoint".
+- **Intervals:** kept as 95% bootstrap CIs in brackets. They are asymmetric (e.g. 0.030 [0.007, 0.093]), so ± would misstate them.
+- **Tables:** all use `tabular*` at full column width. Two new tables bring back results cut earlier:
+  - Table III: RLDX-1 offline, report §15.15 and §15.22.
+  - Table IV: FIPER lead at matched FPR, report §15.23b.
+
+  Table II now includes the three learned-timer controls.
+- **Fig. 1 caption:** overridden via `\qualcaption`, so the shared figure file still gives JSAI its old caption.
+- **Page check (tectonic):** with `\notesfalse`, content fills pages 1–5 and the references fill page 6. With notes on, the draft is 7 pages.

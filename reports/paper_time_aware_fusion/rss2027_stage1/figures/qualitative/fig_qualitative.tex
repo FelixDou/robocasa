@@ -3,6 +3,12 @@
 % Frames: put f1.png..f4.png in \qualdir/frames/ (see README.md); grey placeholders until then.
 % Needs: tikz, pgfplots, graphicx. Set \qualdir before \input if the folder is elsewhere.
 \providecommand{\qualdir}{figures/qualitative}
+% Caption: a paper may define \qualcaption before \input to use its own wording (RSS does).
+\providecommand{\qualcaption}{One failed \emph{OpenCabinet} rollout from the prospective test (chosen to
+illustrate; the median SAFE-first lead is smaller). The SAFE score crosses its calibrated
+threshold at $t = 30$ of $H_k = 66$ inferences, 36 inferences before the time limit; the timer
+alarms at $t = 60$, and the per-task timer, which never reads the policy, at $t = 38$. Dashed: the longest of the 9 (out of 10) successful test rollouts of this task that stay
+below the threshold; it ends at $t = 33$.}
 \newcommand{\qualframe}[2]{%
   \begin{minipage}[t]{0.235\columnwidth}\centering
   \IfFileExists{\qualdir/frames/#1.png}%
@@ -43,10 +49,6 @@
   node[pos=0, left, font=\tiny, inner sep=1pt, xshift=-2pt, text=gray!40!black] {timer: 6};
 \end{axis}
 \end{tikzpicture}
-\caption{One failed \emph{OpenCabinet} rollout from the prospective test (chosen to
-illustrate; the median SAFE-first lead is smaller). The SAFE score crosses its calibrated
-threshold at $t = 30$ of $H_k = 66$ inferences, 36 inferences before the time limit; the timer
-alarms at $t = 60$, and the per-task timer, which never reads the policy, at $t = 38$. Dashed: the longest of the 9 (out of 10) successful test rollouts of this task that stay
-below the threshold; it ends at $t = 33$.}
+\caption{\qualcaption}
 \label{fig:qualitative}
 \end{figure}
