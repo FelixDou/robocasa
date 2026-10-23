@@ -227,6 +227,13 @@ found the same:
 - The first-inference, zero-input and shuffle controls gain 0.02 or less.
 - The gain is on atomic tasks (+0.115; composites +0.010).
 
+A paired re-run of FIPER's own code (Section 15.23) reproduces its published
+table. It shows that a timer ties or beats FIPER on accuracy, while FIPER
+over-alarms (FPR 0.35 against 0.09). At matched FPR, FIPER still warns about
+0.15 of the episode earlier. The lead-over-timer test therefore credits FIPER on its
+benchmark and Hide-and-Seek on XR-1, but not SAFE. It separates genuine early-warning
+signals from duration, which accuracy and TWA do not.
+
 ## 1. Scope, labels, and evaluation rules
 
 ### 1.1 Raw SAFE target
@@ -2032,6 +2039,13 @@ The present evidence supports the following hierarchy of conclusions:
     P's 3. The pre-written replication rule is met; the plan had predicted it would not
     be. With P matched to that budget the gain is +0.052 [+0.002, +0.106]. Every control
     gains 0.02 or less, and the gain is atomic (+0.115; composites +0.010).
+27. **Paired FIPER re-run (Section 15.23).** FIPER's own code reproduces its
+    Table 1 within ±0.05. In its own pipeline, a timer has the best balanced
+    accuracy (0.81 against 0.78) at FPR 0.09, against FIPER's 0.35. At matched
+    FPR (post hoc), FIPER warns earlier than the timer by +0.146 of the episode
+    [+0.104, +0.188], significantly on four of five tasks. Like Hide-and-Seek
+    on XR-1 (Section 15.21), and unlike SAFE (Section 15.13), FIPER passes the
+    lead-over-timer test on its own benchmark.
 
 ## 15. Recommended next experiments
 
@@ -4439,6 +4453,134 @@ Inputs:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_safe20_natur
            /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_lead_replication_20261021_123506/rldx_lead_lstm.json
            /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/rldx1_original_safe35_natural50_20260808_203158/filtered_supported20_natural50/
 Worktree:  /gs/fs/tga-shinoda/felid/robocasa_rldx_hs_6f617d51
+```
+
+### 15.23 Paired re-run: FIPER's own code with an elapsed-time method
+
+#### Status
+
+Exploratory. It replaces the published-versus-computed comparison of
+Section 15.18 with a paired one. The plan was committed before FIPER's code was
+cloned or run ([`fiper_paired_plan.md`](fiper_paired_plan.md), commit
+`c520befc`; anchor fix `4e586158`). The matched-FPR extension below is post hoc:
+it was recorded in the same plan after the run and before its analysis (commit
+`92c84427`).
+
+**Code.** FIPER's public repository (github.com/utiasDSL/fiper, MIT licence),
+pinned at `13d79c5c`. Our additions, applied by
+`scripts/published_eval/fiper_paired/setup_fiper.py`, are:
+- a `time` method whose score at step t is t + 1, with no features and no model;
+- the method list restricted to `rnd_oe`, `entropy`, `time` and FIPER's AND/OR
+  combinations;
+- `time` added to FIPER's summary filter;
+- an opt-in per-seed dump of first-alarm indices.
+
+Nothing else in FIPER's pipeline changed: thresholds, windows, quantiles
+0.90–0.99, seeds {0, 1, 2, 42, 43}, metrics, and the selection rule (best TWA
+averaged over tasks and quantiles). The data were §15.18's released rollouts,
+read-only.
+
+**Run.** One GPU, about 6.5 hours, 25 dumps (5 seeds × 5 tasks). Python 3.10
+(`vla_safe` plus an overlay environment adding only `zarr`, which FIPER imports
+for type hints).
+
+#### Results
+
+**Reproduction.** FIPER (`rnd_oe_and_entropy`) matches its published Table 1
+within ±0.05 on all five tasks: average TWA 0.642 against 0.65, accuracy 0.780
+against 0.78, DT 0.306 against 0.30. FIPER's "accuracy" is balanced accuracy.
+
+**Table 15.23a — FIPER's own summary, with `time` as one more method (average
+over tasks; each method at the configuration FIPER's rule selects).** Test FPR
+is computed from the dumps.
+
+| Method | TWA | Accuracy | DT | Test FPR | Lead |
+|---|---:|---:|---:|---:|---:|
+| FIPER (`rnd_oe_and_entropy`) | **0.642** | 0.780 | **0.306** | 0.346 | 0.473 |
+| entropy (ACE) | 0.630 | 0.742 | 0.248 | 0.436 | 0.538 |
+| **elapsed time** | 0.611 | **0.810** | 0.664 | **0.087** | 0.197 |
+| rnd_oe | 0.597 | 0.673 | 0.172 | 0.559 | 0.576 |
+
+**FIPER's rule handicaps `time`.** It selected `tvt_quantile` with window 35
+for `time`, which never alarms on Stacking (DT 1.0). The pure timer (`ct_quantile`,
+window 1) is not what the rule picked.
+
+**Table 15.23b — Lead at matched FPR (post hoc).**
+- The pure timer's curve was extended over quantiles 0.30–0.99
+  (`extend_timer.py`).
+- **Gate passed:** at 0.90–0.99 the recomputed timer reproduces the `time`
+  method's alarms from FIPER's pipeline rollout by rollout, for every task and
+  seed.
+- FIPER's points are at its selected configuration (`tvt_quantile`, window
+  20/50), one per quantile, averaged over seeds.
+- Bootstrap over test rollouts within task and outcome (1,000 replicates).
+
+| Task | FIPER FPR | FIPER lead | Timer lead at that FPR | FIPER − timer (95% CI) | Clamped |
+|---|---:|---:|---:|---|---:|
+| Pretzel (real) | 0.300 | 0.499 | 0.114 | **+0.385** [+0.208, +0.569] | 0/10 |
+| Sorting | 0.430 | 0.386 | 0.215 | **+0.170** [+0.132, +0.208] | 0/10 |
+| PushT | 0.558 | 0.664 | 0.586 | **+0.079** [+0.021, +0.161] | 0/10 |
+| Stacking | 0.377 | 0.470 | 0.395 | **+0.075** [+0.044, +0.108] | 0/10 |
+| PushChair (real) | 0.064 | 0.348 | 0.329* | +0.019 [−0.062, +0.089] | 10/10 |
+| **Average** | | | | **+0.146** [+0.104, +0.188] | |
+
+\*PushChair has only 10 calibration successes, so the timer's FPR cannot go
+below 0.20. All ten points were clamped, and the timer is compared at a *higher*
+FPR than FIPER's. The PushChair difference is therefore a lower bound on
+FIPER's advantage.
+
+Before the extension, the comparison restricted to FIPER's grid clamped all 50
+points. Its printed +0.25 was an upper bound and is superseded by Table 15.23b.
+
+#### Interpretation
+
+- **The duration confound is confirmed in FIPER's own pipeline.**
+  - Under FIPER's code and selection rule, a plain timer has the best balanced
+    accuracy (0.81 against FIPER's 0.78) and stays near its nominal false-alarm
+    level (FPR 0.09).
+  - At the same nominal calibration levels, FIPER flags 35% of successful test
+    rollouts. Its calibration on in-distribution successes does not carry over
+    to a test set that includes out-of-distribution successes.
+  - Judged by accuracy or TWA alone, a timer looks as good as the published
+    method.
+- **Evaluated by lead over a timer at matched FPR, FIPER earns its place.** It
+  warns about 0.15 of the episode earlier than an equally aggressive timer,
+  significantly on four of five tasks. This is the evaluation this paper argues
+  for: it separates a genuine early-warning signal from duration.
+- **The test discriminates between detectors, which is its purpose.**
+  - On XR-1, SAFE adds +0.030 over the per-task timer (Section 15.13, below the
+    margin).
+  - Hide-and-Seek, trained for early separation on the same features, adds
+    +0.071 and passed a preregistered test (Section 15.21).
+  - On FIPER's benchmark, FIPER adds about +0.15 over a matched-FPR timer.
+  - A plausible but untested reading of FIPER's larger margin: its failures are
+    induced by deliberate out-of-distribution shifts (object size, initial pose)
+    that an OOD-based monitor can see early, whereas most XR-1 failures are slow
+    but still recoverable at the timeout (Section 15.17).
+
+#### Limits
+
+- **Post hoc comparison.** The matched-FPR comparison is post hoc; the
+  same-pipeline table (15.23a) and the reproduction check were pre-declared.
+- **Small real-robot test sets.** Pretzel and PushChair have 10 + 10 test
+  rollouts each.
+- **PushChair is a lower bound.** Its result is limited by the timer's
+  minimum FPR.
+- **Environment.** Python 3.10 instead of FIPER's 3.11. The ±0.05 reproduction
+  suggests this did not matter.
+- **One benchmark.** These are FIPER's tasks and its OOD protocol; other
+  published benchmarks were not re-run.
+
+#### Durable artifacts
+
+```text
+Run:       /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/fiper_paired_20261022_180548/
+             fiper_additions.diff, run_fiper.log, hydra/, first_alarms/ (25 dumps),
+             data/results/{complete_results.csv, summaries/summary_00.csv},
+             paired.json, paired.log, extended_timer.json, extended_timer.log
+FIPER:     /gs/fs/tga-shinoda/felid/external/fiper_13d79c5c (pinned 13d79c5c, plus our additions)
+Worktree:  /gs/fs/tga-shinoda/felid/robocasa_fiper_paired_c520befc (at 92c84427)
+Env:       /gs/bs/tga-shinoda/felid/envs/fiper_overlay (vla_safe + zarr 2.18.3)
 ```
 
 ## 16. Limitations
