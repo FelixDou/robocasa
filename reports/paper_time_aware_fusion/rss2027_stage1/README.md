@@ -331,3 +331,23 @@ Rewritten to read like SAFE and FIPER (NeurIPS 2025). Claims, numbers, registere
   Table II now includes the three learned-timer controls.
 - **Fig. 1 caption:** overridden via `\qualcaption`, so the shared figure file still gives JSAI its old caption.
 - **Page check (tectonic):** with `\notesfalse`, content fills pages 1–5 and the references fill page 6. With notes on, the draft is 7 pages.
+
+## Update 2026-10-24: Hide-and-Seek-style tables
+
+- **Table I (new): standalone detection on the validation set.** Every detector is shown on its own, and the time baselines are rows of their own.
+  - Format follows Hide-and-Seek: rows grouped as OOD / Class. / Time with rotated labels, venue tags, ↑/↓ arrows, **bold** best and underline second best, and P highlighted as ours.
+  - Metrics: TPR, FPR, bACC, TWA, DT.
+  - TWA = ½(ℓ̄ + 1 − FPR), which equals FIPER's and Hide-and-Seek's definition with misses at 0. It is computed from the report's DT and FPR counts; the SAFE, time-risk and timer rows use exact values from `analysis/lead_time.py`.
+  - wACC equals bACC on our balanced sets, so it has no column.
+  - Source for the standalone numbers: report §15.10a (OOD, SAFE, time risk) and §15.20a (ActProbe, Hide-and-Seek).
+- **Table II (full width): gain over P on three sets.** XR-1 validation, XR-1 held-out (preregistered) and RLDX-1 (offline). The RLDX-1 columns replace the old separate RLDX-1 table.
+  - Validation gains for the timer, time-risk and SAFE rows come from the new `analysis/gain_vs_p.py` (writes `gain_vs_p.json`).
+  - The other numbers come from report §15.13–15.22.
+- **Fig. 2 removed.** The alarm curves are covered by the tables.
+- **Uncertainty.** We report bootstrap CIs, not ± std over seeds. Learned scores already average 3 training seeds, and the timers have no seeds. Per-seed std would need the per-seed score trajectories, which are on TSUBAME.
+- **References.** Hide-and-Seek is NeurIPS 2026 (per the author). Added Liu et al. CoRL'24 (PCA-KMeans) and He et al. ICML'24 (RND), the references SAFE and Hide-and-Seek use for these baselines.
+- **Page check (tectonic).** With `\notesfalse`: 6 pages, content to the bottom of page 5. With notes on: 7.
+- **Per-seed std (pending cluster run).** `scripts/xr1_lead_time/per_seed_detection.py` and its runbook `docs/xr1_per_seed_detection.md` compute mean ± std over the 3 training seeds for SAFE-MLP, Hide-and-Seek and ActProbe. Each run is gated on reproducing its Table I row.
+  - Local check on SAFE: the seed-averaged row reproduces TPR 0.566 / FPR 0.039. Per seed: bACC 0.741 ± 0.010, TWA 0.571 ± 0.005, below the 3-seed ensemble shown in Table I (0.763 / 0.575).
+  - Mahalanobis, k-NN and the timers have no training randomness.
+  - PCA-KMeans and RND were trained with one seed (§15.10).
