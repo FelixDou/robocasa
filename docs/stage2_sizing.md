@@ -709,3 +709,218 @@ the E2 FPR rule / under the A1 rule.
   held-out pool (8 successes and 5 failures per task), and inference is conditional on the
   20 tasks. With tasks resampled, power drops sharply for SAFE and for Hide-and-Seek at
   0.052. The task-level CI is reported without a power claim, as before.
+
+## E2 rule under null fusions (2026-10-23)
+
+**Summary for the protocol** (filled from the run; until then, every value is pending).
+Per-detector type I error is the share of null studies that pass; power is per co-primary.
+All values are at n = 20 per class per task unless stated, at 97.5%, within task.
+
+| Rule | Type I, noise + P | Type I, resampled SAFE + P | SAFE + P power (γ = 0.034) | Hide-and-Seek + P power (γ = 0.052) | Smallest n with both ≥ 0.8 |
+|---|---:|---:|---:|---:|---:|
+| (i) current E2 rule | pending | pending | pending | pending | pending |
+| (ii) (i) + CI > 0 against P tuned to the fused FPR | pending | pending | pending | pending | pending |
+| (iii) (i) + Monte Carlo null test (K = 39 per null) | pending | pending | pending | pending | pending |
+
+**Recommendation:** pending (the pre-stated rule is below).
+
+**Why.** The mock review (concern 2, `claude/rss-stage1-mock-review`) argues that E2's rule
+can be passed with false-alarm budget alone:
+- the within-task CI is narrow (SD 0.007 at n = 20);
+- the binomial FPR rule admits up to 39 of 400 false alarms;
+- on RLDX-1, two of 20 noise + P draws gained +0.038 and +0.049, at FPR 0.08 (§15.15).
+
+It asks for the rule's type I error under null fusions next to its power. It also asks for
+the null control to become part of the decision.
+
+**Status.** This is exploratory sizing on opened cohorts, like everything above. This
+section, the code and the tests were committed before the script was run on real data.
+
+### Method
+
+**Code.** `scripts/xr1_lead_time/e2_null_rules.py`, with tests in
+`tests/test_e2_null_rules.py`.
+
+**Studies.** At n = 10, 20 and 30 per class per task, 2,000 within-task studies each. These
+are exactly the studies of `e2_coprimary_sizing.py`: the same held-out pool (8 successes and
+5 failures per task), seed, cells and draws. The test checks this on synthetic data. On the
+cluster, the run stops if SAFE's and Hide-and-Seek's mean gain and SD at each n differ from
+`e2_coprimary.json`.
+
+In every study, on the same drawn rollouts, P is fitted once. Four detectors are then fused
+with P and fitted exactly like SAFE + P (`confirm_lead.fit_fast`):
+- **SAFE + P** and **Hide-and-Seek + P**, the co-primaries;
+- **(a) noise + P:** the running maximum of i.i.d. N(0, 1), a fresh draw for every simulated
+  rollout;
+- **(b) within-task resampled SAFE + P:** for each seed, normalized SAFE values drawn with
+  replacement from all held-out inferences of the same task, outcome ignored. Each seed's
+  running maximum is taken, then the mean over the three seeds. This is the construction of
+  E1's H2 null.
+
+The nulls come from a separate random stream, so they do not disturb the shared draws.
+
+**Rule components, for a detector with gain g against P in a study.**
+- **Decision CI > 0 at 97.5% (within task).** Approximated as in E2 and the co-primary
+  sizing: g − hw > 0, where hw is the median minus the 1.25th percentile of that detector's
+  own sampling distribution at that n. For a null, hw comes from the null's own
+  distribution, as a study's bootstrap would.
+- **E2 FPR rule.** The false alarms must not reject "true FPR ≤ 0.075" in a one-sided exact
+  binomial test at level 0.05. That allows at most 21, 39 and 56 false alarms of 200, 400 and
+  600 test successes.
+- **Tuned-P CI, rule (ii).** This is Amendment 1's registered secondary, made within task:
+  - on the study's test cohort, P's margin is chosen from confirm_lead's grid
+    (−0.5 to 1.0 in steps of 0.0025);
+  - the choice maximizes mean lead with no more false alarms than the fused detector has;
+  - the gain against that tuned P gets a test-only bootstrap with thresholds fixed:
+    failures resampled within task, 1,000 replicates, 97.5% percentile interval;
+  - it must have a lower bound above 0.
+- **Monte Carlo null test, rule (iii).**
+  - In each study, K = 39 fresh draws of each null are fused with P and refitted on the same
+    rollouts.
+  - The detector passes if p = (1 + #{null gains ≥ g})/(K + 1) ≤ 0.05 for **both** nulls,
+    i.e. if g beats at least 38 of the 39 draws of each.
+  - Written this way, rule (iii)'s type I error is at most 0.05 under either null by
+    exchangeability. A plain "95th percentile of 20 draws" would allow about 0.09.
+  - Ties count against the detector. A fit that falls back to the timer gives a gain of
+    exactly 0, which ties with every reference that also falls back, so the test is
+    conservative.
+  - Checked on synthetic data before the run: over 400 studies with K = 19, a null passed
+    the test against its own null in 0.028 (noise) and 0.048 (resampled) of studies.
+
+**Rules.**
+- **(i)** CI > 0 and the E2 FPR rule (the current rule).
+- **(ii)** (i) and the tuned-P CI > 0.
+- **(iii)** (i) and the Monte Carlo null test.
+
+**Outputs.**
+- **Type I error** of each rule under each null: the share of null studies passing it, with
+  its Monte Carlo SE (about 0.005 at 0.05). Each component's pass rate is reported as well.
+- **Co-primary power** of each rule:
+  - at the plug-in gains;
+  - at SAFE γ = 0.034 and Hide-and-Seek γ = 0.083, 0.052 and 0.05, imposed by shift.
+
+  Under a shift, the decision-CI and tuned-P bounds move by the same amount, and the null
+  reference gains do not move. The power that both co-primaries pass is given at
+  (0.034, 0.083) and (0.034, 0.052).
+- **Nested check of rule (i) for the nulls.** At n = 10, 20 and 30, 100 studies per null get
+  a real inner decision bootstrap (200 replicates, rollouts within task and class, refit).
+  Its rule (i) pass rate is compared with the approximation on the same studies.
+
+**Type I error as reported** is per detector. A 97.5% two-sided CI is a one-sided test at
+0.0125. With two co-primaries, the family-wise error is at most the sum of the two
+per-detector rates.
+
+### Recommendation rule, fixed before running
+
+1. A rule is **eligible** if its type I error is at most 0.05 under both nulls at n = 10, 20
+   and 30 (point estimates).
+   - If the nested check gives rule (i) a type I error on the other side of 0.05 from the
+     approximation at any n, the nested value decides whether rule (i) is eligible.
+   - Rules (ii) and (iii) only add conditions to (i), so they cannot be less strict than
+     their tuned-CI or Monte Carlo component alone.
+2. Among eligible rules, **recommend** the one with the highest power that both co-primaries
+   pass at the planning gains (SAFE 0.034, Hide-and-Seek 0.052) at n = 20. On a tie, prefer
+   the simpler rule, in the order (i), (ii), (iii).
+3. Under that rule, report the **smallest n** in {10, 20, 30} at which SAFE (0.034) and
+   Hide-and-Seek (0.052) each have power at least 0.8. If none does, say so and give the
+   power at n = 30.
+
+Hide-and-Seek's planning gain is 0.052, its gain against P at matched false alarms (§15.22),
+not 0.083, its opened point estimate. The script applies this rule mechanically and prints
+the result.
+
+### Expectations, written before running
+
+- **Checks.**
+  - Both replication gains reproduce (SAFE +0.0342, Hide-and-Seek +0.0834).
+  - The co-primary draws match `e2_coprimary.json`.
+- **Nulls fused with P.**
+  - The mean null gain is small, between 0 and +0.01, like the replication's +0.009 for
+    noise.
+  - The E2 FPR rule passes in nearly every null study: calibration and test come from one
+    pool here, so the fused test FPR stays near 0.05, far below the 9.75% the rule allows.
+- **Rule (i).** Its type I error is governed by the null's mean gain relative to its own
+  97.5% half-width. We expect it to exceed 0.05 for at least one null at n = 20 or 30. If
+  the null mean is positive, it should grow with n, because the half-width shrinks while
+  the mean does not. We do not predict its size.
+- **Rule (ii).**
+  - Type I at most about 0.02 under both nulls: a tuned timer with the same number of false
+    alarms should beat randomly placed alarms.
+  - SAFE's RLDX-1 gain came at an unchanged FPR (§15.15), so its tuned-P gain should stay
+    near its gain, with power ≥ 0.8 at n = 20.
+  - Hide-and-Seek at plug-in should pass easily, since its matched-FPR gain is 0.052. Shifted
+    to γ = 0.052, its tuned-P gain is near 0.02, so its power there is uncertain.
+- **Rule (iii).**
+  - Type I at most 0.05 by construction, and lower in practice, because the CI and FPR
+    conditions also apply.
+  - The bar (the second-largest of 39 null gains) should lie near the null mean plus about
+    two null SDs, roughly 0.015–0.03.
+  - SAFE at 0.034 should pass in most studies from n = 20, and less often at n = 10.
+- **Recommendation.** One of (ii) or (iii). We do not predict which.
+
+### Limits
+
+- **One shared, small pool.** Calibration and test samples are drawn from the same held-out
+  pool (5 failures and 8 successes per task). Cohorts are therefore exchangeable here, and
+  the fused detector can spend extra false-alarm budget on the test cohort only through
+  sampling noise.
+  - A real Stage 2 calibration and test cohort can differ. On XR-1 the test FPR ran at
+    0.058–0.061 against the 0.05 target.
+  - That would raise the type I error of rule (i), which has no paired control, and leave
+    rules (ii) and (iii) largely unaffected, since both compare on the same test cohort.
+  - These type I estimates are therefore lower bounds for rule (i).
+- **Tail resampling.** Resampling cannot create new extreme scores. With only 5 failures per
+  task, the co-primaries' sampling SD is likely understated, as in the earlier sections.
+- **Inference is conditional on the 20 tasks.**
+- **The decision CI is approximated**, and checked by nested bootstraps for rule (i) under
+  the nulls only.
+- **The shift assumes the deficit against a tuned P is unchanged** when the true gain is
+  lower.
+- **The nulls fix the scope of "type I error".** Noise and within-task resampled SAFE carry
+  no information about which rollout fails. A detector with weak but real signal is not a
+  null.
+
+### Cluster commands
+
+CPU only, from a pinned detached worktree, about 30–60 minutes with 8 workers. Outputs go
+under `/gs/bs`. `E2N_SHA` is the full SHA of the pushed commit that contains this section.
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+source $STORAGE_BS/robocasa_logs/eval/rldx1_hide_and_seek_20261023_000418/paths.env
+export E2CO_JSON=$(ls -d $STORAGE_BS/robocasa_checkpoints/safe/e2_coprimary_sizing_*/e2_coprimary.json | sort | tail -n 1)
+echo "co-primary run: $E2CO_JSON"
+export E2N_SHA=<full SHA>
+export E2N_REPO=$PROJECT_FS/robocasa_e2null_${E2N_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin
+test -e $E2N_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $E2N_REPO $E2N_SHA
+test "$(git -C $E2N_REPO rev-parse HEAD)" = "$E2N_SHA" && echo "worktree OK" || echo "STOP: wrong HEAD"
+export E2N_TAG=e2_null_rules_$(date +%Y%m%d_%H%M%S)
+export E2N_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/$E2N_TAG E2N_LOG=$STORAGE_BS/robocasa_logs/eval/$E2N_TAG
+mkdir -p $E2N_ROOT $E2N_LOG
+sha256sum $RLDX_CAL/lstm_seed{0,1,2}/normalized_scores.jsonl $RLDXHS_ROOT/scores/{train,calibration,test}_predictions.jsonl \
+  $RLDX_LEAD_OUT/rldx_lead_lstm.json $RLDXHS_ROOT/rldx_hide_and_seek.json $E2CO_JSON | tee $E2N_LOG/frozen_inputs.sha256
+cd $E2N_REPO
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_e2_null_rules tests.test_e2_coprimary_sizing \
+  tests.test_stage2_sizing 2>&1 | grep -E "^(Ran|OK|FAILED)"
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 nohup nice -n 10 \
+  "$SAFE_PY" -I -u scripts/xr1_lead_time/e2_null_rules.py --calibration-dir $RLDX_CAL \
+  --hs-scores-dir $RLDXHS_ROOT/scores --replication-json $RLDX_LEAD_OUT/rldx_lead_lstm.json \
+  --hs-result $RLDXHS_ROOT/rldx_hide_and_seek.json --coprimary-json $E2CO_JSON --workers 8 \
+  --output $E2N_ROOT/e2_null_rules.json > $E2N_LOG/e2_null_rules.log 2>&1 &
+echo "PID $! on $(hostname); log $E2N_LOG/e2_null_rules.log"
+```
+
+Check progress with `tail -n 3 $E2N_LOG/e2_null_rules.log`: the two check lines print within
+a minute, and the tables print at the end. When the process has exited, paste back the
+output of:
+
+```bash
+cat $E2N_LOG/e2_null_rules.log; sha256sum -c $E2N_LOG/frozen_inputs.sha256
+```
+
+Stop conditions: a replication or co-primary-draw mismatch (the script exits with `STOP`),
+a failed checksum, or an error. Do not edit inputs to make the run pass.
