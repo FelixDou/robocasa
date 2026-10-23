@@ -3478,7 +3478,7 @@ bootstrap.
 #### Durable artifacts
 
 ```text
-Output:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_lead_replication_<timestamp>/
+Output:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_lead_replication_20261021_123506/
              rldx_lead_lstm.json, rldx_lead_indep.json, *.log, inputs_sha256_before.txt
 Inputs:    /gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530/calibration/{lstm,indep}/
 Worktree:  /gs/fs/tga-shinoda/felid/robocasa_rldx_lead_67008c04
