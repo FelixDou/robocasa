@@ -20,25 +20,24 @@ feature~\cite{geirhos2020shortcut}, but its causal form is legitimate online evi
 \textbf{Action-space and success-only detectors.}
 STAC~\cite{agia2024sentinel} and VLA-FAIL~\cite{seligmann2026vlafail} compare overlapping
 action chunks, and ActProbe~\cite{huang2026actprobe} feeds chunk consistency and magnitude to
-a task-conditioned LSTM, beating internal-feature baselines on RoboCasa. Our policy executes
-each chunk in full, so overlap signals are undefined. A task-conditioned recurrent detector can also learn how long each task
-takes, which our timers make explicit. FAIL-Detect~\cite{xu2025faildetect} and
+a task-conditioned LSTM, beating internal-feature baselines on RoboCasa. A task-conditioned recurrent detector can also learn how long each task
+takes, which our timers make explicit and our controls test (Sec.~\ref{sec:method}). FAIL-Detect~\cite{xu2025faildetect} and
 FIPER~\cite{romer2025fiper} score inputs, outputs or embeddings against successful rollouts
 only. FIPER alarms when two conformal scores \emph{both} exceed their thresholds, which
 suppresses false alarms; in its own pipeline an elapsed-time method matches its accuracy, but
-FIPER warns earlier at a matched false-alarm rate (Sec.~\ref{sec:evidence}). We alarm when \emph{either} crosses, because the policy score and
-the timer catch failures at different times, and calibrate the pair jointly.
+FIPER warns earlier at a matched false-alarm rate (Sec.~\ref{sec:evidence}). We alarm when \emph{either} crosses, as the two signals catch failures
+at different times.
 
 \textbf{World-model verifiers and VLM monitors.}
 CheckVLA~\cite{liu2026checkvla} is the closest work on our benchmark. It verifies each action
 chunk with an action-conditioned world model on RoboCasa365, at a conformal 5\% rate of
-unnecessary interventions, and repairs it with the same VLA. Foresight~\cite{wang2026foresight} uses world-model latents. Neither compares against
-elapsed time; either could be fused with a timer. LLM and VLM
+unnecessary interventions, and repairs it with the same VLA. Foresight~\cite{wang2026foresight} uses world-model latents; neither compares against
+elapsed time. LLM and VLM
 monitors~\cite{agia2024sentinel,liu2023reflect,sinha2024realtime,zhou2025codeasmonitor,duan2025aha}
 are slower and complementary.
 
 \textbf{Time, calibration and intervention.}
-VLA confidence drifts over a task~\cite{zollo2026calibration}. Our time-risk baseline is a per-task
+VLA confidence drifts over a task~\cite{zollo2026calibration}; our time-risk baseline is a per-task
 survival-style estimate~\cite{kaplan1958,cox1972}, and lead time at a fixed false-alarm
 budget is the accuracy--earliness trade-off of early time-series
 classification~\cite{xing2012early}. Split-conformal thresholds give finite-sample

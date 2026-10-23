@@ -232,3 +232,64 @@ Sources: `mock_review.md` on `origin/claude/rss-stage1-mock-review`, and `docs/s
 Also still open: the two `% CHECK` comments in `refs.bib` (Foresight author order, RoboCasa365 authors), and the qualitative figure's frames, which stay grey placeholders until the frame images exist.
 
 **Not yet updated (outside this brief).** §15.21 (Hide-and-Seek + P passed a preregistered test on XR-1, +0.071) appears only as E2 motivation. The Preliminary Evidence and Confirmatory sections, the contributions and the FIPER paragraph ("finds SAFE's gain on XR-1 small") still present SAFE as the only learned monitor tested.
+
+## Update 2026-10-22: Hide-and-Seek and Amendment 2
+
+Numbers are from `docs/safe_robocasa_experiment_report.md` §15.20 (exploratory, August cohort) and §15.21 (preregistered Amendment 2, E1 cohorts).
+
+- **Framing.** Elapsed time explains how well monitors *separate* failures. Lead over a per-task timer shows which ones also warn *earlier*. SAFE adds 0.030 (below the margin). Hide-and-Seek, an LSTM trained for early separation on the same features, adds 0.071 [0.022, 0.157] and passes H1 and H2.
+- **Edits:**
+  - Abstract, contributions, hypotheses note, conclusion: new framing and the Amendment 2 result.
+  - Method: new paragraph "Sequence score and controls" (zero-input, same-task shuffle and first-inference controls; ActProbe reduces to chunk magnitude).
+  - Exploratory evidence: new paragraph "A sequence detector does warn earlier".
+  - Table II: added the three controls and Hide-and-Seek + P.
+  - Sec. VII: new paragraph "Amendment 2", including that Hide-and-Seek − SAFE is not significant and that the decision bootstrap skews upward.
+  - Limitations: Hide-and-Seek's selection and the registration timing.
+  - Related work: one clause pointing to the controls.
+- **Cut for the page limit:** the cumulative-lead figure (old Fig. 2), the within-task ROC-AUC sentence, and shorter RLDX-1, FIPER, duration and atomic/composite paragraphs.
+- **E2 (decided 2026-10-23).** SAFE + P and Hide-and-Seek + P are co-primary on RLDX-1, each with a 97.5% decision CI above zero (Bonferroni over the two), and Hide-and-Seek − first-inference control is the declared secondary. H3 was rewritten to match, and the E2 todo was removed. The power at 97.5% is now filled in from `docs/stage2_sizing.md` (Results, 2026-10-23): at n = 20, 1.00 for SAFE and ≥ 0.98 for Hide-and-Seek under the E2 FPR rule, and 0.89–0.92 under H1's fixed limit.
+- **Pages (tectonic preview).** Content still ends on page 5. The references already ran to page 7 before this update (limit 5 + 1). Check with pdflatex and the official template, and trim the bibliography if needed.
+
+## Merge 2026-10-23: Hide-and-Seek line + paired-FIPER/Stage 2 line
+
+I merged `claude/time-aware-fusion-paper` (up to `dea166db`, the Hide-and-Seek commits) into the drafts branch at `f5fb27eb`. The author asked to keep:
+- **from the Hide-and-Seek side:** the evidence, abstract and contributions;
+- **from the drafts side:** the paired-FIPER text, the Stage 2 protocol, H3/H4 and the Limitations;
+- **from the Hide-and-Seek side, inside the drafts side's E2:** the E2 power numbers.
+
+How each part was combined:
+- **Kept from the Hide-and-Seek side:**
+  - the abstract and contributions;
+  - the Method paragraph on the sequence score and its controls (tightened);
+  - the exploratory paragraph on Hide-and-Seek on XR-1;
+  - the RLDX-1 paragraph with Hide-and-Seek;
+  - Table III with the Amendment 2 rows, and the Amendment 2 paragraph (two sentences tightened);
+  - the conclusion (shortened);
+  - the removal of the lead-curve figure.
+- **Kept from the drafts side:**
+  - the paired-FIPER paragraph, now ending "credits FIPER, and Hide-and-Seek on XR-1, but finds SAFE's gain small";
+  - H3/H4, and E2/E3/E4–E5 as protocol;
+  - Limitations, with one sentence added: Hide-and-Seek was chosen as the better of two supervised baselines on the opened cohort, and registered on cohorts already opened for SAFE.
+- **E2 now also carries:**
+  - the co-primary power without the matched-FPR condition (1.00 for SAFE; ≥ 0.98 for Hide-and-Seek, even at 0.052);
+  - the task-level power (0.33, 0.34);
+  - power under H1's fixed limit (0.89–0.92), moved to the FPR-rule paragraph;
+  - the Hide-and-Seek side's declared secondary (Hide-and-Seek + P vs first-inference control + P).
+- **Cuts to stay within 5 + 1.**
+  - Scope paragraph.
+  - The point-of-no-return illustration is reduced to "P alarmed after the point of no return on all 10".
+  - Related Work: the CheckVLA "could be fused" clause and the chunk-overlap sentence (the Method paragraph covers ActProbe).
+- **Page check.** With `\notesfalse` the build is 6 pages, and it has no undefined references.
+
+**Open items now:**
+
+| Line | Kind | Text |
+|---|---|---|
+| 425 | `\pending` | checkpoint hashes |
+| 428 | `\todo` | matched-FPR condition |
+| 432 | `\pending` | type I error, power, final n |
+| 436 | `\pending` | FPR rule |
+| 440 | `\pending` | E3 policy |
+| 443 | `\todo` | E3 primary contrast |
+| 448 | `\pending` | pilot result, final size |
+| 455 | `\todo` | E5 registered or exploratory |
