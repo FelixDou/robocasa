@@ -18,6 +18,11 @@ Implemented, with the paper each one follows:
   half of FIPER; also a FAIL-Detect score).
 * ``hide_and_seek``: LSTM on features with inter-trajectory peak margin and
   intra-trajectory onset losses (Park et al. 2026).
+* ``hide_and_seek_zero``, ``hide_and_seek_task_shuffle`` and
+  ``hide_and_seek_first``: controls with the same LSTM and training, on all-zero
+  inputs (elapsed time only), on same-task, same-step features of other
+  training rollouts, and on the rollout's own first-inference features repeated
+  (episode-difficulty prior).
 
 Sampling-based scores (full STAC, FIPER action entropy, Tri-Info, ACE) need
 several action samples per inference and are not recoverable from recorded
@@ -413,7 +418,7 @@ class HideAndSeekDetector(_SequenceDetector):
         self.intra_weight = float(intra_weight)
         self.pca_components = pca_components
 
-    def fit(self, rollouts):
+    def _fit_pca(self, rollouts):
         self.pca_ = None
         if self.pca_components is not None:
             from sklearn.decomposition import PCA
@@ -421,6 +426,9 @@ class HideAndSeekDetector(_SequenceDetector):
             rows = _stack_features(rollouts, 50000, self.seed)
             components = int(min(self.pca_components, rows.shape[0] - 1, rows.shape[1]))
             self.pca_ = PCA(n_components=components, random_state=self.seed).fit(rows)
+
+    def fit(self, rollouts):
+        self._fit_pca(rollouts)
         return super().fit(rollouts)
 
     def _inputs(self, rollout):
@@ -529,6 +537,105 @@ class RNDDetector(_TorchDetector):
                 "pca_components": self.pca_components}
 
 
+class HideAndSeekZeroDetector(HideAndSeekDetector):
+    """Control: Hide-and-Seek trained and scored on all-zero inputs.
+
+    Same LSTM, losses and training. The only information left is the number of
+    inferences so far, so the score shows what the LSTM can learn from elapsed
+    time alone (plus the per-task score normalization applied by the runner).
+    """
+
+    name = "hide_and_seek_zero"
+
+    def fit(self, rollouts):
+        self.pca_ = None
+        return _SequenceDetector.fit(self, rollouts)
+
+    def _inputs(self, rollout):
+        return np.zeros((len(rollout["features"]), 1))
+
+    def config(self):
+        return {**super().config(), "control": "zero_inputs"}
+
+
+def _stable_id(text):
+    import zlib
+
+    return zlib.crc32(str(text).encode("utf-8"))
+
+
+class HideAndSeekTaskShuffleDetector(HideAndSeekDetector):
+    """Control: features of a random same-task training rollout at the same step.
+
+    Inference ``j`` of any rollout gets the (PCA-reduced) features of inference
+    ``j`` of a training rollout of the same task, drawn at random and never the
+    rollout itself. Task identity, elapsed time and the features typical of that
+    task at that time are kept; everything specific to the scored rollout is
+    removed. Draws are seeded by the detector seed and the rollout ID, so a
+    rollout gets the same inputs in ``fit`` and ``score``.
+    """
+
+    name = "hide_and_seek_task_shuffle"
+
+    def fit(self, rollouts):
+        self._fit_pca(rollouts)
+        pool = {}
+        for rollout in rollouts:
+            pool.setdefault(str(rollout["task_name"]), []).append(
+                (str(rollout["rollout_id"]), HideAndSeekDetector._inputs(self, rollout))
+            )
+        self.pool_ = {
+            task: (
+                [rid for rid, _ in items],
+                [rows for _, rows in items],
+                np.asarray([len(rows) for _, rows in items]),
+            )
+            for task, items in pool.items()
+        }
+        return _SequenceDetector.fit(self, rollouts)
+
+    def _inputs(self, rollout):
+        task = str(rollout["task_name"])
+        if task not in self.pool_:
+            raise ValueError(f"{self.name}: no training rollouts for task {task}")
+        ids, rows, lengths = self.pool_[task]
+        own = str(rollout["rollout_id"])
+        rng = np.random.default_rng([self.seed, _stable_id(own)])
+        out = np.empty((len(rollout["features"]), rows[0].shape[1]))
+        for step in range(len(out)):
+            # Training rollouts still running at this step; past the longest one,
+            # fall back to the last step any of them reached.
+            index = min(step, int(lengths.max()) - 1)
+            donors = np.flatnonzero(lengths > index)
+            others = [d for d in donors if ids[d] != own]
+            donor = int(rng.choice(others if others else donors))
+            out[step] = rows[donor][index]
+        return out
+
+    def config(self):
+        return {**super().config(), "control": "same_task_same_step_shuffle"}
+
+
+class HideAndSeekFirstDetector(HideAndSeekDetector):
+    """Control: every inference gets the rollout's own first-inference features.
+
+    Same LSTM, PCA and training as Hide-and-Seek. The episode's initial
+    appearance (scene, objects, task) and the elapsed time are kept; everything
+    that happens after the first inference is removed. Hide-and-Seek's gain over
+    this control is warning that develops during the rollout, as opposed to an
+    episode-difficulty prior visible from the start.
+    """
+
+    name = "hide_and_seek_first"
+
+    def _inputs(self, rollout):
+        rows = HideAndSeekDetector._inputs(self, rollout)
+        return np.repeat(rows[:1], len(rows), axis=0)
+
+    def config(self):
+        return {**super().config(), "control": "first_inference_repeated"}
+
+
 DETECTOR_REGISTRY = {
     detector.name: detector
     for detector in (
@@ -539,6 +646,9 @@ DETECTOR_REGISTRY = {
         PCAKMeansDetector,
         RNDDetector,
         HideAndSeekDetector,
+        HideAndSeekZeroDetector,
+        HideAndSeekTaskShuffleDetector,
+        HideAndSeekFirstDetector,
     )
 }
 
