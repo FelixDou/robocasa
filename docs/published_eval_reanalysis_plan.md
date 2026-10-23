@@ -117,4 +117,7 @@ decided.**
   - average 0.65 / 0.78 / 0.30.
 
 **SAFE archive sizes.** `pi0fast_droid_0510_all.zip` is 25 GB and `openvla_widowx.zip` is
-1.3 GB. Neither is downloaded yet; each needs a separate approval.
+1.3 GB. Each needs a separate approval. Both were later downloaded and checked: the Franka
+archive in report Section 15.19, the WidowX archive (approved 2026-10-23) in Section 15.25.
+For the WidowX archive only the per-step CSVs were read, inside the zip; no pickle was
+loaded.

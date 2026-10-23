@@ -195,7 +195,8 @@ its accuracy but alarms about twice as late: the published benchmark has the
 same duration confound, and earliness is where a detector must earn its place.
 SAFE's real-robot release (Section 15.19) is the boundary case. Every rollout
 of a task stops at the same T regardless of outcome, so length carries no
-information there.
+information there. Its second real-robot release, OpenVLA on a WidowX
+(Section 15.25), is the same: every episode logs 50 steps.
 
 One published supervised baseline breaks the pattern so far (Section 15.20).
 Hide-and-Seek, an LSTM trained with failure labels on SAFE's features, adds
@@ -2057,6 +2058,12 @@ The present evidence supports the following hierarchy of conclusions:
     originally failed scene succeeded 24 of 98 times (0.245), about half the task success
     rate (0.486), on every task. E3's retry benefit and sample size must be recomputed, and
     reset against continuation is the natural decisive contrast.
+29. **SAFE's second real-robot release (Section 15.25).** OpenVLA on a WidowX: all 532
+    episodes (244 successes, 288 failures, 8 tasks, 19 sessions) log exactly 50 steps, so
+    length carries no outcome information, as on the Franka release. SAFE releases no
+    LIBERO rollouts. On LIBERO, where successes stop at completion, SAFE's own paper notes
+    that an elapsed-time score would be perfect and truncates rollouts to the task's
+    shortest length.
 
 ## 15. Recommended next experiments
 
@@ -4675,6 +4682,96 @@ Root:      /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_retry_pilot_20261
 Logs:      /gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_retry_pilot_20261023_103019/
              server_*.log, collection_shard*.log, analyze.log (gate failure), analyze_post_hoc.log
 Worktree:  /gs/fs/tga-shinoda/felid/robocasa_retry_pilot_c03d6d10 (at 9fd9925a)
+```
+
+### 15.25 Published evaluation, boundary case: SAFE's WidowX rollouts are also fixed-length
+
+#### Status
+
+Exploratory check of data released by another group, run 2026-10-23. Plan:
+[`published_eval_reanalysis_plan.md`](published_eval_reanalysis_plan.md), Q2, which listed
+this archive as lower priority. No expectation was written for it beyond the Franka one
+(fixed length within each task).
+
+**What SAFE releases.** The SAFE repository (github.com/vla-safe/SAFE) links two datasets,
+both from real robots:
+- π0-FAST on a Franka (Section 15.19);
+- OpenVLA on a WidowX, `openvla_widowx.zip` (this section).
+
+It releases no LIBERO or SimplerEnv rollouts, only code to generate them (forks of openpi,
+openvla and open-pi-zero).
+
+**Data.** `openvla_widowx.zip`, Google Drive file `1EwaccasZjnlM9L6SEYyWqTd7d6-BR9zp`:
+- 1,408,209,350 bytes, sha256 `4106807a7e9e70ca0b11757d56029c1cd06c57aa95199443de62d366fdece912`;
+- 1,616 entries (1.74 GB uncompressed), with no unsafe paths and no symlinks;
+- one folder `openvla_widowx/<session>/` per session, 19 sessions over 8 tasks;
+- per episode, three files `task_<name>--ep<n>--succ<n>.{csv,pkl,mp4}`, 532 episodes.
+
+Episode numbers restart in each session (207 file names repeat across folders), but no two
+CSVs have identical content. Two folder names (`put_the_carrot_on_plate_1`,
+`task_put_the_carrot_on_plate_1`) are distinct sessions.
+
+**What was read.**
+- Only the CSVs, read as text inside the zip. Nothing was extracted.
+- Each CSV row is one policy step: `action/timestep` followed by per-step action-token
+  entropy and probability statistics.
+- The outcome is `succ<n>` in the file name.
+- The `.pkl` files (per-episode features, 1.53 GB) and the videos were not opened.
+
+#### Results
+
+Every one of the 532 episodes has exactly 50 rows (timestep 0 to 49): every success, every
+failure, in every session.
+
+| | Episodes | Length |
+|---|---:|---|
+| Successes | 244 | 50 steps, all |
+| Failures | 288 | 50 steps, all |
+
+Per session (successes / failures):
+
+| Task | Sessions | Successes | Failures |
+|---|---:|---:|---:|
+| put the carrot on plate | 3 | 30 | 33 |
+| lift AAA battery | 2 | 31 | 31 |
+| lift blue cup | 1 | 30 | 30 |
+| lift eggplant | 2 | 30 | 30 |
+| lift red bottle | 4 | 30 | 30 |
+| put blue cup on plate | 2 | 31 | 48 |
+| put the red block into the pot | 2 | 31 | 30 |
+| put the red bottle into pot | 3 | 31 | 56 |
+
+The per-step rows carry token statistics at every one of the 50 steps, so the policy ran
+for all 50 steps in every episode; the logs did not merely stop.
+
+#### Interpretation
+
+- **A second boundary case.** As on the Franka release, every rollout runs to one fixed
+  horizon regardless of outcome. Rollout length carries no outcome information (length-only
+  ROC-AUC 0.5 by construction), and "lead before the end" means little because a success
+  does not end when the task is done. Unlike the Franka release, no session here stopped at
+  success.
+- **SAFE's LIBERO evaluation shows the confound from the other side.** SAFE's paper
+  (Appendix B.5) states that LIBERO stops a rollout when the task is completed, so failures
+  always run to the step limit and successes are shorter. It notes that a score that only
+  counts elapsed time would then detect failures perfectly, and for its Table 1 it
+  evaluates every rollout of a task at that task's shortest rollout length. Their fork of
+  the openpi LIBERO client stops at success by default (`end_only_at_end` off; 520 steps
+  for LIBERO-10, 50 trials per task).
+- **Together with Sections 15.18 and 15.19.** Every published evaluation checked so far
+  falls into one of two cases, set by its termination rule. Where successes stop at
+  completion (RoboCasa, FIPER's tasks, LIBERO), elapsed time is a strong baseline. Where
+  every rollout runs to a fixed horizon (SAFE's Franka and WidowX releases, SimplerEnv), it
+  is uninformative. SAFE removes the shortcut by design or by truncation; it does not
+  report a timer.
+
+#### Durable artifacts
+
+```text
+Data:      /gs/bs/tga-shinoda/felid/robocasa_datasets/external/safe_widowx/
+             openvla_widowx.zip, download_record.txt, archive_listing.txt,
+             archive_csv_inspection.txt (per-session length table)
+Code:      inline commands from the session (zipfile listing and CSV row counts; no pickle loaded)
 ```
 
 ## 16. Limitations
