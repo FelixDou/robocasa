@@ -748,6 +748,39 @@ class TestSafeAtomicCollection(unittest.TestCase):
                 args = xiaomi_args(out); args.resume = True
                 run_collection(args, runtime=fake_runtime(policy_cls=FakeXiaomiPolicy))
 
+    def test_horizon_scale_lengthens_horizons_and_keeps_seeds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def args_for(out, scale=None):
+                args = collection_args(out, num_rollouts=2)
+                args.seed = 1
+                args.horizon = 4
+                args.horizon_scale = scale
+                return args
+
+            scaled_dir, plain_dir = Path(tmp) / "scaled", Path(tmp) / "plain"
+            run_collection(args_for(scaled_dir, 1.25), runtime=fake_runtime())
+            run_collection(args_for(plain_dir), runtime=fake_runtime())
+            scaled, plain = load_manifest(scaled_dir), load_manifest(plain_dir)
+            self.assertEqual([r.environment_seed for r in scaled], [r.environment_seed for r in plain])
+            self.assertTrue(all(a.rollout_id != b.rollout_id for a, b in zip(scaled, plain)))
+            by_seed = {r.environment_seed: r for r in scaled}
+            self.assertEqual(by_seed[1].rollout_horizon, 5)
+            self.assertEqual(by_seed[1].num_env_steps, 5)  # odd seed fails and runs to 1.25 x 4
+            self.assertFalse(by_seed[2].failed)
+            config = json.loads((scaled_dir / "summary.json").read_text())["config"]
+            self.assertEqual(config["horizon_scale"], 1.25)
+            self.assertEqual(config["base_task_horizons"], {TASK: 4})
+            self.assertEqual(config["task_horizons"], {TASK: 5})
+            plain_config = json.loads((plain_dir / "summary.json").read_text())["config"]
+            self.assertIsNone(plain_config["horizon_scale"])
+            self.assertEqual(plain_config["task_horizons"], {TASK: 4})
+            with self.assertRaisesRegex(ValueError, "incompatible"):
+                args = args_for(scaled_dir); args.resume = True
+                run_collection(args, runtime=fake_runtime())
+            for bad in (0.0, -1.0, float("nan")):
+                with self.assertRaisesRegex(ValueError, "horizon-scale"):
+                    prepare_plan(args_for(Path(tmp) / "bad", bad))
+
     def test_retain_only_quota_discards_majority_class_excess(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = collection_args(

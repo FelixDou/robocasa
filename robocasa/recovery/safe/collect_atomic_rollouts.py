@@ -379,6 +379,18 @@ def prepare_plan(args):
             )
         task_horizons = {task: registered_horizons[task] for task in tasks}
         horizon_source = "robocasa_dataset_registry"
+    horizon_scale = getattr(args, "horizon_scale", None)
+    base_task_horizons = None
+    if horizon_scale is not None:
+        # Opt-in: run every task to ceil(scale x its horizon). Seeds and the reset sequence are
+        # unchanged; rollout IDs change because the horizon is part of the rollout identity.
+        if not np.isfinite(horizon_scale) or horizon_scale <= 0:
+            raise ValueError("--horizon-scale must be a positive number")
+        base_task_horizons = dict(task_horizons)
+        task_horizons = {
+            task: int(np.ceil(round(horizon * horizon_scale, 6)))
+            for task, horizon in base_task_horizons.items()
+        }
     target50_tasks = None
     if args.seed_protocol == "official_xiaomi":
         target50_tasks = registered_target50_tasks()
@@ -505,6 +517,8 @@ def prepare_plan(args):
         "replan_steps": args.replan_steps,
         "task_horizons": task_horizons,
         "horizon_source": horizon_source,
+        "horizon_scale": horizon_scale,
+        "base_task_horizons": base_task_horizons,
         "record_actions": args.record_actions,
         "record_videos": args.record_videos,
         "video_frame_stride": args.video_frame_stride,
@@ -594,6 +608,7 @@ def _assert_resume_compatible(previous, current):
         "xiaomi_checkpoint_revision",
         "xiaomi_num_trials",
         "attempt_limits",
+        "horizon_scale",
     )
     mismatches = []
     previous_reset_indices = previous.get("environment_reset_indices")
@@ -1156,6 +1171,14 @@ def build_parser():
             "JSON file mapping task name to the number of leading attempts to run. Seeds and "
             "rollout IDs are those of an unlimited run with the same --seed and --num-rollouts "
             "(used to re-attempt the same scenes)"
+        ),
+    )
+    parser.add_argument(
+        "--horizon-scale",
+        type=float,
+        help=(
+            "Run every task to ceil(scale x its horizon) (registry or --horizon). Seeds and the "
+            "reset sequence are unchanged; rollout IDs differ from an unscaled run"
         ),
     )
     parser.add_argument("--dry-run", action="store_true")

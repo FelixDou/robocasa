@@ -750,6 +750,8 @@ At n = 10, rule (i)'s nested type I under noise is 0.050 (SE about 0.022), and b
     (0.99 both pass, as for (i)), and it makes the null control part of the decision, as
     the review asks. Rule (ii) has the same protection but costs 0.03 at n = 20, and its
     tuned-P comparator needs a fix first (see Results).
+- **Author's decision (2026-10-23): rule (iii) at n = 20 per class per task** is the E2 rule
+  for the Stage 2 protocol.
 
 **Why.** The mock review (concern 2, `claude/rss-stage1-mock-review`) argues that E2's rule
 can be passed with false-alarm budget alone:
@@ -1104,6 +1106,10 @@ Plug-in power (no shift) is within 0.06 of the SAFE 0.034 and Hide-and-Seek 0.08
   - Until then, register E3 as an estimation study (both arms' success rates with CIs), not
     as a superiority test.
 - Details and the reduced claim are in "Results" below.
+- **Author's decision (2026-10-23).** E3 runs on RLDX-1 and asks reset vs continuation at
+  1.25 H_k. P vs no monitor is descriptive only, since its no-monitor arm wastes the remaining
+  budget. Whether E3 is a test or an estimation study is decided by the RLDX-1 continuation
+  and retry pilot: [`rldx_e3_pilot_plan.md`](rldx_e3_pilot_plan.md).
 
 **Why.** E3's sizing above assumed that a retry after an alarm succeeds at the task's
 ordinary success rate (r = p_k). The same-scene retry pilot (report §15.24,
