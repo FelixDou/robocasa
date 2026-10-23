@@ -121,8 +121,9 @@ class DetectorTests(unittest.TestCase):
     def test_every_detector_ranks_failures_above_chance(self):
         train, test = self.rollouts[:16], self.rollouts[16:]
         for name in sorted(DETECTOR_REGISTRY):
-            kwargs = {"epochs": 30} if name in {"actprobe", "hide_and_seek", "rnd"} else {}
-            if name in {"mahalanobis", "pca_kmeans", "hide_and_seek", "rnd"}:
+            torch_model = name in {"actprobe", "rnd"} or name.startswith("hide_and_seek")
+            kwargs = {"epochs": 30} if torch_model else {}
+            if name in {"mahalanobis", "pca_kmeans", "rnd"} or name.startswith("hide_and_seek"):
                 kwargs["pca_components"] = 4
             if name == "pca_kmeans":
                 kwargs["clusters"] = 4
@@ -151,6 +152,48 @@ class DetectorTests(unittest.TestCase):
         reason = DETECTOR_REGISTRY["action_consistency"].unsupported_reason(rollouts)
         self.assertIn("share no step", reason)
         self.assertIsNone(DETECTOR_REGISTRY["action_consistency"].unsupported_reason(self.rollouts))
+
+    def test_zero_control_sees_only_elapsed_time(self):
+        train, test = self.rollouts[:16], self.rollouts[16:]
+        detector = build_detector("hide_and_seek_zero", seed=0, epochs=5).fit(train)
+        a, b = test[0], dict(test[0], rollout_id="other", features=test[0]["features"] + 5.0)
+        np.testing.assert_array_equal(detector.score(a), detector.score(b))
+        self.assertEqual(detector.config()["control"], "zero_inputs")
+
+    def test_task_shuffle_control_ignores_the_scored_rollout(self):
+        train, test = self.rollouts[:16], self.rollouts[16:]
+        detector = build_detector("hide_and_seek_task_shuffle", seed=0, epochs=5,
+                                  pca_components=4).fit(train)
+        rollout = test[0]
+        changed = dict(rollout, features=rollout["features"] + 100.0)
+        np.testing.assert_array_equal(detector.score(rollout), detector.score(changed))
+        np.testing.assert_array_equal(detector._inputs(rollout), detector._inputs(rollout))
+        # Each input row is a training row of the same task at the same step,
+        # never one of the scored rollout's own rows.
+        for own in (train[0], train[1], train[12], train[13]):
+            ids, rows, lengths = detector.pool_[own["task_name"]]
+            inputs = detector._inputs(own)
+            mine = ids.index(own["rollout_id"])
+            for step, row in enumerate(inputs):
+                index = min(step, int(lengths.max()) - 1)
+                matches = [d for d in range(len(ids)) if lengths[d] > index
+                           and np.array_equal(rows[d][index], row)]
+                self.assertTrue(matches)
+                self.assertNotIn(mine, matches)
+        with self.assertRaises(ValueError):
+            detector.score(dict(rollout, task_name="UnseenTask"))
+
+    def test_first_inference_control_ignores_later_features(self):
+        train, test = self.rollouts[:16], self.rollouts[16:]
+        detector = build_detector("hide_and_seek_first", seed=0, epochs=5, pca_components=4).fit(train)
+        rollout = test[0]
+        later = rollout["features"].copy()
+        later[1:] += 50.0
+        np.testing.assert_array_equal(detector.score(rollout), detector.score(dict(rollout, features=later)))
+        first = rollout["features"].copy()
+        first[0] += 50.0
+        self.assertFalse(np.array_equal(detector.score(rollout), detector.score(dict(rollout, features=first))))
+        self.assertEqual(detector.config()["control"], "first_inference_repeated")
 
     def test_action_detectors_require_actions(self):
         rollout = dict(self.rollouts[0], actions=None)
@@ -209,6 +252,15 @@ class RunnerTests(unittest.TestCase):
                     self.assertTrue(0.0 <= metrics["roc_auc"] <= 1.0)
             self.assertTrue((root / "out" / "summary.md").exists())
             self.assertTrue((root / "out" / "evaluation_predictions.jsonl").exists())
+            calibration_rows = [
+                json.loads(line)
+                for line in (root / "out" / "calibration_predictions.jsonl").read_text().splitlines()
+            ]
+            self.assertEqual(
+                {(row["detector"], row["rollout_id"]) for row in calibration_rows},
+                {(name, rid) for name in ("action_consistency", "mahalanobis", "actprobe")
+                 for rid in by_split["calibration"]},
+            )
 
     def test_runner_skips_action_consistency_without_overlap(self):
         with tempfile.TemporaryDirectory() as directory:
