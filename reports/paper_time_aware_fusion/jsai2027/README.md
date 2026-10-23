@@ -74,3 +74,10 @@ The official English package (`jsaiac_tex_en-2026.zip` from https://conf.ai-gakk
   - On fixed-horizon evaluations such as SAFE's real-robot set, the timer is uninformative, so the termination rule decides.
 - **Cut.** Table 1 (units of time) is removed, as in RSS. The "Time" paragraph still defines all four units.
 - **Page check.** The body ends on page 4, with a few lines to spare.
+
+## Update 2026-10-23: paired FIPER re-run (§15.23)
+
+- **Discussion.** The FIPER sentence now gives the paired result:
+  - in FIPER's own code, the timer has the best balanced accuracy (0.81 against 0.78) at FPR 0.09 against 0.35;
+  - at FIPER's FPR, FIPER warns 0.15 earlier (post hoc).
+- **Body.** It still ends on page 4.

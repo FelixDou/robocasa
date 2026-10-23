@@ -476,12 +476,13 @@ but below what we declared useful. On our data, most of what looked like policy 
 time calibration. Video labels of 48 confirmatory failures, made blind to alarms, suggest why
 (exploratory): 79\% were still recoverable at the limit, mostly slow rather than irreversibly
 wrong (second-labeler agreement on 12 videos: Cohen's $\kappa = 0.80$). The confound is not
-specific to RoboCasa (exploratory, on data released by others): in FIPER's
+specific to RoboCasa (exploratory, on others' released data): in FIPER's
 rollouts~\cite{romer2025fiper}, length alone separates failures with ROC-AUC 0.92--1.00 in four
-of five tasks, and a timer calibrated like FIPER's thresholds exceeds its published mean
-accuracy (0.83 against 0.78) but alarms about twice as late. Where every rollout runs to a
+of five tasks. In FIPER's own code, an added elapsed-time method has the best balanced accuracy
+(0.81 against 0.78) at test FPR 0.09 against 0.35, yet at FIPER's FPR, FIPER warns 0.15 of the
+episode earlier than the timer (post hoc), so the lead test credits FIPER. Where every rollout runs to a
 fixed horizon, as in SAFE's real-robot set, the timer is uninformative: the termination rule
-decides whether time is a strong baseline. Offline, on existing data for a second policy (RLDX-1, 20 tasks, 100 test
+decides. Offline, on existing data for a second policy (RLDX-1, 20 tasks, 100 test
 failures), all failures run to the limit, P beats a single timer (lead 0.271 against 0.032),
 and SAFE's LSTM head + P gains 0.034 (CI 0.008--0.067) at the same FPR, only on atomic tasks;
 the MLP head adds nothing.

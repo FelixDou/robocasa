@@ -30,3 +30,5 @@ All three `main.pdf` files were rebuilt on 2026-10-21 as tectonic (XeTeX) previe
 `main.tex` (2026-10-22): one exploratory paragraph on the point-of-no-return labels (report §15.17), placed after "No early warning". The draft is still 6 pages.
 
 `main.tex` (2026-10-22, b): one exploratory paragraph after the point-of-no-return paragraph covers the FIPER re-analysis, its caveats and the SAFE fixed-horizon boundary case (report §15.18–15.19). The draft is still 6 pages.
+
+`main.tex` (2026-10-23): the FIPER paragraph now uses the paired re-run (report §15.23) instead of the published-versus-computed comparison of §15.18.

@@ -25,8 +25,8 @@ each chunk in full, so overlap signals are undefined. A task-conditioned recurre
 takes, which our timers make explicit. FAIL-Detect~\cite{xu2025faildetect} and
 FIPER~\cite{romer2025fiper} score inputs, outputs or embeddings against successful rollouts
 only. FIPER alarms when two conformal scores \emph{both} exceed their thresholds, which
-suppresses false alarms; it reports no elapsed-time baseline, although length separates most
-of its tasks (Sec.~\ref{sec:evidence}). We alarm when \emph{either} crosses, because the policy score and
+suppresses false alarms; in its own pipeline an elapsed-time method matches its accuracy, but
+FIPER warns earlier at a matched false-alarm rate (Sec.~\ref{sec:evidence}). We alarm when \emph{either} crosses, because the policy score and
 the timer catch failures at different times, and calibrate the pair jointly.
 
 \textbf{World-model verifiers and VLM monitors.}

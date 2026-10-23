@@ -160,3 +160,23 @@ Sources: `docs/safe_robocasa_experiment_report.md` §15.18–15.19 and `docs/pub
   - E3 and E5 are shorter, and E5 is merged into the E4 paragraph.
   - Limitations and the conclusion are shorter. The conclusion no longer lists "early-decided failures" as a Stage 2 item; E5 still has it.
 - **Page check.** With `\notesfalse` the build is 6 pages, with content ending on page 5 and the references ending on page 6.
+
+## Update 2026-10-23: paired FIPER re-run (report §15.23) replaces the §15.18 comparison
+
+Source: `docs/safe_robocasa_experiment_report.md` §15.23 and `docs/fiper_paired_plan.md`. The re-run used FIPER's own code (pinned `13d79c5c`) with one added `time` method.
+
+- **Sec. VI paragraph, now "The test on a published benchmark".**
+  - Kept: length ROC-AUC 0.92–1.00 on 4 of 5 FIPER tasks.
+  - Replaced the published-versus-computed numbers (0.83/0.78 accuracy, DT 0.63/0.30) and their caveats with the paired result:
+    - FIPER reproduces its published results within 0.05;
+    - the timer has the best balanced accuracy, 0.81 against 0.78, at test FPR 0.09 against 0.35;
+    - at FIPER's FPR, FIPER warns 0.146 [0.104, 0.188] earlier, on 4 of 5 tasks (post hoc).
+  - Framed as the test working both ways: it credits FIPER, and finds SAFE's gain on XR-1 small.
+- **Related Work.** In FIPER's own pipeline, an elapsed-time method matches its accuracy, but FIPER warns earlier at a matched FPR.
+- **E4.** The "re-run FIPER's code" item is removed; it is done.
+- **Limitations.** The FIPER lead comparison is post hoc, with 10 + 10 test rollouts per real-robot task, and PushChair is a lower bound.
+- **Cuts.**
+  - The duplicate "Part of SAFE + P's gain is its higher test FPR" sentence is removed from Limitations; the same point remains in Sec. VII.
+  - The conclusion's first sentence, E2's sentence on the replaced atomic test, the FPR-rule paragraph, E3 and E5 are tighter.
+- **Not folded in (needs a decision).** Main's §15.20–15.22 report that Hide-and-Seek + P passed a preregistered "Amendment 2" test on the same E1 cohorts: +0.071, CI [0.022, 0.157]. That clashes with this draft's text, which still describes the dropped atomic test as an "Amendment 2"-style item and uses SAFE as the only policy score.
+- **Page check.** With `\notesfalse` the build is 6 pages.
