@@ -128,3 +128,38 @@ pkill -f "deploy/server.py.*--port 1012[01]"
 $XR1_CLIENT_ENV/bin/python -I scripts/xr1_retry_pilot/analyze_pilot.py $RP_ROOT/collection $XR1_CONFIRM_COLL \
   --selection $RP_ROOT/selection.json --output $RP_ROOT/retry_pilot.json 2>&1 | tee $RP_LOG/analyze.log
 ```
+
+## Outcome of the registered gates, and a post hoc analysis (2026-10-23)
+
+**Run.** `xr1_retry_pilot_20261023_103019`: 194 of 194 attempts (shard 0: 96, shard 1: 98),
+0 errors.
+- The limits file was split into one file per shard, with the same values, because the
+  collector rejects limits for tasks it is not collecting. This is a runbook detail, not a
+  change of design.
+
+**Gate 1 (identity): passed.** Every pilot rollout ID matches its original, with the same
+task, seed and episode.
+
+**Gate 2 (scene): failed under the registered rule. The pilot is void as specified.**
+- Only 93.8% of first-frame pairs (182 of 194) were within the mean absolute difference of
+  2.0; the rule required 95%. No retry outcome was read before this verdict.
+- The diagnostic looked at frames only:
+  - every pair differs slightly (minimum 0.78, median 1.31, 95th percentile 2.08), which
+    looks like rendering or video-compression noise;
+  - 10 of the 12 exceedances lie between 2.0 and 4.0, in RinseSinkBasin (6) and
+    CloseBlenderLid (4), the two tasks with the highest baseline differences;
+  - the other 2 are gross: TurnOffStove episode 17 (47.5) and CloseBlenderLid episode 8
+    (22.2). These are different scenes.
+  - There is no difference between 4.0 and 22.2. The 2.0 tolerance, chosen before any data,
+    was too tight for these renderings.
+
+**Post hoc analysis (added after the gate failed and after the frame diagnostic, before any
+outcome was read).**
+- Exclude only pairs whose first-frame difference exceeds 10, i.e. the two mismatched
+  scenes, and compute the planned endpoints on the remaining 192 pairs
+  (`analyze_pilot.py --post-hoc-exclude-above 10`). The output is labelled post hoc.
+- Its use is limited to informing the E3 design qualitatively. The RSS protocol states that
+  E3's same-scene retry success is measured in Stage 2; nothing is registered from this pilot.
+- The two mismatches are themselves a finding: seed replay reproduced 192 of 194 scenes. An
+  E3 reset by seed replay therefore needs a scene-identity check, or a reset that restores the
+  recorded initial state.

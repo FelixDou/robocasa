@@ -72,7 +72,18 @@ def run(args):
     gates = dict(identity=True, frames_within_tol=round(share, 4), frame_diff_quantiles=np.round(np.quantile(diffs, [0, 0.5, 0.95, 1]), 3).tolist(),
                  scene_gate_passed=share >= FRAME_SHARE)
     print("gates:", gates)
-    if share < FRAME_SHARE:
+    status = "valid"
+    if args.post_hoc_exclude_above is not None:
+        # Post hoc (see the plan): keep the registered verdict on record, drop only pairs whose
+        # first frames differ by more than the given cutoff (different scenes), and label the result.
+        cut = float(args.post_hoc_exclude_above)
+        excluded = sorted(rid for rid, d in zip(list(pilot), diffs) if d > cut)
+        pilot = {rid: r for rid, r in pilot.items() if rid not in excluded}
+        gates["post_hoc_excluded"] = excluded
+        status = (f"post hoc: registered scene gate {'passed' if share >= FRAME_SHARE else 'failed'} "
+                  f"({share:.4f} within {FRAME_TOL}); {len(excluded)} pairs with frame difference > {cut} excluded")
+        print("POST HOC:", status)
+    elif share < FRAME_SHARE:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(dict(status="void: scenes not reproduced", gates=gates), indent=1) + "\n")
         print("STOP: scene gate failed; pilot void"); sys.exit(1)
@@ -100,7 +111,7 @@ def run(args):
         if s_n:
             boot["r_succ"].append(s_s / s_n)
     ci = {k: np.round(np.percentile(v, [2.5, 97.5]), 4).tolist() for k, v in boot.items()}
-    res = dict(plan="docs/xr1_retry_pilot_plan.md", status="valid", gates=gates,
+    res = dict(plan="docs/xr1_retry_pilot_plan.md", status=status, gates=gates,
                r_fail=dict(successes=fs, n=fn, rate=round(fs / fn, 4) if fn else None, wilson95=wilson(fs, fn), cluster95=ci.get("r_fail")),
                r_succ=dict(successes=ss, n=sn, rate=round(ss / sn, 4) if sn else None, wilson95=wilson(ss, sn), cluster95=ci.get("r_succ")),
                p_task_macro=round(p, 4), r_fail_minus_p=dict(point=round(fs / fn - p, 4) if fn else None, cluster95=ci.get("r_fail_minus_p")),
@@ -119,6 +130,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("pilot"); p.add_argument("original"); p.add_argument("--selection", required=True)
     p.add_argument("--output", required=True); p.add_argument("--bootstrap", type=int, default=2000)
+    p.add_argument("--post-hoc-exclude-above", type=float,
+                   help="post hoc only: exclude pairs whose first-frame difference exceeds this; the result is labelled post hoc")
     run(p.parse_args())
 
 

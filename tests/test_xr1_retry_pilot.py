@@ -119,6 +119,25 @@ class TestAnalyze(unittest.TestCase):
                               "--output", str(root / "res.json"), "--bootstrap", "5"])
             self.assertIn("void", json.loads((root / "res.json").read_text())["status"])
 
+    def test_post_hoc_exclusion_is_labelled_and_drops_only_mismatched_pairs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); module = self.setup_case(root)
+            original = module.first_frame
+
+            def frames_with_one_mismatch(path):
+                f = original(path)
+                return f + 40.0 if ("pilot" in str(path) and Path(path).name == "TaskA-0.mp4") else f
+            module.first_frame = frames_with_one_mismatch
+            with self.assertRaises(SystemExit):           # registered rule: 1 of 12 pairs off -> share 0.917 < 0.95
+                call(module, [str(root / "pilot"), str(root / "orig"), "--selection", str(root / "selection.json"),
+                              "--output", str(root / "void.json"), "--bootstrap", "5"])
+            call(module, [str(root / "pilot"), str(root / "orig"), "--selection", str(root / "selection.json"),
+                          "--output", str(root / "posthoc.json"), "--bootstrap", "5", "--post-hoc-exclude-above", "10"])
+            res = json.loads((root / "posthoc.json").read_text())
+            self.assertTrue(res["status"].startswith("post hoc"))
+            self.assertEqual(res["gates"]["post_hoc_excluded"], ["TaskA-0"])
+            self.assertEqual(res["r_fail"]["n"], 6)                     # TaskA episode 0 (originally failed) removed
+
     def test_identity_gate_stops(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); module = self.setup_case(root, wrong_seed=True)
