@@ -713,6 +713,41 @@ class TestSafeAtomicCollection(unittest.TestCase):
                 all(event["status"] == "skipped_quota_reached" for event in skipped)
             )
 
+    def test_attempt_limits_keep_seeds_and_rollout_ids_of_an_unlimited_run(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as full:
+            def xiaomi_args(out, limits=None):
+                args = collection_args(out, num_rollouts=5)
+                args.seed = 7
+                args.seed_protocol = "official_xiaomi"
+                args.model_family = "xiaomi_robotics_1"
+                args.policy_module = "robocasa.recovery.xiaomi_robotics_1_policy:make_policy"
+                args.policy_name = "mock-xiaomi"
+                args.checkpoint = "mock-xiaomi-checkpoint"
+                args.attempt_limits = limits
+                return args
+
+            limits = Path(tmp) / "limits.json"
+            limits.write_text(json.dumps({TASK: 3}))
+            out = Path(tmp) / "limited"
+            run_collection(xiaomi_args(out, str(limits)), runtime=fake_runtime(policy_cls=FakeXiaomiPolicy))
+            run_collection(xiaomi_args(full), runtime=fake_runtime(policy_cls=FakeXiaomiPolicy))
+            limited = load_manifest(out)
+            unlimited = load_manifest(full)
+            self.assertEqual(len(limited), 3)
+            self.assertEqual(
+                [(r.rollout_id, r.environment_seed) for r in limited],
+                [(r.rollout_id, r.environment_seed) for r in unlimited[:3]],
+            )
+            skipped = [json.loads(line) for line in (out / "skipped.jsonl").read_text().splitlines()]
+            self.assertEqual([e["status"] for e in skipped], ["skipped_attempt_limit"] * 2)
+            bad = Path(tmp) / "bad.json"
+            bad.write_text(json.dumps({"NotATask": 2}))
+            with self.assertRaisesRegex(ValueError, "attempt-limits"):
+                prepare_plan(xiaomi_args(Path(tmp) / "x", str(bad)))
+            with self.assertRaisesRegex(ValueError, "incompatible"):
+                args = xiaomi_args(out); args.resume = True
+                run_collection(args, runtime=fake_runtime(policy_cls=FakeXiaomiPolicy))
+
     def test_retain_only_quota_discards_majority_class_excess(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = collection_args(

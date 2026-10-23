@@ -467,6 +467,15 @@ def prepare_plan(args):
                     "rollout_id": stable_rollout_id(task, seed, attempt_identity),
                 }
             )
+    attempt_limits = None
+    if getattr(args, "attempt_limits", None):
+        attempt_limits = json.loads(Path(args.attempt_limits).read_text())
+        unknown = sorted(set(attempt_limits) - set(tasks))
+        if unknown:
+            raise ValueError("--attempt-limits names tasks not being collected: " + ", ".join(unknown))
+        for task, limit in attempt_limits.items():
+            if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1 or limit > args.num_rollouts:
+                raise ValueError(f"--attempt-limits for {task} must be an integer in [1, --num-rollouts]")
     config = {
         "tasks": tasks,
         "task_types": task_types,
@@ -506,6 +515,7 @@ def prepare_plan(args):
         "failure_quota": args.failure_quota,
         "retain_only_quota": args.retain_only_quota,
         "max_errors": args.max_errors,
+        "attempt_limits": attempt_limits,
         "safe_repository_commit": args.safe_repository_commit,
         "official_safe_openpi_commit": (
             args.official_safe_openpi_commit
@@ -583,6 +593,7 @@ def _assert_resume_compatible(previous, current):
         "xiaomi_repository_commit",
         "xiaomi_checkpoint_revision",
         "xiaomi_num_trials",
+        "attempt_limits",
     )
     mismatches = []
     previous_reset_indices = previous.get("environment_reset_indices")
@@ -666,7 +677,14 @@ def run_collection(args, runtime=None):
         task_attempts = attempts_by_task[task_name]
         shared_env = None
         shared_policy = None
+        limit = (plan["config"].get("attempt_limits") or {}).get(task_name)
         for attempt_index, attempt in enumerate(task_attempts):
+            if limit is not None and attempt_index >= limit:
+                for remaining in task_attempts[attempt_index:]:
+                    event = {**remaining, "status": "skipped_attempt_limit", "created_at": utc_now()}
+                    append_jsonl(output_dir / SKIPPED_NAME, event)
+                    skipped.append(event)
+                break
             policy = None
             rollout_id = attempt["rollout_id"]
             seed = attempt["environment_seed"]
@@ -1131,6 +1149,14 @@ def build_parser():
         "--max-errors",
         type=int,
         help="Stop collection after this many recorded errors",
+    )
+    parser.add_argument(
+        "--attempt-limits",
+        help=(
+            "JSON file mapping task name to the number of leading attempts to run. Seeds and "
+            "rollout IDs are those of an unlimited run with the same --seed and --num-rollouts "
+            "(used to re-attempt the same scenes)"
+        ),
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--video-camera-name", default="robot0_agentview_center")
