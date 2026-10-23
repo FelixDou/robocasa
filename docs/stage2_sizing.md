@@ -712,17 +712,44 @@ the E2 FPR rule / under the A1 rule.
 
 ## E2 rule under null fusions (2026-10-23)
 
-**Summary for the protocol** (filled from the run; until then, every value is pending).
-Per-detector type I error is the share of null studies that pass; power is per co-primary.
-All values are at n = 20 per class per task unless stated, at 97.5%, within task.
+**Summary for the protocol** (run 2026-10-23, `e2_null_rules_<timestamp>`, code `34ee5ac7`).
+- Values are at n = 20 per class per task, at 97.5%, within task, over 2,000 simulated
+  studies, unless stated.
+- Type I error is per detector: the share of null studies that pass.
+- "Nested" uses a real inner decision bootstrap (100 studies per cell). "Approx" uses the
+  g − hw shortcut, which the nested check shows to be badly anticonservative for the noise
+  null (see Results).
 
-| Rule | Type I, noise + P | Type I, resampled SAFE + P | SAFE + P power (γ = 0.034) | Hide-and-Seek + P power (γ = 0.052) | Smallest n with both ≥ 0.8 |
-|---|---:|---:|---:|---:|---:|
-| (i) current E2 rule | pending | pending | pending | pending | pending |
-| (ii) (i) + CI > 0 against P tuned to the fused FPR | pending | pending | pending | pending | pending |
-| (iii) (i) + Monte Carlo null test (K = 39 per null) | pending | pending | pending | pending | pending |
+| Rule | Type I, noise + P | Type I, resampled SAFE + P | SAFE + P power (γ = 0.034) | Hide-and-Seek + P power (γ = 0.052) | Both pass (0.034, 0.052) | Smallest n with both ≥ 0.8 |
+|---|---|---|---:|---:|---:|---:|
+| (i) current E2 rule | 0.020 nested (approx 0.217) | 0.000 nested (approx 0.001) | 1.00 | 0.99 | 0.99 | 10 |
+| (ii) (i) + CI > 0 against P tuned to the fused FPR | ≤ 0.020 (bound from nested (i); approx 0.055) | ≤ 0.001 | 0.98 | 0.98 | 0.96 | 10 |
+| (iii) (i) + Monte Carlo null test (K = 39 per null) | ≤ 0.020 (bound from nested (i); approx 0.039) | 0.000 | 1.00 | 0.99 | 0.99 | 10 |
 
-**Recommendation:** pending (the pre-stated rule is below).
+At n = 10, rule (i)'s nested type I under noise is 0.050 (SE about 0.022), and both pass in
+0.90 / 0.74 / 0.81 of studies under (i) / (ii) / (iii). At n = 30 the nested type I is 0.010.
+
+**Recommendation.**
+- By the pre-stated rule: **rule (i), smallest n = 10.**
+  - Only rule (i) is eligible as the rule is written. Its approximated type I error fails,
+    but the nested check puts it on the other side of 0.05, and the rule says the nested
+    value then decides.
+  - Rules (ii) and (iii) miss by Monte Carlo error on the approximated values (0.055 at
+    n = 20; 0.053 at n = 10).
+- **Read with the nested check (post hoc), the order is the same.** (ii) and (iii) are
+  subsets of (i), so they have no higher type I error than nested (i). All three rules are
+  then eligible, and the tie-break picks (i).
+- **Two points the rule does not capture** (judgment, not pre-stated):
+  - **Use n = 20, not n = 10.** At n = 10 the noise type I error sits at 0.050 with an SE of
+    about 0.022, and the family-wise error over two co-primaries could reach about 0.10. At
+    n = 20 it is 0.020 (family-wise ≤ 0.04), and both co-primaries pass in 0.99 of studies.
+  - **Consider registering (iii) instead of (i).** This simulation cannot produce the
+    reviewer's mechanism, a fused detector spending more false alarms on the test cohort
+    than calibration allowed: calibration and test share one pool. Rule (iii) guards
+    against that because its nulls run on the same cohorts. It costs no power at n ≥ 20
+    (0.99 both pass, as for (i)), and it makes the null control part of the decision, as
+    the review asks. Rule (ii) has the same protection but costs 0.03 at n = 20, and its
+    tuned-P comparator needs a fix first (see Results).
 
 **Why.** The mock review (concern 2, `claude/rss-stage1-mock-review`) argues that E2's rule
 can be passed with false-alarm budget alone:
@@ -924,3 +951,124 @@ cat $E2N_LOG/e2_null_rules.log; sha256sum -c $E2N_LOG/frozen_inputs.sha256
 
 Stop conditions: a replication or co-primary-draw mismatch (the script exits with `STOP`),
 a failed checksum, or an error. Do not edit inputs to make the run pass.
+
+### Results (2026-10-23)
+
+**Run.**
+- Code `34ee5ac7`, worktree `robocasa_e2null_34ee5ac7`.
+- Output `e2_null_rules_<timestamp>/e2_null_rules.json` under `robocasa_checkpoints/safe/`;
+  log under `robocasa_logs/eval/`.
+- 2,000 studies per n, seed 20261021, K = 39 reference draws per null in every study.
+
+**Checks, all passed.**
+- The replication gains reproduce SAFE + P +0.0342 and Hide-and-Seek + P +0.0834.
+- The co-primary draws match `e2_coprimary_sizing_20261023_011537/e2_coprimary.json`.
+- All nine frozen input files are unchanged (`sha256sum -c` OK).
+- SAFE's and Hide-and-Seek's mean gains and SDs equal Table S5 at n = 10, 20 and 30.
+
+**Table N1 — detectors fused with P (within task).** Gains are against P; hw is the 97.5%
+half-width of the detector's own sampling distribution.
+
+| Detector | n | Mean gain (SD) | hw | Mean fused FPR | Mean gain against tuned P |
+|---|---:|---|---:|---:|---:|
+| SAFE | 10 / 20 / 30 | +0.040 (0.012) / +0.036 (0.007) / +0.035 (0.006) | 0.015 / 0.011 / 0.009 | 0.052 / 0.050 / 0.049 | +0.031 / +0.033 / +0.033 |
+| Hide-and-Seek | 10 / 20 / 30 | +0.083 (0.017) / +0.080 (0.011) / +0.080 (0.009) | 0.030 / 0.025 / 0.021 | 0.053 / 0.050 / 0.049 | +0.073 / +0.078 / +0.081 |
+| Noise | 10 / 20 / 30 | +0.0055 (0.0081) / +0.0037 (0.0048) / +0.0031 (0.0040) | 0.010 / 0.007 / 0.007 | 0.054 / 0.053 / 0.052 | −0.006 / −0.003 / −0.001 |
+| Resampled SAFE | 10 / 20 / 30 | +0.0000 (0.0003) / 0 / 0 | 0 | 0.045 / 0.047 / 0.047 | −0.002 / +0.000 / +0.001 |
+
+- **Resampled SAFE.** Its fit falls back to the timer in essentially every study, so its
+  gain is exactly 0. On this pool it is not an informative null.
+- **Noise.** Its small positive gain is a timing effect: the running maximum of noise rises
+  with elapsed time and acts as a second, noisier clock.
+- **The rule (iii) bar** (the second-largest of 39 reference gains, mean over studies) is
+  +0.020, +0.012 and +0.010 for noise at n = 10, 20 and 30, and 0 for resampled SAFE.
+
+**Table N2 — type I error.** Each cell is the share of null studies passing. The Monte Carlo
+SE of the approximated rates is 0.004–0.009. Nested uses 100 studies, SE about 0.01–0.02.
+
+| Null | n | Rule (i) approx | Rule (i) nested | Rule (ii) approx | Rule (iii) approx | FPR rule only | Tuned CI only |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Noise | 10 | 0.221 | **0.050** | 0.032 | 0.053 | 0.982 | 0.303 |
+| Noise | 20 | 0.217 | **0.020** | 0.055 | 0.039 | 0.994 | 0.404 |
+| Noise | 30 | 0.157 | **0.010** | 0.033 | 0.036 | 0.999 | 0.472 |
+| Resampled SAFE | 10 | 0.001 | 0.000 | 0.001 | 0.000 | 0.995 | 0.601 |
+| Resampled SAFE | 20 | 0.001 | 0.000 | 0.001 | 0.000 | 0.999 | 0.778 |
+| Resampled SAFE | 30 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.836 |
+
+**Table N3 — co-primary power by rule (i) / (ii) / (iii)** (shift, within-task CI, E2 FPR
+rule).
+
+| Detector, assumed gain | n = 10 | n = 20 | n = 30 |
+|---|---|---|---|
+| SAFE, 0.034 | 0.99 / 0.86 / 0.90 | 1.00 / 0.98 / 1.00 | 1.00 / 0.99 / 1.00 |
+| Hide-and-Seek, 0.083 | 0.99 / 0.98 / 0.99 | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 |
+| Hide-and-Seek, 0.052 | 0.91 / 0.85 / 0.91 | 0.99 / 0.98 / 0.99 | 1.00 / 1.00 / 1.00 |
+| Hide-and-Seek, 0.05 | 0.88 / 0.82 / 0.88 | 0.98 / 0.97 / 0.98 | 1.00 / 1.00 / 1.00 |
+| Both pass, (0.034, 0.083) | 0.98 / 0.84 / 0.89 | 1.00 / 0.98 / 1.00 | 1.00 / 0.99 / 1.00 |
+| Both pass, (0.034, 0.052) | 0.90 / 0.74 / 0.81 | 0.99 / 0.96 / 0.99 | 1.00 / 0.99 / 1.00 |
+
+Plug-in power (no shift) is within 0.06 of the SAFE 0.034 and Hide-and-Seek 0.083 rows at n = 10, and within 0.01 from n = 20.
+
+**What the nested check shows.**
+- **The g − hw shortcut overstates rule (i)'s type I error under noise by a factor of 5 to
+  16:** 0.25 against 0.05 at n = 10, 0.24 against 0.02 at n = 20, 0.16 against 0.01 at
+  n = 30.
+- **Why.** The noise null's sampling distribution has a point mass at 0 (studies whose fit
+  falls back to the timer) plus small positive gains. Its median minus 1.25th percentile is
+  therefore tiny, and the shortcut's lower bound sits close to the study's own gain. A real
+  inner bootstrap refits on resampled rollouts, often falls back to the timer, and gets a
+  lower bound at or below 0.
+- **The co-primaries are not affected.** Their approximation matched nested bootstraps
+  exactly in the E2 check above (Table S4).
+- **Type I conclusions therefore rest on the nested values.** Rules (ii) and (iii) only add
+  conditions to (i), so their type I error with a real CI is at most nested (i).
+
+**Against the expectations.**
+
+| Expectation (written before running) | Result |
+|---|---|
+| Checks pass | Yes |
+| Mean null gain 0 to +0.01 | Yes. Noise +0.003 to +0.006; resampled SAFE exactly 0 (timer fallback) |
+| E2 FPR rule passes nearly every null study | Yes (0.98–1.00): it offers no protection here |
+| Rule (i) type I > 0.05 for at least one null at n = 20 or 30, growing with n | **No.** Nested 0.02 and 0.01, falling with n. Only the shortcut exceeds 0.05 |
+| Rule (ii) type I ≤ about 0.02 | Approx 0.032–0.055; ≤ 0.020 at n ≥ 20 by the nested bound |
+| SAFE's tuned-P gain stays near its gain; power ≥ 0.8 at n = 20 | Yes (+0.033 against +0.036; 0.98) |
+| Hide-and-Seek at shifted 0.052 under (ii): uncertain | 0.98 at n = 20 |
+| Rule (iii) type I ≤ 0.05; bar about 0.015–0.03 | 0.036–0.053 (within MC error of its exact 0.05 bound); bar 0.010–0.020 |
+| SAFE under (iii) passes in most studies from n = 20 | Yes (1.00; 0.90 at n = 10) |
+| Recommendation is (ii) or (iii) | **No.** The pre-stated rule gives (i) |
+
+**Issues found.**
+- **A grid artifact in the tuned-P comparator.**
+  - Rule (ii) searches P's margin on confirm_lead's grid (steps of 0.0025). The calibrated
+    margin of P usually falls between grid points.
+  - When the fused fit falls back to the timer (fused = P), the best grid timer with no
+    more false alarms is slightly later than P. The per-failure differences are then all
+    ≥ 0, and some are positive, so their bootstrap lower bound is above 0.
+  - This is why "tuned CI only" passes in 0.30–0.84 of null studies even though the null's
+    mean tuned gain is ≤ 0.001.
+  - It does not move rule (ii)'s type I error, because rule (i)'s CI blocks those fallback
+    studies.
+  - If rule (ii) is registered, the tuned timer's candidates must include P's own
+    calibrated margin, so that a detector identical to P gets exactly 0.
+- **Resampled SAFE is not an informative null on RLDX-1's held-out pool**: it never changes
+  the fit. Noise is the binding null here.
+
+**Reading (exploratory).**
+- **Concern 2's mechanism does not appear here.** In this exchangeable simulation, E2's
+  rule (i) holds its type I error at 0.02 at n = 20 under both nulls.
+  - The protection comes from the decision CI, not from the FPR rule, which passes almost
+    every null study.
+  - The reviewer's example (noise gaining +0.038/+0.049 at FPR 0.08 in §15.15) came from
+    60 calibration successes and a test FPR well above P's. At E2's size the fused noise
+    FPR averages 0.053, and the 95th percentile of noise gains is +0.013.
+- **The simulation cannot test the reviewer's real worry.** That worry is a fused detector
+  spending more false alarms on a test cohort that differs from calibration. Rules (ii) and
+  (iii) guard against it by construction, at no power cost for (iii) from n = 20. That is
+  the case for registering (iii) even though the pre-stated rule picks (i).
+- **The power figures for the protocol:**
+  - at n = 20, both co-primaries pass in 0.99 (i), 0.96 (ii) and 0.99 (iii) of studies at
+    (SAFE 0.034, Hide-and-Seek 0.052);
+  - each detector individually is at 0.98 or more.
+- **Limits as stated above.** One shared pool, 5 failures per task, inference conditional on
+  the 20 tasks, a shift model for assumed gains.
