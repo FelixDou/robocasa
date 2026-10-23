@@ -709,3 +709,682 @@ the E2 FPR rule / under the A1 rule.
   held-out pool (8 successes and 5 failures per task), and inference is conditional on the
   20 tasks. With tasks resampled, power drops sharply for SAFE and for Hide-and-Seek at
   0.052. The task-level CI is reported without a power claim, as before.
+
+## E2 rule under null fusions (2026-10-23)
+
+**Summary for the protocol** (run 2026-10-23, `e2_null_rules_<timestamp>`, code `34ee5ac7`).
+- Values are at n = 20 per class per task, at 97.5%, within task, over 2,000 simulated
+  studies, unless stated.
+- Type I error is per detector: the share of null studies that pass.
+- "Nested" uses a real inner decision bootstrap (100 studies per cell). "Approx" uses the
+  g − hw shortcut, which the nested check shows to be badly anticonservative for the noise
+  null (see Results).
+
+| Rule | Type I, noise + P | Type I, resampled SAFE + P | SAFE + P power (γ = 0.034) | Hide-and-Seek + P power (γ = 0.052) | Both pass (0.034, 0.052) | Smallest n with both ≥ 0.8 |
+|---|---|---|---:|---:|---:|---:|
+| (i) current E2 rule | 0.020 nested (approx 0.217) | 0.000 nested (approx 0.001) | 1.00 | 0.99 | 0.99 | 10 |
+| (ii) (i) + CI > 0 against P tuned to the fused FPR | ≤ 0.020 (bound from nested (i); approx 0.055) | ≤ 0.001 | 0.98 | 0.98 | 0.96 | 10 |
+| (iii) (i) + Monte Carlo null test (K = 39 per null) | ≤ 0.020 (bound from nested (i); approx 0.039) | 0.000 | 1.00 | 0.99 | 0.99 | 10 |
+
+At n = 10, rule (i)'s nested type I under noise is 0.050 (SE about 0.022), and both pass in
+0.90 / 0.74 / 0.81 of studies under (i) / (ii) / (iii). At n = 30 the nested type I is 0.010.
+
+**Recommendation.**
+- By the pre-stated rule: **rule (i), smallest n = 10.**
+  - Only rule (i) is eligible as the rule is written. Its approximated type I error fails,
+    but the nested check puts it on the other side of 0.05, and the rule says the nested
+    value then decides.
+  - Rules (ii) and (iii) miss by Monte Carlo error on the approximated values (0.055 at
+    n = 20; 0.053 at n = 10).
+- **Read with the nested check (post hoc), the order is the same.** (ii) and (iii) are
+  subsets of (i), so they have no higher type I error than nested (i). All three rules are
+  then eligible, and the tie-break picks (i).
+- **Two points the rule does not capture** (judgment, not pre-stated):
+  - **Use n = 20, not n = 10.** At n = 10 the noise type I error sits at 0.050 with an SE of
+    about 0.022, and the family-wise error over two co-primaries could reach about 0.10. At
+    n = 20 it is 0.020 (family-wise ≤ 0.04), and both co-primaries pass in 0.99 of studies.
+  - **Consider registering (iii) instead of (i).** This simulation cannot produce the
+    reviewer's mechanism, a fused detector spending more false alarms on the test cohort
+    than calibration allowed: calibration and test share one pool. Rule (iii) guards
+    against that because its nulls run on the same cohorts. It costs no power at n ≥ 20
+    (0.99 both pass, as for (i)), and it makes the null control part of the decision, as
+    the review asks. Rule (ii) has the same protection but costs 0.03 at n = 20, and its
+    tuned-P comparator needs a fix first (see Results).
+
+**Why.** The mock review (concern 2, `claude/rss-stage1-mock-review`) argues that E2's rule
+can be passed with false-alarm budget alone:
+- the within-task CI is narrow (SD 0.007 at n = 20);
+- the binomial FPR rule admits up to 39 of 400 false alarms;
+- on RLDX-1, two of 20 noise + P draws gained +0.038 and +0.049, at FPR 0.08 (§15.15).
+
+It asks for the rule's type I error under null fusions next to its power. It also asks for
+the null control to become part of the decision.
+
+**Status.** This is exploratory sizing on opened cohorts, like everything above. This
+section, the code and the tests were committed before the script was run on real data.
+
+### Method
+
+**Code.** `scripts/xr1_lead_time/e2_null_rules.py`, with tests in
+`tests/test_e2_null_rules.py`.
+
+**Studies.** At n = 10, 20 and 30 per class per task, 2,000 within-task studies each. These
+are exactly the studies of `e2_coprimary_sizing.py`: the same held-out pool (8 successes and
+5 failures per task), seed, cells and draws. The test checks this on synthetic data. On the
+cluster, the run stops if SAFE's and Hide-and-Seek's mean gain and SD at each n differ from
+`e2_coprimary.json`.
+
+In every study, on the same drawn rollouts, P is fitted once. Four detectors are then fused
+with P and fitted exactly like SAFE + P (`confirm_lead.fit_fast`):
+- **SAFE + P** and **Hide-and-Seek + P**, the co-primaries;
+- **(a) noise + P:** the running maximum of i.i.d. N(0, 1), a fresh draw for every simulated
+  rollout;
+- **(b) within-task resampled SAFE + P:** for each seed, normalized SAFE values drawn with
+  replacement from all held-out inferences of the same task, outcome ignored. Each seed's
+  running maximum is taken, then the mean over the three seeds. This is the construction of
+  E1's H2 null.
+
+The nulls come from a separate random stream, so they do not disturb the shared draws.
+
+**Rule components, for a detector with gain g against P in a study.**
+- **Decision CI > 0 at 97.5% (within task).** Approximated as in E2 and the co-primary
+  sizing: g − hw > 0, where hw is the median minus the 1.25th percentile of that detector's
+  own sampling distribution at that n. For a null, hw comes from the null's own
+  distribution, as a study's bootstrap would.
+- **E2 FPR rule.** The false alarms must not reject "true FPR ≤ 0.075" in a one-sided exact
+  binomial test at level 0.05. That allows at most 21, 39 and 56 false alarms of 200, 400 and
+  600 test successes.
+- **Tuned-P CI, rule (ii).** This is Amendment 1's registered secondary, made within task:
+  - on the study's test cohort, P's margin is chosen from confirm_lead's grid
+    (−0.5 to 1.0 in steps of 0.0025);
+  - the choice maximizes mean lead with no more false alarms than the fused detector has;
+  - the gain against that tuned P gets a test-only bootstrap with thresholds fixed:
+    failures resampled within task, 1,000 replicates, 97.5% percentile interval;
+  - it must have a lower bound above 0.
+- **Monte Carlo null test, rule (iii).**
+  - In each study, K = 39 fresh draws of each null are fused with P and refitted on the same
+    rollouts.
+  - The detector passes if p = (1 + #{null gains ≥ g})/(K + 1) ≤ 0.05 for **both** nulls,
+    i.e. if g beats at least 38 of the 39 draws of each.
+  - Written this way, rule (iii)'s type I error is at most 0.05 under either null by
+    exchangeability. A plain "95th percentile of 20 draws" would allow about 0.09.
+  - Ties count against the detector. A fit that falls back to the timer gives a gain of
+    exactly 0, which ties with every reference that also falls back, so the test is
+    conservative.
+  - Checked on synthetic data before the run: over 400 studies with K = 19, a null passed
+    the test against its own null in 0.028 (noise) and 0.048 (resampled) of studies.
+
+**Rules.**
+- **(i)** CI > 0 and the E2 FPR rule (the current rule).
+- **(ii)** (i) and the tuned-P CI > 0.
+- **(iii)** (i) and the Monte Carlo null test.
+
+**Outputs.**
+- **Type I error** of each rule under each null: the share of null studies passing it, with
+  its Monte Carlo SE (about 0.005 at 0.05). Each component's pass rate is reported as well.
+- **Co-primary power** of each rule:
+  - at the plug-in gains;
+  - at SAFE γ = 0.034 and Hide-and-Seek γ = 0.083, 0.052 and 0.05, imposed by shift.
+
+  Under a shift, the decision-CI and tuned-P bounds move by the same amount, and the null
+  reference gains do not move. The power that both co-primaries pass is given at
+  (0.034, 0.083) and (0.034, 0.052).
+- **Nested check of rule (i) for the nulls.** At n = 10, 20 and 30, 100 studies per null get
+  a real inner decision bootstrap (200 replicates, rollouts within task and class, refit).
+  Its rule (i) pass rate is compared with the approximation on the same studies.
+
+**Type I error as reported** is per detector. A 97.5% two-sided CI is a one-sided test at
+0.0125. With two co-primaries, the family-wise error is at most the sum of the two
+per-detector rates.
+
+### Recommendation rule, fixed before running
+
+1. A rule is **eligible** if its type I error is at most 0.05 under both nulls at n = 10, 20
+   and 30 (point estimates).
+   - If the nested check gives rule (i) a type I error on the other side of 0.05 from the
+     approximation at any n, the nested value decides whether rule (i) is eligible.
+   - Rules (ii) and (iii) only add conditions to (i), so they cannot be less strict than
+     their tuned-CI or Monte Carlo component alone.
+2. Among eligible rules, **recommend** the one with the highest power that both co-primaries
+   pass at the planning gains (SAFE 0.034, Hide-and-Seek 0.052) at n = 20. On a tie, prefer
+   the simpler rule, in the order (i), (ii), (iii).
+3. Under that rule, report the **smallest n** in {10, 20, 30} at which SAFE (0.034) and
+   Hide-and-Seek (0.052) each have power at least 0.8. If none does, say so and give the
+   power at n = 30.
+
+Hide-and-Seek's planning gain is 0.052, its gain against P at matched false alarms (§15.22),
+not 0.083, its opened point estimate. The script applies this rule mechanically and prints
+the result.
+
+### Expectations, written before running
+
+- **Checks.**
+  - Both replication gains reproduce (SAFE +0.0342, Hide-and-Seek +0.0834).
+  - The co-primary draws match `e2_coprimary.json`.
+- **Nulls fused with P.**
+  - The mean null gain is small, between 0 and +0.01, like the replication's +0.009 for
+    noise.
+  - The E2 FPR rule passes in nearly every null study: calibration and test come from one
+    pool here, so the fused test FPR stays near 0.05, far below the 9.75% the rule allows.
+- **Rule (i).** Its type I error is governed by the null's mean gain relative to its own
+  97.5% half-width. We expect it to exceed 0.05 for at least one null at n = 20 or 30. If
+  the null mean is positive, it should grow with n, because the half-width shrinks while
+  the mean does not. We do not predict its size.
+- **Rule (ii).**
+  - Type I at most about 0.02 under both nulls: a tuned timer with the same number of false
+    alarms should beat randomly placed alarms.
+  - SAFE's RLDX-1 gain came at an unchanged FPR (§15.15), so its tuned-P gain should stay
+    near its gain, with power ≥ 0.8 at n = 20.
+  - Hide-and-Seek at plug-in should pass easily, since its matched-FPR gain is 0.052. Shifted
+    to γ = 0.052, its tuned-P gain is near 0.02, so its power there is uncertain.
+- **Rule (iii).**
+  - Type I at most 0.05 by construction, and lower in practice, because the CI and FPR
+    conditions also apply.
+  - The bar (the second-largest of 39 null gains) should lie near the null mean plus about
+    two null SDs, roughly 0.015–0.03.
+  - SAFE at 0.034 should pass in most studies from n = 20, and less often at n = 10.
+- **Recommendation.** One of (ii) or (iii). We do not predict which.
+
+### Limits
+
+- **One shared, small pool.** Calibration and test samples are drawn from the same held-out
+  pool (5 failures and 8 successes per task). Cohorts are therefore exchangeable here, and
+  the fused detector can spend extra false-alarm budget on the test cohort only through
+  sampling noise.
+  - A real Stage 2 calibration and test cohort can differ. On XR-1 the test FPR ran at
+    0.058–0.061 against the 0.05 target.
+  - That would raise the type I error of rule (i), which has no paired control, and leave
+    rules (ii) and (iii) largely unaffected, since both compare on the same test cohort.
+  - These type I estimates are therefore lower bounds for rule (i).
+- **Tail resampling.** Resampling cannot create new extreme scores. With only 5 failures per
+  task, the co-primaries' sampling SD is likely understated, as in the earlier sections.
+- **Inference is conditional on the 20 tasks.**
+- **The decision CI is approximated**, and checked by nested bootstraps for rule (i) under
+  the nulls only.
+- **The shift assumes the deficit against a tuned P is unchanged** when the true gain is
+  lower.
+- **The nulls fix the scope of "type I error".** Noise and within-task resampled SAFE carry
+  no information about which rollout fails. A detector with weak but real signal is not a
+  null.
+
+### Cluster commands
+
+CPU only, from a pinned detached worktree, about 30–60 minutes with 8 workers. Outputs go
+under `/gs/bs`. `E2N_SHA` is the full SHA of the pushed commit that contains this section.
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+source $STORAGE_BS/robocasa_logs/eval/rldx1_hide_and_seek_20261023_000418/paths.env
+export E2CO_JSON=$(ls -d $STORAGE_BS/robocasa_checkpoints/safe/e2_coprimary_sizing_*/e2_coprimary.json | sort | tail -n 1)
+echo "co-primary run: $E2CO_JSON"
+export E2N_SHA=<full SHA>
+export E2N_REPO=$PROJECT_FS/robocasa_e2null_${E2N_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin
+test -e $E2N_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $E2N_REPO $E2N_SHA
+test "$(git -C $E2N_REPO rev-parse HEAD)" = "$E2N_SHA" && echo "worktree OK" || echo "STOP: wrong HEAD"
+export E2N_TAG=e2_null_rules_$(date +%Y%m%d_%H%M%S)
+export E2N_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/$E2N_TAG E2N_LOG=$STORAGE_BS/robocasa_logs/eval/$E2N_TAG
+mkdir -p $E2N_ROOT $E2N_LOG
+sha256sum $RLDX_CAL/lstm_seed{0,1,2}/normalized_scores.jsonl $RLDXHS_ROOT/scores/{train,calibration,test}_predictions.jsonl \
+  $RLDX_LEAD_OUT/rldx_lead_lstm.json $RLDXHS_ROOT/rldx_hide_and_seek.json $E2CO_JSON | tee $E2N_LOG/frozen_inputs.sha256
+cd $E2N_REPO
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_e2_null_rules tests.test_e2_coprimary_sizing \
+  tests.test_stage2_sizing 2>&1 | grep -E "^(Ran|OK|FAILED)"
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 nohup nice -n 10 \
+  "$SAFE_PY" -I -u scripts/xr1_lead_time/e2_null_rules.py --calibration-dir $RLDX_CAL \
+  --hs-scores-dir $RLDXHS_ROOT/scores --replication-json $RLDX_LEAD_OUT/rldx_lead_lstm.json \
+  --hs-result $RLDXHS_ROOT/rldx_hide_and_seek.json --coprimary-json $E2CO_JSON --workers 8 \
+  --output $E2N_ROOT/e2_null_rules.json > $E2N_LOG/e2_null_rules.log 2>&1 &
+echo "PID $! on $(hostname); log $E2N_LOG/e2_null_rules.log"
+```
+
+Check progress with `tail -n 3 $E2N_LOG/e2_null_rules.log`: the two check lines print within
+a minute, and the tables print at the end. When the process has exited, paste back the
+output of:
+
+```bash
+cat $E2N_LOG/e2_null_rules.log; sha256sum -c $E2N_LOG/frozen_inputs.sha256
+```
+
+Stop conditions: a replication or co-primary-draw mismatch (the script exits with `STOP`),
+a failed checksum, or an error. Do not edit inputs to make the run pass.
+
+### Results (2026-10-23)
+
+**Run.**
+- Code `34ee5ac7`, worktree `robocasa_e2null_34ee5ac7`.
+- Output `e2_null_rules_<timestamp>/e2_null_rules.json` under `robocasa_checkpoints/safe/`;
+  log under `robocasa_logs/eval/`.
+- 2,000 studies per n, seed 20261021, K = 39 reference draws per null in every study.
+
+**Checks, all passed.**
+- The replication gains reproduce SAFE + P +0.0342 and Hide-and-Seek + P +0.0834.
+- The co-primary draws match `e2_coprimary_sizing_20261023_011537/e2_coprimary.json`.
+- All nine frozen input files are unchanged (`sha256sum -c` OK).
+- SAFE's and Hide-and-Seek's mean gains and SDs equal Table S5 at n = 10, 20 and 30.
+
+**Table N1 — detectors fused with P (within task).** Gains are against P; hw is the 97.5%
+half-width of the detector's own sampling distribution.
+
+| Detector | n | Mean gain (SD) | hw | Mean fused FPR | Mean gain against tuned P |
+|---|---:|---|---:|---:|---:|
+| SAFE | 10 / 20 / 30 | +0.040 (0.012) / +0.036 (0.007) / +0.035 (0.006) | 0.015 / 0.011 / 0.009 | 0.052 / 0.050 / 0.049 | +0.031 / +0.033 / +0.033 |
+| Hide-and-Seek | 10 / 20 / 30 | +0.083 (0.017) / +0.080 (0.011) / +0.080 (0.009) | 0.030 / 0.025 / 0.021 | 0.053 / 0.050 / 0.049 | +0.073 / +0.078 / +0.081 |
+| Noise | 10 / 20 / 30 | +0.0055 (0.0081) / +0.0037 (0.0048) / +0.0031 (0.0040) | 0.010 / 0.007 / 0.007 | 0.054 / 0.053 / 0.052 | −0.006 / −0.003 / −0.001 |
+| Resampled SAFE | 10 / 20 / 30 | +0.0000 (0.0003) / 0 / 0 | 0 | 0.045 / 0.047 / 0.047 | −0.002 / +0.000 / +0.001 |
+
+- **Resampled SAFE.** Its fit falls back to the timer in essentially every study, so its
+  gain is exactly 0. On this pool it is not an informative null.
+- **Noise.** Its small positive gain is a timing effect: the running maximum of noise rises
+  with elapsed time and acts as a second, noisier clock.
+- **The rule (iii) bar** (the second-largest of 39 reference gains, mean over studies) is
+  +0.020, +0.012 and +0.010 for noise at n = 10, 20 and 30, and 0 for resampled SAFE.
+
+**Table N2 — type I error.** Each cell is the share of null studies passing. The Monte Carlo
+SE of the approximated rates is 0.004–0.009. Nested uses 100 studies, SE about 0.01–0.02.
+
+| Null | n | Rule (i) approx | Rule (i) nested | Rule (ii) approx | Rule (iii) approx | FPR rule only | Tuned CI only |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Noise | 10 | 0.221 | **0.050** | 0.032 | 0.053 | 0.982 | 0.303 |
+| Noise | 20 | 0.217 | **0.020** | 0.055 | 0.039 | 0.994 | 0.404 |
+| Noise | 30 | 0.157 | **0.010** | 0.033 | 0.036 | 0.999 | 0.472 |
+| Resampled SAFE | 10 | 0.001 | 0.000 | 0.001 | 0.000 | 0.995 | 0.601 |
+| Resampled SAFE | 20 | 0.001 | 0.000 | 0.001 | 0.000 | 0.999 | 0.778 |
+| Resampled SAFE | 30 | 0.000 | 0.000 | 0.000 | 0.000 | 1.000 | 0.836 |
+
+**Table N3 — co-primary power by rule (i) / (ii) / (iii)** (shift, within-task CI, E2 FPR
+rule).
+
+| Detector, assumed gain | n = 10 | n = 20 | n = 30 |
+|---|---|---|---|
+| SAFE, 0.034 | 0.99 / 0.86 / 0.90 | 1.00 / 0.98 / 1.00 | 1.00 / 0.99 / 1.00 |
+| Hide-and-Seek, 0.083 | 0.99 / 0.98 / 0.99 | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 |
+| Hide-and-Seek, 0.052 | 0.91 / 0.85 / 0.91 | 0.99 / 0.98 / 0.99 | 1.00 / 1.00 / 1.00 |
+| Hide-and-Seek, 0.05 | 0.88 / 0.82 / 0.88 | 0.98 / 0.97 / 0.98 | 1.00 / 1.00 / 1.00 |
+| Both pass, (0.034, 0.083) | 0.98 / 0.84 / 0.89 | 1.00 / 0.98 / 1.00 | 1.00 / 0.99 / 1.00 |
+| Both pass, (0.034, 0.052) | 0.90 / 0.74 / 0.81 | 0.99 / 0.96 / 0.99 | 1.00 / 0.99 / 1.00 |
+
+Plug-in power (no shift) is within 0.06 of the SAFE 0.034 and Hide-and-Seek 0.083 rows at n = 10, and within 0.01 from n = 20.
+
+**What the nested check shows.**
+- **The g − hw shortcut overstates rule (i)'s type I error under noise by a factor of 5 to
+  16:** 0.25 against 0.05 at n = 10, 0.24 against 0.02 at n = 20, 0.16 against 0.01 at
+  n = 30.
+- **Why.** The noise null's sampling distribution has a point mass at 0 (studies whose fit
+  falls back to the timer) plus small positive gains. Its median minus 1.25th percentile is
+  therefore tiny, and the shortcut's lower bound sits close to the study's own gain. A real
+  inner bootstrap refits on resampled rollouts, often falls back to the timer, and gets a
+  lower bound at or below 0.
+- **The co-primaries are not affected.** Their approximation matched nested bootstraps
+  exactly in the E2 check above (Table S4).
+- **Type I conclusions therefore rest on the nested values.** Rules (ii) and (iii) only add
+  conditions to (i), so their type I error with a real CI is at most nested (i).
+
+**Against the expectations.**
+
+| Expectation (written before running) | Result |
+|---|---|
+| Checks pass | Yes |
+| Mean null gain 0 to +0.01 | Yes. Noise +0.003 to +0.006; resampled SAFE exactly 0 (timer fallback) |
+| E2 FPR rule passes nearly every null study | Yes (0.98–1.00): it offers no protection here |
+| Rule (i) type I > 0.05 for at least one null at n = 20 or 30, growing with n | **No.** Nested 0.02 and 0.01, falling with n. Only the shortcut exceeds 0.05 |
+| Rule (ii) type I ≤ about 0.02 | Approx 0.032–0.055; ≤ 0.020 at n ≥ 20 by the nested bound |
+| SAFE's tuned-P gain stays near its gain; power ≥ 0.8 at n = 20 | Yes (+0.033 against +0.036; 0.98) |
+| Hide-and-Seek at shifted 0.052 under (ii): uncertain | 0.98 at n = 20 |
+| Rule (iii) type I ≤ 0.05; bar about 0.015–0.03 | 0.036–0.053 (within MC error of its exact 0.05 bound); bar 0.010–0.020 |
+| SAFE under (iii) passes in most studies from n = 20 | Yes (1.00; 0.90 at n = 10) |
+| Recommendation is (ii) or (iii) | **No.** The pre-stated rule gives (i) |
+
+**Issues found.**
+- **A grid artifact in the tuned-P comparator.**
+  - Rule (ii) searches P's margin on confirm_lead's grid (steps of 0.0025). The calibrated
+    margin of P usually falls between grid points.
+  - When the fused fit falls back to the timer (fused = P), the best grid timer with no
+    more false alarms is slightly later than P. The per-failure differences are then all
+    ≥ 0, and some are positive, so their bootstrap lower bound is above 0.
+  - This is why "tuned CI only" passes in 0.30–0.84 of null studies even though the null's
+    mean tuned gain is ≤ 0.001.
+  - It does not move rule (ii)'s type I error, because rule (i)'s CI blocks those fallback
+    studies.
+  - If rule (ii) is registered, the tuned timer's candidates must include P's own
+    calibrated margin, so that a detector identical to P gets exactly 0.
+- **Resampled SAFE is not an informative null on RLDX-1's held-out pool**: it never changes
+  the fit. Noise is the binding null here.
+
+**Reading (exploratory).**
+- **Concern 2's mechanism does not appear here.** In this exchangeable simulation, E2's
+  rule (i) holds its type I error at 0.02 at n = 20 under both nulls.
+  - The protection comes from the decision CI, not from the FPR rule, which passes almost
+    every null study.
+  - The reviewer's example (noise gaining +0.038/+0.049 at FPR 0.08 in §15.15) came from
+    60 calibration successes and a test FPR well above P's. At E2's size the fused noise
+    FPR averages 0.053, and the 95th percentile of noise gains is +0.013.
+- **The simulation cannot test the reviewer's real worry.** That worry is a fused detector
+  spending more false alarms on a test cohort that differs from calibration. Rules (ii) and
+  (iii) guard against it by construction, at no power cost for (iii) from n = 20. That is
+  the case for registering (iii) even though the pre-stated rule picks (i).
+- **The power figures for the protocol:**
+  - at n = 20, both co-primaries pass in 0.99 (i), 0.96 (ii) and 0.99 (iii) of studies at
+    (SAFE 0.034, Hide-and-Seek 0.052);
+  - each detector individually is at 0.98 or more.
+- **Limits as stated above.** One shared pool, 5 failures per task, inference conditional on
+  the 20 tasks, a shift model for assumed gains.
+
+## E3 with the measured same-scene retry rate (2026-10-23)
+
+**Summary for the protocol** (run 2026-10-23, `e3_retry_sizing_<timestamp>`, code `ddab0ec4`).
+- Retry success r = 0.245 (measured, post hoc), budget 1.25 H_k, two-sided 0.05, power 0.8.
+- "Paired" means McNemar pairs for a design that branches at the alarm.
+
+| Contrast | XR-1 (38 tasks) | RLDX-1 (20 tasks) |
+|---|---|---|
+| P vs none: success gain | +0.017 | +0.034 (atomic +0.054; composite −0.012) |
+| P vs none: episodes per arm, unpaired | 14,014 (was 648 at r = p) | 3,280 (was 484) |
+| P vs none: pairs, branching design | 2,306 (159,041 at r = 0.17) | **461** (970 at r = 0.17) |
+| SAFE + P vs P, atomic at 1.0 H_k: pairs | 7,845 | 15,300 |
+| Reset vs continuation: crossover c\* | 0.053 | 0.104 |
+| Reset vs continuation: continuation proxy | 0.092 | 0.082 |
+| Reset vs continuation: expected direction | continuation better (c\* < proxy < 0.27) | unknown (proxy < c\* < 0.27) |
+| Reset vs continuation: pairs (pre-stated rule) | about 3,000 | about 6,500 |
+
+**Recommendation.**
+- **E3 at about 650 per arm is not worthwhile as specified.** With the measured retry rate,
+  P vs no monitor needs 3,300–14,000 episodes per arm.
+- **The one affordable superiority test** is P vs no monitor on RLDX-1 with a branching
+  design. That needs 461 pairs at r = 0.245, or about 1,000 to survive r = 0.17.
+  - Its effect is entirely on atomic tasks.
+  - Its retry rate is borrowed from XR-1.
+- **XR-1 supports no affordable superiority test of any monitor contrast.**
+- **Reset against continuation hinges on c**, a continuation success rate nobody has
+  measured, which sits close to the crossover on both policies.
+  - Measure c first: a cheap continuation pilot whose time limit is raised to 1.25 H_k.
+  - Until then, register E3 as an estimation study (both arms' success rates with CIs), not
+    as a superiority test.
+- Details and the reduced claim are in "Results" below.
+
+**Why.** E3's sizing above assumed that a retry after an alarm succeeds at the task's
+ordinary success rate (r = p_k). The same-scene retry pilot (report §15.24,
+`xr1_retry_pilot_plan.md`) measured otherwise.
+- **Status of the pilot.** Post hoc: its registered scene gate failed, and 2 of 194 scenes
+  did not reproduce and were excluded.
+- **Measured rates.** A retry of an originally failed scene succeeded in 24/98 = **0.245**
+  (Wilson [0.170, 0.339]; task cluster [0.190, 0.303]). A retry of an originally successful
+  scene succeeded in 66/94 = 0.702.
+- **Comparison with p.** The 10 pilot tasks have task-macro p = 0.486, so r_fail / p = 0.504.
+  r_fail is below p_k on every task.
+
+The drafts session also proposed **alarm-triggered reset against continuation** (the same
+rollout keeps running to 1.25 H_k) as E3's primary contrast. This section sizes both.
+
+**Status.** This is exploratory sizing on opened cohorts and a post hoc pilot. This section
+and the code changes were committed before the run on real data.
+
+### Method
+
+The E3 model above is unchanged (`stage2_sizing.py e3`). What changes:
+
+- **Retry success rates**, one run each:
+  - `0.245`: the pooled measured rate, for every task and both policies;
+  - `0.17`: its Wilson lower bound (sensitivity);
+  - `scale:0.504`: r_k = 0.504 × p_k per task, so that tasks keep their relative difficulty;
+  - `scale:0.350` (= 0.17 / 0.486): the per-task version of the lower bound;
+  - `same` (r = p_k): the old assumption, run only as a check. It must reproduce the
+    2026-10-21 E3 tables exactly (`--reference-json`); otherwise the run stops.
+
+  r applies to every retry (a second retry of the same scene is assumed no harder than the
+  first). The rate is measured on XR-1 and assumed for RLDX-1.
+- **Episodes per arm for P vs none and SAFE + P vs P, at every budget**, two ways:
+  - **Unpaired:** the two-proportion formula on task-macro success rates (two-sided 0.05,
+    power 0.8), as before. This fits independent runs on matched scenes.
+  - **Paired by seed (McNemar, Connor 1987):** for a design that *branches at the alarm*
+    (restore the simulator state, then reset in one arm and continue in the other), so the
+    two arms share their first attempt up to the alarm.
+    - The effect is the common-random-number difference.
+    - The discordant total comes from runs whose retries are drawn independently in each
+      arm, as two stochastic policy runs would be.
+    - Not modelled: a positive correlation between arms' retries on hard scenes. It would
+      lower n, so these figures are conservative on that point.
+- **Reset against continuation at 1.25 H_k** (P or SAFE + P as the alarm; the continuation
+  arm has no monitor):
+  - first-attempt successes succeed in the continuation arm, but can be aborted by a false
+    alarm in the reset arm;
+  - first-attempt failures succeed in the continuation arm with probability c, independently
+    of the reset arm's retries;
+  - reported for c ∈ {0, 0.05, 0.10, 0.15, 0.20, 0.27, 0.40}: both arms' success rates, their
+    difference, and the pairs needed (McNemar, branching design) and episodes per arm
+    (unpaired).
+- **What the data say about c.** No rollout ran past H_k, so c cannot be measured. Three
+  reference points:
+  - **Late-success hazard proxy (computed).** Of the rollouts still running at 0.75 H_k, the
+    share that succeed by H_k: XR-1 from all retained rows of both E1 cohorts, RLDX-1 from all
+    rows. It is likely optimistic for c. Rollouts still running at H_k are the slowest ones,
+    and a population's success hazard usually falls with time.
+  - **0.27:** the share of §15.17's labeled failures in the category "slow or nearly
+    succeeded" (13/48).
+  - **0.79:** the share judged "recoverable until timeout" (§15.17). This is a ceiling, not
+    an estimate: recoverable does not mean the policy would recover.
+- **Crossover c\*.** The continuation success at which reset and continuation tie, read off
+  the grid by linear interpolation.
+
+### Expectations, written before running
+
+- **Check.** `same` reproduces the 2026-10-21 tables exactly.
+- **P vs none at 1.25 H_k.** Retry gains scale roughly with r / p.
+  - At r = 0.245 the XR-1 gain falls from 0.075 to about 0.03, and unpaired n rises from about
+    650 to about 3,000–4,000 per arm. RLDX-1 is similar, at about 2,000–3,000.
+  - At r = 0.17, roughly twice that again.
+  - The per-task scaling (0.504 p_k) gives about the same as r = 0.245.
+- **Paired branching design.** Several times smaller than unpaired, because only
+  first-attempt failures can be discordant: hundreds to about 1,500 pairs.
+- **SAFE + P vs P, XR-1 atomic at 1.0 H_k.** The gain falls from 0.044 to about 0.015.
+  Unpaired n is above 10,000; paired, a few thousand.
+- **Reset against continuation.**
+  - c\* is low, about 0.05–0.12. A reset at the alarm leaves about 0.5 H_k, which fits one
+    retry that succeeds about a quarter of the time. Continuation instead gives every failure
+    a chance c.
+  - The hazard proxy is likely above c\*, so the expected direction favours continuation.
+  - Near c\* the needed n is unbounded. At the hazard proxy it should be small (low hundreds).
+
+### Recommendation rule, fixed before running
+
+- **P vs none at 1.25 H_k (r = 0.245):**
+  - unpaired n above 2,000 per arm on both policies → E3 at about 650 per arm is not
+    worthwhile as specified;
+  - paired branching n ≤ 1,000 → propose the branching design at that size (state
+    save/restore at the alarm, plus the scene-identity check of §15.24);
+  - otherwise, reduce the claim to a description of retry outcomes with CIs and register no
+    superiority test.
+- **Reset against continuation:**
+  - if both the hazard proxy and 0.27 exceed c\* on a policy, the test's expected direction
+    there is "continuation better". Register it as two-sided, sized at the pairs needed at
+    c = the hazard proxy, and state the expected direction;
+  - if c\* lies between them, the direction is unknown in advance. Register it as two-sided,
+    sized at the larger of the two n, and say so.
+- **SAFE + P vs P** stays descriptive unless its paired n at 1.0 H_k is ≤ 1,000 on XR-1
+  atomic tasks.
+
+### Limits
+
+- **Pilot coverage.** r is post hoc, from 98 failed scenes on 10 mid-success XR-1 tasks.
+  High- and low-success tasks, and RLDX-1, are extrapolations.
+- **Retry duration.** A retry's duration is drawn from the task's ordinary success durations.
+  Hard scenes may take longer, which would lower retry benefits further.
+- **Continuation success** is assumed and independent of the reset arm's retries.
+- **Shadow data and the bound.** The alarm times come from shadow data, and the
+  retry-benefit model is the bound of the earlier E3 section, with its limits.
+
+### Cluster commands
+
+CPU only, about 10–20 minutes for all five runs. `E3R_SHA` is the full SHA of the pushed
+commit that contains this section.
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export SAFE_PY=$STORAGE_BS/envs/vla_safe/bin/python
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+export E1_OUT=$STORAGE_BS/robocasa_rollouts/safe/xr1_lead_calibration_20261020_001108/lead_analysis
+export XR1_RUNTIME_BUNDLE=$STORAGE_BS/robocasa_checkpoints/safe/xr1_prospective_matched_fpr_20260815_163700_calibration/runtime_bundle.json
+export RLDX_CAL=$STORAGE_BS/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530/calibration/lstm
+export E3_REF=$STORAGE_BS/robocasa_checkpoints/safe/stage2_sizing_20261021_131345/e3.json
+export E3R_SHA=<full SHA>
+export E3R_REPO=$PROJECT_FS/robocasa_e3retry_${E3R_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin
+test -e $E3R_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $E3R_REPO $E3R_SHA
+test "$(git -C $E3R_REPO rev-parse HEAD)" = "$E3R_SHA" && echo "worktree OK" || echo "STOP: wrong HEAD"
+export E3R_TAG=e3_retry_sizing_$(date +%Y%m%d_%H%M%S)
+export E3R_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/$E3R_TAG E3R_LOG=$STORAGE_BS/robocasa_logs/eval/$E3R_TAG
+mkdir -p $E3R_ROOT $E3R_LOG
+sha256sum $E1_OUT/calibration_with_baselines.jsonl $E1_OUT/test_with_baselines.jsonl $XR1_RUNTIME_BUNDLE \
+  $RLDX_CAL/lstm_seed{0,1,2}/normalized_scores.jsonl $E3_REF | tee $E3R_LOG/frozen_inputs.sha256
+cd $E3R_REPO
+CUDA_VISIBLE_DEVICES="" $SAFE_PY -W ignore -m unittest tests.test_stage2_sizing 2>&1 | grep -E "^(Ran|OK|FAILED)"
+export CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2
+nohup sh -c "
+for r in same 0.245 0.17 scale:0.504 scale:0.350; do
+  tag=\$(echo \$r | tr ':.' '__')
+  ref=''; test \$r = same && ref='--reference-json $E3_REF'
+  nice -n 10 $SAFE_PY -I -u scripts/xr1_lead_time/stage2_sizing.py e3 --calibration $E1_OUT/calibration_with_baselines.jsonl \
+    --test $E1_OUT/test_with_baselines.jsonl --runtime-bundle $XR1_RUNTIME_BUNDLE --rldx-calibration-dir $RLDX_CAL \
+    --retry-success \$r \$ref --output $E3R_ROOT/e3_r_\$tag.json > $E3R_LOG/e3_r_\$tag.log 2>&1 || exit 1
+done
+echo ALL DONE > $E3R_LOG/done.txt" > $E3R_LOG/driver.log 2>&1 &
+echo "driver PID $!; logs in $E3R_LOG"
+```
+
+When `done.txt` exists (or the driver stops), paste back the output of:
+
+```bash
+grep -h "check" $E3R_LOG/e3_r_*.log; cat $E3R_LOG/driver.log
+for f in 0_245 0_17 scale_0_504 scale_0_350; do echo "=== r = $f"; awk '/episodes per arm \(unpaired/{p=1} p' $E3R_LOG/e3_r_$f.log; done
+sha256sum -c $E3R_LOG/frozen_inputs.sha256
+```
+
+The driver stops at the first failing run. The `same` run must print
+`check: reference E3 tables MATCH`.
+
+### Results (2026-10-23)
+
+**Run.**
+- Code `ddab0ec4`, worktree `robocasa_e3retry_ddab0ec4`.
+- Five runs: `same`, 0.245, 0.17, `scale:0.504`, `scale:0.350`.
+- Output `e3_retry_sizing_<timestamp>/e3_r_*.json` under `robocasa_checkpoints/safe/`; logs
+  under `robocasa_logs/eval/`.
+
+**Checks.**
+- `same` reproduced the 2026-10-21 E3 tables exactly (`check: reference E3 tables MATCH`).
+- Every run reproduced the registered leads: XR-1 P 0.2252 and SAFE + P 0.2550; RLDX-1
+  0.2711 and 0.3053.
+- All seven input files were unchanged.
+
+**Table R1 — P vs no monitor at 1.25 H_k** (all tasks; atomic in brackets). Each cell is the
+success gain, then episodes per arm unpaired / pairs for the branching design.
+
+| Retry success | XR-1 | RLDX-1 |
+|---|---|---|
+| r = p_k (2026-10-21) | +0.075 → 648 / – | +0.086 → 484 / – |
+| 0.245 | +0.017 → 14,014 / 2,306 (atomic +0.023 → 6,035 / 1,155) | +0.034 → 3,280 / 461 (atomic +0.054 → 1,211 / 252) |
+| 0.17 | +0.002 → 1,184,927 / 159,041 | +0.021 → 8,919 / 970 (atomic +0.035 → 2,980 / 465) |
+| 0.504 · p_k | +0.023 → 7,325 / 1,226 | +0.043 → 2,024 / 333 |
+| 0.350 · p_k | +0.007 → 88,030 / 12,019 | +0.028 → 4,954 / 643 |
+
+**At other budgets (r = 0.245):**
+- **XR-1 P vs none is negative at 1.0 H_k (−0.014) and about 0 at 1.5 H_k.** P's false
+  alarms abort successes (exposure 0.032) at an unchanged rate, while retry gains shrink
+  with r. On XR-1 a timer-triggered reset barely pays for its own false alarms.
+- **RLDX-1 composite tasks lose with P at 1.0–1.25 H_k (−0.012).** No retry fits there.
+
+**SAFE + P vs P** stays far out of reach. At 1.0 H_k on XR-1 atomic tasks (r = 0.245):
+gain +0.007, 63,858 per arm unpaired or 7,845 pairs. RLDX-1 needs at least 11,000 pairs at
+every budget.
+
+**Table R2 — reset at the alarm (P) against continuation to 1.25 H_k, r = 0.245.**
+- c\* is the continuation success at which the two arms tie.
+- "Proxy" is the late-success hazard: of the rollouts still running at 0.75 H_k, the share
+  that succeed by H_k.
+- Pairs are for the branching design.
+
+| Policy, tasks | Reset − continuation at c = 0 | c\* | Proxy | Pairs at the proxy | Pairs at c = 0.27 |
+|---|---:|---:|---:|---:|---:|
+| XR-1, all | +0.023 | 0.053 | 0.092 | about 3,000 (continuation better) | 147 |
+| XR-1, atomic | +0.028 | 0.097 | 0.091 | over 10^5 (tie) | 407 |
+| XR-1, composite | +0.022 | 0.044 | 0.092 | about 1,650 (continuation better) | 116 |
+| RLDX-1, all | +0.046 | 0.104 | 0.082 | about 6,500 (reset better) | 225 |
+| RLDX-1, atomic | +0.070 | 0.188 | 0.062 | about 350 (reset better) | 1,194 |
+| RLDX-1, composite | −0.012 | below 0 | 0.130 | about 90 (continuation better) | 44 |
+
+- **Sensitivity of c\*.** Across the four retry rates, c\* ranges from 0.015 to 0.066 for
+  XR-1 (all tasks) and from 0.066 to 0.137 for RLDX-1. Lower r moves c\* down, so
+  continuation is favoured more.
+- **Reset with SAFE + P** is within about 0.005 of reset with P in every cell.
+- **Pairs at the proxy** are read from the grid (linear in the difference, n ∝ 1/Δ²). They
+  are approximate.
+
+**Decisions under the pre-stated rule.**
+- **P vs none at 1.25 H_k.**
+  - Unpaired n exceeds 2,000 on both policies (14,014 and 3,280), so E3 at about 650 per
+    arm is not worthwhile as specified.
+  - Paired branching n is at most 1,000 on RLDX-1 (461), so propose that design there.
+  - It is not, on XR-1 (2,306), so XR-1 gets a description only.
+- **Reset against continuation.**
+  - XR-1: c\* lies below both the proxy and 0.27, so the expected direction is
+    "continuation better". It would be registered two-sided at about 3,000 pairs (at the
+    proxy).
+  - RLDX-1: c\* lies between them, so the direction is unknown. It would be registered
+    two-sided at the larger n, about 6,500 pairs.
+- **SAFE + P vs P.** Paired n is 7,845 on XR-1 atomic tasks at 1.0 H_k, above 1,000, so it
+  stays descriptive.
+
+**Against the expectations.**
+
+| Expectation (written before running) | Result |
+|---|---|
+| `same` reproduces the tables | Yes |
+| P vs none (r = 0.245): XR-1 gain about 0.03, n about 3,000–4,000; RLDX-1 about 2,000–3,000 | **XR-1 worse:** +0.017, n 14,014, because the false-alarm cost does not scale with r. RLDX-1 as expected (3,280) |
+| r = 0.17 about twice the n again | XR-1 far worse (gain about 0); RLDX-1 2.7× |
+| Per-task scaling close to 0.245 | Somewhat better, because high-p atomic tasks keep a higher r |
+| Branching design several times smaller: hundreds to about 1,500 | 6–7× smaller. RLDX-1 461; XR-1 2,306, above the range |
+| SAFE + P vs P (XR-1 atomic, 1.0 H_k): gain about 0.015, unpaired above 10,000 | Smaller: +0.007, 63,858; paired 7,845 |
+| c\* about 0.05–0.12 | XR-1 0.04–0.10; RLDX-1 0.10 (all), 0.19 (atomic), below 0 (composite) |
+| Proxy above c\*, so continuation favoured, at low-hundreds n | **Partly.** Yes for XR-1 overall. No for RLDX-1: the proxy (0.06–0.08) is lower than expected, below c\*. n at the proxy is in the thousands |
+
+**Reading and recommendation (exploratory).**
+- **The pilot changes E3's case qualitatively, not just its size.**
+  - With r = p, a timer-triggered reset looked like a 7–9 point success gain.
+  - With the measured same-scene rate it is 1.7 points on XR-1, where false alarms eat most
+    of it, and 3.4 points on RLDX-1, all on atomic tasks.
+  - At the Wilson lower bound (0.17), the XR-1 gain vanishes.
+- **Reset against continuation is knife-edge on both policies.** The reset benefit
+  (2–5 points at c = 0) is matched by continuation at c\* = 0.05–0.10. The only data proxy
+  for c lands at about the same values, 0.06–0.09. Its direction cannot be predicted from
+  existing data, and its size is unaffordable unless c turns out far from c\*.
+- **c is cheap to measure, and it decides the design.** A continuation pilot is a collection
+  run with the time limit raised to 1.25 H_k. Its late successes estimate c directly, with
+  no branching needed.
+  - About 300 time-limit failures per policy give c ± 0.05, enough to tell whether c sits
+    clearly above or below c\*.
+  - On the 10 pilot tasks that is about 600 attempts.
+- **A sound E3 for Stage 1:**
+  1. **Primary (if kept as a test):** P vs no monitor on RLDX-1 at 1.25 H_k, branching at the
+     alarm, about 1,000 pairs. That size survives r = 0.17 (970 pairs); 461 suffice at the
+     point estimate.
+     - The claim is restricted to RLDX-1, and in effect to its atomic tasks.
+     - It needs the state save/restore and the scene-identity check of §15.24.
+     - Its retry rate is borrowed from XR-1, and the Stage 2 protocol must measure it.
+  2. **Reset against continuation:** an estimation study on both policies. Report both
+     arms' success rates and their paired difference with CIs, register the continuation
+     pilot as its first step, and make no superiority claim in either direction.
+  3. **SAFE + P against P, and everything on XR-1:** descriptive.
+- **The reduced claim, honestly put.** E3 can show whether a timer-triggered reset helps
+  RLDX-1 on its atomic tasks. It can describe, not decide, whether resetting beats simply
+  giving the policy more time. It cannot show that a learned monitor improves task success
+  over the timer.
+- **Limits as stated above.**
+  - r is post hoc, from 10 mid-success XR-1 tasks, and assumed constant across retries.
+  - Continuation is assumed independent of the retries.
+  - The alarm times come from shadow data.
+
