@@ -109,6 +109,55 @@ class TestDump(unittest.TestCase):
             self.assertEqual(d["max_episode_length"], 4)
 
 
+class TestExtendTimer(unittest.TestCase):
+    def build(self, root, corrupt=False):
+        rng = np.random.default_rng(3)
+        idx_rows = []
+        for task in ("push_t", "sorting"):
+            cal = rng.integers(10, 20, 30)
+            idx_rows += [{"task": task, "split": "calibration", "success": True, "L": int(L)} for L in cal]
+            idx_rows.append({"task": task, "split": "calibration", "success": False, "L": 40})
+            n = 60
+            success = np.arange(n) % 2 == 0
+            lengths = np.where(success, rng.integers(8, 22, n), 40)
+            for seed in (0, 1):
+                time_alarms, fiper_alarms = {}, {}
+                for q in (0.9, 0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99):
+                    thr = np.quantile(cal.astype(float) + 1e-6, q)
+                    ref = np.array([int(np.argmax(a)) if (a := (np.arange(1, L + 1, dtype=float) + 1e-6) / thr > 1).any() else -1
+                                    for L in lengths], dtype=np.int64)
+                    if corrupt and q == 0.95:
+                        ref = ref.copy(); ref[0] = 0
+                    time_alarms[("ct_quantile", q, "1")] = ref
+                    early = rng.integers(2, 10, n)
+                    fiper_alarms[("tvt_quantile", q, "20/50")] = np.where(~success, early, np.where(rng.random(n) < 0.4, 3, -1)).astype(np.int64)
+                common = {"lengths": lengths.astype(np.int64), "successful": success, "max_episode_length": 40}
+                out = {"time": dict(first_alarm=time_alarms, **common), "rnd_oe_and_entropy": dict(first_alarm=fiper_alarms, **common)}
+                (root / "dumps").mkdir(exist_ok=True)
+                (root / "dumps" / f"seed{seed}_{task}.pkl").write_bytes(pickle.dumps(out))
+        (root / "index.jsonl").write_text("".join(json.dumps(r) + "\n" for r in idx_rows))
+
+    def test_extension_matches_pipeline_and_covers_fiper_fpr(self):
+        module = load("extend_timer")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); self.build(root)
+            call(module, [str(root / "dumps"), str(root / "index.jsonl"), "--output", str(root / "ext.json"), "--bootstrap", "20"])
+            res = json.loads((root / "ext.json").read_text())
+            for task in ("push_t", "sorting"):
+                t = res["tasks"][task]
+                self.assertGreater(t["timer_fpr_range"][1], 0.4)          # the extended grid reaches FIPER's FPR
+                self.assertEqual(t["clamped"], 0)
+            self.assertEqual(len(res["average"]["ci95"]), 2)
+
+    def test_mismatch_with_pipeline_stops(self):
+        module = load("extend_timer")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); self.build(root, corrupt=True)
+            with self.assertRaises(SystemExit):
+                call(module, [str(root / "dumps"), str(root / "index.jsonl"), "--output", str(root / "ext.json"), "--bootstrap", "5"])
+            self.assertFalse((root / "ext.json").exists())
+
+
 ANCHORS = {
     "evaluation/method_eval_classes/__init__.py": "from .base_eval_class import *\nfrom .logpzo_eval import *\n",
     # Mirrors FIPER's default.yaml, including the look-alike 'available_rnd_models' line.

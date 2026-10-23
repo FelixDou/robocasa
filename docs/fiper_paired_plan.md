@@ -131,3 +131,28 @@ $SAFE_PY -I $PE_REPO/scripts/published_eval/fiper_paired/analyze_paired.py $FIPE
 
 If step 3 reports a missing module, stop: a separate environment for FIPER is created
 only after approval. Do not install packages into `vla_safe`.
+
+## Post hoc extension (2026-10-23, after the paired run, before this analysis)
+
+**What happened.** The paired run (`fiper_paired_20261022_180548`, 25 dumps) reproduced FIPER's
+Table 1 within ±0.05 on all five tasks. The planned matched-FPR comparison did not work as
+designed: every FIPER operating point at FIPER's selected configuration (50 of 50 task ×
+quantile points) had a test FPR above the highest FPR the timer reaches on FIPER's quantile
+grid (0.90–0.99). FIPER's average test FPR was 0.35; the timer's was 0.09. The interpolation
+therefore clamped, and the printed "+0.25 lead for FIPER" is an upper bound, not a matched
+comparison.
+
+**Extension, added after seeing the clamping.**
+- The pure timer is FIPER's `ct_quantile`, window 1, with score step + 1. It is a
+  deterministic function of rollout lengths, so its curve is recomputed offline over
+  quantiles 0.30–0.99 (`scripts/published_eval/fiper_paired/extend_timer.py`).
+- Calibration lengths come from the §15.18 index (successful calibration rollouts); test
+  lengths and outcomes come from the dumps.
+- **Gate:** at 0.90–0.99 the recomputed timer must reproduce, rollout by rollout, the
+  `time` method's alarms from FIPER's own pipeline, for every task and seed. A mismatch stops
+  the analysis.
+- FIPER's points are unchanged: its selected configuration, per quantile, averaged over seeds.
+- The matched-FPR lead difference and its bootstrap are computed as in the original plan
+  (1,000 replicates, seed 0); clamped points are still counted.
+- This comparison was not pre-declared. It is reported as post hoc, next to the
+  same-pipeline table (which was pre-declared).
