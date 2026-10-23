@@ -228,6 +228,70 @@ class TestCostAndRetry(unittest.TestCase):
         self.assertEqual(m["2.0"]["P"], m["2.0"]["none"])          # identical draws, both always fit
 
 
+class TestRetryPilotSizing(unittest.TestCase):
+    def setUp(self):
+        self.m = load("stage2_sizing")
+
+    def ti(self):
+        H = 100.0
+        return dict(type="atomic", p=0.5, H=H, D=50.0,
+                    fail_alarm=dict(none=np.array([H]), P=np.array([60.0]), safe_plus_P=np.array([60.0])),
+                    fail_hit=dict(none=np.array([True]), P=np.array([True]), safe_plus_P=np.array([True])),
+                    succ_L=np.array([50.0]), succ_alarm=dict(none=np.array([np.inf]), P=np.array([np.inf]),
+                                                            safe_plus_P=np.array([np.inf])))
+
+    def test_retry_rate_modes(self):
+        self.assertEqual(self.m.retry_rate("same", 0.6), 0.6)
+        self.assertAlmostEqual(self.m.retry_rate("scale:0.504", 0.6), 0.3024)
+        self.assertEqual(self.m.retry_rate("scale:3", 0.6), 1.0)
+        self.assertEqual(self.m.retry_rate("0.245", 0.9), 0.245)
+
+    def test_sample_size_formulas(self):
+        # Connor (1987): p10 = 0.2, p01 = 0.1 -> (1.96 sqrt(.3) + 0.8416 sqrt(.29))^2 / .01 = 233.1
+        self.assertEqual(self.m.n_mcnemar(0.2, 0.1), 234)
+        self.assertTrue(math.isinf(self.m.n_mcnemar(0.1, 0.1)))
+        self.assertEqual(self.m.n_unpaired(0.5, 0.6), self.m.n_unpaired(0.6, 0.5))
+        self.assertTrue(math.isinf(self.m.n_unpaired(0.5, 0.5)))
+
+    def test_late_hazard(self):
+        rows = [dict(task_name="T", horizon=100, L=L, failed=f) for L, f in
+                ((50, False), (80, False), (90, False), (100, True), (100, True), (70, False))]
+        self.assertAlmostEqual(self.m.late_hazard(rows)["T"], 2 / 4)
+
+    def test_reset_versus_continuation(self):
+        out = self.m.e3_policy({"T": self.ti()}, (1.0, 2.0), "1.0", 0, c_grid=(0.0, 1.0), contrast_budget=1.25)
+        self.assertIn("1.25", out["by_type"]["atomic"]["multi"])         # contrast budget added
+        c0 = out["per_task"]["T"]["continuation"]["0.0"]["P"]
+        self.assertEqual(c0["reset"], 1.0)                              # alarm at 60, retry of 50 fits in 125
+        self.assertAlmostEqual(c0["cont"], 0.5, delta=0.02)             # only first-attempt successes
+        self.assertAlmostEqual(c0["discordant"][0], 1 - c0["cont"])
+        self.assertEqual(c0["discordant"][1], 0.0)
+        c1 = out["by_type"]["atomic"]["continuation"]["1.0"]["P"]
+        self.assertEqual((c1["reset"], c1["cont"], c1["delta"]), (1.0, 1.0, 0.0))
+        self.assertTrue(math.isinf(c1["paired"]))
+        # No retry ever succeeds: continuation at c = 1 wins every first-attempt failure.
+        out = self.m.e3_policy({"T": self.ti()}, (1.0,), "0.0", 0, c_grid=(1.0,), contrast_budget=1.25)
+        x = out["by_type"]["atomic"]["continuation"]["1.0"]["P"]
+        self.assertAlmostEqual(x["delta"], -0.5, delta=0.02)
+        self.assertEqual(x["p10"], 0.0)
+        e = out["by_type"]["atomic"]["episodes"]["1.25"]["P_vs_none"]
+        self.assertEqual(e["delta"], 0.0)
+
+    def test_independent_retry_streams_share_the_first_attempt(self):
+        ti = self.ti()
+        a_won, a_first = self.m.retry_mc(ti, "P", 2.0, 0.5, (0,), M=4000, paths=True, stream=1)
+        b_won, b_first = self.m.retry_mc(ti, "P", 2.0, 0.5, (0,), M=4000, paths=True, stream=2)
+        np.testing.assert_array_equal(a_first, b_first)
+        self.assertTrue(np.all(a_won[a_first] & b_won[b_first]))   # first-attempt successes win in both
+        self.assertFalse(np.array_equal(a_won, b_won))              # retries differ
+        _, c_first = self.m.retry_mc(ti, "P", 2.0, 0.5, (0,), M=4000, paths=True)
+        _, d_first = self.m.retry_mc(ti, "none", 2.0, 0.5, (0,), M=4000, paths=True)
+        np.testing.assert_array_equal(c_first, d_first)              # common random numbers (stream 0)
+        # Paired n uses the common-random-number difference: zero difference -> no finite n.
+        self.assertTrue(math.isinf(self.m.n_mcnemar_psi(0.3, 0.0)))
+        self.assertEqual(self.m.n_mcnemar_psi(0.3, 0.1), self.m.n_mcnemar(0.2, 0.1))
+
+
 class TestEndToEnd(unittest.TestCase):
     def test_cli_on_synthetic_cohorts(self):
         m = load("stage2_sizing")

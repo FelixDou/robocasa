@@ -1072,3 +1072,169 @@ Plug-in power (no shift) is within 0.06 of the SAFE 0.034 and Hide-and-Seek 0.08
   - each detector individually is at 0.98 or more.
 - **Limits as stated above.** One shared pool, 5 failures per task, inference conditional on
   the 20 tasks, a shift model for assumed gains.
+
+## E3 with the measured same-scene retry rate (2026-10-23)
+
+**Summary for the protocol:** pending (filled from the run).
+
+**Why.** E3's sizing above assumed that a retry after an alarm succeeds at the task's
+ordinary success rate (r = p_k). The same-scene retry pilot (report §15.24,
+`xr1_retry_pilot_plan.md`) measured otherwise.
+- **Status of the pilot.** Post hoc: its registered scene gate failed, and 2 of 194 scenes
+  did not reproduce and were excluded.
+- **Measured rates.** A retry of an originally failed scene succeeded in 24/98 = **0.245**
+  (Wilson [0.170, 0.339]; task cluster [0.190, 0.303]). A retry of an originally successful
+  scene succeeded in 66/94 = 0.702.
+- **Comparison with p.** The 10 pilot tasks have task-macro p = 0.486, so r_fail / p = 0.504.
+  r_fail is below p_k on every task.
+
+The drafts session also proposed **alarm-triggered reset against continuation** (the same
+rollout keeps running to 1.25 H_k) as E3's primary contrast. This section sizes both.
+
+**Status.** This is exploratory sizing on opened cohorts and a post hoc pilot. This section
+and the code changes were committed before the run on real data.
+
+### Method
+
+The E3 model above is unchanged (`stage2_sizing.py e3`). What changes:
+
+- **Retry success rates**, one run each:
+  - `0.245`: the pooled measured rate, for every task and both policies;
+  - `0.17`: its Wilson lower bound (sensitivity);
+  - `scale:0.504`: r_k = 0.504 × p_k per task, so that tasks keep their relative difficulty;
+  - `scale:0.350` (= 0.17 / 0.486): the per-task version of the lower bound;
+  - `same` (r = p_k): the old assumption, run only as a check. It must reproduce the
+    2026-10-21 E3 tables exactly (`--reference-json`); otherwise the run stops.
+
+  r applies to every retry (a second retry of the same scene is assumed no harder than the
+  first). The rate is measured on XR-1 and assumed for RLDX-1.
+- **Episodes per arm for P vs none and SAFE + P vs P, at every budget**, two ways:
+  - **Unpaired:** the two-proportion formula on task-macro success rates (two-sided 0.05,
+    power 0.8), as before. This fits independent runs on matched scenes.
+  - **Paired by seed (McNemar, Connor 1987):** for a design that *branches at the alarm*
+    (restore the simulator state, then reset in one arm and continue in the other), so the
+    two arms share their first attempt up to the alarm.
+    - The effect is the common-random-number difference.
+    - The discordant total comes from runs whose retries are drawn independently in each
+      arm, as two stochastic policy runs would be.
+    - Not modelled: a positive correlation between arms' retries on hard scenes. It would
+      lower n, so these figures are conservative on that point.
+- **Reset against continuation at 1.25 H_k** (P or SAFE + P as the alarm; the continuation
+  arm has no monitor):
+  - first-attempt successes succeed in the continuation arm, but can be aborted by a false
+    alarm in the reset arm;
+  - first-attempt failures succeed in the continuation arm with probability c, independently
+    of the reset arm's retries;
+  - reported for c ∈ {0, 0.05, 0.10, 0.15, 0.20, 0.27, 0.40}: both arms' success rates, their
+    difference, and the pairs needed (McNemar, branching design) and episodes per arm
+    (unpaired).
+- **What the data say about c.** No rollout ran past H_k, so c cannot be measured. Three
+  reference points:
+  - **Late-success hazard proxy (computed).** Of the rollouts still running at 0.75 H_k, the
+    share that succeed by H_k: XR-1 from all retained rows of both E1 cohorts, RLDX-1 from all
+    rows. It is likely optimistic for c. Rollouts still running at H_k are the slowest ones,
+    and a population's success hazard usually falls with time.
+  - **0.27:** the share of §15.17's labeled failures in the category "slow or nearly
+    succeeded" (13/48).
+  - **0.79:** the share judged "recoverable until timeout" (§15.17). This is a ceiling, not
+    an estimate: recoverable does not mean the policy would recover.
+- **Crossover c\*.** The continuation success at which reset and continuation tie, read off
+  the grid by linear interpolation.
+
+### Expectations, written before running
+
+- **Check.** `same` reproduces the 2026-10-21 tables exactly.
+- **P vs none at 1.25 H_k.** Retry gains scale roughly with r / p.
+  - At r = 0.245 the XR-1 gain falls from 0.075 to about 0.03, and unpaired n rises from about
+    650 to about 3,000–4,000 per arm. RLDX-1 is similar, at about 2,000–3,000.
+  - At r = 0.17, roughly twice that again.
+  - The per-task scaling (0.504 p_k) gives about the same as r = 0.245.
+- **Paired branching design.** Several times smaller than unpaired, because only
+  first-attempt failures can be discordant: hundreds to about 1,500 pairs.
+- **SAFE + P vs P, XR-1 atomic at 1.0 H_k.** The gain falls from 0.044 to about 0.015.
+  Unpaired n is above 10,000; paired, a few thousand.
+- **Reset against continuation.**
+  - c\* is low, about 0.05–0.12. A reset at the alarm leaves about 0.5 H_k, which fits one
+    retry that succeeds about a quarter of the time. Continuation instead gives every failure
+    a chance c.
+  - The hazard proxy is likely above c\*, so the expected direction favours continuation.
+  - Near c\* the needed n is unbounded. At the hazard proxy it should be small (low hundreds).
+
+### Recommendation rule, fixed before running
+
+- **P vs none at 1.25 H_k (r = 0.245):**
+  - unpaired n above 2,000 per arm on both policies → E3 at about 650 per arm is not
+    worthwhile as specified;
+  - paired branching n ≤ 1,000 → propose the branching design at that size (state
+    save/restore at the alarm, plus the scene-identity check of §15.24);
+  - otherwise, reduce the claim to a description of retry outcomes with CIs and register no
+    superiority test.
+- **Reset against continuation:**
+  - if both the hazard proxy and 0.27 exceed c\* on a policy, the test's expected direction
+    there is "continuation better". Register it as two-sided, sized at the pairs needed at
+    c = the hazard proxy, and state the expected direction;
+  - if c\* lies between them, the direction is unknown in advance. Register it as two-sided,
+    sized at the larger of the two n, and say so.
+- **SAFE + P vs P** stays descriptive unless its paired n at 1.0 H_k is ≤ 1,000 on XR-1
+  atomic tasks.
+
+### Limits
+
+- **Pilot coverage.** r is post hoc, from 98 failed scenes on 10 mid-success XR-1 tasks.
+  High- and low-success tasks, and RLDX-1, are extrapolations.
+- **Retry duration.** A retry's duration is drawn from the task's ordinary success durations.
+  Hard scenes may take longer, which would lower retry benefits further.
+- **Continuation success** is assumed and independent of the reset arm's retries.
+- **Shadow data and the bound.** The alarm times come from shadow data, and the
+  retry-benefit model is the bound of the earlier E3 section, with its limits.
+
+### Cluster commands
+
+CPU only, about 10–20 minutes for all five runs. `E3R_SHA` is the full SHA of the pushed
+commit that contains this section.
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export SAFE_PY=$STORAGE_BS/envs/vla_safe/bin/python
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+export E1_OUT=$STORAGE_BS/robocasa_rollouts/safe/xr1_lead_calibration_20261020_001108/lead_analysis
+export XR1_RUNTIME_BUNDLE=$STORAGE_BS/robocasa_checkpoints/safe/xr1_prospective_matched_fpr_20260815_163700_calibration/runtime_bundle.json
+export RLDX_CAL=$STORAGE_BS/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530/calibration/lstm
+export E3_REF=$STORAGE_BS/robocasa_checkpoints/safe/stage2_sizing_20261021_131345/e3.json
+export E3R_SHA=<full SHA>
+export E3R_REPO=$PROJECT_FS/robocasa_e3retry_${E3R_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin
+test -e $E3R_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $E3R_REPO $E3R_SHA
+test "$(git -C $E3R_REPO rev-parse HEAD)" = "$E3R_SHA" && echo "worktree OK" || echo "STOP: wrong HEAD"
+export E3R_TAG=e3_retry_sizing_$(date +%Y%m%d_%H%M%S)
+export E3R_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/$E3R_TAG E3R_LOG=$STORAGE_BS/robocasa_logs/eval/$E3R_TAG
+mkdir -p $E3R_ROOT $E3R_LOG
+sha256sum $E1_OUT/calibration_with_baselines.jsonl $E1_OUT/test_with_baselines.jsonl $XR1_RUNTIME_BUNDLE \
+  $RLDX_CAL/lstm_seed{0,1,2}/normalized_scores.jsonl $E3_REF | tee $E3R_LOG/frozen_inputs.sha256
+cd $E3R_REPO
+CUDA_VISIBLE_DEVICES="" $SAFE_PY -W ignore -m unittest tests.test_stage2_sizing 2>&1 | grep -E "^(Ran|OK|FAILED)"
+export CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2
+nohup sh -c "
+for r in same 0.245 0.17 scale:0.504 scale:0.350; do
+  tag=\$(echo \$r | tr ':.' '__')
+  ref=''; test \$r = same && ref='--reference-json $E3_REF'
+  nice -n 10 $SAFE_PY -I -u scripts/xr1_lead_time/stage2_sizing.py e3 --calibration $E1_OUT/calibration_with_baselines.jsonl \
+    --test $E1_OUT/test_with_baselines.jsonl --runtime-bundle $XR1_RUNTIME_BUNDLE --rldx-calibration-dir $RLDX_CAL \
+    --retry-success \$r \$ref --output $E3R_ROOT/e3_r_\$tag.json > $E3R_LOG/e3_r_\$tag.log 2>&1 || exit 1
+done
+echo ALL DONE > $E3R_LOG/done.txt" > $E3R_LOG/driver.log 2>&1 &
+echo "driver PID $!; logs in $E3R_LOG"
+```
+
+When `done.txt` exists (or the driver stops), paste back the output of:
+
+```bash
+grep -h "check" $E3R_LOG/e3_r_*.log; cat $E3R_LOG/driver.log
+for f in 0_245 0_17 scale_0_504 scale_0_350; do echo "=== r = $f"; awk '/episodes per arm \(unpaired/{p=1} p' $E3R_LOG/e3_r_$f.log; done
+sha256sum -c $E3R_LOG/frozen_inputs.sha256
+```
+
+The driver stops at the first failing run. The `same` run must print
+`check: reference E3 tables MATCH`.

@@ -42,6 +42,9 @@ E2_GAINS = (0.034, 0.05)
 REPLICATES, SEED = 2000, 20261021
 NESTED_SIZES, NESTED_OUTER, NESTED_INNER = (10, 30, 60), 200, 300
 BUDGETS = (1.0, 1.25, 1.5, 2.0)
+CONTINUATION = (0.0, 0.05, 0.10, 0.15, 0.20, 0.27, 0.40)   # assumed continuation success rates
+CONTRAST_BUDGET = 1.25
+Z_A, Z_B = 1.959964, 0.841621                          # two-sided 0.05, power 0.8
 RETRY_EPISODES = 20000
 COST_DRAWS = 20000
 ATTEMPT_CAP = 500        # attempts per task allowed by the E1 collection protocol
@@ -470,20 +473,62 @@ def task_inputs(teC, rk, tm, fu, rates, D, types):
     return out
 
 
-def retry_mc(ti, det, B, r_retry, seed, M=RETRY_EPISODES):
+def retry_rate(r_mode, p):
+    """'same': r = p_k; 'scale:f': r = f * p_k (capped at 1); otherwise a fixed probability."""
+    if r_mode == "same":
+        return p
+    if str(r_mode).startswith("scale:"):
+        return min(1.0, float(str(r_mode)[6:]) * p)
+    return float(r_mode)
+
+
+def n_unpaired(p1, p2):
+    d = p2 - p1
+    return math.inf if abs(d) < 1e-12 else math.ceil((Z_A + Z_B) ** 2 * (p1 * (1 - p1) + p2 * (1 - p2)) / d ** 2)
+
+
+def n_mcnemar(p10, p01):
+    """Pairs for McNemar's test (Connor 1987): p10, p01 are the two discordant probabilities."""
+    return n_mcnemar_psi(p10 + p01, p10 - p01)
+
+
+def n_mcnemar_psi(psi, d):
+    """Connor (1987) from the discordant total psi and the difference d."""
+    if abs(d) < 1e-12 or psi - d * d <= 0:
+        return math.inf
+    return math.ceil((Z_A * math.sqrt(psi) + Z_B * math.sqrt(psi - d * d)) ** 2 / d ** 2)
+
+
+def late_hazard(rows, frac=0.75):
+    """Per task: of the rollouts still running at frac * H, the share that succeed by H.
+    An optimistic proxy for the success of a time-limit failure given (1 - frac) H more time."""
+    alive, late = defaultdict(int), defaultdict(int)
+    for r in rows:
+        if r["L"] > frac * r["horizon"]:
+            alive[r["task_name"]] += 1
+            late[r["task_name"]] += int(not r["failed"])
+    return {t: late[t] / alive[t] for t in alive}
+
+
+def retry_mc(ti, det, B, r_retry, seed, M=RETRY_EPISODES, paths=False, stream=0):
     """Episodes under a budget of B*H inferences: an attempt succeeds with p (first) or r_retry
     (later); a failing attempt ends at its alarm (or at H unalarmed); a success ends at its
     duration unless a false alarm aborts it first. Attempts are drawn from the task's test rollouts.
 
     Common random numbers: attempt a of episode e uses the same draws for every detector, so
     detector differences carry little Monte Carlo noise. Returns (success rate, first-attempt
-    success rate of the same draws)."""
+    success rate of the same draws), or with paths=True the per-episode (won, first attempt
+    succeeded) arrays, for paired contrasts.
+
+    stream > 0 keeps the first attempt shared (a design that branches at the alarm) but draws
+    every retry from its own stream, so two arms' retries are independent, as two stochastic
+    policy runs are."""
     budget = B * ti["H"]; t = np.zeros(M); done = np.zeros(M, bool); won = np.zeros(M, bool)
     fa = ti["fail_alarm"][det]
     sL, sa = ti["succ_L"], ti["succ_alarm"][det]
     a, p_hat = 0, None
     while not done.all():
-        rng = np.random.default_rng([*seed, a])
+        rng = np.random.default_rng([*seed, a] if a == 0 or stream == 0 else [*seed, 1000 + stream, a])
         u, si, fi = rng.random(M), rng.integers(0, len(sL), M), rng.integers(0, len(fa), M)
         ok_all = u < (ti["p"] if a == 0 else r_retry)
         if a == 0:
@@ -497,23 +542,49 @@ def retry_mc(ti, det, B, r_retry, seed, M=RETRY_EPISODES):
         # Stop on a win or an exhausted budget. An unalarmed failure ends at the time limit,
         # which is itself observable, so it is retried like a failure under no monitor.
         done[idx[win | (t[idx] >= budget)]] = True
+        if a == 0:
+            first_ok = ok_all.copy()
         a += 1
+    if paths:
+        return won, first_ok
     return float(won.mean()), p_hat
 
 
-def e3_policy(ti, budgets, r_mode, seed):
+def paired(a, b):
+    """Discordant probabilities: a wins and b loses, b wins and a loses."""
+    return float(np.mean(a & ~b)), float(np.mean(~a & b))
+
+
+def e3_policy(ti, budgets, r_mode, seed, c_grid=CONTINUATION, contrast_budget=CONTRAST_BUDGET):
     dets = ("none", "P", "safe_plus_P")
+    budgets = tuple(budgets) + (() if contrast_budget in budgets else (contrast_budget,))
     per_task = {}
     for k_t, (t, v) in enumerate(ti.items()):
-        r_retry = v["p"] if r_mode == "same" else float(r_mode)
-        row = dict(type=v["type"], p=v["p"], D_over_H=round(v["D"] / v["H"], 4), single={}, multi={},
+        r_retry = retry_rate(r_mode, v["p"])
+        row = dict(type=v["type"], p=v["p"], r=round(r_retry, 4), D_over_H=round(v["D"] / v["H"], 4),
+                   late_hazard=v.get("late_hazard"), single={}, multi={}, discordant={}, continuation={},
                    false_alarm_exposure={k: round(v["p"] * float(np.mean(v["succ_alarm"][k] <= v["succ_L"])), 4) for k in dets})
         for B in budgets:
             frac = {k: float(np.mean(B * v["H"] - v["fail_alarm"][k] >= v["D"])) for k in dets}
             row["single"][str(B)] = {k: round((1 - v["p"]) * r_retry * frac[k], 4) for k in dets} | \
                                     {f"frac_{k}": round(frac[k], 4) for k in dets}
-            mc = {k: retry_mc(v, k, B, r_retry, (seed, k_t, int(round(100 * B)))) for k in dets}
-            row["multi"][str(B)] = {k: round(m - ph, 4) for k, (m, ph) in mc.items()}
+            sd = (seed, k_t, int(round(100 * B)))
+            won = {k: retry_mc(v, k, B, r_retry, sd, paths=True) for k in dets}
+            p_hat = float(won["none"][1].mean())
+            row["multi"][str(B)] = {k: round(float(w.mean()) - p_hat, 4) for k, (w, _) in won.items()}
+            ind = {k: retry_mc(v, k, B, r_retry, sd, paths=True, stream=j + 1)[0] for j, k in enumerate(dets)}
+            row["discordant"][str(B)] = dict(P_vs_none=paired(ind["P"], ind["none"]),
+                                             safe_vs_P=paired(ind["safe_plus_P"], ind["P"]))
+            if B == contrast_budget:
+                # Continuation: the same first attempt keeps running to B * H; a time-limit failure
+                # then succeeds with probability c (independent of the reset arm's retries).
+                first_ok = won["none"][1]
+                u_c = np.random.default_rng([seed, k_t, 7777]).random(len(first_ok))
+                for c in c_grid:
+                    cont = first_ok | (~first_ok & (u_c < c))
+                    row["continuation"][str(c)] = {
+                        k: dict(reset=float(won[k][0].mean()), cont=float(cont.mean()), discordant=paired(won[k][0], cont))
+                        for k in ("P", "safe_plus_P")}
         per_task[t] = row
     agg = {}
     for tt in sorted({v["type"] for v in per_task.values()}) + ["all"]:
@@ -532,6 +603,31 @@ def e3_policy(ti, budgets, r_mode, seed):
         d = p2 - p1
         a["episodes_per_arm_safe_vs_timer"] = math.inf if d <= 0 else math.ceil(
             (1.959964 + 0.841621) ** 2 * (p1 * (1 - p1) + p2 * (1 - p2)) / d ** 2)
+        # Episodes per arm at every budget, unpaired and paired by seed (McNemar), task-macro.
+        a["episodes"] = {}
+        for B in budgets:
+            m = {k: a["mean_p"] + a["multi"][str(B)][k] for k in dets}
+            e = {}
+            for name, (x, y) in (("P_vs_none", ("P", "none")), ("safe_vs_P", ("safe_plus_P", "P"))):
+                p10 = float(np.mean([v["discordant"][str(B)][name][0] for v in rows]))
+                p01 = float(np.mean([v["discordant"][str(B)][name][1] for v in rows]))
+                # Effect from the common-random-number runs; discordant total from independent retries.
+                e[name] = dict(delta=round(m[x] - m[y], 4), unpaired=n_unpaired(m[y], m[x]),
+                               paired=n_mcnemar_psi(p10 + p01, m[x] - m[y]), discordant=round(p10 + p01, 4))
+            a["episodes"][str(B)] = e
+        hz = [v["late_hazard"] for v in rows if v["late_hazard"] is not None]
+        a["late_hazard"] = round(float(np.mean(hz)), 4) if hz else None
+        a["mean_r"] = round(float(np.mean([v["r"] for v in rows])), 4)
+        a["continuation"] = {}
+        for c in c_grid:
+            a["continuation"][str(c)] = {}
+            for k in ("P", "safe_plus_P"):
+                x = [v["continuation"][str(c)][k] for v in rows]
+                sr, sc = float(np.mean([y["reset"] for y in x])), float(np.mean([y["cont"] for y in x]))
+                p10, p01 = (float(np.mean([y["discordant"][i] for y in x])) for i in (0, 1))
+                a["continuation"][str(c)][k] = dict(reset=round(sr, 4), cont=round(sc, 4), delta=round(sr - sc, 4),
+                                                    paired=n_mcnemar(p10, p01), unpaired=n_unpaired(sc, sr),
+                                                    p10=round(p10, 4), p01=round(p01, 4))
         agg[tt] = a
     return dict(per_task=per_task, by_type=agg)
 
@@ -539,7 +635,8 @@ def e3_policy(ti, budgets, r_mode, seed):
 def e3(args):
     out_path = check_out(args.output)
     out = dict(plan="docs/stage2_sizing.md", status="exploratory bound (opened cohorts, shadow data)", experiment="E3",
-               budgets=list(args.budgets), retry_success=args.retry_success, policies={})
+               budgets=list(args.budgets), retry_success=args.retry_success, continuation=list(args.continuation),
+               contrast_budget=args.contrast_budget, policies={})
     # XR-1: the registered E1 fit (pooled calibration, 38 tasks).
     bundle = json.load(open(args.runtime_bundle))
     rk = qt.rho(qt.dev_fractions(bundle), Q)
@@ -555,8 +652,11 @@ def e3(args):
             succ[r["task_name"]].append(r["L"])
     types = {r["task_name"]: r.get("task_type") for r in te}
     ti = task_inputs(teC, rk, tm, fu, rates, {t: np.median(v) for t, v in succ.items()}, types)
+    for t, h in late_hazard(cal_all + te_all).items():
+        if t in ti:
+            ti[t]["late_hazard"] = h
     out["policies"]["xr1"] = dict(check=dict(P_lead=eP["mean_lead"], safe_plus_P_lead=eF["mean_lead"], P_fpr=eP["fpr"],
-                                             safe_plus_P_fpr=eF["fpr"]), **e3_policy(ti, args.budgets, args.retry_success, SEED))
+                                             safe_plus_P_fpr=eF["fpr"]), **e3_policy(ti, args.budgets, args.retry_success, SEED, args.continuation, args.contrast_budget))
     print(f"check XR-1: P lead {eP['mean_lead']} (FPR {eP['fpr']}), SAFE+P lead {eF['mean_lead']} (FPR {eF['fpr']})", flush=True)
     if args.rldx_calibration_dir:
         rows, train, tasks, rk2 = rldx_rows(args.rldx_calibration_dir, args.model)
@@ -573,10 +673,25 @@ def e3(args):
         H2 = {r["task_name"]: r["horizon"] for r in rows}
         types2 = {r["task_name"]: r["task_type"] for r in rows}
         ti2 = task_inputs(teC2, rk2, tm2, fu2, rates2, {t: np.median(succ2[t]) if succ2[t] else H2[t] for t in tasks}, types2)
+        for t, h in late_hazard(rows).items():
+            if t in ti2:
+                ti2[t]["late_hazard"] = h
         out["policies"]["rldx1"] = dict(check=dict(P_lead=eP2["mean_lead"], safe_plus_P_lead=eF2["mean_lead"],
                                                    P_fpr=eP2["fpr"], safe_plus_P_fpr=eF2["fpr"]),
-                                        **e3_policy(ti2, args.budgets, args.retry_success, SEED + 1))
+                                        **e3_policy(ti2, args.budgets, args.retry_success, SEED + 1, args.continuation, args.contrast_budget))
         print(f"check RLDX-1: P lead {eP2['mean_lead']} (FPR {eP2['fpr']}), SAFE+P lead {eF2['mean_lead']} (FPR {eF2['fpr']})")
+    if args.reference_json:
+        ref = json.load(open(args.reference_json))
+        if ref.get("retry_success", "same") != args.retry_success:
+            raise SystemExit("error: --reference-json was run with a different --retry-success")
+        bad = [(pol, tt, kind, B) for pol, v in ref["policies"].items() for tt, a in v["by_type"].items()
+               for kind in ("single", "multi") for B, m in a[kind].items()
+               if out["policies"][pol]["by_type"][tt][kind].get(B) is None
+               or any(out["policies"][pol]["by_type"][tt][kind][B][k] != x for k, x in m.items())]
+        out["matches_reference"] = not bad
+        print("check: reference E3 tables " + ("MATCH" if not bad else f"MISMATCH {bad[:5]}"), flush=True)
+        if bad:
+            sys.exit("STOP: E3 does not reproduce the reference run")
     write(out_path, out)
     for pol, v in out["policies"].items():
         for kind, label in (("single", "single-retry bound (1-p) r frac"), ("multi", "multi-retry Monte Carlo, success-rate gain over p")):
@@ -593,6 +708,23 @@ def e3(args):
         for tt, a in v["by_type"].items():
             print(f"| {tt} | {a['tasks']} | {a['mean_p']:.3f} | {a['false_alarm_exposure']['P']:.4f} | "
                   f"{a['false_alarm_exposure']['safe_plus_P']:.4f} | {a['episodes_per_arm_safe_vs_timer']} |")
+        print(f"\n## E3 {pol}: multi-retry gain and episodes per arm (unpaired / paired by seed), retry success = {args.retry_success}")
+        print("| type | mean r | budget x H | P - none | n P vs none | SAFE+P - P | n SAFE+P vs P |")
+        print("|---|---:|---:|---:|---|---:|---|")
+        for tt, a in v["by_type"].items():
+            for B, e in a["episodes"].items():
+                print(f"| {tt} | {a['mean_r']:.3f} | {B} | {e['P_vs_none']['delta']:+.4f} | {e['P_vs_none']['unpaired']} / "
+                      f"{e['P_vs_none']['paired']} | {e['safe_vs_P']['delta']:+.4f} | {e['safe_vs_P']['unpaired']} / {e['safe_vs_P']['paired']} |")
+        print(f"\n## E3 {pol}: reset at alarm vs continuation to {args.contrast_budget} H (paired by seed), by continuation success c")
+        print("late-success hazard proxy (still running at 0.75 H -> success by H): " +
+              ", ".join(f"{tt} {a['late_hazard']}" for tt, a in v["by_type"].items()))
+        print("| type | c | continuation | reset (P) | reset - cont (P) | pairs (P) | reset (SAFE+P) | reset - cont (SAFE+P) | pairs (SAFE+P) |")
+        print("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+        for tt, a in v["by_type"].items():
+            for c, x in a["continuation"].items():
+                P_, S_ = x["P"], x["safe_plus_P"]
+                print(f"| {tt} | {c} | {P_['cont']:.4f} | {P_['reset']:.4f} | {P_['delta']:+.4f} | {P_['paired']} | "
+                      f"{S_['reset']:.4f} | {S_['delta']:+.4f} | {S_['paired']} |")
 
 
 # ---- CLI -----------------------------------------------------------------------------------
@@ -629,7 +761,11 @@ def main():
     c.add_argument("--rldx-calibration-dir")
     c.add_argument("--model", default="lstm", choices=("lstm", "indep"))
     c.add_argument("--budgets", type=gains_arg, default=BUDGETS)
-    c.add_argument("--retry-success", default="same", help="'same' (= task success rate) or a probability")
+    c.add_argument("--retry-success", default="same",
+                   help="'same' (= task success rate), 'scale:f' (= f x task success rate) or a probability")
+    c.add_argument("--continuation", type=gains_arg, default=CONTINUATION)
+    c.add_argument("--contrast-budget", type=float, default=CONTRAST_BUDGET)
+    c.add_argument("--reference-json", help="an earlier e3 output with the same --retry-success; must reproduce")
     c.add_argument("--output", required=True)
     args = p.parse_args()
     {"e1b": e1b, "e2": e2, "e3": e3}[args.cmd](args)
