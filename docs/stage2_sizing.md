@@ -1075,7 +1075,35 @@ Plug-in power (no shift) is within 0.06 of the SAFE 0.034 and Hide-and-Seek 0.08
 
 ## E3 with the measured same-scene retry rate (2026-10-23)
 
-**Summary for the protocol:** pending (filled from the run).
+**Summary for the protocol** (run 2026-10-23, `e3_retry_sizing_<timestamp>`, code `ddab0ec4`).
+- Retry success r = 0.245 (measured, post hoc), budget 1.25 H_k, two-sided 0.05, power 0.8.
+- "Paired" means McNemar pairs for a design that branches at the alarm.
+
+| Contrast | XR-1 (38 tasks) | RLDX-1 (20 tasks) |
+|---|---|---|
+| P vs none: success gain | +0.017 | +0.034 (atomic +0.054; composite −0.012) |
+| P vs none: episodes per arm, unpaired | 14,014 (was 648 at r = p) | 3,280 (was 484) |
+| P vs none: pairs, branching design | 2,306 (159,041 at r = 0.17) | **461** (970 at r = 0.17) |
+| SAFE + P vs P, atomic at 1.0 H_k: pairs | 7,845 | 15,300 |
+| Reset vs continuation: crossover c\* | 0.053 | 0.104 |
+| Reset vs continuation: continuation proxy | 0.092 | 0.082 |
+| Reset vs continuation: expected direction | continuation better (c\* < proxy < 0.27) | unknown (proxy < c\* < 0.27) |
+| Reset vs continuation: pairs (pre-stated rule) | about 3,000 | about 6,500 |
+
+**Recommendation.**
+- **E3 at about 650 per arm is not worthwhile as specified.** With the measured retry rate,
+  P vs no monitor needs 3,300–14,000 episodes per arm.
+- **The one affordable superiority test** is P vs no monitor on RLDX-1 with a branching
+  design. That needs 461 pairs at r = 0.245, or about 1,000 to survive r = 0.17.
+  - Its effect is entirely on atomic tasks.
+  - Its retry rate is borrowed from XR-1.
+- **XR-1 supports no affordable superiority test of any monitor contrast.**
+- **Reset against continuation hinges on c**, a continuation success rate nobody has
+  measured, which sits close to the crossover on both policies.
+  - Measure c first: a cheap continuation pilot whose time limit is raised to 1.25 H_k.
+  - Until then, register E3 as an estimation study (both arms' success rates with CIs), not
+    as a superiority test.
+- Details and the reduced claim are in "Results" below.
 
 **Why.** E3's sizing above assumed that a retry after an alarm succeeds at the task's
 ordinary success rate (r = p_k). The same-scene retry pilot (report §15.24,
@@ -1238,3 +1266,125 @@ sha256sum -c $E3R_LOG/frozen_inputs.sha256
 
 The driver stops at the first failing run. The `same` run must print
 `check: reference E3 tables MATCH`.
+
+### Results (2026-10-23)
+
+**Run.**
+- Code `ddab0ec4`, worktree `robocasa_e3retry_ddab0ec4`.
+- Five runs: `same`, 0.245, 0.17, `scale:0.504`, `scale:0.350`.
+- Output `e3_retry_sizing_<timestamp>/e3_r_*.json` under `robocasa_checkpoints/safe/`; logs
+  under `robocasa_logs/eval/`.
+
+**Checks.**
+- `same` reproduced the 2026-10-21 E3 tables exactly (`check: reference E3 tables MATCH`).
+- Every run reproduced the registered leads: XR-1 P 0.2252 and SAFE + P 0.2550; RLDX-1
+  0.2711 and 0.3053.
+- All seven input files were unchanged.
+
+**Table R1 — P vs no monitor at 1.25 H_k** (all tasks; atomic in brackets). Each cell is the
+success gain, then episodes per arm unpaired / pairs for the branching design.
+
+| Retry success | XR-1 | RLDX-1 |
+|---|---|---|
+| r = p_k (2026-10-21) | +0.075 → 648 / – | +0.086 → 484 / – |
+| 0.245 | +0.017 → 14,014 / 2,306 (atomic +0.023 → 6,035 / 1,155) | +0.034 → 3,280 / 461 (atomic +0.054 → 1,211 / 252) |
+| 0.17 | +0.002 → 1,184,927 / 159,041 | +0.021 → 8,919 / 970 (atomic +0.035 → 2,980 / 465) |
+| 0.504 · p_k | +0.023 → 7,325 / 1,226 | +0.043 → 2,024 / 333 |
+| 0.350 · p_k | +0.007 → 88,030 / 12,019 | +0.028 → 4,954 / 643 |
+
+**At other budgets (r = 0.245):**
+- **XR-1 P vs none is negative at 1.0 H_k (−0.014) and about 0 at 1.5 H_k.** P's false
+  alarms abort successes (exposure 0.032) at an unchanged rate, while retry gains shrink
+  with r. On XR-1 a timer-triggered reset barely pays for its own false alarms.
+- **RLDX-1 composite tasks lose with P at 1.0–1.25 H_k (−0.012).** No retry fits there.
+
+**SAFE + P vs P** stays far out of reach. At 1.0 H_k on XR-1 atomic tasks (r = 0.245):
+gain +0.007, 63,858 per arm unpaired or 7,845 pairs. RLDX-1 needs at least 11,000 pairs at
+every budget.
+
+**Table R2 — reset at the alarm (P) against continuation to 1.25 H_k, r = 0.245.**
+- c\* is the continuation success at which the two arms tie.
+- "Proxy" is the late-success hazard: of the rollouts still running at 0.75 H_k, the share
+  that succeed by H_k.
+- Pairs are for the branching design.
+
+| Policy, tasks | Reset − continuation at c = 0 | c\* | Proxy | Pairs at the proxy | Pairs at c = 0.27 |
+|---|---:|---:|---:|---:|---:|
+| XR-1, all | +0.023 | 0.053 | 0.092 | about 3,000 (continuation better) | 147 |
+| XR-1, atomic | +0.028 | 0.097 | 0.091 | over 10^5 (tie) | 407 |
+| XR-1, composite | +0.022 | 0.044 | 0.092 | about 1,650 (continuation better) | 116 |
+| RLDX-1, all | +0.046 | 0.104 | 0.082 | about 6,500 (reset better) | 225 |
+| RLDX-1, atomic | +0.070 | 0.188 | 0.062 | about 350 (reset better) | 1,194 |
+| RLDX-1, composite | −0.012 | below 0 | 0.130 | about 90 (continuation better) | 44 |
+
+- **Sensitivity of c\*.** Across the four retry rates, c\* ranges from 0.015 to 0.066 for
+  XR-1 (all tasks) and from 0.066 to 0.137 for RLDX-1. Lower r moves c\* down, so
+  continuation is favoured more.
+- **Reset with SAFE + P** is within about 0.005 of reset with P in every cell.
+- **Pairs at the proxy** are read from the grid (linear in the difference, n ∝ 1/Δ²). They
+  are approximate.
+
+**Decisions under the pre-stated rule.**
+- **P vs none at 1.25 H_k.**
+  - Unpaired n exceeds 2,000 on both policies (14,014 and 3,280), so E3 at about 650 per
+    arm is not worthwhile as specified.
+  - Paired branching n is at most 1,000 on RLDX-1 (461), so propose that design there.
+  - It is not, on XR-1 (2,306), so XR-1 gets a description only.
+- **Reset against continuation.**
+  - XR-1: c\* lies below both the proxy and 0.27, so the expected direction is
+    "continuation better". It would be registered two-sided at about 3,000 pairs (at the
+    proxy).
+  - RLDX-1: c\* lies between them, so the direction is unknown. It would be registered
+    two-sided at the larger n, about 6,500 pairs.
+- **SAFE + P vs P.** Paired n is 7,845 on XR-1 atomic tasks at 1.0 H_k, above 1,000, so it
+  stays descriptive.
+
+**Against the expectations.**
+
+| Expectation (written before running) | Result |
+|---|---|
+| `same` reproduces the tables | Yes |
+| P vs none (r = 0.245): XR-1 gain about 0.03, n about 3,000–4,000; RLDX-1 about 2,000–3,000 | **XR-1 worse:** +0.017, n 14,014, because the false-alarm cost does not scale with r. RLDX-1 as expected (3,280) |
+| r = 0.17 about twice the n again | XR-1 far worse (gain about 0); RLDX-1 2.7× |
+| Per-task scaling close to 0.245 | Somewhat better, because high-p atomic tasks keep a higher r |
+| Branching design several times smaller: hundreds to about 1,500 | 6–7× smaller. RLDX-1 461; XR-1 2,306, above the range |
+| SAFE + P vs P (XR-1 atomic, 1.0 H_k): gain about 0.015, unpaired above 10,000 | Smaller: +0.007, 63,858; paired 7,845 |
+| c\* about 0.05–0.12 | XR-1 0.04–0.10; RLDX-1 0.10 (all), 0.19 (atomic), below 0 (composite) |
+| Proxy above c\*, so continuation favoured, at low-hundreds n | **Partly.** Yes for XR-1 overall. No for RLDX-1: the proxy (0.06–0.08) is lower than expected, below c\*. n at the proxy is in the thousands |
+
+**Reading and recommendation (exploratory).**
+- **The pilot changes E3's case qualitatively, not just its size.**
+  - With r = p, a timer-triggered reset looked like a 7–9 point success gain.
+  - With the measured same-scene rate it is 1.7 points on XR-1, where false alarms eat most
+    of it, and 3.4 points on RLDX-1, all on atomic tasks.
+  - At the Wilson lower bound (0.17), the XR-1 gain vanishes.
+- **Reset against continuation is knife-edge on both policies.** The reset benefit
+  (2–5 points at c = 0) is matched by continuation at c\* = 0.05–0.10. The only data proxy
+  for c lands at about the same values, 0.06–0.09. Its direction cannot be predicted from
+  existing data, and its size is unaffordable unless c turns out far from c\*.
+- **c is cheap to measure, and it decides the design.** A continuation pilot is a collection
+  run with the time limit raised to 1.25 H_k. Its late successes estimate c directly, with
+  no branching needed.
+  - About 300 time-limit failures per policy give c ± 0.05, enough to tell whether c sits
+    clearly above or below c\*.
+  - On the 10 pilot tasks that is about 600 attempts.
+- **A sound E3 for Stage 1:**
+  1. **Primary (if kept as a test):** P vs no monitor on RLDX-1 at 1.25 H_k, branching at the
+     alarm, about 1,000 pairs. That size survives r = 0.17 (970 pairs); 461 suffice at the
+     point estimate.
+     - The claim is restricted to RLDX-1, and in effect to its atomic tasks.
+     - It needs the state save/restore and the scene-identity check of §15.24.
+     - Its retry rate is borrowed from XR-1, and the Stage 2 protocol must measure it.
+  2. **Reset against continuation:** an estimation study on both policies. Report both
+     arms' success rates and their paired difference with CIs, register the continuation
+     pilot as its first step, and make no superiority claim in either direction.
+  3. **SAFE + P against P, and everything on XR-1:** descriptive.
+- **The reduced claim, honestly put.** E3 can show whether a timer-triggered reset helps
+  RLDX-1 on its atomic tasks. It can describe, not decide, whether resetting beats simply
+  giving the policy more time. It cannot show that a learned monitor improves task success
+  over the timer.
+- **Limits as stated above.**
+  - r is post hoc, from 10 mid-success XR-1 tasks, and assumed constant across retries.
+  - Continuation is assumed independent of the retries.
+  - The alarm times come from shadow data.
+
