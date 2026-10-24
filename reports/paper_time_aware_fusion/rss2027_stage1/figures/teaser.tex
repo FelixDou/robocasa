@@ -1,0 +1,38 @@
+% Fig. 1 teaser (RSS only): one failed OpenCabinet validation rollout (H_k = 66 inferences),
+% frames at t = 10, 30, 60, 66 (figures/qualitative/frames, see its README), and the alarm times
+% of SAFE (t = 30), the per-task timer P (t = 38) and the global timer (t = 60); data in
+% figures/qualitative/frames.json. Needs tikz and graphicx.
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[x=0.0149\columnwidth, y=1cm, font=\scriptsize,
+  alarm/.style={line width=1.4pt}, lbl/.style={font=\scriptsize, inner sep=1pt}]
+% frames, evenly spaced, each linked to its time on the episode bar
+\foreach \t/\f/\cx in {10/f1/7.6, 30/f2/24.6, 60/f3/41.6, 66/f4/58.6} {
+  \node[inner sep=0, anchor=south] (\f) at (\cx, 0.75)
+    {\includegraphics[width=0.235\columnwidth]{figures/qualitative/frames/\f.png}};
+  \draw[gray!55, densely dotted] (\f.south) -- (\t, 0.16);
+}
+% episode bar: start to time limit
+\fill[gray!12, rounded corners=1.5pt] (0,-0.13) rectangle (66,0.13);
+\draw[gray!60, rounded corners=1.5pt] (0,-0.13) rectangle (66,0.13);
+% alarms
+\draw[alarm, red!75!black]    (30,-0.22) -- (30,0.22);
+\draw[alarm, orange!85!black] (38,-0.22) -- (38,0.22);
+\draw[alarm, gray!60!black]   (60,-0.22) -- (60,0.22);
+\draw[alarm, black]           (66,-0.22) -- (66,0.22);
+\node[lbl, anchor=north, text=red!75!black]    at (30,-0.24) {SAFE};
+\node[lbl, anchor=north, text=orange!75!black] at (38,-0.24) {timer P};
+\node[lbl, anchor=north, text=gray!50!black]   at (59.2,-0.24) {global};
+\node[lbl, anchor=north east]                  at (66.6,-0.24) {limit};
+% what is measured
+\draw[<->, >=stealth, thick, orange!85!black] (38,-0.72) -- (66,-0.72)
+  node[midway, below, lbl] {lead of P, without the policy};
+\draw[<->, >=stealth, thick, red!75!black] (30,-0.72) -- (38,-0.72)
+  node[midway, below, lbl, align=center] {extra\\warning};
+\end{tikzpicture}
+\caption{On timeout-defined benchmarks a failed episode runs to its time limit, so a timer flags
+every failure. A learned monitor helps only if it alarms \emph{earlier} at the same false-alarm
+rate. We measure this extra warning over a per-task timer P, which never reads the policy.
+Example: a failed \emph{OpenCabinet} rollout, $H_k = 66$ inferences.}
+\label{fig:qualitative}
+\end{figure}

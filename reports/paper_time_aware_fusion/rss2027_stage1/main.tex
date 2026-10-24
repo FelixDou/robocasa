@@ -94,13 +94,7 @@ with this timer, a learned failure score should raise the mean lead by a meaning
 the same FPR, and the gain should vanish when the score is replaced by one that cannot see the
 rollout.
 % Defined here so the [t] float lands at the top of column 2 and not above the abstract.
-\newcommand{\qualcaption}{One failed \emph{OpenCabinet} rollout from the validation set
-(chosen to illustrate; the median SAFE-first lead is smaller). The SAFE score crosses its
-calibrated threshold at $t = 30$ of $H_k = 66$ inferences, 36 inferences before the time limit;
-the global timer alarms at $t = 60$, and the per-task timer, which never reads the policy, at
-$t = 38$. Dashed: the longest of the 9 (of 10) successful test rollouts of this task that stay
-below the threshold; it ends at $t = 33$.}
-\input{figures/qualitative/fig_qualitative}
+\input{figures/teaser}
 Our contributions are:
 \begin{itemize}
   \item \textbf{An evaluation protocol for timeout-defined benchmarks:} warning lead over a
@@ -309,7 +303,7 @@ to the fused detector's number of false alarms, which favors the timer.
 and 380 failures). We report the true- and false-positive rates (TPR, FPR), balanced accuracy
 (bACC), time-weighted accuracy (TWA)~\cite{romer2025fiper} and detection time (DT), at
 thresholds calibrated for FPR $\le 0.05$. \textbf{Bold} and \underline{underline} denote the
-best and second-best results.}
+best and second-best results.\pending{add $\pm$ std over 3 seeds (runs A, B)}}
 \label{tab:raw}
 \scriptsize
 \setlength{\tabcolsep}{2pt}
@@ -336,59 +330,80 @@ best and second-best results.}
 \end{tabular*}
 \end{table}
 
-\begin{table*}[t]
+\begin{table}[t]
 \centering
-\caption{Warning lead gained over the per-task timer P ($\Delta\bar\ell$, fraction of the time
-limit), with XR-1 on RoboCasa365 and RLDX-1 offline. P alone reaches $\bar\ell = 0.195$, 0.225 and
-0.271. Brackets: 95\% bootstrap CIs. \textbf{Bold}: preregistered H1 tests and best RLDX-1 result.}
+\caption{Warning lead on the preregistered held-out test set (XR-1 on RoboCasa365, 380 successes
+and 380 failures). Each score is OR-fused with our per-task timer P (\emph{+ P}, ours) and
+calibrated at 5\% FPR. We report FPR, mean warning lead $\bar\ell$, its gain over P
+($\Delta\bar\ell$) and TWA. \textbf{Bold} and \underline{underline} denote the best and
+second-best results.}
 \label{tab:lead}
 \scriptsize
-\setlength{\tabcolsep}{2.5pt}
-\begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}cllcccccc@{}}
+\setlength{\tabcolsep}{2pt}
+\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}cllcccc@{}}
 \toprule
- & & & \multicolumn{2}{c}{XR-1, validation set} & \multicolumn{2}{c}{XR-1, held-out test set (preregistered)} & \multicolumn{2}{c}{RLDX-1, test set (offline)} \\
-\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(l){8-9}
- & Method & & FPR & $\Delta\bar\ell$ over P & FPR & $\Delta\bar\ell$ over P & FPR & $\Delta\bar\ell$ over P \\
+ & Method & & FPR$\downarrow$ & $\bar\ell\uparrow$ & $\Delta\bar\ell\uparrow$ & TWA$\uparrow$ \\
 \midrule
-\multirow{4}{*}{\rotatebox{90}{\textbf{w/o P}}}
- & Global timer & & 0.047 & $-0.105$ [$-0.150$, $-0.062$] & 0.024 & $-0.102$ [$-0.147$, $-0.059$] & 0.01 & $-0.239$ [$-0.325$, $-0.155$] \\
- & Time risk + global timer & & 0.050 & $-0.071$ [$-0.119$, $-0.027$] & 0.040 & $-0.072$ [$-0.114$, $-0.034$] & -- & -- \\
- & SAFE + global timer & & 0.058 & $\phantom{-}0.012$ [$-0.044$, $0.063$] & 0.047 & $-0.011$ [$-0.068$, $0.045$] & 0.01 & $-0.095$ [$-0.174$, $-0.021$]$^\ddagger$ \\
- & SAFE + time risk (original) & & 0.058 & $-0.011$ [$-0.042$, $0.017$] & 0.039 & $-0.035$ [$-0.066$, $-0.007$] & -- & -- \\
+\multirow{2}{*}{\rotatebox{90}{\textbf{Time}}}
+ & Global timer & & \textbf{0.024} & 0.123 & $-0.102$ & 0.550 \\
+ & \cellcolor{blue!8}\textbf{Per-task timer P} & \cellcolor{blue!8}\textit{ours} & \cellcolor{blue!8}\underline{0.055} & \cellcolor{blue!8}0.225 & \cellcolor{blue!8}-- & \cellcolor{blue!8}0.585 \\
 \midrule
-\multirow{4}{*}{\rotatebox{90}{\textbf{OOD + P}}}
- & Mahalanobis + P & \textit{\color{gray}NeurIPS'18} & -- & -- & 0.055 & $\phantom{-}0.034$ & -- & -- \\
- & Cosine k-NN + P & \textit{\color{gray}ICML'22} & -- & -- & 0.058 & $\phantom{-}0.021$ & -- & -- \\
- & PCA-KMeans + P & \textit{\color{gray}CoRL'24} & -- & -- & 0.061 & $\phantom{-}0.022$ & -- & -- \\
- & RND + P & \textit{\color{gray}ICML'24} & -- & -- & 0.058 & $\phantom{-}0.020$ & -- & -- \\
+\multirow{4}{*}{\rotatebox{90}{\textbf{OOD\,+\,P}}}
+ & Mahalanobis + P & \textit{\color{gray}NeurIPS'18} & \underline{0.055} & \underline{0.259} & \underline{0.034} & \underline{0.602} \\
+ & Cosine k-NN + P & \textit{\color{gray}ICML'22} & 0.058 & 0.246 & 0.021 & 0.594 \\
+ & PCA-KMeans + P & \textit{\color{gray}CoRL'24} & 0.061 & 0.247 & 0.022 & 0.593 \\
+ & RND + P & \textit{\color{gray}ICML'24} & 0.058 & 0.245 & 0.020 & 0.594 \\
 \midrule
-\multirow{4}{*}{\rotatebox{90}{\textbf{Class.\,+\,P}}}
- & SAFE-MLP + P & \textit{\color{gray}NeurIPS'25} & 0.042 & $\phantom{-}0.007$ [$-0.003$, $0.019$] & 0.061 & $\phantom{-}\mathbf{0.030}$ [$0.007$, $0.093$] & 0.03 & $\phantom{-}0.000$$^\S$ \\
- & SAFE-LSTM + P & \textit{\color{gray}NeurIPS'25} & -- & -- & -- & -- & 0.03 & $\phantom{-}0.034$ [$0.008$, $0.067$] \\
- & ActProbe + P & \textit{\color{gray}arXiv'26} & 0.050 & $\phantom{-}0.020$ [$0.004$, $0.041$] & -- & -- & -- & -- \\
- & Hide-and-Seek + P & \textit{\color{gray}NeurIPS'26} & 0.055 & $\phantom{-}0.098$ [$0.037$, $0.158$] & 0.061 & $\phantom{-}\mathbf{0.071}$ [$0.022$, $0.157$] & 0.04 & $\phantom{-}\mathbf{0.083}$ [$0.033$, $0.138$] \\
+\multirow{2}{*}{\rotatebox{90}{\textbf{Cl.+P}}}
+ & SAFE-MLP + P & \textit{\color{gray}NeurIPS'25} & 0.061 & 0.255 & 0.030 & 0.597 \\
+ & Hide-and-Seek + P & \textit{\color{gray}NeurIPS'26} & 0.061 & \textbf{0.296} & \textbf{0.071} & \textbf{0.618} \\
 \midrule
-\multirow{4}{*}{\rotatebox{90}{\textbf{Controls}}}
- & Gaussian noise + P$^\ast$ & & -- & $\phantom{-}0.006$ (max $0.037$) & -- & $\phantom{-}0.002$ (max $0.009$) & -- & $\phantom{-}0.009$ (max $0.043$) \\
- & Zero-input Hide-and-Seek + P & & 0.061 & $\phantom{-}0.019$ [$0.005$, $0.039$] & 0.061 & $\phantom{-}0.012$ [$0.001$, $0.044$] & 0.04 & $\phantom{-}0.018$ [$-0.011$, $0.056$] \\
- & Same-task shuffle + P & & 0.047 & $\phantom{-}0.007$ [$0.002$, $0.014$] & 0.063 & $\phantom{-}0.011$ [$0.000$, $0.064$] & 0.03 & $\phantom{-}0.002$ [$0.000$, $0.006$] \\
- & First-inference + P & & -- & -- & 0.055 & $\phantom{-}0.001$ [$-0.015$, $0.036$] & 0.04 & $\phantom{-}0.002$ [$-0.026$, $0.047$] \\
+\multirow{3}{*}{\rotatebox{90}{\textbf{Ctrl.}}}
+ & First-inference + P & & \underline{0.055} & 0.226 & 0.001 & 0.585 \\
+ & Zero-input + P & & 0.061 & 0.237 & 0.012 & 0.588 \\
+ & Same-task shuffle + P & & 0.063 & 0.236 & 0.011 & 0.586 \\
 \bottomrule
 \end{tabular*}
 
 \vspace{2pt}
-\parbox{\textwidth}{\scriptsize Held-out intervals for detectors fused with P resample the
-calibration and test sets and refit thresholds; all other intervals resample the test set only.
-The original design fuses SAFE with the time risk at thresholds frozen before the validation set
-was collected. OOD scores fused with P were run on the held-out set only, after the preregistered
-test, and are point estimates. On RLDX-1 (100 successes, 100 failures), fused paths were chosen on
-in-sample training failures. $^\ast$Mean over 100, 20 and 20 draws. $^\ddagger$SAFE-LSTM.
-$^\S$The fit falls back to the timer alone.}
-\end{table*}
+\parbox{\columnwidth}{\scriptsize Controls are Hide-and-Seek retrained on zero inputs, on another
+same-task rollout's features, or on the first inference only. OOD rows: $\bar\ell$ is P's plus
+the reported gain. Noise and within-task resampled scores fused with P gain at most 0.012.\pending{add
+$\pm$ std over 3 seeds from docs/xr1\_per\_seed\_detection.md, run C}}
+\end{table}
 
 \subsection{Standalone failure detection}
 
-Evaluated on their own, as in prior work (Table~\ref{tab:raw}), the OOD detectors and failure
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+% Data: Table I (validation set, thresholds at 5% calibration FPR).
+\begin{axis}[width=\columnwidth, height=4.6cm, xmin=0.70, xmax=0.93, ymin=0.64, ymax=1.01,
+  xlabel={detection time DT (fraction of $H_k$, lower is earlier)}, ylabel={balanced accuracy},
+  label style={font=\scriptsize}, tick label style={font=\scriptsize},
+  xlabel shift=-3pt, ylabel shift=-4pt, grid=major, grid style={gray!20}]
+\addplot[only marks, mark=*, mark size=1.8pt, gray!70!black] coordinates {
+  (0.782,0.799) (0.818,0.763) (0.806,0.771) (0.792,0.780)};
+\node[font=\tiny, gray!40!black, anchor=south] at (axis cs:0.800,0.808) {OOD detectors (4)};
+\addplot[only marks, mark=square*, mark size=1.8pt, blue!70!black] coordinates {
+  (0.810,0.763) (0.819,0.670) (0.720,0.762)};
+\draw[blue!70!black] (axis cs:0.810,0.757) -- (axis cs:0.833,0.722) node[font=\tiny, anchor=north west, inner sep=1pt] {SAFE};
+\node[font=\tiny, blue!70!black, anchor=west] at (axis cs:0.822,0.670) {ActProbe};
+\node[font=\tiny, blue!70!black, anchor=south] at (axis cs:0.722,0.768) {Hide-and-Seek};
+\addplot[only marks, mark=triangle*, mark size=2.4pt, orange!85!black] coordinates {
+  (0.880,0.792) (0.910,0.976) (0.805,0.978)};
+\node[font=\tiny, orange!75!black, anchor=east] at (axis cs:0.877,0.792) {time risk};
+\node[font=\tiny, orange!75!black, anchor=east] at (axis cs:0.906,0.976) {global timer};
+\node[font=\tiny, orange!75!black, anchor=west] at (axis cs:0.809,0.978) {\textbf{per-task timer P (ours)}};
+\end{axis}
+\end{tikzpicture}
+\caption{Accuracy against timeliness for every detector of Table~\ref{tab:raw}. The timers
+(triangles) are the most accurate because they catch every failure; P also alarms as early as
+most learned detectors. Only Hide-and-Seek alarms clearly earlier.}
+\label{fig:acc_time}
+\end{figure}
+
+Evaluated on their own, as in prior work (Table~\ref{tab:raw}, Fig.~\ref{fig:acc_time}), the OOD detectors and failure
 classifiers catch 40\% to 67\% of the failures at 5\% FPR. The two timers, which never read the
 policy, catch all of them (bACC 0.98, against at most 0.80). The global timer alarms last, but P
 already has a lower DT than SAFE, k-NN, PCA-KMeans and ActProbe, and ties SAFE on TWA; only
@@ -399,12 +414,13 @@ long the attempt has run; what a monitor must add is an earlier alarm.
 
 \textbf{Against a global timer, SAFE looks useful; against P, it does not.} On the validation
 set, SAFE + global timer raises the mean lead from 0.090 to 0.207, but P alone reaches 0.195,
-so SAFE adds only 0.012 over it (Table~\ref{tab:lead}), and SAFE + P adds 0.007. Time risk
+so SAFE adds only 0.012 over it, and SAFE + P adds 0.007. Time risk
 fused with the global timer gives 0.071 less lead than P, and the original SAFE + time-risk
 design, which raised recall over the time risk from 0.63 to 0.96, gives no more lead than P.
 
 \textbf{SAFE: a small but real gain, below the margin (H1 not supported, H2 supported).} On the
-held-out set, SAFE + P leads P by 0.030 of the time limit. The CI lies above zero and the test
+held-out set (Table~\ref{tab:lead}), SAFE + P leads P by 0.030 of the time limit (95\% CI [0.007,
+0.093]). The CI lies above zero and the test
 FPR (0.061, Wilson upper bound 0.089) meets the criterion, but the gain is below the 0.05 margin.
 Noise and within-task resampled scores gain at most 0.009, so SAFE adds policy evidence, not
 an artifact of fusion. P loosened to SAFE + P's FPR leaves SAFE 0.015 ([$-0.007$, 0.041]). All
@@ -412,7 +428,7 @@ five policy scores gain more on the 10 atomic tasks (0.045 to 0.081) than on the
 ones (0.008 to 0.027).
 
 \textbf{Hide-and-Seek: an earlier warning (H1 and H2 supported).} Hide-and-Seek + P leads P by
-0.071 at 0.061 FPR (Wilson bound 0.089), meeting every criterion; noise and resampled scores gain
+0.071 ([0.022, 0.157]) at 0.061 FPR (Wilson bound 0.089), meeting every criterion; noise and resampled scores gain
 at most 0.012. On the validation set, its gain at matched FPR was 0.083 ([0.022, 0.143]),
 against 0.008 for SAFE, 0.009 for ActProbe and at most 0.016 for 100 noise draws. Its advantage
 over SAFE + P, 0.041 ([$-0.011$, 0.103]), is not significant. As the preregistered bootstrap is
@@ -457,8 +473,9 @@ averaged over quantiles and 5 seeds; the timer at the same FPR; 1,000 bootstrap 
 $^\ast$The timer cannot go below 0.20 FPR here, so this row is a lower bound on FIPER's lead.}
 \end{table}
 
-\textbf{RLDX-1, offline.} On existing RLDX-1 data, all failures again ran to the time limit and
-the XR-1 pattern repeats (Table~\ref{tab:lead}, right). Hide-and-Seek + P, set up before scoring with
+\textbf{RLDX-1, offline.} On existing RLDX-1 data (20 tasks, 100 successes and 100 failures), all
+failures again ran to the time limit, and P reaches $\bar\ell = 0.271$ against 0.032 for the global
+timer. SAFE-LSTM + P gains 0.034 over P, and Hide-and-Seek + P 0.083 at 0.04 FPR. Hide-and-Seek + P, set up before scoring with
 the XR-1 settings, gains 0.083, and 0.052 ([0.002, 0.106]) against P loosened to its four false
 alarms; its three controls gain at most 0.018. Both gains come from atomic tasks: on composite
 tasks no score adds clear lead (Hide-and-Seek 0.010).

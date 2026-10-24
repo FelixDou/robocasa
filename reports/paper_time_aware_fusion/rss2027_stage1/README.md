@@ -351,3 +351,17 @@ Rewritten to read like SAFE and FIPER (NeurIPS 2025). Claims, numbers, registere
   - Local check on SAFE: the seed-averaged row reproduces TPR 0.566 / FPR 0.039. Per seed: bACC 0.741 ± 0.010, TWA 0.571 ± 0.005, below the 3-seed ensemble shown in Table I (0.763 / 0.575).
   - Mahalanobis, k-NN and the timers have no training randomness.
   - PCA-KMeans and RND were trained with one seed (§15.10).
+
+## Update 2026-10-24 (b): one test set in Table II, new teaser, accuracy–timeliness plot
+
+- **Table II.** Same style as Table I. It now covers only the preregistered held-out test set and has no intervals. Columns: FPR, ℓ̄, Δℓ̄ over P and TWA.
+  - P and the "+ P" fusion are marked as ours, with bold best and underline second best.
+  - The validation-set and RLDX-1 numbers moved to the text.
+  - The H1 decision CIs stay in the text, because the preregistered criterion uses them.
+  - OOD rows: ℓ̄ = P's 0.2252 plus the reported gain. TWA = ½(ℓ̄ + 1 − FPR), with FPR from the false-alarm counts.
+- **Fig. 1 (new).** `figures/teaser.tex`, RSS only. Four frames above one episode bar, with the alarm times of SAFE, P and the global timer, and arrows for "lead of P, without the policy" and "extra warning". The JSAI draft still uses `figures/qualitative/fig_qualitative.tex`.
+- **Fig. 2 (new).** Balanced accuracy against detection time for every Table I detector, as in Hide-and-Seek's accuracy–timeliness plot.
+- **± std (pending).** `docs/xr1_per_seed_detection.md` now has a run C for Table II. It fits each seed's score OR-fused with P using the registered `confirm_lead.fit_fast` on the held-out cohorts.
+  - Local check of the fused mode on the August cohorts: reproduced SAFE + P 0.202 / 0.042 and P 0.1952 / 0.0447. Per seed, SAFE + P gains 0.012 ± 0.007.
+  - Both tables carry a red `\pending` note until the cluster numbers are in.
+- **Page check (tectonic):** with `\notesfalse`, content fills pages 1–5 and the references fill page 6.

@@ -19,11 +19,19 @@ Sources of per-seed trajectories:
                               score_cohorts.py outputs: per_seed_raw plus normalizations.json
                               (detector -> seed -> task -> {location, scale}).
 
+With --fused RUNTIME_BUNDLE, each seed's score is instead OR-fused with the per-task timer P
+(q = 0.95) and both are fitted exactly as in the registered analysis (confirm_lead.fit_fast and
+evaluate_fast, imported from this folder). Reported per seed: FPR, mean lead, the gain over P
+and TWA. SAFE's per-seed scores then come from per_seed_raw_safe and the bundle's frozen
+task_normalizations (confirm_lead.check_safe_pipeline). The gate (--expect NAME=LEAD,FPR)
+compares the seed-averaged fused detector's lead and FPR with Table II.
+
 Usage:
   python3 -I per_seed_detection.py --base-calibration CAL.jsonl --base-test TEST.jsonl \\
+      [--cal-per-class 3 --test-per-class 10] [--fused runtime_bundle.json] \\
       [--safe] [--scores-calibration S_CAL.jsonl --scores-test S_TEST.jsonl \\
        --normalizations normalizations.json --detectors NAME ...] \\
-      [--expect NAME=TPR,FPR ...] --output OUT.json
+      [--expect NAME=TPR,FPR (standalone) or NAME=LEAD,FPR (fused) ...] --output OUT.json
 """
 import argparse
 import json
@@ -121,11 +129,51 @@ def run_detector(cal_traj, test_traj, cal_rows, test_rows):
     return result
 
 
+def run_fused(cal_traj, test_traj, cal_rows, test_rows, bundle):
+    """Per-seed SAFE-style score OR-fused with P, fitted as in confirm_lead (registered E1 code)."""
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import confirm_lead as cl
+    import quantile_timer as qt
+    rk = qt.rho(qt.dev_fractions(bundle), cl.PRIMARY_Q)
+    seeds = sorted(next(iter(cal_traj.values())))
+
+    def cohort(base, traj, seed):
+        rows = []
+        for r in base:
+            per = traj[r["rollout_id"]]
+            score = np.mean([per[s] for s in seeds], axis=0) if seed is None else np.asarray(per[seed], float)
+            rows.append(dict(task_name=r["task_name"], failed=bool(r["failed"]), horizon=r["horizon"],
+                             L=len(score), score=score))
+        return cl.Cohort(rows, key="score")
+
+    result = {"seeds": seeds}
+    for seed in [None] + seeds:
+        calC, teC = cohort(cal_rows, cal_traj, seed), cohort(test_rows, test_traj, seed)
+        tm, fu = cl.fit_fast(calC, rk)
+        eP, lP = cl.evaluate_fast(teC, rk, tm)
+        eF, lF = cl.evaluate_fast(teC, rk, fu)
+        lead, fpr = float(lF.mean()), eF["fp"] / int((~teC.failed).sum())
+        result["seed_average" if seed is None else f"seed_{seed}"] = dict(
+            fpr=fpr, mean_lead=lead, gain=float(np.mean(lF - lP)), twa=(lead + 1 - fpr) / 2,
+            p_fpr=eP["fp"] / int((~teC.failed).sum()), p_lead=float(lP.mean()),
+            path=dict(lam=float(fu["lam"]), u=float(fu["u"]), s=float(fu["s"])))
+    per = [result[f"seed_{s}"] for s in seeds]
+    result["mean_std_over_seeds"] = {
+        k: dict(mean=float(np.mean([p[k] for p in per])), std=float(np.std([p[k] for p in per], ddof=1)))
+        for k in ("fpr", "mean_lead", "gain", "twa")}
+    return result
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-calibration", required=True)
     ap.add_argument("--base-test", required=True)
     ap.add_argument("--safe", action="store_true")
+    ap.add_argument("--cal-per-class", type=int, default=3)
+    ap.add_argument("--test-per-class", type=int, default=10)
+    ap.add_argument("--fused", metavar="RUNTIME_BUNDLE",
+                    help="OR-fuse each seed's score with P (registered E1 fit) instead of standalone")
     ap.add_argument("--scores-calibration")
     ap.add_argument("--scores-test")
     ap.add_argument("--normalizations")
@@ -134,16 +182,32 @@ def main():
     ap.add_argument("--output", required=True)
     args = ap.parse_args()
 
-    cal_rows = sel(load_jsonl(args.base_calibration), 3)
-    test_rows = sel(load_jsonl(args.base_test), 10)
+    cal_rows = sel(load_jsonl(args.base_calibration), args.cal_per_class)
+    test_rows = sel(load_jsonl(args.base_test), args.test_per_class)
+    bundle = json.load(open(args.fused)) if args.fused else None
+    evaluate_detector = ((lambda c, t: run_fused(c, t, cal_rows, test_rows, bundle)) if bundle
+                         else (lambda c, t: run_detector(c, t, cal_rows, test_rows)))
     print(f"calibration {len(cal_rows)} rollouts, test {len(test_rows)} rollouts", flush=True)
     need = {r["rollout_id"] for r in cal_rows + test_rows}
     out = {"alpha": ALPHA, "n_calibration": len(cal_rows), "n_test": len(test_rows), "detectors": {}}
 
     if args.safe:
-        traj = {r["rollout_id"]: {s: np.asarray(v, float) for s, v in r["per_seed_normalized_running_max"].items()}
-                for r in load_jsonl(args.base_calibration) + load_jsonl(args.base_test) if r["rollout_id"] in need}
-        out["detectors"]["safe_mlp"] = run_detector(traj, traj, cal_rows, test_rows)
+        traj, worst = {}, 0.0
+        for r in load_jsonl(args.base_calibration) + load_jsonl(args.base_test):
+            if r["rollout_id"] not in need:
+                continue
+            if bundle:   # frozen normalization of the raw per-seed SAFE scores, as confirm_lead checks
+                norms = bundle["task_normalizations"]
+                per = {s: (np.maximum.accumulate(np.asarray(raw, float)) - norms[s][r["task_name"]]["location"])
+                          / norms[s][r["task_name"]]["scale"] for s, raw in r["per_seed_raw_safe"].items()}
+            else:
+                per = {s: np.asarray(v, float) for s, v in r["per_seed_normalized_running_max"].items()}
+            avg = np.mean([per[s] for s in sorted(per)], axis=0)
+            worst = max(worst, float(np.max(np.abs(avg - np.asarray(r["safe_scores"], float)))))
+            traj[r["rollout_id"]] = per
+        if worst > 1e-9:
+            sys.exit(f"STOP: SAFE per-seed mean differs from safe_scores by {worst:.2e}")
+        out["detectors"]["safe_mlp"] = evaluate_detector(traj, traj)
 
     if args.detectors:
         norms = json.load(open(args.normalizations))
@@ -169,20 +233,25 @@ def main():
                 sys.exit(f"STOP: {name} lacks {len(missing)} selected rollouts, e.g. {sorted(missing)[:3]}")
             if worst > 1e-9:
                 sys.exit(f"STOP: {name} per-seed mean differs from its stored score by {worst:.2e}")
-            out["detectors"][name] = run_detector(traj, traj, cal_rows, test_rows)
+            out["detectors"][name] = evaluate_detector(traj, traj)
 
     ok = True
+    first_key = "mean_lead" if bundle else "tpr"
     for item in args.expect:
         name, vals = item.split("=")
-        tpr, fpr = (float(v) for v in vals.split(","))
+        a, fpr = (float(v) for v in vals.split(","))
         got = out["detectors"][name]["seed_average"]
-        match = round(got["tpr"], 3) == tpr and round(got["fpr"], 3) == fpr
+        match = round(got[first_key], 3) == a and round(got["fpr"], 3) == fpr
         ok &= match
-        print(f"reference {name}: TPR {got['tpr']:.3f} FPR {got['fpr']:.3f} vs Table I {tpr:.3f} {fpr:.3f}"
+        print(f"reference {name}: {first_key} {got[first_key]:.3f} FPR {got['fpr']:.3f} vs table {a:.3f} {fpr:.3f}"
               f" -> {'OK' if match else 'MISMATCH'}", flush=True)
+    if bundle and out["detectors"]:
+        d0 = next(iter(out["detectors"].values()))["seed_average"]
+        print(f"P alone: lead {d0['p_lead']:.4f} FPR {d0['p_fpr']:.4f}")
+    keys = ("fpr", "mean_lead", "gain", "twa") if bundle else ("tpr", "fpr", "bacc", "twa", "dt")
     for name, d in out["detectors"].items():
         ms = d["mean_std_over_seeds"]
-        print(name, " ".join(f"{k} {ms[k]['mean']:.3f}+-{ms[k]['std']:.3f}" for k in ("tpr", "fpr", "bacc", "twa", "dt")))
+        print(name, " ".join(f"{k} {ms[k]['mean']:.3f}+-{ms[k]['std']:.3f}" for k in keys))
     json.dump(out, open(args.output, "w"), indent=1)
     print("REFERENCE OK" if ok else "STOP: a seed-averaged row does not reproduce Table I", flush=True)
     sys.exit(0 if ok else 1)
