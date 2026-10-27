@@ -77,30 +77,38 @@ CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=2 nice -n 10 "$SAFE_PY" -I -u scripts/xr
 
 ### B1. Rescore ActProbe with per-seed outputs (CPU, about 1–2 hours)
 
-The `--reference` checks make the run fail unless the seed-averaged trajectories equal those
-of the published-baselines run behind Table I.
+The reference is the lead run (`$XR1_LEAD_ROOT/baselines`), which repeated ActProbe and
+Hide-and-Seek with the arguments of the first run and, unlike it, saved calibration predictions.
+The `--reference` checks make the run fail unless the seed-averaged trajectories equal it. The
+`if` refuses to launch when the reference is missing.
 
 ```bash
 cd $PSEED_REPO
-test -s $XR1_FIRST_RUN/calibration_predictions.jsonl -a -s $XR1_FIRST_RUN/evaluation_predictions.jsonl \
-  && echo "reference run OK" || echo "STOP: set XR1_FIRST_RUN to the published-baselines run with ActProbe"
-SCORE_ARGS=(
-  --dataset-dir "${XR1_RAW_DIRS[@]}"
-  --runtime-bundle $XR1_RUNTIME_BUNDLE --train-ids $XR1_TRAIN_IDS
-  --cohort august_calibration $AMEND2_ROOT/august_calibration_ids.json
-  --cohort august_test $XR1_EVAL_IDS
-  --detectors actprobe --feature-aggregation last --seeds 0 1 2
-  --reference august_calibration $XR1_FIRST_RUN/calibration_predictions.jsonl
-  --reference august_test $XR1_FIRST_RUN/evaluation_predictions.jsonl
-  --output-dir $PSEED_ROOT/actprobe_scores
-)
-PYTHONPATH=$PSEED_REPO CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 nohup nice -n 10 \
-  "$SAFE_PY" -u -m robocasa.recovery.safe.baselines.score_cohorts "${SCORE_ARGS[@]}" > $PSEED_LOG/actprobe_score.log 2>&1 &
-echo "score PID: $! on $(hostname)"
+export XR1_REF=$XR1_LEAD_ROOT/baselines
+if test -s $XR1_REF/calibration_predictions.jsonl -a -s $XR1_REF/evaluation_predictions.jsonl \
+   && grep -q '"actprobe"' $XR1_REF/results.json; then
+  SCORE_ARGS=(
+    --dataset-dir "${XR1_RAW_DIRS[@]}"
+    --runtime-bundle $XR1_RUNTIME_BUNDLE --train-ids $XR1_TRAIN_IDS
+    --cohort august_calibration $AMEND2_ROOT/august_calibration_ids.json
+    --cohort august_test $XR1_EVAL_IDS
+    --detectors actprobe --feature-aggregation last --seeds 0 1 2
+    --reference august_calibration $XR1_REF/calibration_predictions.jsonl
+    --reference august_test $XR1_REF/evaluation_predictions.jsonl
+    --output-dir $PSEED_ROOT/actprobe_scores
+  )
+  PYTHONPATH=$PSEED_REPO CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 nohup nice -n 10 \
+    "$SAFE_PY" -u -m robocasa.recovery.safe.baselines.score_cohorts "${SCORE_ARGS[@]}" > $PSEED_LOG/actprobe_score.log 2>&1 &
+  echo "score PID: $! on $(hostname)"
+else
+  echo "STOP: $XR1_REF lacks ActProbe calibration or evaluation predictions; nothing launched"
+fi
 ```
 
 Monitor with `tail -f $PSEED_LOG/actprobe_score.log`. It must end with two
-`reference ... -> OK` lines and `REFERENCE OK`; otherwise stop.
+`reference ... -> OK` lines and `REFERENCE OK`; otherwise stop. (2026-10-27: the first run,
+`xr1_published_baselines_20261021_135600`, has no calibration_predictions.jsonl, so it cannot
+serve as the reference.)
 
 ### B2. ActProbe per-seed metrics
 

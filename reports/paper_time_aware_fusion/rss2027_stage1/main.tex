@@ -61,7 +61,8 @@ by how much earlier than a per-task timer they alarm at the same FPR, and fuse a
 timer by an OR rule with a split-conformal FPR bound. In a preregistered test on 760 fresh
 rollouts of one VLA on 38 tasks, the SAFE failure score adds 0.030 of the time limit to the timer
 (95\% CI [0.007, 0.093]), short of the 0.05 we required, while the sequence detector
-Hide-and-Seek adds 0.071 ([0.022, 0.157]). Controls that see only elapsed time or another
+Hide-and-Seek adds 0.071 ([0.022, 0.157]) with 3 seeds averaged and $0.039 \pm 0.006$ as a single
+model. Controls that see only elapsed time or another
 rollout's features add at most 0.012, so this warning comes from the rollout itself. It
 replicates offline on a second VLA, and on FIPER's benchmark the same test credits FIPER.
 Stage~2 tests a second VLA prospectively and whether earlier alarms raise success through retry.
@@ -288,46 +289,52 @@ need discrete action tokens and STAC~\cite{agia2024sentinel} overlapping chunks,
 not produce; multi-sample baselines are part of E4.
 
 \textbf{Metrics.} Following~\cite{romer2025fiper,park2026hideseek}, at thresholds calibrated for
-FPR $\le 0.05$ we report TPR, test FPR, balanced accuracy (bACC; on our balanced sets it equals
-weighted accuracy), time-weighted accuracy $\mathrm{TWA} = \frac{1}{2}(\bar\ell + 1 - \mathrm{FPR})$
-and detection time $\mathrm{DT} = 1 - \bar\ell$, a miss counting as 1. Intervals are 95\%
-bootstrap CIs over tasks, then rollouts (2,000 resamples), rather than standard deviations over
-seeds: every learned score already averages 3 training seeds, and the timers have none. For the
-preregistered tests the bootstrap also resamples the calibration set and refits all thresholds.
-\emph{Matched} gains compare with P loosened on the test set
-to the fused detector's number of false alarms, which favors the timer.
+FPR $\le 0.05$ we report TPR, test FPR, balanced accuracy (bACC), weighted accuracy (wACC; it
+equals bACC on our balanced sets), time-weighted accuracy $\mathrm{TWA} = \frac{1}{2}(\bar\ell + 1 -
+\mathrm{FPR})$ and detection time $\mathrm{DT} = 1 - \bar\ell$, a miss counting as 1. As
+in~\cite{park2026hideseek}, learned detectors are trained with 3 random seeds and we report the
+mean and standard deviation of single models. The preregistered detectors instead average the 3
+seeds' scores; their decision intervals are 95\% bootstrap CIs over tasks, then rollouts, that
+also resample the calibration set and refit all thresholds (2,000 resamples). \emph{Matched} gains
+compare with P loosened on the test set to the fused detector's number of false alarms, which
+favors the timer.
 
 \begin{table}[t]
 \centering
 \caption{Standalone failure detection with XR-1 on RoboCasa365 (validation set, 380 successes
-and 380 failures). We report the true- and false-positive rates (TPR, FPR), balanced accuracy
-(bACC), time-weighted accuracy (TWA)~\cite{romer2025fiper} and detection time (DT), at
-thresholds calibrated for FPR $\le 0.05$. \textbf{Bold} and \underline{underline} denote the
-best and second-best results.\pending{add $\pm$ std over 3 seeds (runs A, B)}}
+and 380 failures), at thresholds calibrated for FPR $\le 0.05$. We report balanced accuracy
+(bACC), weighted accuracy (wACC) and time-weighted accuracy (TWA)~\cite{romer2025fiper},
+averaged over 3 random seeds with standard deviation. \textbf{Bold} and \underline{underline}
+denote the best and second-best results.}
 \label{tab:raw}
 \scriptsize
 \setlength{\tabcolsep}{2pt}
-\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}cllccccc@{}}
+\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}cllccc@{}}
 \toprule
- & Method & & TPR$\uparrow$ & FPR$\downarrow$ & bACC$\uparrow$ & TWA$\uparrow$ & DT$\downarrow$ \\
+ & Method & & bACC$\uparrow$ & wACC$\uparrow$ & TWA$\uparrow$ \\
 \midrule
 \multirow{4}{*}{\rotatebox{90}{\textbf{OOD}}}
- & Mahalanobis & \textit{\color{gray}NeurIPS'18} & \underline{0.666} & 0.068 & 0.799 & \underline{0.575} & \underline{0.782} \\
- & Cosine k-NN & \textit{\color{gray}ICML'22} & 0.582 & 0.055 & 0.763 & 0.563 & 0.818 \\
- & PCA-KMeans & \textit{\color{gray}CoRL'24} & 0.605 & 0.063 & 0.771 & 0.565 & 0.806 \\
- & RND & \textit{\color{gray}ICML'24} & 0.629 & 0.068 & 0.780 & 0.570 & 0.792 \\
+ & Mahalanobis$^\ast$ & \textit{\color{gray}NeurIPS'18} & 0.799 & 0.799 & \underline{0.575} \\
+ & Cosine k-NN$^\ast$ & \textit{\color{gray}ICML'22} & 0.763 & 0.763 & 0.563 \\
+ & PCA-KMeans$^\ast$ & \textit{\color{gray}CoRL'24} & 0.771 & 0.771 & 0.565 \\
+ & RND$^\ast$ & \textit{\color{gray}ICML'24} & 0.780 & 0.780 & 0.570 \\
 \midrule
 \multirow{3}{*}{\rotatebox{90}{\textbf{Class.}}}
- & SAFE-MLP & \textit{\color{gray}NeurIPS'25} & 0.566 & \textbf{0.039} & 0.763 & \underline{0.575} & 0.810 \\
- & ActProbe & \textit{\color{gray}arXiv'26} & 0.403 & 0.063 & 0.670 & 0.559 & 0.819 \\
- & Hide-and-Seek & \textit{\color{gray}NeurIPS'26} & 0.584 & 0.061 & 0.762 & \textbf{0.610} & \textbf{0.720} \\
+ & SAFE-MLP & \textit{\color{gray}NeurIPS'25} & $0.741^{\pm 0.010}$ & $0.741^{\pm 0.010}$ & $0.571^{\pm 0.005}$ \\
+ & ActProbe$^\dagger$ & \textit{\color{gray}arXiv'26} & 0.670 & 0.670 & 0.559 \\
+ & Hide-and-Seek & \textit{\color{gray}NeurIPS'26} & $0.743^{\pm 0.019}$ & $0.743^{\pm 0.019}$ & $\mathbf{0.595}^{\pm 0.005}$ \\
 \midrule
 \multirow{3}{*}{\rotatebox{90}{\textbf{Time}}}
- & Time risk & & 0.632 & 0.047 & 0.792 & 0.537 & 0.880 \\
- & Global timer & & \textbf{1.000} & 0.047 & \underline{0.976} & 0.521 & 0.910 \\
- & \cellcolor{blue!8}\textbf{Per-task timer P} & \cellcolor{blue!8}\textit{ours} & \cellcolor{blue!8}\textbf{1.000} & \cellcolor{blue!8}\underline{0.045} & \cellcolor{blue!8}\textbf{0.978} & \cellcolor{blue!8}\underline{0.575} & \cellcolor{blue!8}0.805 \\
+ & Time risk$^\ast$ & & 0.792 & 0.792 & 0.537 \\
+ & Global timer$^\ast$ & & \underline{0.976} & \underline{0.976} & 0.521 \\
+ & \cellcolor{blue!8}\textbf{Per-task timer P}$^\ast$ & \cellcolor{blue!8}\textit{ours} & \cellcolor{blue!8}\textbf{0.978} & \cellcolor{blue!8}\textbf{0.978} & \cellcolor{blue!8}\underline{0.575} \\
 \bottomrule
 \end{tabular*}
+
+\vspace{2pt}
+\parbox{\columnwidth}{\scriptsize $^\ast$No seed variance: no training randomness, or a single
+trained model. $^\dagger$Average of 3 seeds' scores; per-seed values pending.\pending{ActProbe
+per-seed (runs B1, B2)}}
 \end{table}
 
 \begin{table}[t]
@@ -335,41 +342,41 @@ best and second-best results.\pending{add $\pm$ std over 3 seeds (runs A, B)}}
 \caption{Warning lead on the preregistered held-out test set (XR-1 on RoboCasa365, 380 successes
 and 380 failures). Each score is OR-fused with our per-task timer P (\emph{+ P}, ours) and
 calibrated at 5\% FPR. We report FPR, mean warning lead $\bar\ell$, its gain over P
-($\Delta\bar\ell$) and TWA. \textbf{Bold} and \underline{underline} denote the best and
-second-best results.}
+($\Delta\bar\ell$) and TWA, averaged over 3 random seeds with standard deviation. \textbf{Bold}
+and \underline{underline} denote the best and second-best results.}
 \label{tab:lead}
 \scriptsize
 \setlength{\tabcolsep}{2pt}
-\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}cllcccc@{}}
+\begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}clcccc@{}}
 \toprule
- & Method & & FPR$\downarrow$ & $\bar\ell\uparrow$ & $\Delta\bar\ell\uparrow$ & TWA$\uparrow$ \\
+ & Method & FPR$\downarrow$ & $\bar\ell\uparrow$ & $\Delta\bar\ell\uparrow$ & TWA$\uparrow$ \\
 \midrule
 \multirow{2}{*}{\rotatebox{90}{\textbf{Time}}}
- & Global timer & & \textbf{0.024} & 0.123 & $-0.102$ & 0.550 \\
- & \cellcolor{blue!8}\textbf{Per-task timer P} & \cellcolor{blue!8}\textit{ours} & \cellcolor{blue!8}\underline{0.055} & \cellcolor{blue!8}0.225 & \cellcolor{blue!8}-- & \cellcolor{blue!8}0.585 \\
+ & Global timer & 0.024 & 0.123 & $-0.102$ & 0.550 \\
+ & \cellcolor{blue!8}\textbf{Per-task timer P (ours)} & \cellcolor{blue!8}0.055 & \cellcolor{blue!8}0.225 & \cellcolor{blue!8}-- & \cellcolor{blue!8}0.585 \\
 \midrule
 \multirow{4}{*}{\rotatebox{90}{\textbf{OOD\,+\,P}}}
- & Mahalanobis + P & \textit{\color{gray}NeurIPS'18} & \underline{0.055} & \underline{0.259} & \underline{0.034} & \underline{0.602} \\
- & Cosine k-NN + P & \textit{\color{gray}ICML'22} & 0.058 & 0.246 & 0.021 & 0.594 \\
- & PCA-KMeans + P & \textit{\color{gray}CoRL'24} & 0.061 & 0.247 & 0.022 & 0.593 \\
- & RND + P & \textit{\color{gray}ICML'24} & 0.058 & 0.245 & 0.020 & 0.594 \\
+ & Mahalanobis + P & 0.055 & \underline{0.259} & \underline{0.034} & \underline{0.602} \\
+ & Cosine k-NN + P & 0.058 & 0.246 & 0.021 & 0.594 \\
+ & PCA-KMeans + P & 0.061 & 0.247 & 0.022 & 0.593 \\
+ & RND + P & 0.058 & 0.245 & 0.020 & 0.594 \\
 \midrule
 \multirow{2}{*}{\rotatebox{90}{\textbf{Cl.+P}}}
- & SAFE-MLP + P & \textit{\color{gray}NeurIPS'25} & 0.061 & 0.255 & 0.030 & 0.597 \\
- & Hide-and-Seek + P & \textit{\color{gray}NeurIPS'26} & 0.061 & \textbf{0.296} & \textbf{0.071} & \textbf{0.618} \\
+ & SAFE-MLP + P & 0.058 & $0.249^{\pm 0.015}$ & $0.024^{\pm 0.015}$ & $0.596^{\pm 0.006}$ \\
+ & Hide\&Seek + P & 0.055 & $\mathbf{0.264}^{\pm 0.006}$ & $\mathbf{0.039}^{\pm 0.006}$ & $\mathbf{0.605}^{\pm 0.005}$ \\
 \midrule
 \multirow{3}{*}{\rotatebox{90}{\textbf{Ctrl.}}}
- & First-inference + P & & \underline{0.055} & 0.226 & 0.001 & 0.585 \\
- & Zero-input + P & & 0.061 & 0.237 & 0.012 & 0.588 \\
- & Same-task shuffle + P & & 0.063 & 0.236 & 0.011 & 0.586 \\
+ & First inference + P & 0.055 & $0.226^{\pm 0.001}$ & $0.001^{\pm 0.001}$ & $0.586^{\pm 0.001}$ \\
+ & Zero-input + P & 0.062 & $0.238^{\pm 0.003}$ & $0.013^{\pm 0.003}$ & $0.588^{\pm 0.000}$ \\
+ & Shuffle + P & 0.058 & $0.230^{\pm 0.001}$ & $0.005^{\pm 0.001}$ & $0.586^{\pm 0.002}$ \\
 \bottomrule
 \end{tabular*}
 
 \vspace{2pt}
-\parbox{\columnwidth}{\scriptsize Controls are Hide-and-Seek retrained on zero inputs, on another
-same-task rollout's features, or on the first inference only. OOD rows: $\bar\ell$ is P's plus
-the reported gain. Noise and within-task resampled scores fused with P gain at most 0.012.\pending{add
-$\pm$ std over 3 seeds from docs/xr1\_per\_seed\_detection.md, run C}}
+\parbox{\columnwidth}{\scriptsize FPR: mean over seeds. Timers and OOD scores have no seed variance. Controls are
+Hide-and-Seek (Hide\&Seek) retrained on zero inputs, on another same-task rollout's features
+(shuffle), or on the first inference only. OOD rows: $\bar\ell$ is P's plus the reported gain. The preregistered detectors
+average the 3 seeds' scores (Sec.~\ref{sec:results}).}
 \end{table}
 
 \subsection{Standalone failure detection}
@@ -377,7 +384,9 @@ $\pm$ std over 3 seeds from docs/xr1\_per\_seed\_detection.md, run C}}
 \begin{figure}[t]
 \centering
 \begin{tikzpicture}
-% Data: Table I (validation set, thresholds at 5% calibration FPR).
+% Data: Table I (validation set, thresholds at 5% calibration FPR). SAFE and Hide-and-Seek at their
+% single-model means over 3 seeds (DT 0.823 / 0.750, bACC 0.741 / 0.743; per_seed_detection.py run A);
+% ActProbe at its 3-seed average until runs B1-B2.
 \begin{axis}[width=\columnwidth, height=4.6cm, xmin=0.70, xmax=0.93, ymin=0.64, ymax=1.01,
   xlabel={detection time DT (fraction of $H_k$, lower is earlier)}, ylabel={balanced accuracy},
   label style={font=\scriptsize}, tick label style={font=\scriptsize},
@@ -386,10 +395,10 @@ $\pm$ std over 3 seeds from docs/xr1\_per\_seed\_detection.md, run C}}
   (0.782,0.799) (0.818,0.763) (0.806,0.771) (0.792,0.780)};
 \node[font=\tiny, gray!40!black, anchor=south] at (axis cs:0.800,0.808) {OOD detectors (4)};
 \addplot[only marks, mark=square*, mark size=1.8pt, blue!70!black] coordinates {
-  (0.810,0.763) (0.819,0.670) (0.720,0.762)};
-\draw[blue!70!black] (axis cs:0.810,0.757) -- (axis cs:0.833,0.722) node[font=\tiny, anchor=north west, inner sep=1pt] {SAFE};
+  (0.823,0.741) (0.819,0.670) (0.750,0.743)};
+\draw[blue!70!black] (axis cs:0.823,0.735) -- (axis cs:0.840,0.712) node[font=\tiny, anchor=north west, inner sep=1pt] {SAFE};
 \node[font=\tiny, blue!70!black, anchor=west] at (axis cs:0.822,0.670) {ActProbe};
-\node[font=\tiny, blue!70!black, anchor=south] at (axis cs:0.722,0.768) {Hide-and-Seek};
+\node[font=\tiny, blue!70!black, anchor=south] at (axis cs:0.752,0.749) {Hide-and-Seek};
 \addplot[only marks, mark=triangle*, mark size=2.4pt, orange!85!black] coordinates {
   (0.880,0.792) (0.910,0.976) (0.805,0.978)};
 \node[font=\tiny, orange!75!black, anchor=east] at (axis cs:0.877,0.792) {time risk};
@@ -397,7 +406,7 @@ $\pm$ std over 3 seeds from docs/xr1\_per\_seed\_detection.md, run C}}
 \node[font=\tiny, orange!75!black, anchor=west] at (axis cs:0.809,0.978) {\textbf{per-task timer P (ours)}};
 \end{axis}
 \end{tikzpicture}
-\caption{Accuracy against timeliness for every detector of Table~\ref{tab:raw}. The timers
+\caption{Accuracy against timeliness for every detector of Table~\ref{tab:raw} (single-model means). The timers
 (triangles) are the most accurate because they catch every failure; P also alarms as early as
 most learned detectors. Only Hide-and-Seek alarms clearly earlier.}
 \label{fig:acc_time}
@@ -422,6 +431,7 @@ design, which raised recall over the time risk from 0.63 to 0.96, gives no more 
 held-out set (Table~\ref{tab:lead}), SAFE + P leads P by 0.030 of the time limit (95\% CI [0.007,
 0.093]). The CI lies above zero and the test
 FPR (0.061, Wilson upper bound 0.089) meets the criterion, but the gain is below the 0.05 margin.
+A single SAFE model gains $0.024 \pm 0.015$ (Table~\ref{tab:lead}).
 Noise and within-task resampled scores gain at most 0.009, so SAFE adds policy evidence, not
 an artifact of fusion. P loosened to SAFE + P's FPR leaves SAFE 0.015 ([$-0.007$, 0.041]). All
 five policy scores gain more on the 10 atomic tasks (0.045 to 0.081) than on the 28 composite
@@ -432,7 +442,9 @@ ones (0.008 to 0.027).
 at most 0.012. On the validation set, its gain at matched FPR was 0.083 ([0.022, 0.143]),
 against 0.008 for SAFE, 0.009 for ActProbe and at most 0.016 for 100 noise draws. Its advantage
 over SAFE + P, 0.041 ([$-0.011$, 0.103]), is not significant. As the preregistered bootstrap is
-skewed upward, the point gain rather than the interval carries this decision.
+skewed upward, the point gain rather than the interval carries this decision. The preregistered
+detector averages the scores of 3 seeds; a single Hide-and-Seek model gains only $0.039 \pm
+0.006$ (Table~\ref{tab:lead}), below the margin, so averaging seeds is part of its earlier warning.
 
 \subsection{Is the extra warning learned elapsed time?}
 

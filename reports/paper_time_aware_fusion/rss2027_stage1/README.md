@@ -365,3 +365,23 @@ Rewritten to read like SAFE and FIPER (NeurIPS 2025). Claims, numbers, registere
   - Local check of the fused mode on the August cohorts: reproduced SAFE + P 0.202 / 0.042 and P 0.1952 / 0.0447. Per seed, SAFE + P gains 0.012 ± 0.007.
   - Both tables carry a red `\pending` note until the cluster numbers are in.
 - **Page check (tectonic):** with `\notesfalse`, content fills pages 1–5 and the references fill page 6.
+
+## Update 2026-10-27: Hide-and-Seek's reporting convention (3 seeds, single-model mean ± std)
+
+Per-seed results come from TSUBAME run `xr1_per_seed_detection_*` (PSEED_SHA 30b5ac57). Every seed-averaged row reproduced its table value. Runs A and C are done; ActProbe (B1, B2) is pending.
+
+- **Table I.** Columns are now bACC / wACC / TWA, exactly as in Hide-and-Seek (wACC = bACC here). TPR, FPR and DT are in the text.
+  - SAFE-MLP: bACC 0.741 ± 0.010, TWA 0.571 ± 0.005.
+  - Hide-and-Seek: bACC 0.743 ± 0.019, TWA 0.595 ± 0.005.
+  - The OOD baselines and timers have no seed variance (deterministic, or trained once).
+  - ActProbe still shows its 3-seed average, marked †.
+- **Table II.** Seeded rows are now single-model mean ± std; the FPR column shows the seed mean only.
+  - SAFE + P: ℓ̄ 0.249 ± 0.015, Δ 0.024 ± 0.015.
+  - Hide-and-Seek + P: ℓ̄ 0.264 ± 0.006, Δ 0.039 ± 0.006.
+  - Controls: Δ 0.001–0.013.
+  - The venue column was dropped (venues are in Table I) to fit the column.
+- **Text.** The preregistered decisions stay as registered: 3-seed-averaged scores, SAFE + P 0.030, Hide-and-Seek + P 0.071, H1 supported for Hide-and-Seek.
+  - The single-model gains now appear next to them: 0.024 ± 0.015 and 0.039 ± 0.006, the latter below the 0.05 margin.
+  - The text says that averaging seeds is part of Hide-and-Seek's earlier warning. The abstract says so as well.
+- **Fig. 2.** SAFE and Hide-and-Seek now sit at their single-model means.
+- **Runbook B1.** The reference is now `$XR1_LEAD_ROOT/baselines`, because the first run has no calibration predictions, and an `if` now blocks the launch when it is missing.
