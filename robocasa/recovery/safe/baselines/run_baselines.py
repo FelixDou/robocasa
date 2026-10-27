@@ -116,7 +116,9 @@ def load_baseline_rollout(directory, metadata, aggregation):
         "rollout_id": metadata.rollout_id,
         "task_name": metadata.task_name,
         "failed": bool(metadata.failed),
-        "features": aggregate_features(features, aggregation),
+        # Copy: "first" and "last" are slices, and a view would keep the whole raw
+        # (T, flow, horizon, D) tensor in memory (about 80 times the slice for XR-1).
+        "features": aggregate_features(features, aggregation).copy(),
         "actions": actions,
         "replan_steps": int(metadata.replan_steps),
         "environment_seed": metadata.environment_seed,
