@@ -318,10 +318,10 @@ denote the best and second-best results.}
  & Method & & bACC$\uparrow$ & wACC$\uparrow$ & TWA$\uparrow$ \\
 \midrule
 \multirow{4}{*}{\rotatebox{90}{\textbf{OOD}}}
- & Mahalanobis$^\dagger$ & \textit{\color{gray}NeurIPS'18} & 0.799 & 0.799 & \underline{0.575} \\
- & Cosine k-NN$^\dagger$ & \textit{\color{gray}ICML'22} & 0.763 & 0.763 & 0.563 \\
- & PCA-KMeans$^\dagger$ & \textit{\color{gray}CoRL'24} & 0.771 & 0.771 & 0.565 \\
- & RND$^\dagger$ & \textit{\color{gray}ICML'24} & 0.780 & 0.780 & 0.570 \\
+ & Mahalanobis & \textit{\color{gray}NeurIPS'18} & $0.798^{\pm 0.001}$ & $0.798^{\pm 0.001}$ & $\underline{0.575}^{\pm 0.000}$ \\
+ & Cosine k-NN & \textit{\color{gray}ICML'22} & $0.763^{\pm 0.000}$ & $0.763^{\pm 0.000}$ & $0.564^{\pm 0.000}$ \\
+ & PCA-KMeans & \textit{\color{gray}CoRL'24} & $0.771^{\pm 0.001}$ & $0.771^{\pm 0.001}$ & $0.565^{\pm 0.001}$ \\
+ & RND & \textit{\color{gray}ICML'24} & $0.782^{\pm 0.002}$ & $0.782^{\pm 0.002}$ & $0.567^{\pm 0.002}$ \\
 \midrule
 \multirow{3}{*}{\rotatebox{90}{\textbf{Class.}}}
  & SAFE-MLP & \textit{\color{gray}NeurIPS'25} & $0.741^{\pm 0.010}$ & $0.741^{\pm 0.010}$ & $0.571^{\pm 0.005}$ \\
@@ -336,8 +336,7 @@ denote the best and second-best results.}
 \end{tabular*}
 
 \vspace{2pt}
-\parbox{\columnwidth}{\scriptsize $^\ast$Deterministic: no training randomness.
-$^\dagger$One fitted model (seed 0).\pending{OOD seeds 1--2: docs/xr1\_ood\_per\_seed.md}}
+\parbox{\columnwidth}{\scriptsize $^\ast$Deterministic: no training randomness.}
 \end{table}
 
 \begin{table}[t]
@@ -392,12 +391,13 @@ average the 3 seeds' scores (Sec.~\ref{sec:results}).}
 % Data: Table I (validation set, thresholds at 5% calibration FPR). SAFE and Hide-and-Seek at their
 % single-model means over 3 seeds (DT 0.823 / 0.750, bACC 0.741 / 0.743; per_seed_detection.py run A);
 % ActProbe DT 0.872, bACC 0.626 (runs B1-B2, 2026-10-27).
+% OOD detectors at their means over model seeds 0-2 (docs/xr1_ood_per_seed.md, 2026-10-27).
 \begin{axis}[width=\columnwidth, height=4.6cm, xmin=0.70, xmax=0.93, ymin=0.60, ymax=1.01,
   xlabel={detection time DT (fraction of $H_k$, lower is earlier)}, ylabel={balanced accuracy},
   label style={font=\scriptsize}, tick label style={font=\scriptsize},
   xlabel shift=-3pt, ylabel shift=-4pt, grid=major, grid style={gray!20}]
 \addplot[only marks, mark=*, mark size=1.8pt, gray!70!black] coordinates {
-  (0.782,0.799) (0.818,0.763) (0.806,0.771) (0.792,0.780)};
+  (0.782,0.798) (0.818,0.763) (0.807,0.771) (0.795,0.782)};
 \node[font=\tiny, gray!40!black, anchor=south] at (axis cs:0.800,0.808) {OOD detectors (4)};
 \addplot[only marks, mark=square*, mark size=1.8pt, blue!70!black] coordinates {
   (0.823,0.741) (0.872,0.626) (0.750,0.743)};

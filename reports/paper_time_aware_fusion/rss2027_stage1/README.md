@@ -416,3 +416,14 @@ seed-0 gate passed for Mahalanobis and k-NN but stopped on PCA-KMeans (validatio
 differ by 1.9e-8, selection score identical; multithreaded k-means rounding). The gate now takes
 `--reproduction-tolerance 1e-6`, and seed 0 is refit and run through calibrate/evaluate with
 seeds 1–2, so the summary checks Table I against the refit seed 0.
+
+## Update 2026-10-27 (d): OOD baselines per seed (done)
+
+TSUBAME run `xr1_ood_per_seed_20261027_212729`, code `e2af57ef`: the seed-0 gate passed with
+tolerance 1e-6; seeds 0, 1, 2 were calibrated and evaluated; the refit seed 0 reproduces Table I
+(TPR/FPR) for all four baselines (`REFERENCE OK`) and the original seed-0 outputs are unchanged.
+Mean ± std over seeds 0–2 (ddof 1): Mahalanobis bACC 0.798 ± 0.001, TWA 0.575 ± 0.000, DT 0.782;
+cosine k-NN 0.763 ± 0.000, 0.564 ± 0.000, 0.818 (identical across seeds); PCA-KMeans
+0.771 ± 0.001, 0.565 ± 0.001, 0.807; RND 0.782 ± 0.002, 0.567 ± 0.002, 0.795. Table I and Fig. 2
+now use these; the † note and its pending marker are removed. Table II's OOD + P rows still use
+the seed-0 models, as its note says.
