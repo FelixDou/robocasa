@@ -293,7 +293,8 @@ FPR $\le 0.05$ we report TPR, test FPR, balanced accuracy (bACC), weighted accur
 equals bACC on our balanced sets), time-weighted accuracy $\mathrm{TWA} = \frac{1}{2}(\bar\ell + 1 -
 \mathrm{FPR})$ and detection time $\mathrm{DT} = 1 - \bar\ell$, a miss counting as 1. As
 in~\cite{park2026hideseek}, learned detectors are trained with 3 random seeds and we report the
-mean and standard deviation of single models. The preregistered detectors instead average the 3
+mean and standard deviation of single models; our seeds change only training, not the data or
+splits (there, each seed redraws the task split). The preregistered detectors instead average the 3
 seeds' scores; their decision intervals are 95\% bootstrap CIs over tasks, then rollouts, that
 also resample the calibration set and refit all thresholds (2,000 resamples). \emph{Matched} gains
 compare with P loosened on the test set to the fused detector's number of false alarms, which
