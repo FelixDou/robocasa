@@ -439,3 +439,15 @@ First summary attempt (code `63b22f9a`): P alone and Mahalanobis, k-NN and RND m
 stopped on PCA-KMeans + P because it compared Python-rounded values with the table (stored FPR
 0.0605 = 23/380, shown as 0.061; `round(0.0605, 3)` = 0.060). The script now checks seed 0
 exactly against the original `dose_response.json` and the table within half a unit.
+
+## Update 2026-10-27 (f): Table II OOD + P per seed (done)
+
+Code `2a21f987`, run `xr1_ood_per_seed_20261027_212729` (steps 4–5): P alone identical for all
+seeds (lead 0.2252, FPR 0.0553); seed 0 reproduces the original `dose_response.json` exactly
+(e.g. Mahalanobis + P gain 0.0337, FPR 0.0553, lead 0.2589) and Table II within rounding;
+held-out inputs unchanged. Mean ± std over seeds 0–2: Mahalanobis + P lead 0.259 ± 0.000, gain
+0.034 ± 0.000, TWA 0.602 ± 0.000 (FPR 0.055); k-NN + P 0.246 / 0.021 / 0.594, all ± 0.000
+(0.058); PCA-KMeans + P 0.248 ± 0.001 / 0.022 ± 0.001 / 0.594 ± 0.000 (0.060); RND + P
+0.246 ± 0.001 / 0.021 ± 0.001 / 0.593 ± 0.000 (0.060). Table II uses these. TWA is now computed
+from unrounded lead and FPR, so seed-0 TWA can differ by 0.001 from the earlier table (RND
+0.594 -> 0.593). Its note no longer says the OOD scores come from one model.

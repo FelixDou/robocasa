@@ -360,10 +360,10 @@ and \underline{underline} denote the best and second-best results.}
  & \cellcolor{blue!8}\textbf{Per-task timer P (ours)} & \cellcolor{blue!8}0.055 & \cellcolor{blue!8}0.225 & \cellcolor{blue!8}-- & \cellcolor{blue!8}0.585 \\
 \midrule
 \multirow{4}{*}{\rotatebox{90}{\textbf{OOD\,+\,P}}}
- & Mahalanobis + P & 0.055 & \underline{0.259} & \underline{0.034} & \underline{0.602} \\
- & Cosine k-NN + P & 0.058 & 0.246 & 0.021 & 0.594 \\
- & PCA-KMeans + P & 0.061 & 0.247 & 0.022 & 0.593 \\
- & RND + P & 0.058 & 0.245 & 0.020 & 0.594 \\
+ & Mahalanobis + P & 0.055 & $\underline{0.259}^{\pm 0.000}$ & $\underline{0.034}^{\pm 0.000}$ & $\underline{0.602}^{\pm 0.000}$ \\
+ & Cosine k-NN + P & 0.058 & $0.246^{\pm 0.000}$ & $0.021^{\pm 0.000}$ & $0.594^{\pm 0.000}$ \\
+ & PCA-KMeans + P & 0.060 & $0.248^{\pm 0.001}$ & $0.022^{\pm 0.001}$ & $0.594^{\pm 0.000}$ \\
+ & RND + P & 0.060 & $0.246^{\pm 0.001}$ & $0.021^{\pm 0.001}$ & $0.593^{\pm 0.000}$ \\
 \midrule
 \multirow{2}{*}{\rotatebox{90}{\textbf{Cl.+P}}}
  & SAFE-MLP + P & 0.058 & $0.249^{\pm 0.015}$ & $0.024^{\pm 0.015}$ & $0.596^{\pm 0.006}$ \\
@@ -377,9 +377,9 @@ and \underline{underline} denote the best and second-best results.}
 \end{tabular*}
 
 \vspace{2pt}
-\parbox{\columnwidth}{\scriptsize FPR: mean over seeds. Timers are deterministic; OOD scores come from one fitted model. Controls are
+\parbox{\columnwidth}{\scriptsize FPR: mean over seeds; timers are deterministic. Controls are
 Hide-and-Seek (Hide\&Seek) retrained on zero inputs, on another same-task rollout's features
-(shuffle), or on the first inference only. OOD rows: $\bar\ell$ is P's plus the reported gain. The preregistered detectors
+(shuffle), or on the first inference only. The preregistered detectors
 average the 3 seeds' scores (Sec.~\ref{sec:results}).}
 \end{table}
 
