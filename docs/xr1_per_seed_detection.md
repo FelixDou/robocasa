@@ -14,8 +14,7 @@ Analysis only; no rollout is collected and no policy runs. Code:
 | SAFE-MLP | `per_seed_normalized_running_max` in `$XR1_PS_INPUTS` | run A |
 | Hide-and-Seek | Amendment 2 scores (`score_cohorts`, `per_seed_raw`) | run A |
 | ActProbe | only the seed average was saved (`run_baselines`) | rescore 3 seeds (B1), then B2 |
-| Mahalanobis, cosine k-NN | deterministic: no training randomness | none (std 0) |
-| PCA-KMeans, RND | section 15.10 trained one model seed | not covered here |
+| Mahalanobis, cosine k-NN, PCA-KMeans, RND | section 15.10 fitted one model (`--model-seed 0`); the seed sets the row subsample, randomized PCA, k-means and RND initialization | [`xr1_ood_per_seed.md`](xr1_ood_per_seed.md) (seeds 1, 2) |
 | Time risk, global timer, P | deterministic | none |
 
 Gate: each run first evaluates the seed-averaged score and must reproduce its table row

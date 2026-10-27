@@ -318,10 +318,10 @@ denote the best and second-best results.}
  & Method & & bACC$\uparrow$ & wACC$\uparrow$ & TWA$\uparrow$ \\
 \midrule
 \multirow{4}{*}{\rotatebox{90}{\textbf{OOD}}}
- & Mahalanobis$^\ast$ & \textit{\color{gray}NeurIPS'18} & 0.799 & 0.799 & \underline{0.575} \\
- & Cosine k-NN$^\ast$ & \textit{\color{gray}ICML'22} & 0.763 & 0.763 & 0.563 \\
- & PCA-KMeans$^\ast$ & \textit{\color{gray}CoRL'24} & 0.771 & 0.771 & 0.565 \\
- & RND$^\ast$ & \textit{\color{gray}ICML'24} & 0.780 & 0.780 & 0.570 \\
+ & Mahalanobis$^\dagger$ & \textit{\color{gray}NeurIPS'18} & 0.799 & 0.799 & \underline{0.575} \\
+ & Cosine k-NN$^\dagger$ & \textit{\color{gray}ICML'22} & 0.763 & 0.763 & 0.563 \\
+ & PCA-KMeans$^\dagger$ & \textit{\color{gray}CoRL'24} & 0.771 & 0.771 & 0.565 \\
+ & RND$^\dagger$ & \textit{\color{gray}ICML'24} & 0.780 & 0.780 & 0.570 \\
 \midrule
 \multirow{3}{*}{\rotatebox{90}{\textbf{Class.}}}
  & SAFE-MLP & \textit{\color{gray}NeurIPS'25} & $0.741^{\pm 0.010}$ & $0.741^{\pm 0.010}$ & $0.571^{\pm 0.005}$ \\
@@ -336,8 +336,8 @@ denote the best and second-best results.}
 \end{tabular*}
 
 \vspace{2pt}
-\parbox{\columnwidth}{\scriptsize $^\ast$No seed variance: no training randomness, or a single
-trained model.}
+\parbox{\columnwidth}{\scriptsize $^\ast$Deterministic: no training randomness.
+$^\dagger$One fitted model (seed 0).\pending{OOD seeds 1--2: docs/xr1\_ood\_per\_seed.md}}
 \end{table}
 
 \begin{table}[t]
@@ -378,7 +378,7 @@ and \underline{underline} denote the best and second-best results.}
 \end{tabular*}
 
 \vspace{2pt}
-\parbox{\columnwidth}{\scriptsize FPR: mean over seeds. Timers and OOD scores have no seed variance. Controls are
+\parbox{\columnwidth}{\scriptsize FPR: mean over seeds. Timers are deterministic; OOD scores come from one fitted model. Controls are
 Hide-and-Seek (Hide\&Seek) retrained on zero inputs, on another same-task rollout's features
 (shuffle), or on the first inference only. OOD rows: $\bar\ell$ is P's plus the reported gain. The preregistered detectors
 average the 3 seeds' scores (Sec.~\ref{sec:results}).}

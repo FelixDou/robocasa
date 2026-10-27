@@ -416,6 +416,112 @@ class TestOfflineBaselineRunner(unittest.TestCase):
                     interpretation_note=str(note),
                 )
 
+    def test_fixed_selection_refits_with_new_seed_and_reproduces_source_seed(self):
+        from robocasa.recovery.safe.run_offline_detector_baselines import (
+            calibrate,
+            develop,
+            evaluate,
+            write_synthetic_fixture,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = write_synthetic_fixture(root / "fixture", seed=3)
+
+            def development(output, **extra):
+                options = dict(
+                    development_cache=str(fixture["caches"]["development"]),
+                    runtime_bundle=str(fixture["runtime_bundle"]),
+                    split_manifest=None,
+                    output_dir=str(root / output),
+                    baselines=["mahalanobis", "rnd"],
+                    aggregations=list(AGGREGATIONS),
+                    grid="smoke",
+                    selection_landmarks=[0.10, 0.25],
+                    validation_fraction=0.3,
+                    meta_split_seed=0,
+                    model_seed=0,
+                    max_fit_rows=50000,
+                )
+                options.update(extra)
+                return develop(argparse.Namespace(**options))
+
+            source = development("develop")
+            source_path = source["baseline_bundle"]
+            source_bundle = json.loads(Path(source_path).read_text())
+
+            same = development("develop_seed0", fixed_selection=source_path)
+            same_bundle = json.loads(Path(same["baseline_bundle"]).read_text())
+            self.assertEqual(same_bundle["grid"], "fixed")
+            for name in ("mahalanobis", "rnd"):
+                self.assertEqual(
+                    same_bundle["selected"][name]["aggregation"],
+                    source_bundle["selected"][name]["aggregation"],
+                )
+                report = same_bundle["fixed_selection"]["reproduction"][name]
+                self.assertEqual(report["max_validation_score_diff"], 0.0)
+                self.assertTrue(report["normalization_equal"])
+
+            other = development("develop_seed1", fixed_selection=source_path, model_seed=1)
+            other_bundle = json.loads(Path(other["baseline_bundle"]).read_text())
+            self.assertIsNone(other_bundle["fixed_selection"]["reproduction"])
+            self.assertEqual(other_bundle["model_seed"], 1)
+            self.assertEqual(
+                other_bundle["selected"]["rnd"]["params"],
+                source_bundle["selected"]["rnd"]["params"],
+            )
+            self.assertNotEqual(
+                other_bundle["selected"]["rnd"]["normalization"],
+                source_bundle["selected"]["rnd"]["normalization"],
+            )
+
+            calibration = calibrate(
+                argparse.Namespace(
+                    baseline_bundle=other["baseline_bundle"],
+                    calibration_cache=str(fixture["caches"]["calibration"]),
+                    calibration_predictions=None,
+                    output_dir=str(root / "calibrate_seed1"),
+                    workers=1,
+                )
+            )
+            result = evaluate(
+                argparse.Namespace(
+                    baseline_calibration=calibration["baseline_calibration"],
+                    test_cache=str(fixture["caches"]["prospective_test"]),
+                    test_predictions=None,
+                    frozen_analysis=str(fixture["frozen_analysis"]),
+                    output_dir=str(root / "evaluate_seed1"),
+                    test_per_class=fixture["test_per_class"],
+                    bootstrap_samples=fixture["bootstrap_samples"],
+                    bootstrap_seed=0,
+                )
+            )
+            self.assertTrue(result["frozen_results_reproduced"])
+            self.assertIn("rnd_only", result["overall"])
+
+            with self.assertRaisesRegex(ValueError, "differs from this run"):
+                development(
+                    "develop_drift", fixed_selection=source_path, validation_fraction=0.4
+                )
+
+            tampered_dir = root / "tampered"
+            tampered_dir.mkdir()
+            tampered = tampered_dir / "baseline_bundle.json"
+            tampered.write_text(Path(source_path).read_text())
+            rows = [
+                json.loads(line)
+                for line in (Path(source_path).parent / "validation_scores.jsonl")
+                .read_text()
+                .splitlines()
+                if line.strip()
+            ]
+            rows[0]["baseline_scores"]["mahalanobis"][0] += 1e-9
+            (tampered_dir / "validation_scores.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in rows)
+            )
+            with self.assertRaisesRegex(ValueError, "reproduction failed for mahalanobis"):
+                development("develop_tampered", fixed_selection=str(tampered))
+
     def test_confirmatory_mode_freezes_inputs_and_rejects_prior_data(self):
         from robocasa.recovery.safe.run_offline_detector_baselines import (
             calibrate,

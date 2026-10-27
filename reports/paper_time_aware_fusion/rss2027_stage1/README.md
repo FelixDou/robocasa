@@ -400,3 +400,14 @@ FPR 0.050 ± 0.003, bACC 0.626 ± 0.024, TWA 0.539 ± 0.014, DT 0.872 ± 0.029; 
 unchanged. Table I's ActProbe row, its † note and the pending marker are replaced; Fig. 2 moves
 ActProbe to (DT 0.872, bACC 0.626); the text's TPR range becomes 30% to 67%. The ActProbe
 matched-FPR gain quoted in Sec. VI-C (0.009) is the preregistered 3-seed average and is unchanged.
+
+## Update 2026-10-27 (c): OOD baselines per seed (pending runs)
+
+The four OOD rows of Table I come from one fitted model (Section 15.10 run, `--model-seed 0`),
+and the seed is not inert there (row subsample, randomized PCA, k-means and RND
+initialization). The old footnote ("no training randomness") was wrong for them: Table I now
+marks them † "One fitted model (seed 0)" with a pending note, and Table II's note says the
+same. `run_offline_detector_baselines develop --fixed-selection BUNDLE --model-seed S` refits
+seed 0's selected configurations with a new seed (with seed 0 it must reproduce the source run
+exactly); `scripts/xr1_lead_time/ood_per_seed_summary.py` turns the three evaluations into
+mean ± std. Runbook: `docs/xr1_ood_per_seed.md`. Table II's OOD + P rows are not covered.

@@ -9,7 +9,9 @@ its runtime bundle, thresholds, or reported numbers.  Phases are ordered:
 2. ``develop`` fits success-only baselines on development outer-training
    rollouts, selects hyperparameters on a development meta-validation split,
    fits task normalization there, and freezes the baseline bundle without
-   reading calibration or prospective outcomes;
+   reading calibration or prospective outcomes.  With ``--fixed-selection``
+   it skips the search and refits the configurations and aggregations of an
+   earlier bundle, so a new ``--model-seed`` changes only training randomness;
 3. ``calibrate`` reproduces the frozen SAFE/time thresholds exactly, then
    selects every baseline threshold on the same primary calibration cohort
    under the same event-level FPR cap and tie-breaking;
@@ -349,6 +351,77 @@ def _resolve_split_manifest(runtime, override):
     return path, _verify_sha(path, artifact["sha256"], "Frozen split manifest")
 
 
+def _load_fixed_selection(path, args, baselines, runtime_path, split_sha, cache):
+    """Earlier bundle whose selected configurations are refit with ``args.model_seed``.
+
+    Everything except the model seed must match the earlier development run, so
+    that a new seed changes only training randomness (row subsample, PCA,
+    k-means initialization, RND initialization).
+    """
+    path = Path(path).resolve()
+    source = json.loads(path.read_text())
+    checks = {
+        "runtime_bundle_sha256": (source.get("runtime_bundle_sha256"), _sha256(runtime_path)),
+        "split_manifest_sha256": (source.get("split_manifest_sha256"), split_sha),
+        "development_cache_provenance": (
+            source.get("development_cache_provenance"),
+            json.loads(json.dumps(_json_value(cache.provenance))),
+        ),
+        "validation_fraction": (source.get("validation_fraction"), float(args.validation_fraction)),
+        "meta_split_seed": (source.get("meta_split_seed"), int(args.meta_split_seed)),
+        "max_fit_rows": (source.get("max_fit_rows"), int(args.max_fit_rows)),
+        "selection_landmarks": (
+            [float(value) for value in source.get("selection_landmarks", [])],
+            [float(value) for value in args.selection_landmarks],
+        ),
+    }
+    drift = [name for name, (before, now) in checks.items() if before != now]
+    if drift:
+        raise ValueError(f"--fixed-selection bundle differs from this run in: {drift}")
+    missing = [name for name in baselines if name not in source["selected"]]
+    unexplained = [name for name in missing if name not in source.get("skipped", {})]
+    if unexplained:
+        raise ValueError(f"--fixed-selection bundle has no selection for: {unexplained}")
+    return {
+        "path": path,
+        "sha256": _sha256(path),
+        "bundle": source,
+        "validation_scores": path.parent / "validation_scores.jsonl",
+    }
+
+
+def _check_fixed_reproduction(fixed, selected, validation_scores):
+    """With the source model seed, the refit must equal the source run exactly."""
+    source_scores = {}
+    for line in fixed["validation_scores"].read_text().splitlines():
+        if line.strip():
+            row = json.loads(line)
+            source_scores[row["rollout_id"]] = row["baseline_scores"]
+    if set(source_scores) != set(validation_scores):
+        raise ValueError("Fixed-selection reproduction: validation rollouts differ")
+    report = {}
+    for name, value in selected.items():
+        before = fixed["bundle"]["selected"][name]
+        normalization = json.loads(json.dumps(_json_value(value["normalization"])))
+        max_diff = 0.0
+        for rollout_id, scores in validation_scores.items():
+            now = np.asarray(scores[name], dtype=np.float64)
+            old = np.asarray(source_scores[rollout_id][name], dtype=np.float64)
+            if now.shape != old.shape:
+                raise ValueError(f"Fixed-selection reproduction: {name} length differs on {rollout_id}")
+            if len(now):
+                max_diff = max(max_diff, float(np.max(np.abs(now - old))))
+        report[name] = {
+            "max_validation_score_diff": max_diff,
+            "normalization_equal": normalization == before["normalization"],
+            "selection_score_equal": value["selection_score"] == before["selection_score"],
+        }
+        if max_diff != 0.0 or not report[name]["normalization_equal"] or not report[name]["selection_score_equal"]:
+            raise ValueError(f"Fixed-selection reproduction failed for {name}: {report[name]}")
+        print(f"fixed selection {name}: validation scores max diff 0.0, normalization equal -> OK", flush=True)
+    return report
+
+
 def develop(args):
     output = _prepare_output(args.output_dir)
     baselines = validate_baselines(args.baselines)
@@ -370,7 +443,17 @@ def develop(args):
     frozen_development = set(runtime.get("development_rollout_ids", []))
     if frozen_development and not split["train"] <= frozen_development:
         raise ValueError("Outer-training IDs are not frozen development rollouts")
+    fixed = None
+    if getattr(args, "fixed_selection", None):
+        fixed = _load_fixed_selection(
+            args.fixed_selection, args, baselines, runtime_path, split_sha, cache
+        )
     meta = stratified_meta_split(rows, args.validation_fraction, args.meta_split_seed)
+    if fixed is not None and (
+        sorted(meta["fit"]) != fixed["bundle"]["fit_rollout_ids"]
+        or sorted(meta["validation"]) != fixed["bundle"]["validation_rollout_ids"]
+    ):
+        raise ValueError("--fixed-selection bundle used different fit/validation partitions")
     fit_rows = [row for row in rows if row["rollout_id"] in meta["fit"]]
     validation_rows = [row for row in rows if row["rollout_id"] in meta["validation"]]
 
@@ -399,8 +482,12 @@ def develop(args):
                 f"{exec_horizon}; consecutive chunks do not overlap"
             )
             continue
+        configs, baseline_aggregations = grids[baseline], aggregations
+        if fixed is not None:
+            source = fixed["bundle"]["selected"][baseline]
+            configs, baseline_aggregations = [source["params"]], (source["aggregation"],)
         best = None
-        for config_index, params in enumerate(grids[baseline]):
+        for config_index, params in enumerate(configs):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 model = BaselineScorer(baseline, params, seed=args.model_seed).fit(
@@ -412,7 +499,7 @@ def develop(args):
                 row["rollout_id"]: model.score(row["task_name"], features, actions)
                 for row, features, actions in validation_inputs
             }
-            for aggregation_index, aggregation in enumerate(aggregations):
+            for aggregation_index, aggregation in enumerate(baseline_aggregations):
                 trajectories = [
                     {
                         "task_name": row["task_name"],
@@ -431,7 +518,7 @@ def develop(args):
                 ]
                 candidate = {
                     "baseline": baseline,
-                    "candidate_index": config_index * len(aggregations) + aggregation_index,
+                    "candidate_index": config_index * len(baseline_aggregations) + aggregation_index,
                     "params": json.dumps(params, sort_keys=True),
                     "aggregation": aggregation,
                     "selection_score": float(np.mean(macro)) if macro else None,
@@ -475,6 +562,22 @@ def develop(args):
         }
     if not selected:
         raise ValueError("No baseline could be developed")
+    fixed_record = None
+    if fixed is not None:
+        source_seed = int(fixed["bundle"]["model_seed"])
+        fixed_record = {
+            "bundle": str(fixed["path"]),
+            "bundle_sha256": fixed["sha256"],
+            "source_model_seed": source_seed,
+            "source_candidate_index": {
+                name: fixed["bundle"]["selected"][name]["candidate_index"] for name in selected
+            },
+            "reproduction": (
+                _check_fixed_reproduction(fixed, selected, validation_scores)
+                if int(args.model_seed) == source_seed
+                else None
+            ),
+        }
     _write_csv(output / "selection_audit.csv", audit)
     _write_jsonl(
         output / "validation_scores.jsonl",
@@ -499,8 +602,16 @@ def develop(args):
         "split_manifest_sha256": split_sha,
         "development_cache": str(cache.root),
         "development_cache_provenance": cache.provenance,
-        "grid": args.grid,
-        "grids": {name: grids[name] for name in baselines},
+        "grid": "fixed" if fixed is not None else args.grid,
+        "grids": {
+            name: (
+                [fixed["bundle"]["selected"][name]["params"]]
+                if fixed is not None
+                else grids[name]
+            )
+            for name in (selected if fixed is not None else baselines)
+        },
+        "fixed_selection": fixed_record,
         "aggregations": list(aggregations),
         "selection_landmarks": list(landmarks),
         "selection_rule": (
@@ -2101,6 +2212,14 @@ def build_parser():
     development.add_argument("--meta-split-seed", type=int, default=0)
     development.add_argument("--model-seed", type=int, default=0)
     development.add_argument("--max-fit-rows", type=int, default=50000)
+    development.add_argument(
+        "--fixed-selection",
+        help=(
+            "Earlier baseline_bundle.json: refit its selected configurations and "
+            "aggregations with --model-seed instead of searching the grid. With the "
+            "source model seed the refit must reproduce the source run exactly."
+        ),
+    )
 
     calibration = subparsers.add_parser("calibrate")
     calibration.add_argument("--baseline-bundle", required=True)
