@@ -84,9 +84,19 @@ class TestPlan(unittest.TestCase):
             source = Path(tmp) / "source"; source.mkdir()
             rows = raw_rows(source)
             (source / "manifest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-            shard = Path(tmp) / "collection" / "shard0"; shard.mkdir(parents=True)
-            (shard / "summary.json").write_text(json.dumps(dict(config=config())))
-            (Path(tmp) / "collection" / "merged_summary.json").write_text("{}")
+            coll = Path(tmp) / "collection"
+            for k, task in enumerate(TASKS):          # one collector shard per task, base seed set
+                shard = coll / f"shard{k}"; shard.mkdir(parents=True)
+                (shard / "summary.json").write_text(json.dumps(dict(config=config(tasks=[task]))))
+                (shard / "manifest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows if r["task_name"] == task))
+            # A merged dataset: holds the same rollouts, no base seed, other settings. Ignored.
+            merged = coll / "merged"; merged.mkdir()
+            (merged / "summary.json").write_text(json.dumps(dict(config=config(base_environment_seed=None, policy_module="x:y"))))
+            (merged / "manifest.jsonl").write_text((source / "manifest.jsonl").read_text())
+            # A shard of other tasks with another seed: no overlap, ignored.
+            other = coll / "other"; other.mkdir()
+            (other / "summary.json").write_text(json.dumps(dict(config=config(base_environment_seed=99, tasks=["WashLettuce"]))))
+            (other / "manifest.jsonl").write_text(json.dumps(dict(rollout_id="unrelated")) + "\n")
             out = Path(tmp) / "pilot"
             old_argv, old_fn = sys.argv, plan.first_frame_shape
             sys.argv = ["plan_pilot", str(source), "--collection-root", str(Path(tmp) / "collection"), "--output", str(out)]
@@ -98,6 +108,11 @@ class TestPlan(unittest.TestCase):
                 sys.argv, plan.first_frame_shape = old_argv, old_fn
             self.assertIn("PLAN OK", buf.getvalue())
             sel = json.loads((out / "selection.json").read_text())
+            self.assertEqual(sorted(Path(p).parent.name for p in sel["summaries"]), ["shard0", "shard1"])
+            # Shards that miss some rollouts stop the plan.
+            (coll / "shard1" / "manifest.jsonl").write_text("")
+            with self.assertRaises(SystemExit):
+                plan.summaries(coll, {r["rollout_id"] for r in rows})
             self.assertEqual(sel["cost"]["rollouts"], 2 * N)
             self.assertEqual(sel["settings"]["original_videos_present"], 2 * N)
             flags = (out / "collector_flags.txt").read_text().splitlines()

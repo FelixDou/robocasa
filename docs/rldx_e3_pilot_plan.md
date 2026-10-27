@@ -54,7 +54,7 @@ One collection measures both unknowns.
   roughly 90,000 policy inferences, under half of E2's collection. `plan_pilot.py` prints the
   exact figure. Two GPUs, one RLDX server and one simulator shard each, with shards balanced
   by expected steps.
-- **Scenes reused.** These are old scenes (base seed 7) whose outcomes are already known.
+- **Scenes reused.** These are old scenes (base seed 20) whose outcomes are already known.
   Stage 2's E3 must use a fresh base seed.
 
 ## Gates (checked before any outcome is read)
@@ -167,13 +167,24 @@ Either way, in Stage 2's E3:
 ## Runbook
 
 Run it from a pinned worktree at the commit that contains this plan. `EP_SHA` is that
-commit's full SHA. Two GPUs.
+commit's full SHA. Two GPUs for steps 3–4. Steps 0–2 and 5 are CPU only.
+
+**Runbook fixes (2026-10-27, before any collection; design unchanged).** The first attempt at
+step 2 stopped as designed, with nothing written, and its tests could not be imported.
+- **Summaries.** The SAFE35 root also holds merged datasets (`merged_natural50`,
+  `filtered_supported20_natural50`) whose summaries have no base seed. The planner now reads
+  only collector shard summaries (base seed set) whose own manifest contains the pilot's
+  rollouts, and it checks that those shards hold all 1,000.
+- **Seed.** The original base seed is 20, not 7.
+- **Tests.** They run with `$SAFE_PY`: in the `robocasa_openpi` env an installed package named
+  `tests` shadows the repo's `tests/` folder, which has no `__init__.py`.
+- **Conda.** The cluster's conda hook path is now `miniconda/26.9.3`.
 
 ### 0. Session
 
 ```bash
 module load miniconda
-eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+eval "$(/apps/t4/rhel9/free/miniconda/26.9.3/bin/conda shell.bash hook)"
 conda activate /gs/bs/tga-shinoda/felid/envs/robocasa_openpi
 export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
 export RLDX_REPO=$PROJECT_FS/RLDX-1
@@ -203,7 +214,7 @@ test -e $EP_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $EP_REPO $
 test "$(git -C $EP_REPO rev-parse HEAD)" = "$EP_SHA" && echo "worktree OK" || echo "STOP: wrong HEAD"
 mkdir -p $EP_REPO/robocasa/models/assets
 cp -aln $PROJECT_FS/robocasa/robocasa/models/assets/. $EP_REPO/robocasa/models/assets/
-cd $EP_REPO && $CLIENT_PY -W ignore -m unittest tests.test_rldx_continuation_pilot tests.test_safe_atomic_collection 2>&1 | tail -1
+cd $EP_REPO && CUDA_VISIBLE_DEVICES="" $SAFE_PY -W ignore -m unittest tests.test_rldx_continuation_pilot tests.test_safe_atomic_collection 2>&1 | tail -1
 ```
 
 ### 2. Plan (reads the original collection; no outcome endpoint)

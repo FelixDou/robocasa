@@ -47,18 +47,27 @@ def one(values, name):
     return json.loads(values.pop())
 
 
-def summaries(root, tasks):
-    """Summary configs of the original shards that collected any of the tasks."""
-    found = []
+def summaries(root, rollout_ids):
+    """Summary configs of the collector shards that hold any of the rollouts.
+
+    Merged or filtered datasets also write a summary.json, without a base seed; they are
+    skipped. A shard is used only if its own manifest contains some of the rollouts, and the
+    shards used must hold all of them."""
+    found, covered = [], set()
     for path in sorted(Path(root).rglob("summary.json")):
         try:
             config = json.loads(path.read_text()).get("config") or {}
         except (OSError, ValueError):
             continue
-        # Collector shard summaries only: they carry the collector settings.
-        if (config.get("model_family") == "rldx1" and "policy_module" in config
-                and "base_environment_seed" in config and set(config.get("tasks") or []) & set(tasks)):
-            found.append((path, config))
+        if config.get("model_family") != "rldx1" or config.get("base_environment_seed") is None:
+            continue
+        manifest = path.parent / "manifest.jsonl"
+        ids = {r["rollout_id"] for r in read_jsonl(manifest)} if manifest.is_file() else set()
+        if ids & rollout_ids:
+            found.append((path, config)); covered |= ids & rollout_ids
+    missing = rollout_ids - covered
+    if found and missing:
+        raise SystemExit(f"STOP: {len(missing)} rollouts are in no collector shard manifest under the root")
     return found
 
 
@@ -190,7 +199,7 @@ def main():
     if not rows:
         raise SystemExit("STOP: empty manifest")
     at = atomic_tasks_module()
-    configs = summaries(a.collection_root, {r["task_name"] for r in rows})
+    configs = summaries(a.collection_root, {r["rollout_id"] for r in rows})
     tasks, out_tasks, settings = build(rows, a.source, configs, at.registered_safe_task_horizons(),
                                        at.registered_atomic_tasks())
     s0, s1 = shards(tasks, out_tasks)
