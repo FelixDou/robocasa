@@ -435,3 +435,7 @@ to the held-out E1 cohorts with `score-baselines`). `docs/xr1_ood_per_seed.md` s
 attach each OOD seed's models the same way, and `scripts/xr1_lead_time/ood_per_seed_fused.py`
 fuses them with P via `dose_response.fused_gain`, checks P alone and seed 0 against Table II,
 and prints mean ± std of FPR, lead, gain and TWA.
+First summary attempt (code `63b22f9a`): P alone and Mahalanobis, k-NN and RND matched; the gate
+stopped on PCA-KMeans + P because it compared Python-rounded values with the table (stored FPR
+0.0605 = 23/380, shown as 0.061; `round(0.0605, 3)` = 0.060). The script now checks seed 0
+exactly against the original `dose_response.json` and the table within half a unit.

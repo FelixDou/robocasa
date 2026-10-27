@@ -175,8 +175,12 @@ OR-fused with P, fitted and evaluated like SAFE + P (q = 0.95; 10 + 10 per task 
 and test). Here each seed's models from steps 1–2 are attached the same way, and
 `scripts/xr1_lead_time/ood_per_seed_fused.py` fuses and evaluates them with the same functions
 (`dose_response.fused_gain`). It checks that P alone is identical for every seed
-(lead 0.2252, FPR 0.0553) and that seed 0 reproduces Table II's gain and FPR, then prints mean
-± std (ddof 1) of FPR, mean lead, gain over P and TWA. Both held-out cohorts were opened
+(lead 0.2252, FPR 0.0553), that seed 0 reproduces the original `$E1_OUT/dose_response.json`
+exactly at its stored 4-decimal precision, and that it matches Table II's gain and FPR to within
+half a unit of the last digit, then prints mean ± std (ddof 1) of FPR, mean lead, gain over P
+and TWA. (A first attempt, 2026-10-27, compared Python-rounded values with the table and
+stopped on PCA-KMeans: stored FPR 0.0605, 23 of 380, which the table shows as 0.061 but
+`round(0.0605, 3)` gives 0.060.) Both held-out cohorts were opened
 before; this adds per-seed point estimates, not a new test.
 
 Prerequisite: steps 1–2 done (`$OOD_ROOT/seed{0,1,2}/calibrate/baseline_calibration.json`).
@@ -244,8 +248,9 @@ PY
 
 ```bash
 cd $OOD_REPO
+test -s $E1_OUT/dose_response.json && echo "OK dose_response.json" || echo "STOP: missing $E1_OUT/dose_response.json"
 CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=2 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/ood_per_seed_fused.py \
-  --runtime-bundle $XR1_RUNTIME_BUNDLE \
+  --runtime-bundle $XR1_RUNTIME_BUNDLE --reference $E1_OUT/dose_response.json \
   --seed 0 $OOD_ROOT/seed0/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed0/heldout/test_with_baselines.jsonl \
   --seed 1 $OOD_ROOT/seed1/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed1/heldout/test_with_baselines.jsonl \
   --seed 2 $OOD_ROOT/seed2/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed2/heldout/test_with_baselines.jsonl \
@@ -254,5 +259,6 @@ CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=2 nice -n 10 "$SAFE_PY" -I -u scripts/xr
 sha256sum -c $OOD_LOG/heldout_inputs.sha256 && echo "HELD-OUT INPUTS UNCHANGED"
 ```
 
-Report back: the `P alone` line, the four `reference ... -> OK` lines, the per-seed and
+Report back: the `P alone` line, the four `original ... -> OK` and four `reference ... -> OK`
+lines, the per-seed and
 `mean+-std` lines, `REFERENCE OK` and `HELD-OUT INPUTS UNCHANGED` (and the diagnostic, if run).
