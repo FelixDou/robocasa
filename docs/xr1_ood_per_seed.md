@@ -1,4 +1,4 @@
-# OOD baselines per seed (RSS Table I, mean ± std over 3 model seeds)
+# OOD baselines per seed (RSS Tables I and II, mean ± std over 3 model seeds)
 
 Purpose: report the four OOD rows of Table I (Mahalanobis, cosine k-NN, PCA-KMeans, RND) as
 Hide-and-Seek does, mean ± std over 3 seeds, like the SAFE, ActProbe and Hide-and-Seek rows
@@ -167,6 +167,92 @@ Report back: the four `fixed selection ... -> OK` lines from step 1, the four `r
 -> OK` lines, the per-seed and `mean+-std` lines and `REFERENCE OK` from `summary.log`, and
 `SEED 0 OUTPUTS UNCHANGED`.
 
-Not covered: Table II's OOD + P rows (held-out set) still use the seed-0 models. Adding seeds
-there needs each seed's models scored on the held-out cohorts (`score-baselines`) and then
-`per_seed_detection.py --fused`.
+## Table II: OOD + P per seed (held-out set)
+
+Table II's OOD + P rows come from report Section 15.14 (`dose_response.py`): the seed-0 models'
+trajectories were attached to the held-out E1 cohorts with `score-baselines` and each score was
+OR-fused with P, fitted and evaluated like SAFE + P (q = 0.95; 10 + 10 per task in calibration
+and test). Here each seed's models from steps 1–2 are attached the same way, and
+`scripts/xr1_lead_time/ood_per_seed_fused.py` fuses and evaluates them with the same functions
+(`dose_response.fused_gain`). It checks that P alone is identical for every seed
+(lead 0.2252, FPR 0.0553) and that seed 0 reproduces Table II's gain and FPR, then prints mean
+± std (ddof 1) of FPR, mean lead, gain over P and TWA. Both held-out cohorts were opened
+before; this adds per-seed point estimates, not a new test.
+
+Prerequisite: steps 1–2 done (`$OOD_ROOT/seed{0,1,2}/calibrate/baseline_calibration.json`).
+
+### 4. Attach each seed's trajectories to the held-out cohorts
+
+```bash
+source "$(ls -d $STORAGE_BS/robocasa_logs/eval/xr1_ood_per_seed_* | sort | tail -n 1)/paths.env"
+export XR1_LCAL_ROOT=$STORAGE_BS/robocasa_rollouts/safe/xr1_lead_calibration_20261020_001108
+export XR1_CONFIRM_ROOT=$STORAGE_BS/robocasa_rollouts/safe/xr1_confirmatory_fused_20261017_160220
+export E1_OUT=$XR1_LCAL_ROOT/lead_analysis
+for f in $E1_OUT/calibration_predictions.jsonl $E1_OUT/test_predictions.jsonl \
+         $E1_OUT/calibration_with_baselines.jsonl $E1_OUT/test_with_baselines.jsonl \
+         $XR1_LCAL_ROOT/cache_lead_calibration/provenance.json \
+         $XR1_CONFIRM_ROOT/cache_confirmatory_test/provenance.json \
+         $OOD_ROOT/seed0/calibrate/baseline_calibration.json $OOD_ROOT/seed1/calibrate/baseline_calibration.json \
+         $OOD_ROOT/seed2/calibrate/baseline_calibration.json; do
+  test -s $f && echo "OK $f" || echo "STOP: missing $f"
+done
+sha256sum $E1_OUT/calibration_predictions.jsonl $E1_OUT/test_predictions.jsonl \
+  $E1_OUT/calibration_with_baselines.jsonl $E1_OUT/test_with_baselines.jsonl > $OOD_LOG/heldout_inputs.sha256
+
+cd $OOD_REPO
+cat > $OOD_LOG/attach_heldout.sh <<EOF
+set -e
+cd $OOD_REPO
+export CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
+for S in 0 1 2; do
+  mkdir -p $OOD_ROOT/seed\$S/heldout
+  for cohort in calibration test; do
+    if test \$cohort = calibration; then cache=$XR1_LCAL_ROOT/cache_lead_calibration; group=lead_calibration
+    else cache=$XR1_CONFIRM_ROOT/cache_confirmatory_test; group=confirmatory_test; fi
+    "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines score-baselines \\
+      --baseline-calibration $OOD_ROOT/seed\$S/calibrate/baseline_calibration.json \\
+      --predictions $E1_OUT/\${cohort}_predictions.jsonl --cache \$cache --cache-group \$group \\
+      --output $OOD_ROOT/seed\$S/heldout/\${cohort}_with_baselines.jsonl > /dev/null
+    echo "seed \$S \$cohort attached"
+  done
+done
+echo "ATTACH DONE"
+EOF
+nohup nice -n 10 bash $OOD_LOG/attach_heldout.sh > $OOD_LOG/attach_heldout.log 2>&1 &
+echo "attach PID: $!"
+```
+
+Monitor with `tail -n 3 $OOD_LOG/attach_heldout.log`; it must end with `ATTACH DONE`.
+
+Optional diagnostic: how far the refit seed-0 trajectories are from the originals used by
+Table II (expected 0 or float noise below 1e-6):
+
+```bash
+"$SAFE_PY" - $E1_OUT $OOD_ROOT/seed0/heldout <<'PY'
+import json, sys, numpy as np
+for cohort in ("calibration", "test"):
+    load = lambda p: {r["rollout_id"]: r["baseline_scores"] for r in (json.loads(l) for l in open(p) if l.strip())}
+    a = load(f"{sys.argv[1]}/{cohort}_with_baselines.jsonl"); b = load(f"{sys.argv[2]}/{cohort}_with_baselines.jsonl")
+    assert set(a) == set(b), cohort
+    for n in sorted(next(iter(a.values()))):
+        d = max(float(np.max(np.abs(np.asarray(a[k][n], float) - np.asarray(b[k][n], float)))) for k in a)
+        print(f"{cohort:12s} {n:12s} max |refit - original| {d:.3g}")
+PY
+```
+
+### 5. Per-seed fused metrics (seconds)
+
+```bash
+cd $OOD_REPO
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=2 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/ood_per_seed_fused.py \
+  --runtime-bundle $XR1_RUNTIME_BUNDLE \
+  --seed 0 $OOD_ROOT/seed0/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed0/heldout/test_with_baselines.jsonl \
+  --seed 1 $OOD_ROOT/seed1/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed1/heldout/test_with_baselines.jsonl \
+  --seed 2 $OOD_ROOT/seed2/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed2/heldout/test_with_baselines.jsonl \
+  --expect mahalanobis=0.034,0.055 knn_cosine=0.021,0.058 pca_kmeans=0.022,0.061 rnd=0.020,0.058 \
+  --output $OOD_ROOT/ood_per_seed_fused_heldout.json 2>&1 | tee $OOD_LOG/fused_summary.log
+sha256sum -c $OOD_LOG/heldout_inputs.sha256 && echo "HELD-OUT INPUTS UNCHANGED"
+```
+
+Report back: the `P alone` line, the four `reference ... -> OK` lines, the per-seed and
+`mean+-std` lines, `REFERENCE OK` and `HELD-OUT INPUTS UNCHANGED` (and the diagnostic, if run).

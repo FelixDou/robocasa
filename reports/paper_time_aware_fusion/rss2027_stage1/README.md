@@ -427,3 +427,11 @@ cosine k-NN 0.763 ± 0.000, 0.564 ± 0.000, 0.818 (identical across seeds); PCA-
 0.771 ± 0.001, 0.565 ± 0.001, 0.807; RND 0.782 ± 0.002, 0.567 ± 0.002, 0.795. Table I and Fig. 2
 now use these; the † note and its pending marker are removed. Table II's OOD + P rows still use
 the seed-0 models, as its note says.
+
+## Update 2026-10-27 (e): Table II OOD + P per seed (pending runs)
+
+Table II's OOD + P rows come from Section 15.14 (`dose_response.py`, seed-0 models attached
+to the held-out E1 cohorts with `score-baselines`). `docs/xr1_ood_per_seed.md` steps 4–5
+attach each OOD seed's models the same way, and `scripts/xr1_lead_time/ood_per_seed_fused.py`
+fuses them with P via `dose_response.fused_gain`, checks P alone and seed 0 against Table II,
+and prints mean ± std of FPR, lead, gain and TWA.
