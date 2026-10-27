@@ -390,8 +390,29 @@ def _load_fixed_selection(path, args, baselines, runtime_path, split_sha, cache)
     }
 
 
-def _check_fixed_reproduction(fixed, selected, validation_scores):
-    """With the source model seed, the refit must equal the source run exactly."""
+def _max_relative_diff(now, before):
+    """Largest |now - before| / max(|before|, 1e-12) over matching nested numbers."""
+    if isinstance(before, dict):
+        if not isinstance(now, dict) or set(now) != set(before):
+            return math.inf
+        return max([_max_relative_diff(now[key], before[key]) for key in before] or [0.0])
+    if isinstance(before, list):
+        if not isinstance(now, list) or len(now) != len(before):
+            return math.inf
+        return max([_max_relative_diff(a, b) for a, b in zip(now, before)] or [0.0])
+    if before is None or now is None or isinstance(before, (str, bool)):
+        return 0.0 if now == before else math.inf
+    return abs(float(now) - float(before)) / max(abs(float(before)), 1e-12)
+
+
+def _check_fixed_reproduction(fixed, selected, validation_scores, tolerance=0.0):
+    """With the source model seed, the refit must reproduce the source run.
+
+    ``tolerance`` bounds the absolute difference of the normalized validation scores and the
+    relative difference of the task normalization and selection score; 0 demands bit-exact
+    equality. Multithreaded k-means and BLAS can differ in the last float digits when the
+    thread count differs from the source run.
+    """
     source_scores = {}
     for line in fixed["validation_scores"].read_text().splitlines():
         if line.strip():
@@ -414,11 +435,29 @@ def _check_fixed_reproduction(fixed, selected, validation_scores):
         report[name] = {
             "max_validation_score_diff": max_diff,
             "normalization_equal": normalization == before["normalization"],
+            "normalization_max_relative_diff": _max_relative_diff(
+                normalization, before["normalization"]
+            ),
             "selection_score_equal": value["selection_score"] == before["selection_score"],
+            "selection_score_relative_diff": _max_relative_diff(
+                value["selection_score"], before["selection_score"]
+            ),
+            "tolerance": float(tolerance),
         }
-        if max_diff != 0.0 or not report[name]["normalization_equal"] or not report[name]["selection_score_equal"]:
+        worst = max(
+            max_diff,
+            report[name]["normalization_max_relative_diff"],
+            report[name]["selection_score_relative_diff"],
+        )
+        if not worst <= float(tolerance):
             raise ValueError(f"Fixed-selection reproduction failed for {name}: {report[name]}")
-        print(f"fixed selection {name}: validation scores max diff 0.0, normalization equal -> OK", flush=True)
+        print(
+            f"fixed selection {name}: validation scores max diff {max_diff:.3g}, "
+            f"normalization max rel diff {report[name]['normalization_max_relative_diff']:.3g}, "
+            f"selection score rel diff {report[name]['selection_score_relative_diff']:.3g} "
+            f"(tolerance {float(tolerance):g}) -> OK",
+            flush=True,
+        )
     return report
 
 
@@ -573,7 +612,12 @@ def develop(args):
                 name: fixed["bundle"]["selected"][name]["candidate_index"] for name in selected
             },
             "reproduction": (
-                _check_fixed_reproduction(fixed, selected, validation_scores)
+                _check_fixed_reproduction(
+                    fixed,
+                    selected,
+                    validation_scores,
+                    getattr(args, "reproduction_tolerance", 0.0),
+                )
                 if int(args.model_seed) == source_seed
                 else None
             ),
@@ -2218,6 +2262,16 @@ def build_parser():
             "Earlier baseline_bundle.json: refit its selected configurations and "
             "aggregations with --model-seed instead of searching the grid. With the "
             "source model seed the refit must reproduce the source run exactly."
+        ),
+    )
+    development.add_argument(
+        "--reproduction-tolerance",
+        type=float,
+        default=0.0,
+        help=(
+            "With --fixed-selection and the source model seed: largest allowed absolute "
+            "difference of normalized validation scores and relative difference of the "
+            "normalization and selection score (default 0: bit-exact)."
         ),
     )
 

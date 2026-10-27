@@ -17,8 +17,14 @@ Protocol:
   the same fit/validation partitions (meta-split seed 0), so only training randomness changes.
   Task normalization is refit on the same meta-validation rollouts, as for seed 0.
 - **Seed-0 gate.** The same command with `--model-seed 0` must reproduce the original
-  development run exactly (validation scores max diff 0.0, equal normalization and selection
-  score), or it stops. The scorer code has not changed since `d71b6d27`.
+  development run, or it stops: normalized validation scores within 1e-6 (absolute), task
+  normalization and selection score within 1e-6 (relative). The scorer code has not changed
+  since `d71b6d27`. A bit-exact check (2026-10-27) passed for Mahalanobis and k-NN, but
+  PCA-KMeans differed by 1.9e-8 with an identical selection score: multithreaded k-means sums
+  in a thread-count-dependent order, and this run's thread count differs from the original's.
+- **Seed 0 end to end.** Seed 0 is refit and run through calibration and evaluation like seeds
+  1 and 2, so all three seeds come from the same code and settings, and the summary checks that
+  this refit seed 0 reproduces Table I's TPR/FPR.
 - **Same calibration and test.** Each seed is calibrated on the 228-rollout primary calibration
   cohort (event-level FPR <= 0.05) and evaluated once on the 760-rollout primary cohort
   (380/380), exactly as seed 0. Both steps also check that the frozen SAFE/time results are
@@ -90,38 +96,41 @@ Continue only if every input is `OK` and the tests end with `OK` (16 tests).
 
 ### 1. Seed-0 gate (minutes)
 
+The first, bit-exact attempt (2026-10-27) left a partial `seed0/develop`; keep it as evidence.
+
 ```bash
 cd $OOD_REPO
+test -e $OOD_ROOT/seed0/develop && mv $OOD_ROOT/seed0/develop $OOD_ROOT/seed0/develop_bitexact_failed
+test -e $OOD_LOG/develop_seed0.log && mv $OOD_LOG/develop_seed0.log $OOD_LOG/develop_seed0_bitexact_failed.log
 CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 nice -n 10 "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines develop \
   --development-cache $XR1_BASELINE_ROOT/cache_development \
   --runtime-bundle $XR1_RUNTIME_BUNDLE \
   --fixed-selection $XR1_BASELINE_ROOT/develop/baseline_bundle.json \
-  --model-seed 0 \
+  --model-seed 0 --reproduction-tolerance 1e-6 \
   --output-dir $OOD_ROOT/seed0/develop 2>&1 | tee $OOD_LOG/develop_seed0.log | grep -E 'fixed selection|error'
 ```
 
-It must print four lines `fixed selection <baseline>: validation scores max diff 0.0,
-normalization equal -> OK` (mahalanobis, knn_cosine, pca_kmeans, rnd) and no `error`. Otherwise
-stop and report the log: seed 0 is then not reproducible with this code and the per-seed rows
-would not be comparable.
+It must print four lines `fixed selection <baseline>: ... (tolerance 1e-06) -> OK`
+(mahalanobis, knn_cosine, pca_kmeans, rnd) and no `error`. Otherwise stop and report the log.
 
-### 2. Seeds 1 and 2: develop, calibrate, evaluate (in parallel)
+### 2. Seeds 0, 1, 2: develop, calibrate, evaluate (in parallel)
+
+Seed 0 reuses the bundle from step 1; seeds 1 and 2 are refit here.
 
 ```bash
 cd $OOD_REPO
-for S in 1 2; do
+for S in 0 1 2; do
+  if test $S = 0; then DEVELOP="echo seed 0 bundle from step 1"; else DEVELOP="\"$SAFE_PY\" -u -m robocasa.recovery.safe.run_offline_detector_baselines develop --development-cache $XR1_BASELINE_ROOT/cache_development --runtime-bundle $XR1_RUNTIME_BUNDLE --fixed-selection $XR1_BASELINE_ROOT/develop/baseline_bundle.json --model-seed $S --output-dir $OOD_ROOT/seed$S/develop"; fi
   cat > $OOD_LOG/run_seed$S.sh <<EOF
 set -e
 cd $OOD_REPO
 export CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
-"$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines develop \\
-  --development-cache $XR1_BASELINE_ROOT/cache_development --runtime-bundle $XR1_RUNTIME_BUNDLE \\
-  --fixed-selection $XR1_BASELINE_ROOT/develop/baseline_bundle.json --model-seed $S \\
-  --output-dir $OOD_ROOT/seed$S/develop
+$DEVELOP
+test -s $OOD_ROOT/seed$S/develop/baseline_bundle.json
 "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines calibrate \\
   --baseline-bundle $OOD_ROOT/seed$S/develop/baseline_bundle.json \\
   --calibration-cache $XR1_BASELINE_ROOT/cache_calibration \\
-  --output-dir $OOD_ROOT/seed$S/calibrate --workers 6
+  --output-dir $OOD_ROOT/seed$S/calibrate --workers 5
 "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines evaluate \\
   --baseline-calibration $OOD_ROOT/seed$S/calibrate/baseline_calibration.json \\
   --test-cache $XR1_BASELINE_ROOT/cache_prospective_test --frozen-analysis $XR1_FROZEN_ANALYSIS \\
@@ -133,22 +142,21 @@ EOF
 done
 ```
 
-Monitor (peak memory of the allocation, then the end of each log):
+Monitor until the three runs end (peak memory, then the last line of each log, every 2 minutes):
 
 ```bash
-qstat -j $JOB_ID | grep -o 'maxrss=[^,]*'; tail -n 3 $OOD_LOG/run_seed1.log $OOD_LOG/run_seed2.log
+while pgrep -f "run_seed[012].sh" > /dev/null; do echo "$(date +%H:%M) $(qstat -j $JOB_ID | grep -o 'maxrss=[^,]*')"; tail -qn 1 $OOD_LOG/run_seed{0,1,2}.log; sleep 120; done; tail -n 3 $OOD_LOG/run_seed{0,1,2}.log
 ```
 
-Each log must end with `SEED S DONE`. `calibrate/status.json` must report
-`frozen_thresholds_reproduced: true` and `evaluate` must print
-`"frozen_results_reproduced": true`; an `error:` line is a stop condition.
+Each log must end with `SEED S DONE`, and `evaluate` must print
+`"frozen_results_reproduced": true`. An `error:` line is a stop condition.
 
 ### 3. Summary (seconds)
 
 ```bash
 cd $OOD_REPO
 "$SAFE_PY" -I -u scripts/xr1_lead_time/ood_per_seed_summary.py \
-  --analysis 0=$XR1_BASELINE_ROOT/evaluate/analysis.json \
+  --analysis 0=$OOD_ROOT/seed0/evaluate/analysis.json \
              1=$OOD_ROOT/seed1/evaluate/analysis.json 2=$OOD_ROOT/seed2/evaluate/analysis.json \
   --expect mahalanobis=0.666,0.068 knn_cosine=0.582,0.055 pca_kmeans=0.605,0.063 rnd=0.629,0.068 \
   --output $OOD_ROOT/ood_per_seed_summary.json 2>&1 | tee $OOD_LOG/summary.log

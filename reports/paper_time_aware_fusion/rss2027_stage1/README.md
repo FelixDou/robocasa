@@ -411,3 +411,8 @@ same. `run_offline_detector_baselines develop --fixed-selection BUNDLE --model-s
 seed 0's selected configurations with a new seed (with seed 0 it must reproduce the source run
 exactly); `scripts/xr1_lead_time/ood_per_seed_summary.py` turns the three evaluations into
 mean ± std. Runbook: `docs/xr1_ood_per_seed.md`. Table II's OOD + P rows are not covered.
+First TSUBAME attempt (`xr1_ood_per_seed_20261027_212729`, code `1b5e0d19`): the bit-exact
+seed-0 gate passed for Mahalanobis and k-NN but stopped on PCA-KMeans (validation scores
+differ by 1.9e-8, selection score identical; multithreaded k-means rounding). The gate now takes
+`--reproduction-tolerance 1e-6`, and seed 0 is refit and run through calibrate/evaluate with
+seeds 1–2, so the summary checks Table I against the refit seed 0.

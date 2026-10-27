@@ -522,6 +522,28 @@ class TestOfflineBaselineRunner(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "reproduction failed for mahalanobis"):
                 development("develop_tampered", fixed_selection=str(tampered))
 
+            within = development(
+                "develop_within_tolerance",
+                fixed_selection=str(tampered),
+                reproduction_tolerance=1e-6,
+            )
+            report = json.loads(Path(within["baseline_bundle"]).read_text())[
+                "fixed_selection"
+            ]["reproduction"]["mahalanobis"]
+            self.assertGreater(report["max_validation_score_diff"], 0.0)
+            self.assertLessEqual(report["max_validation_score_diff"], 1e-6)
+
+            rows[0]["baseline_scores"]["mahalanobis"][0] += 1e-3
+            (tampered_dir / "validation_scores.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in rows)
+            )
+            with self.assertRaisesRegex(ValueError, "reproduction failed for mahalanobis"):
+                development(
+                    "develop_beyond_tolerance",
+                    fixed_selection=str(tampered),
+                    reproduction_tolerance=1e-6,
+                )
+
     def test_confirmatory_mode_freezes_inputs_and_rejects_prior_data(self):
         from robocasa.recovery.safe.run_offline_detector_baselines import (
             calibrate,
