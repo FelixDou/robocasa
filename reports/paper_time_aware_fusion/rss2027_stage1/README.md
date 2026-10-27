@@ -389,3 +389,14 @@ Per-seed results come from TSUBAME run `xr1_per_seed_detection_*` (PSEED_SHA 30b
   - 55.6% = 1,056 / 1,900: XR-1's natural success rate on our 38 tasks, from the 50-per-task selection (report §1), kept without regard to outcome.
   - The count is the runtime bundle's training successes (1,018 of 1,824) plus the outer test's 1 success per task.
   - Check: the report's 1,105 / 1,950 on 39 tasks, minus the excluded task's 49 successes, gives the same 1,056.
+
+## Update 2026-10-27 (b): ActProbe per seed (runs B1, B2)
+
+ActProbe rescored with 3 seeds on TSUBAME (`xr1_per_seed_detection_20261027_152130`, worktree
+`robocasa_perseed_30b5ac57`). B1: the seed-averaged scores equal the lead run's
+(`reference ... max diff 0.0 -> OK` on 228 calibration and 760 balanced test rollouts); peak
+memory 95 GB. B2: reference TPR 0.403 / FPR 0.063 reproduced; per seed TPR 0.302 ± 0.051,
+FPR 0.050 ± 0.003, bACC 0.626 ± 0.024, TWA 0.539 ± 0.014, DT 0.872 ± 0.029; frozen inputs
+unchanged. Table I's ActProbe row, its † note and the pending marker are replaced; Fig. 2 moves
+ActProbe to (DT 0.872, bACC 0.626); the text's TPR range becomes 30% to 67%. The ActProbe
+matched-FPR gain quoted in Sec. VI-C (0.009) is the preregistered 3-seed average and is unchanged.

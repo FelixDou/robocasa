@@ -77,6 +77,12 @@ CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=2 nice -n 10 "$SAFE_PY" -I -u scripts/xr
 
 ### B1. Rescore ActProbe with per-seed outputs (CPU, about 1–2 hours)
 
+Memory: B1 peaks at about 95 GB (1,824 training rollouts; 2026-10-27, 228 calibration and 760
+balanced test rollouts). A `cpu_16` allocation (16 × 2.3 GB) was killed twice at about 37 GB;
+the run that finished had 96 × 3.9 GB. Request at least about 120 GB, e.g. `cpu_80`
+(`qrsh -g tga-shinoda -l cpu_80=1 -l h_rt=4:00:00`), and check the job's peak with
+`qstat -j $JOB_ID | grep -o 'maxrss=[^,]*'`.
+
 The reference is the lead run (`$XR1_LEAD_ROOT/baselines`), which repeated ActProbe and
 Hide-and-Seek with the arguments of the first run and, unlike it, saved calibration predictions.
 The `--reference` checks make the run fail unless the seed-averaged trajectories equal it. The
