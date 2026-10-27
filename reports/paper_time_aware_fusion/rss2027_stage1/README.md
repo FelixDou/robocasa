@@ -385,3 +385,7 @@ Per-seed results come from TSUBAME run `xr1_per_seed_detection_*` (PSEED_SHA 30b
   - The text says that averaging seeds is part of Hide-and-Seek's earlier warning. The abstract says so as well.
 - **Fig. 2.** SAFE and Hide-and-Seek now sit at their single-model means.
 - **Runbook B1.** The reference is now `$XR1_LEAD_ROOT/baselines`, because the first run has no calibration predictions, and an `if` now blocks the launch when it is missing.
+- **Policy header (2026-10-27).** Tables I and II open with "Policy: XR-1 (Success Rate: 55.6%)", as Hide-and-Seek does.
+  - 55.6% = 1,056 / 1,900: XR-1's natural success rate on our 38 tasks, from the 50-per-task selection (report §1), kept without regard to outcome.
+  - The count is the runtime bundle's training successes (1,018 of 1,824) plus the outer test's 1 success per task.
+  - Check: the report's 1,105 / 1,950 on 39 tasks, minus the excluded task's 49 successes, gives the same 1,056.

@@ -310,7 +310,11 @@ denote the best and second-best results.}
 \scriptsize
 \setlength{\tabcolsep}{2pt}
 \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}cllccc@{}}
+% XR-1 success rate on the 38 tasks: 1,056 of 1,900 natural rollouts (50 per task, kept without
+% regard to outcome; report section 1 and the runtime bundle's training counts plus the outer test).
 \toprule
+\multicolumn{6}{c}{\textbf{Policy: XR-1 (Success Rate: 55.6\%)}} \\
+\midrule
  & Method & & bACC$\uparrow$ & wACC$\uparrow$ & TWA$\uparrow$ \\
 \midrule
 \multirow{4}{*}{\rotatebox{90}{\textbf{OOD}}}
@@ -349,6 +353,8 @@ and \underline{underline} denote the best and second-best results.}
 \setlength{\tabcolsep}{2pt}
 \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}clcccc@{}}
 \toprule
+\multicolumn{6}{c}{\textbf{Policy: XR-1 (Success Rate: 55.6\%)}} \\
+\midrule
  & Method & FPR$\downarrow$ & $\bar\ell\uparrow$ & $\Delta\bar\ell\uparrow$ & TWA$\uparrow$ \\
 \midrule
 \multirow{2}{*}{\rotatebox{90}{\textbf{Time}}}
