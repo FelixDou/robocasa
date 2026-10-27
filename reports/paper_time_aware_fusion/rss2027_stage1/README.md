@@ -451,3 +451,19 @@ held-out inputs unchanged. Mean ± std over seeds 0–2: Mahalanobis + P lead 0.
 0.246 ± 0.001 / 0.021 ± 0.001 / 0.593 ± 0.000 (0.060). Table II uses these. TWA is now computed
 from unrounded lead and FPR, so seed-0 TWA can differ by 0.001 from the earlier table (RND
 0.594 -> 0.593). Its note no longer says the OOD scores come from one model.
+
+## Update 2026-10-27 (g): Fig. 2 replaced by an RLDX-1 block in Table II
+
+- Fig. 2 (accuracy against detection time) is removed; its point is now one sentence in
+  Sec. VI-B with the DT values (P 0.805; SAFE, k-NN, PCA-KMeans, ActProbe 0.807–0.872;
+  Hide-and-Seek 0.750).
+- Table II gains a "Policy: RLDX-1 (Success Rate: 56.2%)" block (562 of 1,000 rollouts on the 20
+  supported tasks, report §8.3), from §15.15 and §15.22: global timer, P, SAFE-MLP + P,
+  SAFE-LSTM + P, Hide-and-Seek + P and its three controls (seed averages, marked †, TWA from the
+  stored rounded lead and FPR). OOD + P rows are placeholders (‡, default settings, not tuned on
+  RLDX-1). The RLDX-1 paragraph is shortened to what the table does not show.
+- Per-seed values and the OOD rows: `docs/rldx_per_seed.md`,
+  `scripts/xr1_lead_time/rldx_per_seed.py` (test: `tests/test_rldx_per_seed.py`).
+- Pages: the submission build (notes off) is 6 pages with references alone on page 6; the
+  draft build (notes on) runs about 3 lines over because of the red notes, about 2 of which go
+  once the RLDX-1 values replace the pending notes.
