@@ -240,6 +240,13 @@ registered scene gate. Post hoc, retrying a scene the policy had just failed suc
 0.245 of the time, against a 0.486 task success rate. Failure scenes are persistently hard,
 so reset-and-retry is worth about half what E3 assumed.
 
+An RLDX-1 continuation pilot (Section 15.26) measured, for the first time, how often a
+rollout still running at its time limit succeeds within 25% more time: 18 of 444, c = 0.040
+[0.020, 0.070]. That is close to the point where reset and continuation tie, so by its
+pre-stated rule E3 becomes an estimation study at 1,000 pairs. The same pilot found that
+RLDX-1's evaluator protocol does not re-create a task's scenes after the first one, so E3's
+reset arm must restore the scene explicitly.
+
 ## 1. Scope, labels, and evaluation rules
 
 ### 1.1 Raw SAFE target
@@ -2064,6 +2071,12 @@ The present evidence supports the following hierarchy of conclusions:
     LIBERO rollouts. On LIBERO, where successes stop at completion, SAFE's own paper notes
     that an elapsed-time score would be perfect and truncates rollouts to the task's
     shortest length.
+30. **RLDX-1 continuation pilot (Section 15.26).** Of 444 rollouts with no success by the
+    time limit, 18 succeeded by 1.25 times the limit: c = 0.040 [0.020, 0.070], inside the
+    expected 0.02–0.08. The interval straddles the crossover at the lower retry rate
+    (c\* = 0.066), so by the pre-stated rule E3 is an estimation study at 1,000 pairs. The
+    scene gate failed: RLDX-1's seed-once-and-reset protocol re-created only 41 of 1,000
+    scenes, mostly each task's first. Same-scene retries need an explicit scene restore.
 
 ## 15. Recommended next experiments
 
@@ -4774,6 +4787,157 @@ Data:      /gs/bs/tga-shinoda/felid/robocasa_datasets/external/safe_widowx/
 Code:      inline commands from the session (zipfile listing and CSV row counts; no pickle loaded)
 ```
 
+### 15.26 RLDX-1 continuation pilot for E3 (c measured; scene gate failed; decision ESTIMATION)
+
+#### Status
+
+A pilot for designing the RSS Stage 2 E3 experiment. It tests nothing that Stage 2
+registers. The plan, its decision rule, its expectations and its code were committed and
+pushed before any rollout was collected ([`rldx_e3_pilot_plan.md`](rldx_e3_pilot_plan.md),
+commit `c6d69009`; planner and runbook fix `ce962a3e`, also before collection). Collected
+2026-10-27 to 2026-10-28 from a pinned worktree at `ce962a3e`.
+
+**Question.** E3 compares two uses of the same budget, 1.25 H_k, once P alarms: reset and
+retry, or let the rollout keep running. Which is better depends on c, the share of rollouts
+not done by H_k that succeed by 1.25 H_k, which had never been measured. The sizing puts
+the tie at c\* = 0.104 with retry success r = 0.245, and at 0.066 with r = 0.17.
+
+**Design.**
+- All 1,000 scenes of the RLDX-1 SAFE20 natural-rate collection (20 tasks × 50 resets,
+  base seed 20, protocol `official_rldx`), re-run with every setting copied and one change:
+  the time limit is ceil(1.25 H_k) (new opt-in `--horizon-scale 1.25`).
+- Rollouts stop at success and the wrapper never truncates, so a pilot rollout's outcome at
+  H_k is exactly its outcome under the original limit.
+- Scenes were to be paired with the original rollouts by (task, reset index), on the
+  assumption that the protocol re-creates them. That assumption failed (below).
+- 1,000 rollouts on two GPUs, 804,858 env steps, 0 errors, about 26 hours.
+
+#### Gates
+
+- **Identity and coverage: passed.** 1,000 of 1,000 planned scenes, each with the planned
+  seed, protocol, split, policy, replan steps and horizon; no duplicates.
+- **Scene: failed.** Only 41 of 1,000 first-frame pairs (4.1%) are within the tolerance of
+  10; the rule required 95%. First-frame differences: minimum 0.67, median 59.7, 95th
+  percentile 97.7, maximum 138.1. The two runs mostly started from different scenes.
+  **By the plan, r is void, and the sizing uses XR-1's 0.245 and 0.17.** c needs no pairing.
+
+A diagnostic of where the scenes diverge, run after the gates:
+
+| Pattern | Tasks |
+|---|---|
+| Same scene at reset 0 only | 13 tasks, among them CloseFridge, CoffeeSetupMug, LoadDishwasher, WashLettuce |
+| Same scene at resets 0–1 or 0–2 | PickPlaceCounterToStove, SlideDishwasherRack (0–1); OpenCabinet (0–2) |
+| Same scene at resets 0–17 | CloseToasterOvenDoor |
+| Same at 0, then isolated matches (8, 39) | TurnOnMicrowave (probably chance look-alikes) |
+| Different already at reset 0 | PreSoakPan (28.5), ScrubCuttingBoard (49.7) |
+
+- In 18 tasks the first scene matches closely (differences 0.67–1.78), so seeding the
+  environment does fix the first scene.
+- After it, scenes diverge in every task, mostly from the second reset on. Episode lengths
+  differ between the two runs from the first episode on: the policy is stochastic, and
+  failures now run 25% longer.
+- **Reading.** Under `official_rldx`, the scene at reset k depends on what happened in the
+  task's earlier episodes, not only on the seed and k. The mechanism is not identified.
+  Candidates, not verified:
+  - some random state is consumed during episodes, so earlier episodes shift later scenes
+    (CloseToasterOvenDoor stays matched through reset 17 although its episode lengths
+    differ, so this is not simply one draw per step);
+  - for the two tasks that differ at reset 0, robocasa code paths that fall back to an
+    unseeded generator (`np.random.default_rng()` in `placement_samplers.py`,
+    `kitchen_object_utils.py` and `fixture.py`), or a scene-generation change since the
+    original collection's commit (a limit the plan named).
+- XR-1's protocol (`official_xiaomi`) re-seeds every episode and re-created 192 of 194
+  scenes (Section 15.24). The plan assumed the same of `official_rldx`. That assumption was
+  wrong.
+
+#### Results
+
+**c, the continuation success (primary):**
+
+| | Late successes / not done by H_k | c | 95% interval |
+|---|---:|---:|---|
+| All 20 tasks | 18 / 444 | **0.0405** | Wilson [0.026, 0.063]; task cluster [0.020, 0.070] |
+| Atomic | 10 / 269 | 0.037 | |
+| Composite | 8 / 175 | 0.046 | |
+
+- The decision interval (union of the two) is **[0.020, 0.070]**.
+- Late successes come soon after the limit: L / H_k is 1.001 at minimum, 1.091 median,
+  1.221 maximum.
+- They are spread thinly: ScrubCuttingBoard 5, PickPlaceDrawerToCounter 3,
+  CloseToasterOvenDoor 2, eight tasks with 1, nine with none.
+- Split by the original rollout's outcome at the same reset index: 3 / 234 (originally
+  failed) and 15 / 210 (originally succeeded). Since the scenes mostly differ, this split
+  mixes tasks rather than scenes: tasks with a high success rate contribute more
+  "originally succeeded" indices. It is not evidence about scene difficulty.
+
+**Stationarity.** Success by H_k: pilot 0.556, original 0.562 (task-macro), within the
+expected ±0.07. Per task the two differ by up to 0.22 (CoffeeSetupMug 0.26 against 0.48),
+consistent with two independent draws of 50 mostly different scenes.
+
+**Same-scene pairs (exploratory, not used).** On the 41 matched pairs, mostly each task's
+first scene: re-running a scene that the original rollout had failed succeeded by H_k 1 of
+15 times (0.067, Wilson [0.012, 0.298]); a scene it had succeeded on, 20 of 26 (0.769). The pattern is
+XR-1's (0.245 and 0.702): failure scenes stay hard. The direct paired estimate of reset
+against continuation is void, as specified.
+
+#### Decision (pre-stated rule)
+
+`stage2_sizing.py e3` on RLDX-1, all 20 tasks, P as the alarm. The fits reproduce P's lead
+of 0.2711 (FPR 0.03); all input checksums match.
+
+| r | c | Reset − continuation | Pairs needed |
+|---|---:|---:|---:|
+| 0.245 (c\* = 0.104) | 0.020 | +0.037 | 408 |
+| | 0.040 | +0.028 | 780 |
+| | 0.070 | +0.015 | 2,878 |
+| 0.17 (c\* = 0.066) | 0.020 | +0.020 | 1,098 |
+| | 0.040 | +0.011 | 4,081 |
+| | 0.070 | −0.002 | 245,253 |
+
+- **The direction is not decided.** At r = 0.17 the sign flips at the upper end of c's
+  interval.
+- **Decision: ESTIMATION.** Stage 2's E3 reports both arms and their paired difference with
+  95% CIs at 1,000 pairs (50 per task), with no superiority claim. The expected difference
+  is +0.028 (reset better), with an expected CI half-width of 0.017.
+- **Against the written expectations:**
+  - c fell inside the expected 0.02–0.08, and below the hazard proxy 0.082, as expected.
+  - We expected more late successes on atomic tasks; composite tasks have slightly more
+    (0.046 against 0.037).
+  - Stationarity held, and ESTIMATION was the predicted outcome.
+  - The expected passing scene gate did not happen.
+
+#### Interpretation
+
+- **Running on rarely rescues a rollout.** Only 4% of rollouts still going at the time limit
+  finish within 25% more time, and those that do finish almost at once. At XR-1's retry rate
+  a reset is the better use of the budget; at its lower bound the two tie. The measured
+  retry rate on matched RLDX-1 scenes, 1 of 15, is too small to settle which.
+- **Consequence for Stage 2's E3.**
+  - The reset arm must re-create the failed attempt's scene explicitly: restore a state
+    saved at reset (`robocasa/recovery/full_snapshot.py`, outside the frozen exact-replay
+    package), or re-seed each episode as XR-1's protocol does. Either way, check scene
+    identity by first frames, as here.
+  - r on RLDX-1 is still unmeasured. E3 measures it as part of the estimation.
+  - E3 needs fresh scenes (a new base seed), as the plan already required.
+- **Consequence for reproducibility.** On RLDX-1, (task, base seed, reset index) does not
+  identify a scene beyond each task's first. Re-running the collector reproduces the scene
+  distribution, not the scenes. The same holds for resumed `official_rldx` collections,
+  which skip completed episodes by resetting without running them.
+
+#### Durable artifacts
+
+```text
+Root:      /gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/rldx1_e3_pilot_20261027_152900/
+             selection.json, collector_flags.txt, tasks_shard{0,1}.txt,
+             attempt_limits_shard{0,1}.json, collection/shard{0,1}/ (manifests, SAFE features,
+             videos), pilot.json, e3_r.json, e3_rlow.json, direct.json, decision.json
+Logs:      /gs/bs/tga-shinoda/felid/robocasa_logs/eval/rldx1_e3_pilot_20261027_152900/
+             plan.log, collection_shard{0,1}.log, analyze.log, e3_{r,rlow}.log, direct.log,
+             decide.log, frozen_inputs.sha256, scene_diag.log, progress.py, scene_diag.py
+Code:      worktree /gs/fs/tga-shinoda/felid/robocasa_rldx_e3pilot_ce962a3e (commit ce962a3e)
+pilot.json sha256 3bd614f03e62ca47cc9e33cd37b5d21281375c835ee6653491cc918005087e68
+```
+
 ## 16. Limitations
 
 - The π0 and RLDX experiments use different policies, feature shapes, task sets, and data volumes; their absolute metrics are not direct model-family comparisons.
@@ -4824,6 +4988,7 @@ Code:      inline commands from the session (zipfile listing and CSV row counts;
 - Causal-prefix sample support falls to 25 segments at 32 inferences and zero at 64.
 - The elapsed-time baseline is task/subtask-conditioned; its strength may partly reflect policy-specific stage difficulty and horizons, but that is exactly the shortcut a deployable detector must beat.
 - Subtask progress uses environment predicates unavailable to a real robot unless separately estimated online.
+- Under RLDX-1's `official_rldx` protocol, (task, base seed, reset index) identifies only each task's first scene (Section 15.26). RLDX-1 collections reproduce the scene distribution, not the scenes, and pairing RLDX-1 rollouts by reset index does not pair scenes.
 
 ## 17. Reproducibility pointers
 

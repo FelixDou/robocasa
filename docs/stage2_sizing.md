@@ -1110,6 +1110,13 @@ Plug-in power (no shift) is within 0.06 of the SAFE 0.034 and Hide-and-Seek 0.08
   1.25 H_k. P vs no monitor is descriptive only, since its no-monitor arm wastes the remaining
   budget. Whether E3 is a test or an estimation study is decided by the RLDX-1 continuation
   and retry pilot: [`rldx_e3_pilot_plan.md`](rldx_e3_pilot_plan.md).
+- **Pilot result (2026-10-28; report §15.26).** c = 0.0405 [0.020, 0.070]; the scene gate
+  failed, so r stayed at 0.245 / 0.17. The direction is not decided (at r = 0.17 the sign
+  flips at c = 0.070), so **E3 is an estimation study at 1,000 pairs (50 per task)**:
+  expected reset − continuation +0.028, CI half-width 0.017. Its reset arm must restore the
+  failed attempt's scene explicitly (a state saved at reset, or per-episode seeding) and
+  check scene identity, because RLDX-1's `official_rldx` protocol does not re-create scenes
+  after each task's first.
 
 **Why.** E3's sizing above assumed that a retry after an alarm succeeds at the task's
 ordinary success rate (r = p_k). The same-scene retry pilot (report §15.24,

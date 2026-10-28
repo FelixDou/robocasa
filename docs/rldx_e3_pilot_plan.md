@@ -4,6 +4,12 @@
 registers. This plan, its decision rule and its code were committed before any pilot rollout
 was collected.
 
+**Result (2026-10-28; report §15.26).** Gate 1 passed (1,000 of 1,000). The scene gate
+failed (41 of 1,000 same-scene pairs), so r is void and the sizing used 0.245 and 0.17.
+c = 18/444 = 0.0405, decision interval [0.020, 0.070]. **Decision: ESTIMATION** at 1,000
+pairs (50 per task); expected reset − continuation +0.028, CI half-width 0.017. The plan text
+below is unchanged except where marked.
+
 ## Why
 
 E3 asks whether resetting a rollout when the per-task timer P alarms beats letting the policy
@@ -34,6 +40,8 @@ One collection measures both unknowns.
     times. Scenes are built only at reset: the scene RNG (`Kitchen.rng`) is used for layout,
     style, textures and object placement, not during steps. Re-running the collector with the
     same seed and settings therefore re-creates the same scenes, in the same order.
+    **This was wrong (found 2026-10-28, report §15.26).** Only each task's first scene was
+    re-created (18 of 20 tasks); later scenes depend on the earlier episodes.
   - The policy samples stochastically, so each re-run is a new attempt at the same scene.
 - **One change: the time limit.** Every task runs to ceil(1.25 × H_k), with H_k the registry
   horizon used originally. This is the new opt-in collector option `--horizon-scale 1.25`.
