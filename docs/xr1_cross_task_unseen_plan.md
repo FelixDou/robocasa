@@ -420,7 +420,10 @@ Recorded 2026-10-28. Nothing above this section was changed after scoring.
 - **Logs:** the killed and stopped attempts keep their logs as `*.oomkilled.log` and
   `*.stopped_early.log`.
 - **Later fix:** the loader now copies the slice (`3c5b6bba`, committed after scoring and used by
-  no fold here).
+  no fold here). It was verified on 2026-10-28 (`loader_copy_check_20261028_130325`): fold all
+  re-scored with the fix equals this run's fold all bit for bit, with max difference 0.0 for all
+  four detectors on both cohorts. Peak memory was 5.0 GB instead of about 126 GB, and the run time
+  was unchanged (8,178 s vs 8,007 s).
 
 **Primary and secondary rules.** All gains are in units of H_k. Brackets are decision-bootstrap
 95% CIs.
