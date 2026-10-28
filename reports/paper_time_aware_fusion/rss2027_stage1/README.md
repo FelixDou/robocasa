@@ -467,3 +467,20 @@ from unrounded lead and FPR, so seed-0 TWA can differ by 0.001 from the earlier 
 - Pages: the submission build (notes off) is 6 pages with references alone on page 6; the
   draft build (notes on) runs about 3 lines over because of the red notes, about 2 of which go
   once the RLDX-1 values replace the pending notes.
+
+## Update 2026-10-28: RLDX-1 block per seed, with OOD + P (done)
+
+TSUBAME run `rldx1_per_seed_20261028_145711`, code `67d7fa1d` (`docs/rldx_per_seed.md`):
+- OOD scoring (`score_cohorts`, default settings, seeds 0–2) peaked at 23 GB.
+- Every gate passed: stored seed-averaged trajectories reproduced (max diff 0); P (0.2711, 0.03)
+  and the seed-averaged SAFE-LSTM, SAFE-MLP, Hide-and-Seek and control + P results equal the
+  stored §15.15/§15.22 values exactly; inputs unchanged.
+- Single-model mean ± std (lead, gain, TWA; FPR mean): SAFE-LSTM + P 0.307 ± 0.003,
+  0.036 ± 0.003, 0.637 ± 0.003 (0.033); SAFE-MLP + P 0.279 ± 0.012, 0.008 ± 0.012 (0.053);
+  Hide-and-Seek + P 0.345 ± 0.030, 0.074 ± 0.030, 0.648 ± 0.004 (0.050; seed 0 at 0.08 FPR);
+  controls gain −0.004 to 0.012; Mahalanobis + P 0.030 ± 0.000, PCA-KMeans 0.029 ± 0.004,
+  RND 0.015 ± 0.007, k-NN 0.005 ± 0.000.
+- Table II's RLDX-1 block now shows these (the † seed-average note is gone; ‡ marks the
+  untuned OOD rows), and the RLDX-1 paragraph gives both seed-averaged and single-model gains.
+- Pages: submission build 6 pages (references alone on page 6); the draft build runs about 3
+  lines over, only because of the red Stage 2 notes.
