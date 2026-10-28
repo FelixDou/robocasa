@@ -315,6 +315,86 @@ score, and A3 means retraining is bit-exact.
 
 If either mean gain over G is ≥ 0.05, U1-S is reported as not interpretable.
 
+## R6. Seen and unseen columns for Tables I and II (written 2026-10-28, before any run)
+
+**Why.** Hide-and-Seek reports every detector on seen and unseen tasks, side by side. The paper's
+Tables I and II report seen tasks only, and the unseen results so far cover SAFE and the
+Hide-and-Seek family against G. R6 adds an Unseen column group for every row that can have one.
+
+**Protocol (Hide-and-Seek's, with our folds).**
+- **Unseen:** the four cross-task folds (`cross_task_folds.json`). Each task is held out once,
+  and monitors are trained without it. Thresholds are calibrated on the seen tasks'
+  lead-calibration rollouts and applied to the held-out tasks' test rollouts. Outcomes are pooled
+  over the folds. Hide-and-Seek instead uses one random 7/3 split per seed; ours reuses the trained
+  folds and gives every task an unseen score.
+- **Seen:** all 38 tasks, as Tables I and II are now: per-task models and per-task normalization.
+  This is stronger than Hide-and-Seek's seen setting, which has no per-task normalization; the
+  captions say so.
+- **Cohorts:** the held-out E1 cohorts for both column groups (calibration 380/380, test 380/380).
+  Table I therefore moves from the validation set to the held-out set. Its seen numbers change.
+- **α = 0.05** throughout (Hide-and-Seek averages 0.15–0.25).
+- **Statistics:** mean and standard deviation (ddof 1) over training seeds 0–2; timers are
+  deterministic. No confidence intervals.
+
+**Table I (standalone).** One threshold per detector and seed: the largest calibration lead with
+calibration FPR ≤ 0.05 (`per_seed_detection.threshold`), applied once. Columns: bACC and TWA for
+Seen and Unseen (wACC equals bACC on balanced sets and is dropped; the caption says so). TPR, FPR
+and DT are kept in the JSON.
+
+**Table II (fused).** Seen: score + P, the published per-seed rows (unchanged). Unseen: score + G
+per fold (`cross_task_lead.unseen`: G and the fused path fitted on seen-task calibration rollouts,
+pooled normalization), pooled. Columns: FPR, gain over the timer and TWA for each group.
+
+**Rows and score sources.**
+
+| Row | Seen | Unseen |
+|---|---|---|
+| Mahalanobis, cosine k-NN, PCA-KMeans, RND | Section 15.10 tuned models, per seed (`xr1_ood_per_seed_20261027_212729`) | the same configuration refit per fold on seen tasks, every task-specific reference pooled (`run_offline_detector_baselines develop --fold`, `score-fold`) |
+| SAFE-MLP | E1 `per_seed_raw_safe`, bundle normalization | Stage B fold models |
+| ActProbe | fold all of a new cross-task run (`score_cross_task --detectors actprobe`) | its folds 0–3 |
+| Hide-and-Seek, zero-input, first-inference | Amendment 2 scores | cross-task folds (`xr1_cross_task_20261027_212141`) |
+| same-task shuffle | Amendment 2 scores | — (needs the task's own rollouts) |
+| global timer | t/H, same threshold rule | the same, fitted per fold |
+| time risk, per-task timer P | as now | — (per-task by construction) |
+
+**Pooled variant of the tuned OOD baselines.** Mahalanobis (one Gaussian per task), PCA-KMeans
+(32 clusters per task) and k-NN (per-task reference) cannot score a task without its own
+successes. Their unseen version keeps every tuned setting but pools the reference over the fold's
+seen tasks (one Gaussian, one set of clusters, one reference); RND is unchanged. The partitions
+are the frozen fit/validation partitions restricted to the seen tasks. The pooled normalization
+uses `fit_safe_normalization`'s formula over the seen tasks' meta-validation trajectories, the
+role the per-task normalization has in Section 15.10. The configuration was selected with all
+tasks, which can only favor the baselines (as for SAFE in Stage B).
+
+**Gates (no table without them).**
+- **T1.** Every fold directory matches the fold file (fold, held-out tasks, training on exactly
+  the seen tasks, fold-file SHA-256, seeds 0–2), and every selected rollout is present with the
+  right task, label and length.
+- **T2.** Seen + P per seed equals the stored runs to 1e-12: run C of
+  `xr1_per_seed_detection_20261027_152130` (SAFE, Hide-and-Seek and its three controls) and
+  `ood_per_seed_fused_heldout.json` (the four OOD rows).
+- **T3.** Seed-averaged unseen + G equals the cross-task results at their stored precision:
+  Hide-and-Seek +0.1273, zero-input +0.0331, first-inference 0.0000 (`cross_task_lead.json`) and
+  SAFE +0.0166 (`cross_task_safe.json`).
+- **T4.** ActProbe fold all reproduces B1's raw August trajectories exactly
+  (`--reference-raw`), and its per-task normalization equals B1's.
+- **T5.** Every OOD fold directory is the pooled variant of the frozen Section 15.10 bundle
+  (its SHA-256).
+
+**Expectations (written before running).**
+- Unseen bACC and TWA fall for every learned detector; the global timer barely moves.
+- Hide-and-Seek keeps the best unseen TWA among learned detectors, as its unseen + G gain
+  (+0.127) suggests.
+- The pooled OOD variants lose most of their seen-task advantage, since their per-task references
+  carried most of it.
+- SAFE's unseen + G gain stays near noise (+0.017 seed-averaged), with single models at or below it.
+
+**Code.** `scripts/xr1_lead_time/seen_unseen_tables.py`; tests
+`tests/test_xr1_seen_unseen_tables.py` and `tests/test_safe_offline_detector_folds.py`. The
+per-seed scripts and docs of `claude/time-aware-fusion-paper` (`per_seed_detection.py`,
+`ood_per_seed_fused.py`, `run_offline_detector_baselines.py`) are copied unchanged into this
+branch, then extended with the fold mode.
+
 ## Runbook
 
 Run on TSUBAME from a pinned worktree, CPU only for R1–R4, following
@@ -619,6 +699,180 @@ Report:
 - B5's log;
 - the analysis tail, ending in `CROSS-TASK SAFE OK`;
 - `INPUTS UNCHANGED`.
+
+### 4. R6: seen and unseen columns (CPU, one large allocation)
+
+ActProbe peaks at about 95 GB per run (B1), so use a node with at least about 300 GB and run at
+most three ActProbe folds at a time, e.g. `qrsh -g tga-shinoda -l node_h=1 -l h_rt=12:00:00`.
+Everything below is CPU only. `R6_SHA` is the full SHA of the pushed commit on
+`claude/review-analyses` that contains this step.
+
+**C0. Environment, pinned code, inputs, unit tests.**
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export SAFE_PY=$STORAGE_BS/envs/vla_safe/bin/python
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+export CK=$STORAGE_BS/robocasa_checkpoints/safe
+export XT_ROOT=$CK/xr1_cross_task_20261027_212141 RS_ROOT=$CK/xr1_cross_task_safe_20261028_193716
+export PSEED_ROOT=$CK/xr1_per_seed_detection_20261027_152130 OOD_ROOT=$CK/xr1_ood_per_seed_20261027_212729
+export XR1_BASELINE_ROOT=$CK/xr1_offline_baselines_20261017_100820
+export R6_LCAL_CACHE=$STORAGE_BS/robocasa_rollouts/safe/xr1_lead_calibration_20261020_001108/cache_lead_calibration
+export R6_TEST_CACHE=$STORAGE_BS/robocasa_rollouts/safe/xr1_confirmatory_fused_20261017_160220/cache_confirmatory_test
+
+export R6_SHA=<R6_SHA>
+export R6_REPO=$PROJECT_FS/robocasa_seenunseen_${R6_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $R6_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R6_REPO $R6_SHA
+test "$(git -C $R6_REPO rev-parse HEAD)" = "$R6_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not R6_SHA"
+cd $R6_REPO
+export R6_TAG=xr1_seen_unseen_$(date +%Y%m%d_%H%M%S)
+export R6_ROOT=$CK/$R6_TAG R6_LOG=$STORAGE_BS/robocasa_logs/eval/$R6_TAG
+mkdir -p $R6_ROOT $R6_LOG
+export FOLDS=$R6_REPO/scripts/xr1_lead_time/cross_task_folds.json
+printf 'export %s=%q\n' R6_SHA "$R6_SHA" R6_REPO "$R6_REPO" R6_TAG "$R6_TAG" R6_ROOT "$R6_ROOT" R6_LOG "$R6_LOG" \
+  > $R6_LOG/paths.env
+
+for f in $E1_OUT/calibration_predictions.jsonl $E1_OUT/test_predictions.jsonl $XR1_RUNTIME_BUNDLE $XR1_TRAIN_IDS \
+         $XR1_EVAL_IDS $AMEND2_ROOT/august_calibration_ids.json \
+         $AMEND2_ROOT/scores/lead_calibration_predictions.jsonl $AMEND2_ROOT/scores/confirmatory_test_predictions.jsonl \
+         $AMEND2_ROOT/scores/normalizations.json $XT_ROOT/cross_task_lead.json $RS_ROOT/cross_task_safe.json \
+         $PSEED_ROOT/per_seed_fused_heldout.json $PSEED_ROOT/actprobe_scores/normalizations.json \
+         $PSEED_ROOT/actprobe_scores/august_calibration_predictions.jsonl \
+         $PSEED_ROOT/actprobe_scores/august_test_predictions.jsonl \
+         $OOD_ROOT/ood_per_seed_fused_heldout.json $XR1_BASELINE_ROOT/develop/baseline_bundle.json \
+         $XR1_BASELINE_ROOT/cache_development/provenance.json \
+         $R6_LCAL_CACHE/provenance.json $R6_TEST_CACHE/provenance.json \
+         $OOD_ROOT/seed{0,1,2}/heldout/{calibration,test}_with_baselines.jsonl \
+         $XT_ROOT/fold_{0,1,2,3}/scoring.json $RS_ROOT/folds/fold_{0,1,2,3}/scoring.json; do
+  test -s $f && echo "OK $f" || echo "STOP: missing $f"
+done > $R6_LOG/inputs_check.log
+grep -v '^OK' $R6_LOG/inputs_check.log; grep -c '^OK' $R6_LOG/inputs_check.log
+echo "XR1_RAW_DIRS: ${#XR1_RAW_DIRS[@]} directories"
+sha256sum $E1_OUT/calibration_predictions.jsonl $E1_OUT/test_predictions.jsonl $XR1_RUNTIME_BUNDLE \
+  $AMEND2_ROOT/scores/*_predictions.jsonl $AMEND2_ROOT/scores/normalizations.json \
+  $XT_ROOT/cross_task_lead.json $RS_ROOT/cross_task_safe.json $PSEED_ROOT/per_seed_fused_heldout.json \
+  $PSEED_ROOT/actprobe_scores/*.json* $OOD_ROOT/ood_per_seed_fused_heldout.json \
+  $OOD_ROOT/seed{0,1,2}/heldout/*_with_baselines.jsonl $XR1_BASELINE_ROOT/develop/baseline_bundle.json \
+  | tee $R6_LOG/frozen_inputs.sha256 | wc -l
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -m unittest tests.test_safe_offline_detector_folds \
+  tests.test_safe_offline_detector_baselines tests.test_xr1_seen_unseen_tables \
+  tests.test_xr1_cross_task_safe tests.test_xr1_cross_task_lead 2>&1 | tail -n 3
+free -g | head -n 2; nproc
+```
+
+No `STOP` line may print, the count must be 34, `XR1_RAW_DIRS` must be nonempty, and the tests
+must end with `OK`.
+
+**C1. OOD pooled refits per fold (12 `develop` runs, then 4 `score-fold` runs).** One script per
+fold, all four in the background.
+
+```bash
+cd $R6_REPO
+for F in 0 1 2 3; do
+  cat > $R6_LOG/ood_fold$F.sh <<EOF
+set -e
+cd $R6_REPO
+export CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4
+for S in 0 1 2; do
+  "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines develop \\
+    --development-cache $XR1_BASELINE_ROOT/cache_development --runtime-bundle $XR1_RUNTIME_BUNDLE \\
+    --fixed-selection $XR1_BASELINE_ROOT/develop/baseline_bundle.json --model-seed \$S \\
+    --baselines mahalanobis knn_cosine pca_kmeans rnd --folds $FOLDS --fold $F \\
+    --output-dir $R6_ROOT/ood/develop/fold_$F/seed\$S > /dev/null
+  echo "fold $F seed \$S developed"
+done
+"$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines score-fold \\
+  --bundle 0=$R6_ROOT/ood/develop/fold_$F/seed0/baseline_bundle.json \\
+  --bundle 1=$R6_ROOT/ood/develop/fold_$F/seed1/baseline_bundle.json \\
+  --bundle 2=$R6_ROOT/ood/develop/fold_$F/seed2/baseline_bundle.json --folds $FOLDS \\
+  --cohort lead_calibration $E1_OUT/calibration_predictions.jsonl $R6_LCAL_CACHE lead_calibration \\
+  --cohort confirmatory_test $E1_OUT/test_predictions.jsonl $R6_TEST_CACHE confirmatory_test \\
+  --output-dir $R6_ROOT/ood/fold_$F
+echo "=== OOD FOLD $F DONE"
+EOF
+  nohup nice -n 10 bash $R6_LOG/ood_fold$F.sh > $R6_LOG/ood_fold$F.log 2>&1 &
+  echo "OOD fold $F PID $! on $(hostname)"
+done
+```
+
+Progress: `tail -qn 1 $R6_LOG/ood_fold?.log`. Each log must end with `=== OOD FOLD F DONE`; an
+`error:` or `Traceback` line is a stop condition.
+
+**C2. ActProbe per fold (5 runs, about 95 GB and 1–2 hours each).** Fold all also scores the
+August cohorts and must reproduce B1 exactly (`REFERENCE OK`). The script runs fold all, 0 and 1
+together, then 2 and 3.
+
+```bash
+cd $R6_REPO
+cat > $R6_LOG/actprobe.sh <<'EOF'
+set -u
+# Arrays such as XR1_RAW_DIRS are not inherited by a child shell, so read the paths here.
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+cd $R6_REPO
+export CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
+COMMON=(--dataset-dir "${XR1_RAW_DIRS[@]}" $XR1_LCAL_ROOT/merged_all_retained $XR1_CONFIRM_ROOT/confirmatory_collection/merged_all_retained
+        --runtime-bundle $XR1_RUNTIME_BUNDLE --train-ids $XR1_TRAIN_IDS --folds $FOLDS
+        --cohort lead_calibration $E1_OUT/calibration_predictions.jsonl
+        --cohort confirmatory_test $E1_OUT/test_predictions.jsonl
+        --detectors actprobe --feature-aggregation last --seeds 0 1 2)
+one() {
+  F=$1; EXTRA=()
+  if [ $F = all ]; then
+    EXTRA=(--cohort august_calibration $AMEND2_ROOT/august_calibration_ids.json --cohort august_test $XR1_EVAL_IDS
+           --reference-raw august_calibration $PSEED_ROOT/actprobe_scores/august_calibration_predictions.jsonl
+           --reference-raw august_test $PSEED_ROOT/actprobe_scores/august_test_predictions.jsonl)
+  fi
+  "$SAFE_PY" -u -m robocasa.recovery.safe.baselines.score_cross_task "${COMMON[@]}" --fold $F "${EXTRA[@]}" \
+    --output-dir $R6_ROOT/actprobe/fold_$F > $R6_LOG/actprobe_fold_$F.log 2>&1
+  echo "=== ACTPROBE FOLD $F rc=$? $(date -Iseconds)"
+}
+one all & one 0 & one 1 & wait
+one 2 & one 3 & wait
+echo "=== ACTPROBE DONE"
+EOF
+nohup nice -n 10 bash $R6_LOG/actprobe.sh > $R6_LOG/actprobe.log 2>&1 &
+echo "ActProbe PID $! on $(hostname)"
+```
+
+Progress: `cat $R6_LOG/actprobe.log; tail -qn 2 $R6_LOG/actprobe_fold_*.log`. Done when
+`actprobe.log` shows five `rc=0` lines and `=== ACTPROBE DONE`, and `actprobe_fold_all.log` ends
+with two `reference ... -> OK` lines and `REFERENCE OK`. Any other `rc` is a stop condition.
+
+**C3. The tables (CPU, minutes).** Only after C1 and C2 are done.
+
+```bash
+cd $R6_REPO
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/seen_unseen_tables.py run \
+  --calibration $E1_OUT/calibration_predictions.jsonl --test $E1_OUT/test_predictions.jsonl \
+  --runtime-bundle $XR1_RUNTIME_BUNDLE --folds $FOLDS \
+  --safe-fold-dirs $RS_ROOT/folds/fold_{0,1,2,3} --xt-fold-dirs $XT_ROOT/fold_{0,1,2,3} \
+  --actprobe-fold-dirs $R6_ROOT/actprobe/fold_{0,1,2,3,all} --ood-fold-dirs $R6_ROOT/ood/fold_{0,1,2,3} \
+  --ood-source-bundle $XR1_BASELINE_ROOT/develop/baseline_bundle.json \
+  --amend2-scores $AMEND2_ROOT/scores/lead_calibration_predictions.jsonl $AMEND2_ROOT/scores/confirmatory_test_predictions.jsonl \
+  --amend2-normalizations $AMEND2_ROOT/scores/normalizations.json \
+  --ood-seen 0 $OOD_ROOT/seed0/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed0/heldout/test_with_baselines.jsonl \
+  --ood-seen 1 $OOD_ROOT/seed1/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed1/heldout/test_with_baselines.jsonl \
+  --ood-seen 2 $OOD_ROOT/seed2/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed2/heldout/test_with_baselines.jsonl \
+  --run-c $PSEED_ROOT/per_seed_fused_heldout.json --ood-fused $OOD_ROOT/ood_per_seed_fused_heldout.json \
+  --cross-task-result $XT_ROOT/cross_task_lead.json --cross-task-safe-result $RS_ROOT/cross_task_safe.json \
+  --actprobe-reference-normalizations $PSEED_ROOT/actprobe_scores/normalizations.json \
+  --output $R6_ROOT/seen_unseen_tables.json 2>&1 | tee $R6_LOG/tables.log
+sha256sum -c --quiet $R6_LOG/frozen_inputs.sha256 && echo INPUTS UNCHANGED
+sha256sum $R6_ROOT/seen_unseen_tables.json
+```
+
+Report the whole `tables.log` (it ends in `SEEN/UNSEEN TABLES OK` or `REPRODUCTION FAILED`),
+`INPUTS UNCHANGED` and the SHA-256. Then copy the JSON to the local evidence folder:
+
+```bash
+# local machine
+rsync -av tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/<R6_TAG>/seen_unseen_tables.json \
+  reports/safe_robocasa365_research_plan_20260823/evidence/<R6_TAG>/
+```
 
 ## Result
 

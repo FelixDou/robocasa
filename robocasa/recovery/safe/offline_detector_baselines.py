@@ -275,6 +275,17 @@ class BaselineScorer:
         self.standardizer = _Standardizer(sample)
         self.pca = _fit_pca(self.standardizer(sample), self.params["pca_dim"], self.seed)
         self.gaussians = {}
+        scope = self.params.get("scope", "per_task")
+        if scope == "pooled":
+            # One Gaussian over the pooled fit sample, for tasks without their own successes.
+            estimate = LedoitWolf().fit(self.pca.transform(self.standardizer(sample)))
+            self.gaussians["__pooled__"] = {
+                "mean": estimate.location_.astype(np.float64),
+                "precision": estimate.precision_.astype(np.float64),
+            }
+            return
+        if scope != "per_task":
+            raise ValueError(f"Unknown Mahalanobis scope {scope!r}")
         for task in self.tasks:
             projected = self.pca.transform(self.standardizer(task_features[task]))
             if len(projected) < 2:
@@ -342,9 +353,20 @@ class BaselineScorer:
     def requires_actions(self):
         return self.name == "action_inconsistency"
 
+    @property
+    def task_agnostic(self):
+        """True for a pooled variant (pooled_variant), which may score tasks it was not fitted on.
+
+        RND has no task component, but only its pooled variant is marked, so the frozen
+        per-task pipeline keeps refusing unknown tasks.
+        """
+        return self.name in ("knn_cosine", "pca_kmeans", "mahalanobis", "rnd") and (
+            self.params.get("scope", "per_task") == "pooled"
+        )
+
     def score(self, task, features=None, actions=None, *, chunk_rows=2048):
         task = str(task)
-        if task not in self.tasks:
+        if task not in self.tasks and not self.task_agnostic:
             raise ValueError(f"Baseline {self.name} was not fitted for task {task}")
         if self.name == "action_inconsistency":
             values = stac_single(actions, self.exec_horizon)
@@ -355,7 +377,7 @@ class BaselineScorer:
             if self.name == "knn_cosine":
                 values = self._score_knn(task, features, chunk_rows)
             elif self.name == "mahalanobis":
-                gaussian = self.gaussians[task]
+                gaussian = self.gaussians["__pooled__" if "__pooled__" in self.gaussians else task]
                 centered = self.pca.transform(self.standardizer(features)) - gaussian["mean"]
                 squared = np.einsum("ij,jk,ik->i", centered, gaussian["precision"], centered)
                 values = np.sqrt(np.maximum(squared, 0.0))
@@ -385,6 +407,17 @@ class BaselineScorer:
             nearest = np.partition(distance, k - 1, axis=1)[:, :k]
             output.append(nearest.mean(axis=1))
         return np.clip(np.concatenate(output), 0.0, 2.0)
+
+
+def pooled_variant(name, params):
+    """The same tuned configuration with every task-specific reference pooled over tasks.
+
+    Used to score tasks without successes of their own (unseen tasks). RND has no task
+    component; its "scope" only marks the model as allowed to score unseen tasks.
+    """
+    if name not in ("knn_cosine", "pca_kmeans", "mahalanobis", "rnd"):
+        raise ValueError(f"{name} has no task-agnostic variant")
+    return dict(params, scope="pooled")
 
 
 def safe_roc_auc(labels, scores):
