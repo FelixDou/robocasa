@@ -394,7 +394,10 @@ Recorded 2026-10-28. Nothing above this section was changed after scoring.
 - Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_20261027_212141`.
 - Logs: `/gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_cross_task_20261027_212141`.
 - Code: every fold scored at `152fbb86`, the commit of this plan.
-- Output: `cross_task_lead.json` (2,000 decision-bootstrap replicates).
+- Output: `cross_task_lead.json` (2,000 decision-bootstrap replicates). A byte-identical copy is
+  committed in
+  [`reports/.../evidence/xr1_cross_task_20261027_212141/`](../reports/safe_robocasa365_research_plan_20260823/evidence/xr1_cross_task_20261027_212141/)
+  with its SHA-256 in `provenance.json`.
 
 **Integrity checks.** All passed.
 - **I1:** `FOLDS OK` on both cohorts. Each fold dropped exactly 48 training rollouts per held-out

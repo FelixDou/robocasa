@@ -1,0 +1,17 @@
+{
+  "analysis": "scripts/xr1_lead_time/cross_task_lead.py run",
+  "cluster_file": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_20261027_212141/cross_task_lead.json",
+  "cluster_log_directory": "/gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_cross_task_20261027_212141",
+  "cluster_run_directory": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_20261027_212141",
+  "export_sha256": {
+    "cross_task_lead.json": "f4c12595fdf4f16183d1506ea9bd6688e60f43fc7e25b4f521c0d3f82efb8e0a"
+  },
+  "frozen_inputs_unchanged": true,
+  "implementation_commit": "152fbb86ca84ea84a9378c8bf8c2b567da627bff",
+  "json_note": "Written by Python's json module: two fused-path thresholds (hide_and_seek_first, folds 0 and 3) are Infinity, meaning the score is never used. Python's json reads them; strict JSON parsers do not.",
+  "loader_fix_verification_run": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/loader_copy_check_20261028_130325",
+  "plan": "docs/xr1_cross_task_unseen_plan.md (Result section)",
+  "received_date": "2026-10-28",
+  "source": "Copied byte for byte from the cluster with rsync by the user; not edited",
+  "status": "exploratory, pre-specified (opened cohorts)"
+}
