@@ -945,9 +945,10 @@ Hide-and-Seek − SAFE is +0.111 [0.036, 0.166].
   SAFE adds about +0.01 at every n. Hide-and-Seek stays ahead of SAFE at every n.
 - **U-HS:** +0.111 [0.036, 0.166]. Hide-and-Seek warns earlier than SAFE on unseen tasks.
 - **U4-S (transfer loss):** unseen gain +0.017, seen gain +0.011; difference +0.006
-  [−0.028, +0.041]. No loss is detected because SAFE gains little over G on seen tasks too (9 FP
-  against 8). With per-task normalization against P it gains +0.030 (S2), +0.015 at matched false
-  alarms (R2).
+  [−0.028, +0.041]. No loss is detected because, with the unseen arm's pooled normalization,
+  SAFE gains little over G on seen tasks too (9 FP against 8). With E1's per-task normalization
+  it gains +0.094 over G (R2) but stays 0.008 below P; over P it gains +0.030 (S2), +0.015 at
+  matched false alarms (R2).
 
 **Descriptive.**
 - **Per fold** (gain over G; FP of G → SAFE + G): fold 0 0.000 (5 → 5); fold 1 +0.011 (1 → 7);
@@ -974,8 +975,10 @@ Hide-and-Seek − SAFE is +0.111 [0.036, 0.166].
 - **On unseen tasks, Hide-and-Seek transfers and SAFE does not.** Hide-and-Seek: +0.127 over G,
   +0.051 at matched false alarms. SAFE: +0.017 (the size of a noise score's), −0.079 at matched
   false alarms. The gap is +0.111 [0.036, 0.166] and holds with P_n for every n.
-- **The learned detector adds little beyond time on any task.** Over G: +0.011 seen, +0.017
-  unseen. Over P: +0.030 seen (+0.015 at matched false alarms), about +0.01 unseen. This supports
-  "SAFE mostly tracks time" with the unseen-task numbers.
+- **Beyond the per-task timer, SAFE adds little on any task.** Over P: +0.030 seen (+0.015 at
+  matched false alarms), about +0.01 unseen. Over G the seen gain depends on normalization:
+  +0.011 with the unseen arm's pooled normalization, +0.094 with E1's per-task normalization
+  (R2); unseen it is +0.017. This supports the review's wording, "limited additional warning after
+  controlling for duration", rather than "SAFE mostly tracks time".
 - **Report matched false alarms beside every G comparison.** Against G alone, SAFE's α = 0.05 CI
   excludes 0.
