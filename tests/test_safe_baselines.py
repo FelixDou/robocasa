@@ -1,3 +1,4 @@
+import importlib.util
 import json
 from pathlib import Path
 import tempfile
@@ -6,18 +7,25 @@ import unittest
 import numpy as np
 
 from robocasa.recovery.safe.baselines.detectors import DETECTOR_REGISTRY, build_detector
-from robocasa.recovery.safe.baselines.run_baselines import load_rollout_ids, main
+from robocasa.recovery.safe.baselines.run_baselines import (
+    index_datasets,
+    load_baseline_rollout,
+    load_rollout_ids,
+    main,
+)
 from robocasa.recovery.safe.baselines.signals import (
     action_signal_matrix,
     exponential_moving_average,
     temporal_consistency_error,
 )
-from robocasa.recovery.safe.dataset import save_rollout
+from robocasa.recovery.safe.dataset import aggregate_features, load_rollout, save_rollout
 from robocasa.recovery.safe.schema import (
     XIAOMI_ROBOTICS_1_FEATURE_LAYER,
     SafeRolloutMetadata,
 )
 
+HAS_TORCH = importlib.util.find_spec("torch") is not None
+TORCH_DETECTORS = {"actprobe", "rnd"} | {name for name in DETECTOR_REGISTRY if name.startswith("hide_and_seek")}
 HORIZON = 6
 REPLAN = 2
 FLOW = 2
@@ -199,6 +207,55 @@ class DetectorTests(unittest.TestCase):
         rollout = dict(self.rollouts[0], actions=None)
         with self.assertRaises(ValueError):
             build_detector("action_consistency").score(rollout)
+
+
+class LoaderTests(unittest.TestCase):
+    def test_loaded_features_own_their_memory(self):
+        # "first" and "last" slice the raw (T, flow, horizon, D) tensor; a view would keep
+        # the whole tensor alive for every loaded rollout.
+        with tempfile.TemporaryDirectory() as directory:
+            make_dataset(Path(directory), per_task=1)
+            for directory_, metadata in index_datasets([directory]).values():
+                raw = load_rollout(directory_, metadata)[0]
+                for aggregation in ("first", "last", "mean", "flow_last_horizon_mean"):
+                    features = load_baseline_rollout(directory_, metadata, aggregation)["features"]
+                    self.assertTrue(features.flags.owndata and features.flags.c_contiguous, aggregation)
+                    self.assertEqual(features.dtype, np.float32)
+                    np.testing.assert_array_equal(features, aggregate_features(raw, aggregation))
+
+    def check_scores_match_view_features(self, names):
+        # Copying the slice must not change any score: fit and score each detector on the
+        # copied features and on the old view-of-the-raw-tensor features.
+        with tempfile.TemporaryDirectory() as directory:
+            make_dataset(Path(directory), per_task=6)
+            index = index_datasets([directory])
+            copied = [load_baseline_rollout(*index[rid], "last") for rid in sorted(index)]
+            viewed = [dict(r, features=aggregate_features(load_rollout(*index[r["rollout_id"]])[0], "last"))
+                      for r in copied]
+            self.assertIsNotNone(viewed[0]["features"].base)
+            self.assertFalse(viewed[0]["features"].flags.c_contiguous)
+            # Rollouts alternate success/failure, so split in pairs: both splits get both classes.
+            train = [i for i in range(len(copied)) if i % 4 < 2]
+            test = [i for i in range(len(copied)) if i % 4 >= 2]
+            for split in (train, test):
+                self.assertEqual({copied[i]["failed"] for i in split}, {False, True})
+            for name in names:
+                kwargs = {"epochs": 5} if name in TORCH_DETECTORS else {}
+                if name in {"mahalanobis", "pca_kmeans", "rnd"} or name.startswith("hide_and_seek"):
+                    kwargs["pca_components"] = 4
+                if name == "pca_kmeans":
+                    kwargs["clusters"] = 4
+                a = build_detector(name, seed=0, **kwargs).fit([copied[i] for i in train])
+                b = build_detector(name, seed=0, **kwargs).fit([viewed[i] for i in train])
+                for i in test:
+                    np.testing.assert_array_equal(a.score(copied[i]), b.score(viewed[i]), err_msg=name)
+
+    def test_copied_features_give_identical_scores(self):
+        self.check_scores_match_view_features(sorted(set(DETECTOR_REGISTRY) - TORCH_DETECTORS))
+
+    @unittest.skipUnless(HAS_TORCH, "Torch detectors need PyTorch")
+    def test_copied_features_give_identical_scores_torch(self):
+        self.check_scores_match_view_features(sorted(TORCH_DETECTORS))
 
 
 class RunnerTests(unittest.TestCase):

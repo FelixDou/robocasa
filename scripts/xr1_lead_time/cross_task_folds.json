@@ -1,0 +1,106 @@
+{
+ "plan": "docs/xr1_cross_task_unseen_plan.md",
+ "seed": 20261027,
+ "k": 4,
+ "rule": "per task type (atomic, then composite): sort names, numpy default_rng(seed).permutation, deal round-robin into folds 0..k-1",
+ "tasks": {
+  "ArrangeBreadBasket": "composite",
+  "ArrangeTea": "composite",
+  "BreadSelection": "composite",
+  "CategorizeCondiments": "composite",
+  "CloseBlenderLid": "atomic",
+  "CloseToasterOvenDoor": "atomic",
+  "CoffeeSetupMug": "atomic",
+  "CuttingToolSelection": "composite",
+  "DeliverStraw": "composite",
+  "GarnishPancake": "composite",
+  "GetToastedBread": "composite",
+  "KettleBoiling": "composite",
+  "LoadDishwasher": "composite",
+  "MakeIceLemonade": "composite",
+  "OpenCabinet": "atomic",
+  "PackIdenticalLunches": "composite",
+  "PickPlaceCounterToCabinet": "atomic",
+  "PickPlaceCounterToStove": "atomic",
+  "PortionHotDogs": "composite",
+  "PreSoakPan": "composite",
+  "PrepareCoffee": "composite",
+  "RecycleBottlesByType": "composite",
+  "RinseSinkBasin": "composite",
+  "ScrubCuttingBoard": "composite",
+  "SearingMeat": "composite",
+  "SetUpCuttingStation": "composite",
+  "SlideDishwasherRack": "atomic",
+  "StackBowlsCabinet": "composite",
+  "SteamInMicrowave": "composite",
+  "StirVegetables": "composite",
+  "StoreLeftoversInBowl": "composite",
+  "TurnOffStove": "atomic",
+  "TurnOnMicrowave": "atomic",
+  "TurnOnSinkFaucet": "atomic",
+  "WaffleReheat": "composite",
+  "WashFruitColander": "composite",
+  "WashLettuce": "composite",
+  "WeighIngredients": "composite"
+ },
+ "folds": [
+  {
+   "fold": 0,
+   "held_out": [
+    "BreadSelection",
+    "CloseBlenderLid",
+    "CloseToasterOvenDoor",
+    "GarnishPancake",
+    "GetToastedBread",
+    "KettleBoiling",
+    "PrepareCoffee",
+    "SetUpCuttingStation",
+    "SlideDishwasherRack",
+    "StoreLeftoversInBowl"
+   ]
+  },
+  {
+   "fold": 1,
+   "held_out": [
+    "CategorizeCondiments",
+    "CoffeeSetupMug",
+    "LoadDishwasher",
+    "MakeIceLemonade",
+    "PickPlaceCounterToStove",
+    "ScrubCuttingBoard",
+    "SearingMeat",
+    "SteamInMicrowave",
+    "StirVegetables",
+    "TurnOnSinkFaucet"
+   ]
+  },
+  {
+   "fold": 2,
+   "held_out": [
+    "ArrangeBreadBasket",
+    "CuttingToolSelection",
+    "PortionHotDogs",
+    "PreSoakPan",
+    "RecycleBottlesByType",
+    "TurnOffStove",
+    "TurnOnMicrowave",
+    "WashFruitColander",
+    "WeighIngredients"
+   ]
+  },
+  {
+   "fold": 3,
+   "held_out": [
+    "ArrangeTea",
+    "DeliverStraw",
+    "OpenCabinet",
+    "PackIdenticalLunches",
+    "PickPlaceCounterToCabinet",
+    "RinseSinkBasin",
+    "StackBowlsCabinet",
+    "WaffleReheat",
+    "WashLettuce"
+   ]
+  }
+ ]
+}
