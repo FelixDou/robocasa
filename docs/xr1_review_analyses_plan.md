@@ -389,4 +389,234 @@ The A3 retraining command and the Stage B code follow from them, before any fold
 
 ## Result
 
-Not run yet.
+Recorded 2026-10-28. Nothing above this section was changed after the run. The runbook's
+checksum line was fixed before the run (`22f42dbc`); the analysis code is unchanged from
+`4a558327`.
+
+**Run.**
+- Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_review_analyses_20261028_155557`
+  (`review_analyses.json`).
+- Logs: `/gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_review_analyses_20261028_155557`.
+- Code: pinned worktree `robocasa_review_22f42dbc`, CPU only, about 10 minutes.
+
+**Integrity checks.** All passed:
+- **I1:** `fit_alpha(·, 0.05)` equals `fit_fast` for all nine detectors.
+- **I2:** E1, Amendment 2 and dose-response reproduced exactly.
+- **I3:** the α = 0.05 decision CIs equal Amendment 2's.
+- **I4:** `INPUTS UNCHANGED`.
+- **Also:** normalization difference 0.0; every test failure ends at H_k.
+
+### R1. Lead–FPR curves
+
+All gains are over P at the same α, in units of H_k. The columns:
+- *same-α:* thresholds from calibration only;
+- *P loosened:* P tuned on the test cohort to the fused detector's false alarms (favors the timer);
+- *tightened:* the fused detector moved along its own path to P's false alarms (this loosens it
+  when it has fewer false alarms than P, as Hide-and-Seek at α = 0.04);
+- "—": no point on the path reaches P's false alarms.
+
+| α | P: FP, lead | SAFE + P: FP; same-α / P loosened / tightened | Hide-and-Seek + P: FP; same-α / P loosened / tightened |
+|---|---|---|---|
+| 0.01 | 2, 0.040 | 2; +0.026 / −0.010 / — | 2; +0.028 / −0.008 / +0.061 |
+| 0.02 | 3, 0.100 | 11; +0.057 / −0.024 / −0.001 | 3; +0.031 / +0.027 / +0.065 |
+| 0.03 | 7, 0.155 | 13; +0.036 / +0.007 / −0.008 | 9; +0.048 / +0.036 / — |
+| 0.04 | 19, 0.208 | 19; +0.016 / +0.017 / +0.015 | 13; +0.040 / +0.064 / +0.101 |
+| **0.05** | **21, 0.225** | **23; +0.030 / +0.015 / +0.016** | **23; +0.071 / +0.056 / +0.067** |
+| 0.06 | 25, 0.249 | 25; +0.019 / +0.017 / +0.021 | 24; +0.064 / +0.066 / +0.065 |
+| 0.075 | 29, 0.273 | 30; +0.023 / +0.024 / +0.013 | 33; +0.086 / +0.057 / +0.070 |
+| 0.10 | 32, 0.293 | 32; +0.037 / +0.037 / +0.030 | 42; +0.102 / +0.058 / +0.072 |
+| 0.125 | 33, 0.299 | 45; +0.070 / +0.027 / +0.031 | 46; +0.115 / +0.069 / +0.060 |
+| 0.15 | 33, 0.299 | 51; +0.090 / +0.027 / +0.026 | 53; +0.140 / +0.072 / +0.064 |
+| 0.20 | 33, 0.299 | 75; +0.116 / +0.020 / −0.004 | 79; +0.180 / +0.077 / +0.060 |
+
+- **P stops loosening at 33 false alarms.** For α ≥ 0.125 it stays at 33 because its margin
+  cannot go below 0 (the 95th percentile of success durations). Above 0.10, same-α gains
+  therefore compare against a timer that cannot spend its budget.
+- **Noise + P** gains at most +0.006 on average for α ≤ 0.10 (maximum +0.017 over 20 draws).
+  At α = 0.125, 0.15 and 0.20 it gains +0.014, +0.033 and +0.064. All of that comes from extra
+  false alarms (73 on average at 0.20).
+- **The global timer G** is conservative: 8 false alarms at α = 0.05.
+
+**Band summary, α = 0.02–0.10.** Each failure's gain is averaged over the 7 targets. CIs are
+test-only.
+
+| Detector | Same-α | Matched (P loosened) | Matched ≤ 0 at | Reading |
+|---|---|---|---|---|
+| SAFE | +0.031 [+0.006, +0.059] | +0.013 [−0.011, +0.041] | 0.02 | budget-dependent |
+| **Hide-and-Seek** | +0.063 [+0.006, +0.115] | **+0.052 [−0.005, +0.105]** | none | budget-dependent |
+| first-inference | +0.003 [−0.001, +0.008] | −0.006 [−0.010, −0.000] | 5 of 7 | later than the timer at matched false alarms |
+| zero-input | +0.007 [−0.003, +0.024] | −0.005 [−0.016, +0.011] | 5 of 7 | no earlier warning shown |
+| same-task shuffle | +0.009 [−0.007, +0.027] | −0.020 [−0.036, −0.003] | 6 of 7 | later than the timer at matched false alarms |
+| cosine kNN | +0.025 [+0.005, +0.050] | +0.007 [−0.013, +0.033] | 0.02 | budget-dependent |
+| **Mahalanobis** | +0.040 [+0.016, +0.066] | **+0.024 [+0.000, +0.051]** | none | **earlier at every budget** |
+| PCA-KMeans | +0.026 [+0.002, +0.054] | +0.008 [−0.016, +0.036] | 0.02 | budget-dependent |
+| RND | +0.025 [+0.008, +0.047] | +0.004 [−0.013, +0.025] | 0.02, 0.10 | budget-dependent |
+
+**Decision bootstrap (refits, 2,000 replicates).** Gains at the same α, with 95% CIs.
+
+| α | SAFE | Hide-and-Seek | H&S − SAFE | H&S − first | H&S − zero | H&S − shuffle |
+|---|---|---|---|---|---|---|
+| 0.02 | +0.057 [+0.005, +0.120] | +0.031 [+0.012, +0.172] | [−0.059, +0.093] | [+0.002, +0.163] | [−0.000, +0.129] | [−0.025, +0.118] |
+| 0.05 | +0.030 [+0.007, +0.093] | +0.071 [+0.022, +0.157] | [−0.011, +0.103] | [+0.014, +0.153] | [+0.013, +0.131] | [+0.004, +0.127] |
+| 0.10 | +0.037 [+0.016, +0.098] | +0.102 [+0.057, +0.161] | [+0.021, +0.094] | [+0.038, +0.140] | [+0.049, +0.132] | [+0.036, +0.126] |
+
+H&S − SAFE excludes 0 only at α = 0.10. There Hide-and-Seek uses 42 false alarms and SAFE 32, so
+the contrast is partly a difference in false alarms. At matched false alarms the two gains are
++0.058 and +0.037.
+
+**Reading.**
+- **Hide-and-Seek.** Its matched point gain is positive at every target in the band, under
+  both matched procedures: +0.027 to +0.066 with P loosened, +0.065 to +0.101 tightened. But the
+  band-average CI with P loosened includes 0 (lower bound −0.005). By the rule fixed in advance
+  it is "budget-dependent", not the expected "earlier at every budget".
+- **SAFE.** Its same-α gains are mostly bought with false alarms: matched, it gains +0.013 in the
+  band.
+- **The controls** gain nothing, or lose, at matched false alarms, although their same-α gains
+  reach +0.05 to +0.09 at loose targets.
+- **Mahalanobis** is the one detector "earlier at every budget", by a small margin (+0.024; at
+  α = 0.05, +0.030 [+0.010, +0.053] with P loosened).
+
+### R2. The α = 0.05 table
+
+| Detector | FP (FPR, Wilson) | Lead | TWA | Gain [decision CI] | P loosened [test-only CI] | Tightened to 21 FP |
+|---|---|---|---|---|---|---|
+| P | 21 (0.055) | 0.225 | 0.585 | — | — | — |
+| G | 8 (0.021) | 0.123 | 0.551 | — | — | — |
+| SAFE + P | 23 (0.061, ≤ 0.089) | 0.255 | 0.597 | +0.030 [+0.007, +0.093] | +0.015 [−0.007, +0.041] | +0.016 [−0.004, +0.042] |
+| Hide-and-Seek + P | 23 (0.061, ≤ 0.089) | 0.296 | 0.618 | +0.071 [+0.022, +0.157] | +0.056 [−0.014, +0.120] | +0.067 [−0.003, +0.130] |
+| first-inference + P | 21 (0.055) | 0.226 | 0.586 | +0.001 [−0.015, +0.036] | −0.003 | +0.006 |
+| zero-input + P | 23 (0.061) | 0.237 | 0.588 | +0.012 [+0.001, +0.044] | −0.003 | −0.003 |
+| shuffle + P | 24 (0.063) | 0.236 | 0.587 | +0.011 [+0.000, +0.064] | −0.011 | −0.013 |
+| Mahalanobis + P | 21 (0.055) | 0.259 | 0.602 | +0.034 | +0.030 [+0.010, +0.053] | +0.037 [+0.018, +0.060] |
+| cosine kNN + P | 22 (0.058) | 0.246 | 0.594 | +0.021 | +0.009 | +0.018 |
+| PCA-KMeans + P | 23 (0.061) | 0.247 | 0.593 | +0.022 | +0.007 | +0.018 |
+| RND + P | 22 (0.058) | 0.245 | 0.593 | +0.020 | +0.007 | +0.009 |
+| SAFE + G | 17 | 0.217 | 0.586 | +0.094 over G, −0.008 over P | | |
+| Hide-and-Seek + G | 24 | 0.295 | 0.616 | +0.172 over G, +0.070 over P | | |
+
+### R3. Per-task gains (α = 0.05)
+
+| Detector | + / 0 / − tasks | Sign test p | Median [IQR] | Top-5 share | Leave-one-task-out min | Between-task SD vs within SE | Atomic / composite mean (positive) | Reading |
+|---|---|---|---|---|---|---|---|---|
+| SAFE | 15 / 3 / 20 | 0.50 | −0.009 [−0.015, +0.032] | 0.88 | +0.022 | 0.078 vs 0.013 | +0.081 (7/10) / +0.012 (8/28) | concentrated |
+| Hide-and-Seek | 21 / 1 / 16 | 0.51 | +0.054 [−0.092, +0.260] | 0.78 | +0.058 | 0.218 vs 0.042 | +0.160 (8/10) / +0.039 (13/28) | concentrated |
+| Mahalanobis | 16 / 19 / 3 | 0.004 | 0.000 [0.000, +0.031] | 0.71 | +0.027 | 0.066 vs 0.022 | +0.053 (7/10) / +0.027 (9/28) | concentrated |
+
+The other detectors are also "concentrated" (the controls have almost no gain to concentrate).
+
+- **The task gains are bimodal.** On 21 tasks Hide-and-Seek + P alarms earlier than P on most
+  failures (top: PickPlaceCounterToCabinet +0.55, StoreLeftoversInBowl +0.43,
+  PickPlaceCounterToStove +0.38). Its gain is negative on 16 tasks, and on 14 of them it alarms
+  **later than P on all 10 failures**, by up to 0.21 H_k. Several tasks sit at exactly −0.213.
+  - **The mechanism:** the fused path relaxes its timer margin (λ above P's δ) to spend the
+    false-alarm budget on the score.
+  - Where the score fires early, the gain is large. Where it does not, the relaxed timer alarms
+    later than P alone.
+  - The pooled gain is a reallocation of the false-alarm budget across tasks, not an earlier
+    alarm on every task.
+- **The gain survives dropping any one task:** the leave-one-task-out minimum is +0.058, still
+  ≥ 0.05. But five tasks carry 78% of the summed gain.
+- **SAFE and Hide-and-Seek help on the same tasks** (Spearman 0.71 over task gains).
+- **False alarms per task (P):** 24 tasks have 0, 6 have ≥ 2, and the most is 3 of 10. Under
+  Hide-and-Seek + P the most is 4 of 10 (PickPlaceCounterToCabinet). The 5% bound is marginal over
+  tasks, not per task.
+
+### R4. Calibration reuse and the test FPR
+
+**R4a. Path chosen on half of the calibration successes, margin set on the other half.**
+All columns are at α = 0.05.
+
+| Detector | FP (FPR) | Lead | Gain over P from the same half (23 FP, lead 0.239) | Gain over the registered P | 20 random halvings: median FPR; median gain [range] |
+|---|---|---|---|---|---|
+| SAFE | 23 (0.061) | 0.260 | +0.021 [−0.002, +0.048] | +0.035 | 0.054; +0.005 [−0.067, +0.039] |
+| Hide-and-Seek | 23 (0.061) | 0.304 | **+0.065 [−0.001, +0.127]** | +0.079 | 0.037; **+0.018 [−0.250, +0.115]** |
+| first-inference | 22 | 0.235 | −0.004 | +0.010 | 0.057; −0.006 |
+| zero-input | 26 | 0.251 | +0.012 | +0.025 | 0.065; −0.012 |
+| shuffle | 21 | 0.196 | −0.043 | −0.029 | 0.054; −0.019 |
+
+- **By the rule fixed in advance**, Hide-and-Seek "does not depend on reusing calibration
+  successes": on the deterministic split its gain is +0.065, with FPR 0.061.
+- **Across random halvings, however**, its median gain is only +0.018, with a range from −0.25 to
+  +0.11. With 190 successes for path selection, the chosen path is unstable. When the selected
+  score threshold rarely fires, the relaxed timer costs lead everywhere (see R3).
+
+**R4b. 200 random re-splits of the pooled successes.** Test FPR at α = 0.05.
+
+| | Mean over re-splits (SD) | P(> 0.05) | P(> 0.075) | Actual split | Percentile of actual |
+|---|---|---|---|---|---|
+| P (no path selection) | 0.047 (0.016) | 0.35 | 0.04 | 0.055 | 70 |
+| SAFE + P, registered fit | 0.054 (0.016) | 0.53 | 0.12 | 0.061 | 62 |
+| SAFE + P, split path | 0.043 (0.020) | 0.28 | 0.06 | 0.061 | 84 |
+| Hide-and-Seek + P, registered fit | 0.055 (0.016) | 0.57 | 0.13 | 0.061 | 66 |
+| Hide-and-Seek + P, split path | 0.045 (0.018) | 0.36 | 0.05 | 0.061 | 81 |
+
+- **The effects:**
+
+  | Detector | Selection effect | Cohort effect |
+  |---|---|---|
+  | SAFE | 0.012 | 0.006 |
+  | Hide-and-Seek | 0.010 | 0.006 |
+
+  The reading for both is "mainly path selection on calibration successes".
+- **About 0.003 of the selection effect is the smaller certification set**: the bound is
+  1 − 182/191 = 0.047, against 1 − 362/381 = 0.050.
+- **Against P**, which has the same calibration set and no selection, the registered fits run
+  about 0.008 higher.
+- **The method check passed**: with exchangeable successes, P and the split path stay at or below
+  0.05 on average.
+- **The 0.061 on the actual split** is at the 62nd–66th percentile for the registered fits, so it
+  is within chance for them.
+- **Choosing the path on the calibration successes** raises the expected test FPR from about 0.047
+  to 0.055, and the chance of exceeding 0.075 from 4% to 12–13%.
+
+### Expectations against results
+
+| Expectation | Result |
+|---|---|
+| R1 SAFE: "no earlier warning shown" or "budget-dependent" | budget-dependent (matched +0.013) |
+| R1 Hide-and-Seek: "earlier at every budget" | **no**: budget-dependent (matched point > 0 at every target; band CI lower bound −0.005) |
+| R1 controls and noise: no earlier warning | yes; first-inference and shuffle are slightly later than P at matched false alarms |
+| R1 baselines like SAFE | yes, except Mahalanobis (earlier at every budget, +0.024) |
+| R2 Hide-and-Seek matched ≈ +0.06 | +0.056 (P loosened), +0.067 (tightened) |
+| R3 SAFE concentrated | yes (top-5 share 0.88) |
+| R3 Hide-and-Seek mixed | **no**: concentrated (0.78); bimodal |
+| R3 most tasks 0–1 false alarm under P | yes (32 of 38) |
+| R4a Hide-and-Seek positive, ≥ 0.05 open | +0.065 on the deterministic split; median +0.018 over random halvings |
+| R4b cohort effect 0.005–0.01 and a similar selection effect | cohort 0.006, selection 0.010–0.012 |
+
+### What this changes for the paper
+
+- **Report gains at matched false alarms, not only at the same α.** At loose targets, same-α
+  gains of the controls and of noise reach +0.06 to +0.09. Even at α = 0.05, SAFE's and
+  Hide-and-Seek's same-α gains exceed their matched gains by 0.015, because both use two more
+  false alarms than P.
+- **Hide-and-Seek's earlier warning holds at equal false alarms** (+0.056 to +0.067 at 0.05,
+  positive at every target from 0.02 to 0.10). But its uncertainty is task-driven: the gain is
+  bimodal across tasks, concentrated in five, and on 16 tasks the fused detector warns later
+  than P alone. The paper should show the per-task distribution and explain the budget
+  reallocation.
+- **SAFE adds about +0.015 at equal false alarms.** Against G it looks useful (+0.094); against P
+  it does not (−0.008).
+- **Conformal scope:**
+  - the bound is marginal over tasks (up to 4 of 10 successes alarmed in one task);
+  - choosing the path on the calibration successes costs about 0.008 in expected FPR;
+  - the split path restores the bound, but it is unstable at 190 successes.
+- **For E2:** choose the fused path on a separate selection set, sized so that the certification
+  set keeps about 380 successes. Do not halve the calibration set. This resolves the draft's TODO
+  on held-out path selection.
+
+### R5 Stage A
+
+- **A1.** In the SAFE repo, `task_min_step` is set by the data loaders (`set_task_min_step`, the
+  earliest termination per task) and read only in `utils/metrics.py` and `utils/video.py`. The use
+  in `utils/routines.py` is commented out. The model and the dataset masks do not read it. A
+  held-out task can therefore be scored with its rollout length as the cutoff (Stage B rule).
+- **A2.** The E1 runtime checkpoints are the final refit (SHA-256 identical for seeds 0–2; same
+  config). The refit used:
+  - `--selection-manifest .../seen38_split_seed0.json` (1,824 train, 76 test, 38 tasks);
+  - `--selection-summary .../xr1_safe_pooled_39tasks_50each_seed0_20260812_221815_full_cv/cv_selection_summary.json`;
+  - official inverse-frequency weighting, no online mode;
+  - MLP settings: lr 1e-4, weight decay 0.01, λ_reg 1e-3, batch 512, 1,000 epochs.
+
+  The original log shows 49 minutes for three seeds (23:15–00:04 on 2026-08-14/15).
+- **A3.** Running since 2026-10-28 18:33 JST (seed 0, H100).
