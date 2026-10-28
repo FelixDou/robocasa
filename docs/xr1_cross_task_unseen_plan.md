@@ -388,4 +388,124 @@ block, the final `U1:` line and `INPUTS UNCHANGED`.
 
 ## Result
 
-To be recorded here after the run, with the run folder. Nothing above changes.
+Recorded 2026-10-28. Nothing above this section was changed after scoring.
+
+**Run.**
+- Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_20261027_212141`.
+- Logs: `/gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_cross_task_20261027_212141`.
+- Code: every fold scored at `152fbb86`, the commit of this plan.
+- Output: `cross_task_lead.json` (2,000 decision-bootstrap replicates).
+
+**Integrity checks.** All passed.
+- **I1:** `FOLDS OK` on both cohorts. Each fold dropped exactly 48 training rollouts per held-out
+  task (1,344 or 1,392 left; 1,824 for fold all).
+- **I2:** fold all's raw trajectories equal Amendment 2's for all three Hide-and-Seek variants on
+  both cohorts, with max difference 0.0.
+- **I3:** the Amendment 2 table is reproduced exactly: P 0.2252; Hide-and-Seek + P 0.2961, gain
+  +0.0708; zero-input +0.0121; first-inference +0.0010; normalization difference 0.0.
+- **I4:** `INPUTS UNCHANGED`.
+- Every fold has the full 6,088 + 6,104 rows (4 detectors × 1,522 and × 1,526 rollouts).
+
+**Operational restarts.** No code, input or argument changed. All runs used `152fbb86`.
+- **What ran out of memory:** with `last` aggregation, `load_baseline_rollout` kept each
+  rollout's whole raw feature tensor alive (a NumPy view). Each process held 111–126 GB, and the
+  allocation's limit is estimated at 340–460 GB.
+- **First launch (all five folds at once):** fold all and fold 0 were killed by the memory limit
+  while loading data. They wrote nothing.
+- **Early relaunch of all and 0:** this pushed memory over the limit again, and fold 3 was killed
+  after `hide_and_seek seed 0`. Its partial output is kept as `fold_3.oomkilled/`. The two
+  relaunched folds were stopped by hand.
+- **Final runs:** fold 3 was rerun from scratch. Fold 0 started when folds 1 and 2 had exited, and
+  fold all when fold 3 had exited.
+- **Logs:** the killed and stopped attempts keep their logs as `*.oomkilled.log` and
+  `*.stopped_early.log`.
+- **Later fix:** the loader now copies the slice (`3c5b6bba`, committed after scoring and used by
+  no fold here).
+
+**Primary and secondary rules.** All gains are in units of H_k. Brackets are decision-bootstrap
+95% CIs.
+
+| Rule | Result | Verdict |
+|---|---|---|
+| **U1** Hide-and-Seek + G over G, unseen | lead 0.253 vs 0.126, gain **+0.127 [0.069, 0.211]**; FPR 0.047 (18 FP), Wilson ≤ 0.074 | **supported** (all 4 criteria) |
+| Null sanity | noise +0.005 mean (max +0.019); resampled H&S +0.003 (max +0.021) | interpretable |
+| **U2** − zero-input + G | +0.094 [0.038, 0.165] (both at 18 FP) | beyond a learned elapsed-time signal |
+| **U3** − first-inference + G | +0.127 [0.067, 0.210]; the first-inference control adds 0.000 over G | develops during the rollout |
+| **U4** unseen − seen gain over G | 0.127 − 0.122 = +0.005 [−0.048, 0.100] | no transfer loss detected (not equivalence) |
+| **U5** few-shot crossover | gain over P_n ≥ 0.068 for every n | not reached |
+| **U6** cosine kNN + G over G | +0.011 [−0.002, 0.066]; H&S − kNN +0.116 [0.042, 0.188] | descriptive |
+| **U7** FPR on held-out tasks | G 0.024 (≤ 0.044); H&S + G 0.047 (≤ 0.074) | calibration transfers |
+
+The zero-input control alone gains +0.033 [0.0025, 0.087] over G: a learned elapsed-time signal,
+below the margin.
+
+**Seen/Unseen table (Hide-and-Seek's layout).** Mean warning lead (FPR), with the gain over the
+timer in the same row.
+
+| Monitor | Seen (fold all) | Unseen (pooled folds) |
+|---|---|---|
+| G | 0.123 (0.021) | 0.126 (0.024) |
+| Hide-and-Seek + G | 0.245 (0.047), +0.122 [0.022, 0.208] | 0.253 (0.047), +0.127 [0.069, 0.211] |
+| P (seen) / P_n, n = all (unseen) | 0.225 (0.055) | 0.228 (0.058) |
+| Hide-and-Seek + P / + P_all | 0.296 (0.061), +0.071 [0.022, 0.160] | 0.296 (0.063), +0.068 [0.048, 0.160] |
+
+Seen + P uses per-task normalization (Amendment 2). With pooled normalization the seen gain over
+P is +0.064, at FPR 0.071 (Wilson upper bound 0.101).
+
+**Few-shot (U5).** P_n is the mean over 20 draws of n development successes per task.
+
+| n | P_n lead (FPR) | H&S + P_n lead (FPR) | gain over P_n | P_n − G | (H&S + P_n) − (H&S + G) |
+|---|---|---|---|---|---|
+| 1 | 0.169 (0.041) | 0.268 (0.052) | +0.099 [0.047, 0.188] | +0.043 [−0.038, 0.118] | +0.014 [−0.028, 0.061] |
+| 3 | 0.186 (0.048) | 0.284 (0.061) | +0.098 [0.047, 0.189] | +0.060 [−0.030, 0.131] | +0.030 [−0.016, 0.072] |
+| 5 | 0.201 (0.052) | 0.289 (0.064) | +0.088 [0.045, 0.189] | +0.075 [−0.025, 0.141] | +0.035 [−0.013, 0.081] |
+| all | 0.228 (0.058) | 0.296 (0.063) | +0.068 [0.048, 0.160] | +0.102 [0.007, 0.147] | +0.043 [0.003, 0.087] |
+
+Gain at n = all minus the seen gain over P (per-task normalization): −0.003 [−0.077, 0.101].
+
+**Descriptive.**
+- **Matched false alarms (favors the timer).** G uses 9 FP; Hide-and-Seek + G uses 18. G tuned on
+  the test cohort to 18 FP leads by 0.203. Against it, Hide-and-Seek's gain is
+  **+0.051 [−0.002, 0.104]** (test-only bootstrap). Part of the 0.127 comes from G leaving its
+  false-alarm budget unused, because the Proposition 1 margin makes it conservative. At equal
+  false alarms, the gain over a global timer is about the margin and not clearly above 0.
+- **Task type.** Atomic: 100 failures, gain +0.043 (0.124 → 0.167). Composite: 280 failures,
+  gain +0.158 (0.127 → 0.284). This is against G, so it is not comparable to the seen-task strata
+  against P (§15.13).
+- **Per fold** (held-out tasks only):
+
+  | Fold | Tasks | G lead (FPR) | H&S + G lead (FPR) | Gain | Zero-input gain | kNN gain |
+  |---|---|---|---|---|---|---|
+  | 0 | 10 | 0.169 (0.050) | 0.223 (0.040) | +0.054 | 0.000 | +0.015 |
+  | 1 | 10 | 0.111 (0.010) | 0.175 (0.030) | +0.064 | +0.017 | +0.005 |
+  | 2 | 9 | 0.110 (0.033) | 0.365 (0.100) | +0.255 | +0.077 | +0.026 |
+  | 3 | 9 | 0.110 (0.000) | 0.262 (0.022) | +0.152 | +0.045 | −0.001 |
+
+  - All four folds gain at least +0.054.
+  - Fold 2 has the largest gain, and also an FPR of 0.10 (9 of the 18 pooled false alarms; Wilson
+    up to 0.179).
+  - In fold 3, the fitted path caps the timer at the time limit (`lam` 1.109 ≥ 1), so all warning
+    comes from the score. 33 of its 90 failures are flagged only at the final inference, with no
+    lead. The seen fold all path does the same (`lam` 1.092): with pooled normalization, the fit
+    drops G.
+- **Test-only bootstrap of U1:** +0.127 [0.073, 0.184].
+
+**Reading, by the table written before scoring.** This is the row "U1 and U2 supported":
+
+> On tasks the monitor never saw and with no timing data for them, Hide-and-Seek adds at least
+> 0.05 H_k of warning over a global timer, beyond a learned elapsed-time signal. The few-shot
+> crossover is not reached: even with every development success of the new task, Hide-and-Seek
+> trained without the task adds +0.068 over the per-task timer, the same as its seen-task gain
+> (+0.071).
+
+Caveats that go with that statement:
+- **Exploratory only:** both cohorts were already opened.
+- **Matched false alarms:** with G tuned to the same 18 false alarms, the gain is about the margin
+  (+0.051, CI touching 0).
+- **No loss is not equivalence:** U4's CI is wide.
+- **Fold 2:** it carries the largest gain at FPR 0.10.
+
+**Stage 2.** By the plan's rule, a Stage 2 confirmatory item is proposed: zero-shot Hide-and-Seek
+on held-out tasks. Given the false-alarm caveat, its primary comparison should be against the
+per-task timer from n successes (H&S + P_n over P_n), where the false-alarm rates nearly match.
+The comparison against G would be secondary, reported together with the matched-FPR comparison.
