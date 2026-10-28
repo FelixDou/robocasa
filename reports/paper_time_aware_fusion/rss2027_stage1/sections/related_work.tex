@@ -26,21 +26,19 @@ action chunks, and ActProbe~\cite{huang2026actprobe} feeds chunk consistency and
 a task-conditioned LSTM, beating internal-feature baselines on RoboCasa. FAIL-Detect~\cite{xu2025faildetect} and
 FIPER~\cite{romer2025fiper} score inputs, outputs or embeddings against successful rollouts
 only. FIPER alarms when two conformal scores \emph{both} exceed their thresholds, which
-suppresses false alarms; in its own pipeline an elapsed-time method matches its accuracy, but
-FIPER warns earlier at a matched false-alarm rate (Sec.~\ref{sec:results}). We alarm when \emph{either} crosses, as the two signals catch failures
-at different times.
-
-\textbf{World-model verifiers.}
-CheckVLA~\cite{liu2026checkvla} is the closest work on our benchmark. It verifies each action
-chunk with an action-conditioned world model on RoboCasa365, at a conformal 5\% rate of
-unnecessary interventions, and repairs it with the same VLA. It does not compare against
-elapsed time.
+suppresses false alarms; we alarm when \emph{either} crosses, as the two signals catch failures
+at different times. CheckVLA~\cite{liu2026checkvla}, the closest work on our benchmark,
+verifies each action chunk with a world model on RoboCasa365 at a conformal 5\% rate of
+unnecessary interventions and repairs it with the same VLA. Neither FIPER nor CheckVLA compares
+against elapsed time.
 
 \textbf{Time, calibration and intervention.}
-Our time-risk baseline is a per-task
-survival-style estimate~\cite{kaplan1958}, and lead time at a fixed false-alarm
-budget is the accuracy--earliness trade-off of early time-series
-classification~\cite{xing2012early}. Split-conformal thresholds give finite-sample
+FIPER argues that late detection is not enough~\cite{romer2025fiper} and Hide-and-Seek weights
+accuracy by time~\cite{park2026hideseek}. Our lead is one minus FIPER's detection time and, when
+failures run to the limit, determines Hide-and-Seek's TWA at equal FPR (Sec.~\ref{sec:setup}): the
+metric is not new, the duration-only comparator is. Lead at a fixed false-alarm budget is the
+accuracy--earliness trade-off of early time-series classification~\cite{xing2012early}, and our
+time risk a survival-style estimate~\cite{kaplan1958}. Split-conformal thresholds give finite-sample
 false-positive control under exchangeability~\cite{angelopoulos2021gentle}; we extend the
 construction to a two-signal OR rule (Sec.~\ref{sec:guarantee}). RESCUE~\cite{ahmedt2026rescue}
 finds that good detection scores do not guarantee lower intervention cost, and CheckVLA

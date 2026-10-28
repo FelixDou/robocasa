@@ -484,3 +484,44 @@ TSUBAME run `rldx1_per_seed_20261028_145711`, code `67d7fa1d` (`docs/rldx_per_se
   untuned OOD rows), and the RLDX-1 paragraph gives both seed-averaged and single-model gains.
 - Pages: submission build 6 pages (references alone on page 6); the draft build runs about 3
   lines over, only because of the red Stage 2 notes.
+
+## Update 2026-10-28 (b): response to the proposal review
+
+The review of the 3-page proposal raised four points (novelty is the comparator, not the metric;
+fair information budget and unseen tasks; lead before timeout is not useful warning by itself;
+statistical precision) and two prose fixes. The numbers come from the review analyses on branch
+`claude/review-analyses` (`docs/xr1_review_analyses_plan.md`, Result: R1–R4 and R5 Stage B; runs
+`xr1_review_analyses_20261028_155557`, `xr1_cross_task_20261027_212141`,
+`xr1_cross_task_safe_20261028_193716`). All are exploratory, on opened cohorts.
+- **Novelty.** Abstract, introduction and Related Work now say that FIPER and Hide-and-Seek
+  already measure timeliness: lead is one minus FIPER's DT and, when failures run to the limit,
+  determines TWA at equal FPR. The contribution is the duration-only comparator (contribution 1).
+- **Scope.** "Benchmarks where failure is a timeout" became "success-terminated, time-limited
+  protocols such as RoboCasa365's".
+- **Information budget and unseen tasks.** New paragraph in Sec. VI-E: P uses 6–45 success
+  durations per task, the monitors 48 rollouts per task with failures. On unseen tasks
+  (4 folds, global timer G): Hide-and-Seek + G +0.127 [0.069, 0.211], 0.051 [−0.002, 0.104] at
+  matched false alarms; SAFE + G +0.017 (best noise draw 0.019), −0.079 matched;
+  Hide-and-Seek − SAFE +0.111 [0.036, 0.166]; with 1–5 successes, Hide-and-Seek +0.088 to
+  +0.099, SAFE about +0.01.
+- **Statistics.** SAFE's CI contains 0.05, so the rule decides; Hide-and-Seek's matched gain
+  0.056 [−0.014, 0.120], positive at every target from 0.02 to 0.10 (SAFE 0.013); per task, the
+  fused detector is later than P on 16 of 38 tasks and five tasks carry 78% of the gain; SAFE +
+  G on the held-out set gains 0.094 over G but is 0.008 below P.
+- **Conformal scope.** Per trajectory, marginal over tasks and calibration draws, not a cap on a
+  test set or a task (one task: 4 of 10 successes alarmed); path selection raises the expected
+  test FPR from 0.047 to about 0.055 (R4b). The E2 TODO now carries R4's recommendation (separate
+  selection set), still for the author to confirm.
+- **Usefulness of lead.** Introduction and Limitations say lead is measured to the time limit,
+  not to an irreversible failure, and that Stage 2 tests its value by acting on it. E3's
+  descriptive monitor arm is now Hide-and-Seek + P (was SAFE + P), with unnecessary resets,
+  wasted time and inference latency; marked TODO for the author to confirm and resize.
+- **Cuts to stay within 5 + 1:** the validation-set time-risk sentences, the time risk's
+  estimator formula, the validation matched-FPR sentence (its expectation stays in Sec. V), the
+  World-model verifiers heading (CheckVLA merged into the previous paragraph), E2/E3 sizing
+  details and the atomic/composite split of the point-of-no-return counts.
+- Pages: submission build (notes off, pdflatex from TinyTeX) 6 pages, content ends at the bottom
+  of page 5, references alone on page 6. The draft build (notes on) runs over by the length of
+  the red notes.
+- The 3-page proposal (`../venue_proposal/venue_proposal.tex`, untracked in the main checkout)
+  was revised the same way and still fits 3 pages.
