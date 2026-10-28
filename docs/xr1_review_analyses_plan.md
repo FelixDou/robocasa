@@ -619,4 +619,19 @@ All columns are at α = 0.05.
   - MLP settings: lr 1e-4, weight decay 0.01, λ_reg 1e-3, batch 512, 1,000 epochs.
 
   The original log shows 49 minutes for three seeds (23:15–00:04 on 2026-08-14/15).
-- **A3.** Running since 2026-10-28 18:33 JST (seed 0, H100).
+- **A3. Retraining is bit-exact.**
+  - **Run:** seed 0 retrained on r1n8 (H100), with the same export, selection manifest, selection
+    summary and settings, from the pinned worktree `22f42dbc`. Output:
+    `$RV_ROOT/safe_retrain_check/indep_seed0`; log: `$RV_LOG/a3_retrain_seed0.log`.
+  - **Checkpoint:** SHA-256 identical to the frozen `indep_seed0/model_final.ckpt` (`c8b0124e…`).
+  - **Config:** identical.
+  - **Scores:** all 1,900 score trajectories equal (maximum absolute difference 0.0).
+  - **Metrics:** selected hyperparameters, task cutoffs, class weights and objective are equal.
+  - **Time:** 18:33–19:16 JST, 43 minutes. Almost all of it is loading the 1,950-rollout export
+    (about 1.3–2.2 s per rollout from `/gs/bs`).
+  - **A second launch, not used:** a duplicate launch at 18:42 (`a3_retrain_r2.sh`) had no GPU
+    visible (`CUDA_VISIBLE_DEVICES` empty), so it cannot train. Its log is
+    `a3_retrain_seed0_r2*.log` and its output folder `indep_seed0_r2*`. It plays no part in the
+    result.
+  - **Consequence for Stage B:** gate B-G2 is the exact form. Retrained fold all must equal the
+    frozen trajectories, and the frozen trajectories are the seen reference.
