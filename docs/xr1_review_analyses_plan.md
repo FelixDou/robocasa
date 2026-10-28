@@ -331,8 +331,8 @@ The eleven `alpha ...` lines appear within minutes. The decision bootstrap takes
 hour. When the process has exited:
 
 ```bash
-tail -n 45 $RV_LOG/review_analyses.log
-sha256sum -c $RV_LOG/frozen_inputs.sha256 | tail -n 3 && echo INPUTS UNCHANGED
+tail -n 80 $RV_LOG/review_analyses.log
+sha256sum -c --quiet $RV_LOG/frozen_inputs.sha256 && echo INPUTS UNCHANGED
 ls -la $RV_ROOT/review_analyses.json
 ```
 
