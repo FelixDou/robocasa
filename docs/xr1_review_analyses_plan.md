@@ -628,6 +628,7 @@ Recorded 2026-10-28.
   unchanged from `4a558327`.
 - After the R1–R4 run and Stage A, two things were added before any fold is trained: "Stage B
   implementation" under R5, and runbook step 3.
+- R5 Stage B ran from `9d0353be` with no code change. Its result is the last section below.
 
 **Run.**
 - Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_review_analyses_20261028_155557`
@@ -871,3 +872,106 @@ All columns are at α = 0.05.
     result.
   - **Consequence for Stage B:** gate B-G2 is the exact form. Retrained fold all must equal the
     frozen trajectories, and the frozen trajectories are the seen reference.
+
+### R5 Stage B
+
+**SAFE does not carry warning to unseen tasks. U1-S is not supported.** SAFE + G gains +0.017
+over G, below the 0.05 margin. Hide-and-Seek + G gains +0.127 on the same folds and replicates.
+Hide-and-Seek − SAFE is +0.111 [0.036, 0.166].
+
+**Run.**
+- Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_safe_20261028_193716`
+  (`cross_task_safe.json`, SHA-256 `113864b4…`, copied to
+  `reports/safe_robocasa365_research_plan_20260823/evidence/xr1_cross_task_safe_20261028_193716/`).
+- Logs: `/gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_cross_task_safe_20261028_193716`.
+- Code: pinned worktree `robocasa_xtsafe_9d0353be` on r1n8 (2× H100), all five fold directories
+  assembled by `9d0353be`.
+- 12 fold models (folds 0–3 × seeds 0–2); fold all is the frozen refit. Both E1 cohorts scored
+  with every model. Decision bootstrap 2,000 replicates, seed 0.
+
+**Checks.**
+- **B0:** 20 unit tests passed; both GPUs empty at the start.
+- **B1:** folds 0 and 1 have 28 seen tasks and 1,344 training rollouts; folds 2 and 3 have 29 and
+  1,392. Exactly 48 training rollouts are removed per held-out task. `MANIFESTS OK`.
+- **B-G1a:** fold all's scores of both cohorts, through `--unseen-tasks score`, equal E1's
+  `per_seed_raw_safe` (maximum difference 0.0 on each cohort).
+- **B-G3:** fold all's per-task normalization equals the runtime bundle's (maximum difference 0.0).
+- **S1:** every fold assembled with its own seen tasks, checkpoints and held-out tasks.
+- **S2:** E1 reproduced exactly: P 0.2252, 21 FP; SAFE + P 0.2550, 23 FP; gain +0.0298.
+- **S3:** Hide-and-Seek's zero-shot gain (+0.1273) and decision CI ([0.0687, 0.2105]) equal the
+  cross-task run's. SAFE and Hide-and-Seek therefore share its replicates.
+- **Inputs:** the hashes recorded in the JSON equal those of the R1–R4 and cross-task runs: both
+  E1 cohorts, the runtime bundle, `confirm_lead.json`, the fold file and `cross_task_lead.json`.
+- **Not yet received:** B4's `compare` line (B-G1b), the `END` lines of B2 and B3, and
+  `INPUTS UNCHANGED` from the checksum file. The analysis could only run after all 12 trainings
+  and 30 scorings had written their files, because `assemble` requires every seed of every cohort.
+
+**Unseen arm, α = 0.05** (380 failures and 380 successes, pooled over the four folds).
+
+| | Lead | FP (FPR) | Gain over G | Decision CI |
+|---|---|---|---|---|
+| G | 0.126 | 9 (0.024) | | |
+| SAFE + G | 0.143 | 20 (0.053) | +0.017 | [0.003, 0.091] |
+| Hide-and-Seek + G | 0.253 | 18 (0.047) | +0.127 | [0.069, 0.211] |
+| Hide-and-Seek − SAFE | | | +0.111 | [0.036, 0.166] |
+
+- **U1-S.** CI above 0: yes. Point ≥ 0.05: **no** (0.017). FPR ≤ 0.075: yes (0.053). Wilson upper
+  ≤ 0.10: yes (0.080). Not supported. The test-only bootstrap CI is [−0.022, +0.060].
+- **Nulls** (20 draws each; the reading is interpretable because both means are below 0.05):
+  - Gaussian noise: mean gain +0.005, maximum +0.019. One draw of 20 reaches SAFE's +0.017.
+  - SAFE resampled within task: mean +0.002, maximum +0.009. No draw reaches +0.017.
+  - SAFE's gain is above both null means and above every resampled draw, so it carries some
+    temporal signal. It is the size of the best noise draw.
+- **At matched false alarms** (G loosened on the test cohort, which favors the timer; test-only
+  bootstrap):
+  - SAFE + G (20 FP) against G at 19 FP (lead 0.221): **−0.079 [−0.119, −0.034]**. SAFE's gain at
+    α = 0.05 is paid for with 11 more false alarms than G, and those buy less lead than loosening
+    G does.
+  - Hide-and-Seek + G (18 FP) against G at 18 FP (lead 0.203): **+0.051 [−0.002, +0.104]**.
+- **U5-S, timers from n successes of the task** (gain over P_n and Hide-and-Seek − SAFE, decision
+  CIs):
+
+  | n | P_n | SAFE + P_n | Gain | Hide-and-Seek − SAFE |
+  |---|---|---|---|---|
+  | 1 | 0.169 | 0.182 | +0.013 [0.001, 0.077] | +0.086 [0.018, 0.155] |
+  | 3 | 0.186 | 0.195 | +0.010 [0.000, 0.074] | +0.088 [0.020, 0.158] |
+  | 5 | 0.201 | 0.209 | +0.008 [−0.001, 0.069] | +0.080 [0.024, 0.155] |
+  | all | 0.228 | 0.238 | +0.009 [0.000, 0.047] | +0.059 [0.027, 0.144] |
+
+  SAFE adds about +0.01 at every n. Hide-and-Seek stays ahead of SAFE at every n.
+- **U-HS:** +0.111 [0.036, 0.166]. Hide-and-Seek warns earlier than SAFE on unseen tasks.
+- **U4-S (transfer loss):** unseen gain +0.017, seen gain +0.011; difference +0.006
+  [−0.028, +0.041]. No loss is detected because SAFE gains little over G on seen tasks too (9 FP
+  against 8). With per-task normalization against P it gains +0.030 (S2), +0.015 at matched false
+  alarms (R2).
+
+**Descriptive.**
+- **Per fold** (gain over G; FP of G → SAFE + G): fold 0 0.000 (5 → 5); fold 1 +0.011 (1 → 7);
+  fold 2 +0.023 (3 → 3); fold 3 +0.036 (0 → 5). In fold 0 the chosen path makes SAFE's score
+  almost unused (u = 1.45). The 11 extra false alarms are in folds 1 and 3.
+- **By task type:** atomic tasks (100 failures) −0.041, composite tasks (280 failures) +0.037. The
+  fused detector warning later than G on atomic tasks fits R3's mechanism (the fused path relaxes
+  the timer's margin); this run does not test it.
+
+**Expectations against results.**
+- "U1-S is likely to pass against G": **wrong**. The CI and FPR criteria pass; the point gain is a
+  third of the margin.
+- "Against G at matched false alarms, and against P_all, SAFE's gain should be near +0.030 or
+  below": held (−0.079 and +0.009).
+- "The informative number is U-HS": +0.111 [0.036, 0.166].
+
+**Caveats.**
+- The fold models are trained on 1,344–1,392 rollouts instead of 1,824. Their MLP settings are the
+  frozen ones, chosen by cross-validation on the pool that contains the held-out tasks. That can
+  only favor SAFE.
+- The matched-false-alarm CIs are test-only. G is loosened on the test cohort.
+
+**What this changes for the paper.**
+- **On unseen tasks, Hide-and-Seek transfers and SAFE does not.** Hide-and-Seek: +0.127 over G,
+  +0.051 at matched false alarms. SAFE: +0.017 (the size of a noise score's), −0.079 at matched
+  false alarms. The gap is +0.111 [0.036, 0.166] and holds with P_n for every n.
+- **The learned detector adds little beyond time on any task.** Over G: +0.011 seen, +0.017
+  unseen. Over P: +0.030 seen (+0.015 at matched false alarms), about +0.01 unseen. This supports
+  "SAFE mostly tracks time" with the unseen-task numbers.
+- **Report matched false alarms beside every G comparison.** Against G alone, SAFE's α = 0.05 CI
+  excludes 0.
