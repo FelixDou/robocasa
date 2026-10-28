@@ -234,16 +234,21 @@ class LoaderTests(unittest.TestCase):
                       for r in copied]
             self.assertIsNotNone(viewed[0]["features"].base)
             self.assertFalse(viewed[0]["features"].flags.c_contiguous)
+            # Rollouts alternate success/failure, so split in pairs: both splits get both classes.
+            train = [i for i in range(len(copied)) if i % 4 < 2]
+            test = [i for i in range(len(copied)) if i % 4 >= 2]
+            for split in (train, test):
+                self.assertEqual({copied[i]["failed"] for i in split}, {False, True})
             for name in names:
                 kwargs = {"epochs": 5} if name in TORCH_DETECTORS else {}
                 if name in {"mahalanobis", "pca_kmeans", "rnd"} or name.startswith("hide_and_seek"):
                     kwargs["pca_components"] = 4
                 if name == "pca_kmeans":
                     kwargs["clusters"] = 4
-                a = build_detector(name, seed=0, **kwargs).fit(copied[::2])
-                b = build_detector(name, seed=0, **kwargs).fit(viewed[::2])
-                for r, v in zip(copied[1::2], viewed[1::2]):
-                    np.testing.assert_array_equal(a.score(r), b.score(v), err_msg=name)
+                a = build_detector(name, seed=0, **kwargs).fit([copied[i] for i in train])
+                b = build_detector(name, seed=0, **kwargs).fit([viewed[i] for i in train])
+                for i in test:
+                    np.testing.assert_array_equal(a.score(copied[i]), b.score(viewed[i]), err_msg=name)
 
     def test_copied_features_give_identical_scores(self):
         self.check_scores_match_view_features(sorted(set(DETECTOR_REGISTRY) - TORCH_DETECTORS))
