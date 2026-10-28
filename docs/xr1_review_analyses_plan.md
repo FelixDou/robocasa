@@ -893,18 +893,22 @@ Hide-and-Seek − SAFE is +0.111 [0.036, 0.166].
 - **B0:** 20 unit tests passed; both GPUs empty at the start.
 - **B1:** folds 0 and 1 have 28 seen tasks and 1,344 training rollouts; folds 2 and 3 have 29 and
   1,392. Exactly 48 training rollouts are removed per held-out task. `MANIFESTS OK`.
-- **B-G1a:** fold all's scores of both cohorts, through `--unseen-tasks score`, equal E1's
-  `per_seed_raw_safe` (maximum difference 0.0 on each cohort).
+- **B2, B3:** all 12 trainings and 30 scorings ended with exit code 0 (`42 ok`).
+- **B-G1a:** fold all's scores, through `--unseen-tasks score`, equal E1's `per_seed_raw_safe`
+  on every row of the E1 prediction files (maximum difference 0.0). That is 1,522 calibration-campaign
+  and 1,526 test-campaign rollouts, a superset of the 760 + 760 cohort rollouts.
+- **B-G1b:** fold all seed 0, scored with every cutoff set to the rollout length, equals its
+  scores with training cutoffs on all 1,526 test-campaign rollouts (maximum difference 0.0,
+  `IDENTICAL`). The cutoff does not change a score, as A1 found.
 - **B-G3:** fold all's per-task normalization equals the runtime bundle's (maximum difference 0.0).
 - **S1:** every fold assembled with its own seen tasks, checkpoints and held-out tasks.
 - **S2:** E1 reproduced exactly: P 0.2252, 21 FP; SAFE + P 0.2550, 23 FP; gain +0.0298.
 - **S3:** Hide-and-Seek's zero-shot gain (+0.1273) and decision CI ([0.0687, 0.2105]) equal the
   cross-task run's. SAFE and Hide-and-Seek therefore share its replicates.
-- **Inputs:** the hashes recorded in the JSON equal those of the R1–R4 and cross-task runs: both
-  E1 cohorts, the runtime bundle, `confirm_lead.json`, the fold file and `cross_task_lead.json`.
-- **Not yet received:** B4's `compare` line (B-G1b), the `END` lines of B2 and B3, and
-  `INPUTS UNCHANGED` from the checksum file. The analysis could only run after all 12 trainings
-  and 30 scorings had written their files, because `assemble` requires every seed of every cohort.
+- **Inputs:** `INPUTS UNCHANGED` after the analysis. The hashes recorded in the JSON also equal
+  those of the R1–R4 and cross-task runs: both E1 prediction files, the runtime bundle,
+  `confirm_lead.json`, the fold file and `cross_task_lead.json`.
+- **Copy:** the local `cross_task_safe.json` has the cluster file's SHA-256.
 
 **Unseen arm, α = 0.05** (380 failures and 380 successes, pooled over the four folds).
 
