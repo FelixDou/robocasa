@@ -28,6 +28,33 @@ def _write_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
+UNSEEN_TASK_MODES = ("refuse", "score")
+CUTOFF_RULES = ("training", "rollout_length")
+
+
+def assign_cutoffs(tasks, lengths, cutoffs, expected_tasks, *, unseen_tasks="refuse", cutoff_rule="training"):
+    """task_min_step for each rollout, and whether its task is outside the checkpoint's training tasks.
+
+    By default every task must be a training task and keeps its training-derived cutoff. With
+    unseen_tasks="score", a task outside training is scored with its rollout length as the cutoff;
+    cutoff_rule="rollout_length" applies that to every task. The official SAFE code reads
+    task_min_step only for metrics and plots, never for the score trajectory
+    (docs/xr1_review_analyses_plan.md, R5 A1), so neither option changes a score.
+    """
+    if unseen_tasks not in UNSEEN_TASK_MODES:
+        raise ValueError(f"unseen_tasks must be one of {UNSEEN_TASK_MODES}")
+    if cutoff_rule not in CUTOFF_RULES:
+        raise ValueError(f"cutoff_rule must be one of {CUTOFF_RULES}")
+    out, outside = [], []
+    for task, length in zip(tasks, lengths):
+        seen = task in expected_tasks
+        if not seen and unseen_tasks != "score":
+            raise ValueError(f"Task {task} is not a training task of this checkpoint")
+        out.append(int(length) if cutoff_rule == "rollout_length" or not seen else min(int(cutoffs[task]), int(length)))
+        outside.append(not seen)
+    return out, outside
+
+
 def score_external_export(
     *,
     export_dir,
@@ -37,6 +64,8 @@ def score_external_export(
     group,
     device="cuda",
     allow_task_subset=False,
+    unseen_tasks="refuse",
+    cutoff_rule="training",
 ):
     import sys
 
@@ -99,7 +128,7 @@ def score_external_export(
     }
     unexpected = sorted(actual_tasks - expected_tasks)
     missing = sorted(expected_tasks - actual_tasks)
-    if unexpected or (missing and not allow_task_subset):
+    if (unexpected and unseen_tasks != "score") or (missing and not allow_task_subset):
         raise ValueError(
             f"External export task coverage differs from training: "
             f"missing={missing}, unexpected={unexpected}"
@@ -109,9 +138,18 @@ def score_external_export(
     cutoffs = training_metrics.get("task_min_steps", {})
     if set(cutoffs) != expected_tasks:
         raise ValueError("Frozen training metrics lack exact task cutoff coverage")
-    for rollout in rollouts:
-        task = catalog["task_names"][int(rollout.task_id)]
-        rollout.task_min_step = min(int(cutoffs[task]), len(rollout.hidden_states))
+    rollout_tasks = [catalog["task_names"][int(rollout.task_id)] for rollout in rollouts]
+    task_cutoffs, outside = assign_cutoffs(
+        rollout_tasks,
+        [len(rollout.hidden_states) for rollout in rollouts],
+        cutoffs,
+        expected_tasks,
+        unseen_tasks=unseen_tasks,
+        cutoff_rule=cutoff_rule,
+    )
+    for rollout, cutoff in zip(rollouts, task_cutoffs):
+        rollout.task_min_step = cutoff
+    nondefault = unseen_tasks != "refuse" or cutoff_rule != "training"
     if cfg.dataset.load_to_cuda:
         rollouts = [rollout.to(device) for rollout in rollouts]
 
@@ -139,7 +177,7 @@ def score_external_export(
         raise RuntimeError("Frozen checkpoint produced an invalid score trajectory")
 
     records = []
-    for rollout, score in zip(rollouts, trajectories):
+    for index, (rollout, score) in enumerate(zip(rollouts, trajectories)):
         env_path, env = identity[id(rollout)]
         manifest = env.get("robocasa_manifest_record", {})
         task_name = catalog["task_names"][int(rollout.task_id)]
@@ -167,6 +205,8 @@ def score_external_export(
                 ),
             }
         )
+        if nondefault:
+            records[-1]["training_task"] = not outside[index]
     ids = [row["rollout_id"] for row in records]
     if len(ids) != len(set(ids)):
         raise ValueError("External scoring produced duplicate rollout IDs")
@@ -196,6 +236,12 @@ def score_external_export(
         "checkpoint_updated": False,
         "thresholds_fitted": False,
     }
+    if nondefault:
+        provenance.update(
+            unseen_tasks=str(unseen_tasks),
+            cutoff_rule=str(cutoff_rule),
+            unseen_task_names=sorted({t for t, o in zip(rollout_tasks, outside) if o}),
+        )
     _write_json(output / "provenance.json", provenance)
     return provenance
 
@@ -215,6 +261,18 @@ def build_parser():
             "Allow the external export to contain a strict subset of the "
             "checkpoint's training tasks. Unexpected tasks remain forbidden."
         ),
+    )
+    parser.add_argument(
+        "--unseen-tasks",
+        choices=UNSEEN_TASK_MODES,
+        default="refuse",
+        help="'score' also scores tasks outside the checkpoint's training tasks (cutoff: rollout length)",
+    )
+    parser.add_argument(
+        "--cutoff-rule",
+        choices=CUTOFF_RULES,
+        default="training",
+        help="'rollout_length' sets every task's cutoff to the rollout length (a check that cutoffs do not change scores)",
     )
     return parser
 

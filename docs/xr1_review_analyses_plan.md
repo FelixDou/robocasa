@@ -260,11 +260,60 @@ under the rules below, which are fixed now.
   - **U5-S:** SAFE + P_n over P_n for n ∈ {1, 3, 5, all}.
   - **U-HS:** (Hide-and-Seek + G) − (SAFE + G), unseen arm, decision CI.
   - The matched-false-alarm version against G is reported with every G comparison.
-- **Expectation:**
+- **Expectation (written with the design):**
   - U1-S is likely to pass against G, because G is weak and its margin is conservative.
   - Against G at matched false alarms, and against P_all, SAFE's gain should be near its
     seen-task +0.030 or below.
   - The informative number is U-HS.
+
+### Stage B implementation
+
+Added 2026-10-28, after Stage A and before any fold is trained. It changes no rule above. It
+fixes the code and the checks that follow from Stage A: A1 means the cutoff does not change a
+score, and A3 means retraining is bit-exact.
+
+**Code.**
+- **`robocasa/recovery/safe/score_seen_checkpoint_external.py`** gains two opt-in options.
+  - `--unseen-tasks score` scores tasks outside the checkpoint's training tasks, with their
+    rollout length as the cutoff, and marks each row `training_task`.
+  - `--cutoff-rule rollout_length` applies that cutoff to every task. It is used only for check
+    B-G1b.
+  - The defaults, and the files they write, are unchanged.
+- **`robocasa/recovery/safe/cross_task_safe.py`** has three commands:
+  - `manifests`: one selection manifest per fold. Each is `seen38_split_seed0.json` without the
+    fold's held-out tasks, after checking that the frozen refit's train and test IDs equal the
+    manifest's.
+  - `assemble`: fold directories in the cross-task format, with detector `safe`.
+  - `compare`: score-file equality.
+- **`scripts/xr1_lead_time/cross_task_safe.py`**: the analysis. It reuses `cross_task_lead.py`'s
+  fold design, fits, few-shot timers and bootstrap draw sequence, unchanged.
+
+**Models.**
+- Folds 0–3 × seeds 0–2 are trained with the frozen command of A3 and the fold manifest:
+  12 runs, `train_seen_tasks` unchanged.
+- Fold all is the frozen final refit. A3 showed that retraining reproduces it exactly.
+
+**Checks, all required before the analysis reports anything:**
+- **B-G1a.** Fold all's scores of both E1 cohorts, through the new scorer path
+  (`--unseen-tasks score`), equal the E1 rows' `per_seed_raw_safe` exactly (`assemble`, fold all).
+- **B-G1b.** Fold all seed 0, scored with `--cutoff-rule rollout_length`, equals its scores with
+  training cutoffs (`compare` prints `IDENTICAL`). This is A1 checked empirically.
+- **B-G3.** Fold all's per-task normalization equals the runtime bundle's `task_normalizations`
+  (`assemble`, fold all).
+- **S1.** Every fold's assembled training tasks are exactly its seen tasks. Each score file comes
+  from that fold's checkpoint (SHA-256), and its unseen tasks are the fold's held-out tasks.
+- **S2.** SAFE fold all with per-task normalization, fused with P, equals E1: P 0.2252,
+  21 FP; SAFE + P 0.2550, 23 FP; gain +0.0298.
+- **S3.** The Hide-and-Seek fold directories of the cross-task run pass that run's own checks.
+  Hide-and-Seek + G's zero-shot gain (+0.127) and its decision CI ([0.069, 0.211], 2,000
+  replicates) are reproduced exactly. That shows SAFE and Hide-and-Seek share the cross-task
+  run's replicates.
+
+**Nulls for U1-S** (20 draws, seed 1), as in the cross-task study:
+- Gaussian noise;
+- within-task resampled fold SAFE, pooled-normalized.
+
+If either mean gain over G is ≥ 0.05, U1-S is reported as not interpretable.
 
 ## Runbook
 
@@ -387,11 +436,198 @@ ls $STORAGE_BS/robocasa_logs/eval | grep -i -E "pooled_39tasks|final_refit" | te
 Report the three files: `a1_task_min_step.txt`, `a2_checkpoints.sha256` and `a2_settings.txt`.
 The A3 retraining command and the Stage B code follow from them, before any fold is trained.
 
+### 3. R5 Stage B (SAFE per fold; two GPUs, then CPU)
+
+The steps take roughly 1–2 h of training, 1–2 h of scoring and 1 h of analysis. The first load of
+each export from `/gs/bs` takes 40–70 minutes, and later loads on the same node are much faster.
+Use one allocation with two GPUs and enough time left. A background job dies when its allocation
+ends. `RS_SHA` is the full SHA of the pushed commit on `claude/review-analyses` that contains this
+step.
+
+**B0. Environment, pinned code, inputs, unit tests.**
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export SAFE_PY=$STORAGE_BS/envs/vla_safe/bin/python SAFE_REPO=$PROJECT_FS/SAFE
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+export XR1_FINAL_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/xr1_pooled_39tasks_final_refits_20260814_231508
+export XR1_POOL=$STORAGE_BS/robocasa_rollouts/safe/xr1_safe_pooled_39tasks_50each_seed0_20260812_221815
+export XR1_SAFE_EXPORT=$XR1_POOL/official_safe_39tasks_50each_seed0 XR1_SEEN38_SPLIT=$XR1_POOL/seen38_split_seed0.json
+export XR1_SAFE_CV_SUMMARY=$STORAGE_BS/robocasa_checkpoints/safe/xr1_safe_pooled_39tasks_50each_seed0_20260812_221815_full_cv/cv_selection_summary.json
+export XT_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/xr1_cross_task_20261027_212141
+
+export RS_SHA=<RS_SHA>
+export RS_REPO=$PROJECT_FS/robocasa_xtsafe_${RS_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $RS_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $RS_REPO $RS_SHA
+test "$(git -C $RS_REPO rev-parse HEAD)" = "$RS_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not RS_SHA"
+cd $RS_REPO
+export RS_TAG=xr1_cross_task_safe_$(date +%Y%m%d_%H%M%S)
+export RS_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/$RS_TAG RS_LOG=$STORAGE_BS/robocasa_logs/eval/$RS_TAG
+mkdir -p $RS_ROOT $RS_LOG
+export XR1_LCAL_EXPORT=$("$SAFE_PY" -I -c "import json,sys; print(json.load(open(sys.argv[1]))['export_dir'])" \
+  $XR1_LCAL_ROOT/frozen_mlp_scores/seed0/provenance.json)
+export XR1_TEST_EXPORT=$("$SAFE_PY" -I -c "import json,sys; print(json.load(open(sys.argv[1]))['export_dir'])" \
+  $XR1_CONFIRM_ROOT/confirmatory_collection/frozen_mlp_scores/seed0/provenance.json)
+echo "lead calibration export: $XR1_LCAL_EXPORT"; echo "confirmatory test export: $XR1_TEST_EXPORT"
+RS_INPUTS=($E1_OUT/calibration_predictions.jsonl $E1_OUT/test_predictions.jsonl $E1_OUT/confirm_lead.json
+           $XR1_RUNTIME_BUNDLE $XR1_SEEN38_SPLIT $XR1_SAFE_CV_SUMMARY $XR1_FINAL_ROOT/indep_seed{0,1,2}/scores.jsonl
+           $XR1_FINAL_ROOT/indep_seed{0,1,2}/model_final.ckpt $XT_ROOT/cross_task_lead.json
+           $RS_REPO/scripts/xr1_lead_time/cross_task_folds.json)
+for f in "${RS_INPUTS[@]}"; do test -s $f && echo "OK $f" || echo "STOP: missing $f"; done
+for F in 0 1 2 3 all; do test -s $XT_ROOT/fold_$F/scoring.json && echo "OK H&S fold $F" || echo "STOP: no H&S fold $F"; done
+sha256sum "${RS_INPUTS[@]}" | tee $RS_LOG/frozen_inputs.sha256
+printf 'export %s=%q\n' RS_SHA "$RS_SHA" RS_REPO "$RS_REPO" RS_ROOT "$RS_ROOT" RS_LOG "$RS_LOG" \
+  XR1_LCAL_EXPORT "$XR1_LCAL_EXPORT" XR1_TEST_EXPORT "$XR1_TEST_EXPORT" > $RS_LOG/paths.env
+PYTHONPATH=$RS_REPO "$SAFE_PY" -m unittest tests.test_xr1_cross_task_safe tests.test_xr1_cross_task_lead \
+  tests.test_safe_score_cross_task 2>&1 | tail -n 3
+nvidia-smi --query-gpu=index,memory.used --format=csv
+```
+
+**B1. Fold manifests.** It must print `MANIFESTS OK` and `[48]` dropped per held-out task in
+every fold.
+
+```bash
+cd $RS_REPO
+PYTHONPATH=$RS_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.cross_task_safe manifests \
+  --selection-manifest $XR1_SEEN38_SPLIT --folds $RS_REPO/scripts/xr1_lead_time/cross_task_folds.json \
+  --frozen-scores $XR1_FINAL_ROOT/indep_seed0/scores.jsonl --output-dir $RS_ROOT/manifests | tee $RS_LOG/manifests.log
+```
+
+**B2. Train 12 models.** GPU 0 trains folds 0 and 1, GPU 1 folds 2 and 3, three seeds each, one
+after another.
+
+```bash
+cd $RS_REPO
+for G in 0 1; do
+  if [ $G = 0 ]; then FS="0 1"; else FS="2 3"; fi
+  cat > $RS_LOG/train_gpu$G.sh <<EOF
+#!/bin/bash
+cd $RS_REPO
+for F in $FS; do for S in 0 1 2; do
+  echo "=== START fold \$F seed \$S \$(date -Iseconds) on \$(hostname) GPU $G ==="
+  CUDA_VISIBLE_DEVICES=$G WANDB_MODE=disabled "$SAFE_PY" -u -m robocasa.recovery.safe.train_seen_tasks \\
+    --export-dir $XR1_SAFE_EXPORT --safe-repo $SAFE_REPO \\
+    --output-dir $RS_ROOT/train/fold_\$F/indep_seed\$S \\
+    --model indep --seed \$S --split-seed 0 \\
+    --selection-manifest $RS_ROOT/manifests/fold_\$F.json --selection-summary $XR1_SAFE_CV_SUMMARY \\
+    --class-weighting official_inverse_frequency --epochs 1000 --device cuda
+  echo "=== END fold \$F seed \$S rc=\$? \$(date -Iseconds) ==="
+done; done
+EOF
+done
+cat $RS_LOG/train_gpu0.sh
+for G in 0 1; do nohup bash $RS_LOG/train_gpu$G.sh > $RS_LOG/train_gpu$G.log 2>&1 & echo "GPU $G PID $! on $(hostname)"; done
+```
+
+Check progress with `grep -h "=== " $RS_LOG/train_gpu*.log; tail -c 200 $RS_LOG/train_gpu0.log; echo`.
+Training is done when both logs have six `END ... rc=0` lines. Any other `rc` is a stop condition.
+
+**B3. Score both E1 cohorts with every fold model** (fold all uses the frozen refit). GPU 0
+scores the lead-calibration cohort and GPU 1 the confirmatory test cohort.
+
+```bash
+cd $RS_REPO
+for G in 0 1; do
+  if [ $G = 0 ]; then C=lead_calibration; X=$XR1_LCAL_EXPORT; else C=confirmatory_test; X=$XR1_TEST_EXPORT; fi
+  cat > $RS_LOG/score_gpu$G.sh <<EOF
+#!/bin/bash
+cd $RS_REPO
+for F in all 0 1 2 3; do for S in 0 1 2; do
+  if [ \$F = all ]; then RUN=$XR1_FINAL_ROOT/indep_seed\$S; else RUN=$RS_ROOT/train/fold_\$F/indep_seed\$S; fi
+  echo "=== START $C fold \$F seed \$S \$(date -Iseconds) on \$(hostname) GPU $G ==="
+  CUDA_VISIBLE_DEVICES=$G PYTHONPATH=$RS_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.score_seen_checkpoint_external \\
+    --export-dir $X --safe-repo $SAFE_REPO --training-run-dir \$RUN \\
+    --output-dir $RS_ROOT/score/fold_\$F/$C/seed\$S --group $C --device cuda --unseen-tasks score
+  echo "=== END $C fold \$F seed \$S rc=\$? \$(date -Iseconds) ==="
+done; done
+EOF
+done
+cat $RS_LOG/score_gpu1.sh
+for G in 0 1; do nohup bash $RS_LOG/score_gpu$G.sh > $RS_LOG/score_gpu$G.log 2>&1 & echo "GPU $G PID $! on $(hostname)"; done
+```
+
+Scoring is done when both logs have 15 `END ... rc=0` lines.
+
+**B4. Cutoff check (B-G1b).** It must print `IDENTICAL`.
+
+```bash
+cd $RS_REPO
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$RS_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.score_seen_checkpoint_external \
+  --export-dir $XR1_TEST_EXPORT --safe-repo $SAFE_REPO --training-run-dir $XR1_FINAL_ROOT/indep_seed0 \
+  --output-dir $RS_ROOT/score/cutoff_check/confirmatory_test/seed0 --group confirmatory_test --device cuda \
+  --unseen-tasks score --cutoff-rule rollout_length > $RS_LOG/cutoff_check.log 2>&1
+PYTHONPATH=$RS_REPO "$SAFE_PY" -m robocasa.recovery.safe.cross_task_safe compare \
+  $RS_ROOT/score/fold_all/confirmatory_test/seed0 $RS_ROOT/score/cutoff_check/confirmatory_test/seed0 \
+  | tee $RS_LOG/cutoff_compare.log
+```
+
+**B5. Assemble the five fold directories (B-G1a, B-G3, S1).** Every fold must print
+`ASSEMBLY OK`. Fold all must also print two `reference ... -> OK` lines and `bundle normalization
+... -> OK`.
+
+```bash
+cd $RS_REPO
+for F in all 0 1 2 3; do
+  A=()
+  for S in 0 1 2; do
+    if [ $F = all ]; then RUN=$XR1_FINAL_ROOT/indep_seed$S; else RUN=$RS_ROOT/train/fold_$F/indep_seed$S; fi
+    A+=(--training-run $S $RUN --scores lead_calibration $S $RS_ROOT/score/fold_$F/lead_calibration/seed$S
+        --scores confirmatory_test $S $RS_ROOT/score/fold_$F/confirmatory_test/seed$S)
+  done
+  if [ $F = all ]; then
+    A+=(--reference-predictions lead_calibration $E1_OUT/calibration_predictions.jsonl
+        --reference-predictions confirmatory_test $E1_OUT/test_predictions.jsonl)
+  else
+    A+=(--fold-manifest $RS_ROOT/manifests/fold_$F.json)
+  fi
+  PYTHONPATH=$RS_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.cross_task_safe assemble --fold $F \
+    --folds $RS_REPO/scripts/xr1_lead_time/cross_task_folds.json --runtime-bundle $XR1_RUNTIME_BUNDLE \
+    "${A[@]}" --output-dir $RS_ROOT/folds/fold_$F 2>&1 | tail -n 5
+done | tee $RS_LOG/assemble.log
+```
+
+**B6. The analysis (CPU, about an hour).**
+
+```bash
+cd $RS_REPO
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 MKL_NUM_THREADS=2 nohup nice -n 10 \
+  "$SAFE_PY" -I -u scripts/xr1_lead_time/cross_task_safe.py run \
+  --calibration $E1_OUT/calibration_predictions.jsonl --test $E1_OUT/test_predictions.jsonl \
+  --safe-fold-dirs $RS_ROOT/folds/fold_0 $RS_ROOT/folds/fold_1 $RS_ROOT/folds/fold_2 $RS_ROOT/folds/fold_3 $RS_ROOT/folds/fold_all \
+  --hs-fold-dirs $XT_ROOT/fold_0 $XT_ROOT/fold_1 $XT_ROOT/fold_2 $XT_ROOT/fold_3 $XT_ROOT/fold_all \
+  --runtime-bundle $XR1_RUNTIME_BUNDLE --e1-result $E1_OUT/confirm_lead.json \
+  --cross-task-result $XT_ROOT/cross_task_lead.json \
+  --output $RS_ROOT/cross_task_safe.json > $RS_LOG/analysis.log 2>&1 &
+echo "analysis PID $! on $(hostname)"
+```
+
+When it ends:
+
+```bash
+tail -n 70 $RS_LOG/analysis.log
+sha256sum -c --quiet $RS_LOG/frozen_inputs.sha256 && echo INPUTS UNCHANGED
+```
+
+Report:
+- B1's fold lines;
+- the `END` lines of B2 and B3 (`grep -h "=== END" $RS_LOG/*_gpu*.log`);
+- B4's `IDENTICAL`;
+- B5's log;
+- the analysis tail, ending in `CROSS-TASK SAFE OK`;
+- `INPUTS UNCHANGED`.
+
 ## Result
 
-Recorded 2026-10-28. Nothing above this section was changed after the run. The runbook's
-checksum line was fixed before the run (`22f42dbc`); the analysis code is unchanged from
-`4a558327`.
+Recorded 2026-10-28.
+- The R1–R4 sections above were not changed after the run.
+- The runbook's checksum line was fixed before the run (`22f42dbc`). The analysis code is
+  unchanged from `4a558327`.
+- After the R1–R4 run and Stage A, two things were added before any fold is trained: "Stage B
+  implementation" under R5, and runbook step 3.
 
 **Run.**
 - Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_review_analyses_20261028_155557`
