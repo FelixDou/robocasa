@@ -642,3 +642,23 @@ path chosen on the validation set (R8, branch `claude/review-analyses`, plan R8,
     fresh held-out cohort, disjoint from all development data";
   - recoverability is worded as in the paper;
   - the "Even a rejection is useful" bullet is shortened.
+
+## Update 2026-10-29 (d): R8, fused path chosen on the validation set
+
+R8 (branch `claude/review-analyses`, plan R8, run `xr1_fixed_path_20261029_164116`,
+`fixed_path.json` SHA-256 `5b4c7b6a…`; all gates passed) chooses the fused path on the
+validation set, freezes it, and certifies it on the held-out calibration successes. Proposition 1
+then covers the evaluated detector.
+- **Hide-and-Seek + P** gains 0.072 at FPR 0.061, the same as registered (0.071). With the path
+  held fixed, its decision CI is [−0.069, 0.143].
+- **SAFE + P** gains 0.007 (CI [−0.222, 0.067]).
+- **Paper:** Sec. IV-D now reports this after "A path chosen on other rollouts restores the
+  bound". The TODO there now refers to R4/R8.
+- **Proposal:** the method bullet adds "chosen on the validation set instead, Hide-and-Seek keeps
+  its gain (0.072) but its CI then includes zero". To stay at 3 pages:
+  - the few-shot timer sentence and the RSS bullet are shorter;
+  - the timeline is a little tighter (y = 0.8 cm);
+  - the caption is one line;
+  - the fallback note is one line.
+- **Pages:** the paper's submission build is 6 pages, with references alone on page 6; the
+  proposal is 3 pages.

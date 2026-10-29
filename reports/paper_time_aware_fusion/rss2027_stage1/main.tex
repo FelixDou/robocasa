@@ -232,7 +232,9 @@ successes: Proposition~\ref{prop:fpr} bounds the FPR of each candidate path, not
 chosen among them, which is why our criteria also check the test FPR
 (Sec.~\ref{sec:hypotheses}); over 200 re-splits of the successes, the selection raised the
 expected test FPR from 0.047 (P) to about 0.055. A path chosen on other rollouts restores the
-bound.\todo{R4: separate selection set for E2?}
+bound: chosen on the validation set (exploratory), Hide-and-Seek + P still gains 0.072 at 0.061
+FPR and SAFE + P 0.007, but with the path held fixed both decision CIs include zero
+([$-0.069$, 0.143], [$-0.222$, 0.067]).\todo{R4/R8: separate selection set for E2?}
 
 \section{Hypotheses}
 \label{sec:hypotheses}
