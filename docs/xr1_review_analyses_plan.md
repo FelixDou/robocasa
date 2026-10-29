@@ -1796,3 +1796,13 @@ only.
   If `config.yaml` differs, its diff names the setting to fix, and nothing else follows until
   A′3 is exact. If the config is equal but the scores differ, Stage B′ uses R5's approximate
   B-G2 instead.
+- **A′3. Retraining is bit-exact for both heads.**
+  - **Run:** LSTM seed 0 on GPU 0 and MLP seed 0 on GPU 1, on r4n5, from the pinned worktree
+    `9fef3adf`, with the D4 command. Output: `$R7_ROOT/safe_retrain_check/{lstm,indep}_seed0`.
+  - **Checkpoints:** SHA-256 identical to the frozen ones (LSTM `8bccbab9…`, MLP `8ca1aa49…`).
+  - **Config:** `config.yaml` identical for both heads.
+  - **Scores:** all 1,000 trajectories equal (maximum absolute difference 0.0), same IDs.
+  - **Metrics:** selected hyperparameters, task cutoffs, class weights, objective and counts are
+    equal.
+  - **Consequence for Stage B′:** the gate is the exact form. Fold all is the frozen SAFE20
+    models, and the rebuilt command trains the folds.
