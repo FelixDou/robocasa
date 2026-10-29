@@ -853,4 +853,5 @@ The author accepted both remaining drafts as written (2026-10-29).
 - **Tables.** P no longer marked "(ours)" or highlighted; Table II repeats the Seen + P / Unseen + G and metric headers under each policy; captions and footnotes shortened; unseen-task protocol moved to Sec. VI-A.
 - **Figures.** New Fig. 1 (`figures/teaser.tex`): frames, any monitor's score, per-task timer, fused first alarm and the extra warning. New Fig. 2 (`figures/per_task.tex`): per-task gain over P with atomic/composite colours and the matched-gain sweep over FPR targets; data from `analysis/per_task_figure.py` (review_analyses.json, run xr1_review_analyses_20261028_155557).
 - **References.** Added RLDX-1 report, Kress-Gazit et al. (evaluation practice), Pardo et al. (time limits), LIBERO, OpenVLA, pi0; all checked on arXiv on 2026-10-29. 29 entries, still on page 6.
-- Content ends about halfway down page 5, column 2.
+- **Method figure** (`figures/fusion.tex`, Fig. 2): the venue proposal's fusion diagram (monitor score and per-task timer, OR, alarm, joint calibration), placed with Sec. IV-C. The per-task figure is now Fig. 3.
+- Content ends near the bottom of page 5, column 2; references alone on page 6.

@@ -1,0 +1,31 @@
+% Method figure: time-aware fusion (adapted from the venue proposal's Fig. 2; colors as in Fig. 1).
+% Needs tikz with arrows.meta.
+\begin{figure}[t]
+\centering
+\resizebox{\columnwidth}{!}{%
+\begin{tikzpicture}[font=\small, >={Stealth[length=5pt]},
+  box/.style={draw=#1, fill=#1!7, rounded corners=2pt, align=center, inner sep=4pt,
+    text width=4.15cm},
+  thr/.style={draw=#1, fill=white, rounded corners=2pt, align=center, inner sep=4pt}]
+\node[box=blue!65!black] (pol) at (0, 0.85)
+  {\textbf{Policy hidden state}\\any monitor score $s_t$\\(SAFE, Hide-and-Seek, \dots)};
+\node[box=orange!85!black] (tim) at (0, -0.85)
+  {\textbf{Elapsed time} $t$, task $k$\\per-task timer P (95th pct.\\of success durations)};
+\node[thr=blue!65!black] (t1) at (3.95, 0.85) {$s_t > \tau_s$};
+\node[thr=orange!85!black] (t2) at (3.95, -0.85) {$t \ge c_k H_k$};
+\draw[gray!60, dashed, rounded corners=3pt] (3.0, -1.45) rectangle (4.9, 1.45);
+\node[draw=red!75!black, fill=red!8, circle, inner sep=2pt, font=\small\bfseries] (or) at (5.9, 0) {OR};
+\node[draw=red!75!black, fill=red!75!black, text=white, rounded corners=2pt, inner sep=5pt,
+  font=\bfseries] (al) at (7.35, 0) {Alarm};
+\draw[->] (pol) -- (t1); \draw[->] (tim) -- (t2);
+\draw[->] (t1) -- (or); \draw[->] (t2) -- (or); \draw[->] (or) -- (al);
+\node[font=\footnotesize, text=gray!35!black, align=center, anchor=north] at (3.95, -1.5)
+  {calibrated jointly on successes: $\Pr(\text{false alarm}) \le \alpha$};
+\end{tikzpicture}}
+\caption{Time-aware fusion. Any monitor score gives early alarms and the per-task timer a late one
+that catches every timeout; the first to fire raises the alarm. A split-conformal rule on
+calibration successes sets both thresholds along one path, so that a new success raises an
+alarm with probability at most $\alpha$ (Proposition~\ref{prop:fpr}).}
+\label{fig:fusion}
+\vspace{-6pt}
+\end{figure}
