@@ -564,3 +564,33 @@ SHA-256 `d927f67e…`). All gates passed. The analysis is exploratory, on opened
 - **Pages.** The submission build (notes off, pdflatex from TinyTeX) has 6 pages: content ends on
   page 5 and the references are alone on page 6. It has no overfull boxes and no undefined
   references.
+
+## Update 2026-10-29 (b): RLDX-1 unseen columns in Table II (R7)
+
+Table II's RLDX-1 block now has its Unseen (+ G) cells. The numbers come from R7 on branch
+`claude/review-analyses` (`docs/xr1_review_analyses_plan.md`, R7; run
+`rldx1_unseen_20261029_135501`, file `rldx_unseen_safe.json`, SHA-256 `1bcbbd97…`). All gates
+passed. One cross-check (LSTM fold 0's training scores, 1.19e-7) was accepted at float32
+precision by the author's decision; the plan records it. The analysis is exploratory, on opened
+cohorts.
+
+- **Protocol.** RLDX-1's 20 tasks are split into 4 folds stratified by type, every monitor is
+  retrained per fold, and SAFE-LSTM and SAFE-MLP get 24 GPU fits. G and the fusion are fitted on
+  the seen tasks' calibration successes and training failures. The seen rows are the published
+  ones, reproduced exactly.
+- **Cells.** Hide-and-Seek + G gains 0.196 ± 0.013 (TWA 0.583, best). SAFE-LSTM gains 0.101, the
+  OOD detectors 0.099–0.115 and SAFE-MLP 0.044 (TWA 0.500, below G's 0.513). The controls gain
+  0.010 and 0.038. G itself has FPR 0.000 and TWA 0.513.
+- **Text.**
+  - The RLDX-1 paragraph gains one sentence on these results and notes that G alarms late
+    (lead 0.026).
+  - The contribution bullet and the unseen paragraph now say that "only Hide-and-Seek's gain
+    carries over" holds on XR-1.
+  - The table note gives RLDX-1's unseen G lead and "4 folds per policy".
+- **Cuts to stay within 5 + 1:**
+  - the RLDX-1 parenthetical is shortened to "0.052 at matched false alarms";
+  - the controls note under Table II is shortened;
+  - E5 drops "for disagreements" after "a third labeler".
+- **Pages.** The submission build (notes off, pdflatex from TinyTeX) has 6 pages: content ends on
+  page 5 and the references are alone on page 6. It has no overfull boxes and no undefined
+  references.

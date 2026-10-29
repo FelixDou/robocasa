@@ -110,7 +110,7 @@ Our contributions are:
   \item \textbf{A preregistered evaluation} on 38 RoboCasa365 tasks. SAFE adds 0.030 of the time
   limit over the per-task timer, below our 0.05 margin; Hide-and-Seek~\cite{park2026hideseek}
   adds 0.071, and controls show that its warning develops during the rollout
-  (Sec.~\ref{sec:results}). Only Hide-and-Seek's gain carries over to unseen tasks; the result
+  (Sec.~\ref{sec:results}). On XR-1, only Hide-and-Seek's gain carries over to unseen tasks; the result
   replicates offline on a second VLA, and on FIPER's released benchmark the test credits FIPER.
 \end{itemize}
 Most failures we labeled were still recoverable at the limit: failure here mostly means being too
@@ -381,37 +381,37 @@ seeds. \textbf{Bold}/\underline{underline}: best/second-best monitor per column.
  & Zero-input & 0.062 & $0.013^{\pm 0.003}$ & $0.588^{\pm 0.000}$ & 0.037 & $0.020^{\pm 0.008}$ & $0.554^{\pm 0.005}$ \\
  & Shuffle & 0.058 & $0.005^{\pm 0.001}$ & $0.586^{\pm 0.002}$ & -- & -- & -- \\
 \midrule
-\multicolumn{8}{c}{\textbf{Policy: RLDX-1 (Success Rate: 56.2\%; seen tasks only)}} \\
+\multicolumn{8}{c}{\textbf{Policy: RLDX-1 (Success Rate: 56.2\%)}} \\
 \midrule
 \multirow{2}{*}{\rotatebox{90}{\textbf{Time}}}
- & Timer G & 0.010 & $-0.239$ & 0.511 & & & \\
- & \cellcolor{blue!8}\textbf{P (ours)} & \cellcolor{blue!8}0.030 & \cellcolor{blue!8}-- & \cellcolor{blue!8}0.621 & \cellcolor{blue!8} & \cellcolor{blue!8} & \cellcolor{blue!8} \\
+ & Timer G & 0.010 & $-0.239$ & 0.511 & 0.000 & -- & 0.513 \\
+ & \cellcolor{blue!8}\textbf{P (ours)} & \cellcolor{blue!8}0.030 & \cellcolor{blue!8}-- & \cellcolor{blue!8}0.621 & \cellcolor{blue!8}-- & \cellcolor{blue!8}-- & \cellcolor{blue!8}-- \\
 \midrule
 \multirow{4}{*}{\rotatebox{90}{\textbf{OOD}}}
- & Mahalanobis & 0.040 & $0.030^{\pm 0.000}$ & $0.631^{\pm 0.000}$ & & & \\
- & Cosine k-NN & 0.050 & $0.005^{\pm 0.000}$ & $0.613^{\pm 0.000}$ & & & \\
- & PCA-KMeans & 0.047 & $0.029^{\pm 0.004}$ & $0.627^{\pm 0.001}$ & & & \\
- & RND & 0.040 & $0.015^{\pm 0.007}$ & $0.623^{\pm 0.010}$ & & & \\
+ & Mahalanobis & 0.040 & $0.030^{\pm 0.000}$ & $0.631^{\pm 0.000}$ & 0.030 & $0.112^{\pm 0.000}$ & $0.554^{\pm 0.000}$ \\
+ & Cosine k-NN & 0.050 & $0.005^{\pm 0.000}$ & $0.613^{\pm 0.000}$ & 0.010 & $0.112^{\pm 0.000}$ & $\underline{0.564}^{\pm 0.000}$ \\
+ & PCA-KMeans & 0.047 & $0.029^{\pm 0.004}$ & $0.627^{\pm 0.001}$ & 0.040 & $\underline{0.115}^{\pm 0.004}$ & $0.550^{\pm 0.002}$ \\
+ & RND & 0.040 & $0.015^{\pm 0.007}$ & $0.623^{\pm 0.010}$ & 0.037 & $0.099^{\pm 0.013}$ & $0.544^{\pm 0.011}$ \\
 \midrule
 \multirow{3}{*}{\rotatebox{90}{\textbf{Cl.}}}
- & SAFE-MLP & 0.053 & $0.008^{\pm 0.012}$ & $0.613^{\pm 0.007}$ & & & \\
- & SAFE-LSTM & 0.033 & $\underline{0.036}^{\pm 0.003}$ & $\underline{0.637}^{\pm 0.003}$ & & & \\
- & Hide\&Seek & 0.050 & $\mathbf{0.074}^{\pm 0.030}$ & $\mathbf{0.648}^{\pm 0.004}$ & & & \\
+ & SAFE-MLP & 0.053 & $0.008^{\pm 0.012}$ & $0.613^{\pm 0.007}$ & 0.070 & $0.044^{\pm 0.000}$ & $0.500^{\pm 0.000}$ \\
+ & SAFE-LSTM & 0.033 & $\underline{0.036}^{\pm 0.003}$ & $\underline{0.637}^{\pm 0.003}$ & 0.067 & $0.101^{\pm 0.006}$ & $0.530^{\pm 0.000}$ \\
+ & Hide\&Seek & 0.050 & $\mathbf{0.074}^{\pm 0.030}$ & $\mathbf{0.648}^{\pm 0.004}$ & 0.057 & $\mathbf{0.196}^{\pm 0.013}$ & $\mathbf{0.583}^{\pm 0.021}$ \\
 \midrule
 \multirow{3}{*}{\rotatebox{90}{\textbf{Ctrl.}}}
- & First inf. & 0.050 & $-0.004^{\pm 0.014}$ & $0.609^{\pm 0.005}$ & & & \\
- & Zero-input & 0.037 & $0.012^{\pm 0.010}$ & $0.623^{\pm 0.002}$ & & & \\
- & Shuffle & 0.030 & $0.007^{\pm 0.005}$ & $0.624^{\pm 0.002}$ & & & \\
+ & First inf. & 0.050 & $-0.004^{\pm 0.014}$ & $0.609^{\pm 0.005}$ & 0.090 & $0.038^{\pm 0.025}$ & $0.487^{\pm 0.012}$ \\
+ & Zero-input & 0.037 & $0.012^{\pm 0.010}$ & $0.623^{\pm 0.002}$ & 0.023 & $0.010^{\pm 0.024}$ & $0.506^{\pm 0.008}$ \\
+ & Shuffle & 0.030 & $0.007^{\pm 0.005}$ & $0.624^{\pm 0.002}$ & -- & -- & -- \\
 \bottomrule
 \end{tabular}}
 
 \vspace{2pt}
 \parbox{\columnwidth}{\scriptsize FPR: mean over seeds; timers are deterministic. Timer leads:
-XR-1 P 0.225, G 0.123 (seen) and 0.126 (unseen); RLDX-1 P 0.271, G 0.032. Unseen: the folds of
-Table~\ref{tab:raw}, G and the fusion fitted on the seen tasks; thresholds set there can fire
-more often on new tasks, so FPR can exceed 0.05. Controls are Hide-and-Seek
-(Hide\&Seek) retrained on zero inputs, on another same-task rollout's features (shuffle, which
-needs the task's rollouts), or on the first inference only. The preregistered detectors average
+XR-1 P 0.225, G 0.123 (seen) and 0.126 (unseen); RLDX-1 P 0.271, G 0.032 and 0.026. Unseen: 4
+folds per policy, G and the fusion fitted on the seen tasks; thresholds set there can fire more
+often on new tasks, so FPR can exceed 0.05. Controls: Hide-and-Seek (Hide\&Seek) retrained on
+zero inputs, another same-task rollout's features (shuffle; seen tasks only) or the first
+inference. The preregistered detectors average
 the 3 seeds' scores (Sec.~\ref{sec:results}). RLDX-1 OOD rows: default settings, not tuned.}
 \end{table}
 
@@ -487,7 +487,7 @@ $^\ast$The timer cannot go below 0.20 FPR here, so this row is a lower bound on 
 \textbf{Unseen tasks (exploratory; Tables~\ref{tab:raw} and~\ref{tab:lead}).} Known tasks
 already give the monitors more data than P (48 rollouts per task with failures, against 6 to 45
 success durations). With no rollout of the task, as in SAFE's setting~\cite{gu2025safe}, only
-Hide-and-Seek keeps a gain over G: 0.127 with 3 seeds averaged (zero-input control: 0.033), 0.111
+Hide-and-Seek keeps a gain over G on XR-1: 0.127 with 3 seeds averaged (zero-input control: 0.033), 0.111
 more than SAFE ([0.036, 0.166]). SAFE's seed-averaged 0.017 is no larger than the best of 20
 noise scores (0.019; single models: 0.028), and against G loosened to its 20 false alarms it is $-0.079$ (Hide-and-Seek: $+0.051$).
 The OOD detectors' gains cost three times G's false alarms and leave TWA at G's level. With P
@@ -497,8 +497,10 @@ built from one success of the new task, Hide-and-Seek still leads SAFE by 0.086 
 \textbf{RLDX-1, offline.} On existing RLDX-1 data (20 tasks; Table~\ref{tab:lead}, bottom), all
 failures again ran to the time limit. With 3 seeds averaged, SAFE-LSTM + P gains 0.034 ([0.008,
 0.067]) and Hide-and-Seek + P, set up before scoring with the XR-1 settings, 0.083 ([0.033, 0.138];
-0.052 against P loosened to its four false alarms; single models in Table~\ref{tab:lead}). Both gains come from atomic tasks: on composite
-tasks no score adds clear lead (Hide-and-Seek 0.010).
+0.052 at matched false alarms). Both gains come from atomic tasks: on composite tasks no score
+adds clear lead (Hide-and-Seek 0.010). On unseen tasks, Hide-and-Seek again gains most over G
+($0.196 \pm 0.013$; controls $\le 0.038$); SAFE-LSTM and the OOD detectors gain 0.10 to 0.115
+over this late timer (lead 0.026).
 
 \textbf{FIPER's benchmark.} In FIPER's released rollouts~\cite{romer2025fiper} (five tasks, two
 on a real robot), length alone separates failures with ROC-AUC 0.92--1.00 in four tasks. We
@@ -554,7 +556,7 @@ final size}
 
 \textbf{E4, E5 (exploratory).} E4 adds action-only monitors, richer time baselines and a
 prospective unseen-task test. E5 measures lead from the point of no return, fused detector against P, on about 250 to
-500 labeled failures (50 to 100 decided) with a third labeler for disagreements; we report it
+500 labeled failures (50 to 100 decided) with a third labeler; we report it
 only if a pilot of $\ge 20$ doubly labeled decided failures reaches a mean
 $|\Delta t_u|/H_k \le 0.10$.\todo{E5 exploratory proposed; registering it is the author's call}
 
