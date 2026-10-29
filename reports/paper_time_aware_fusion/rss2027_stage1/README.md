@@ -726,3 +726,35 @@ edits.
   - three of the previous round's additions are tightened to stay at 3 pages.
 - **Pages.** The paper's submission build is 6 pages, with references alone on page 6; the
   proposal is 3 pages.
+
+## Update 2026-10-29 (g): Stage 2 sizings with the author's decisions (R9)
+
+R9 on `claude/review-analyses` (`docs/xr1_review_analyses_plan.md`; run
+`stage2_frozen_sizing_20261029_190042`; every check passed) sized the two pending items.
+- **E2, paths frozen.** Simulated power at n = 20 (97.5% within-task CI, E2 FPR rule) is
+  ≥ 0.99 for each detector, with or without the matched condition. It is 0.86 if
+  Hide-and-Seek's gain is only its matched-FPR 0.052. n = 20 stands.
+  - The frozen path lowers Hide-and-Seek's simulated gain from 0.080 to 0.064. The adaptive
+    sizing was optimistic in-sample.
+  - The paper now gives this power. The type I error with the path fixed stays pending, and
+    the checkpoint hashes stay pending.
+- **E3, Hide-and-Seek + P reset vs P reset at 1.25 H_k.**
+  - Δ = +0.011 (+0.007 at r = 0.17).
+  - CI half-width at 1,000 scenes: 0.043 with three independent runs, 0.019 if each reset arm
+    shares the no-reset run up to its own alarm (branching).
+  - A test needs about 29,000 scenes, or 5,700 pairs with branching. Under the author's rule,
+    H4 is therefore estimated, not tested. The paper says so.
+  - The branching design is the sizing's recommendation, flagged as a `\todo` for the author.
+  - Hide-and-Seek's latency is not charged in the sizing, so Δ is an upper bound.
+- **Other wording.**
+  - Sec. V (hypotheses): "Stage 2 tests H3 and estimates H4".
+  - H4: "a reset and retry ... than the same reset triggered by P".
+  - Conclusion: Stage 2 "estimates their value in closed-loop retry".
+- **Trims to stay at 5 + 1 pages:**
+  - Sec. IV-D says "Other results" and "freezes paths".
+  - Eq. 1's paragraph says "training successes".
+  - Sec. VI-B: "seed averaging is part of its warning"; "the fusion alarms later".
+  - Sec. VI-C: "task durations"; "vs."
+  - Sec. VI-F drops "(2 per atomic and 1 per composite task)".
+  - FPR criterion: "test-set false alarms"; "≤ 39 of 400".
+- **Pages.** The submission build is 6 pages, with references alone on page 6.
