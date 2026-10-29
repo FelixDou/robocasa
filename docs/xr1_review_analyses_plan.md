@@ -1175,7 +1175,8 @@ Recorded 2026-10-28.
   implementation" under R5, and runbook step 3.
 - R5 Stage B ran from `9d0353be` with no code change. Its result follows R5 Stage A below.
 - R6 ran from `8ef49963` with no code change. Only its runbook was fixed (C2b, the August
-  test list) before fold all was rerun. Its result is the last section below.
+  test list) before fold all was rerun. Its result follows R5 Stage B below.
+- R7's CPU rows ran from `9fef3adf` with no code change. Their result is the last section below.
 
 **Run.**
 - Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_review_analyses_20261028_155557`
@@ -1624,3 +1625,82 @@ pooled; mean ± sd over seeds 0–2. P: lead 0.225, 21 FP. G unseen: lead 0.126,
   G's at three times its FPR. The table needs the FPR column beside the gain.
 - Table IV becomes redundant. Its inferential numbers stay in the text: Hide-and-Seek − SAFE
   +0.111 [0.036, 0.166]; G at matched false alarms (SAFE −0.079, Hide-and-Seek +0.051); P_n.
+
+### R7 (CPU rows)
+
+**On RLDX-1's unseen tasks, Hide-and-Seek again adds the most over G.** Its gain is
++0.196 ± 0.013, against +0.010 and +0.038 for the zero-input and first-inference controls.
+Unlike on XR-1, the default OOD detectors also gain over G (+0.099 to +0.115). They do so at
+FPR 0.010–0.040, and their TWA (0.544 to 0.564) is above G's (0.513). G is very weak here:
+lead 0.026 with no false alarm.
+
+**Run.**
+- Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_unseen_20261029_135501`
+  (`rldx_unseen.json`, SHA-256 `58a68f5b…`; `rldx_folds.json`, SHA-256 `079ce858…`).
+- Logs: `/gs/bs/tga-shinoda/felid/robocasa_logs/eval/rldx1_unseen_20261029_135501`.
+- Code: pinned worktree `robocasa_rldxunseen_9fef3adf` on r4n5, CPU only.
+  - The five folds were scored at once. The run folder was created at 13:55, and the last
+    fold (all) finished at 14:28.
+  - The table took minutes.
+- **Folds:** 6, 6, 4 and 4 tasks. The rule deals each task type from fold 0, so folds 0 and 1
+  get the remainders.
+
+**Checks.** All passed:
+- Five scoring runs with rc=0.
+- **R1:** fold all ends with `REFERENCE OK`; the last check printed was
+  `train/rnd: 740 rollouts, max diff 0.0`. The table script requires all 21 checks, and the
+  fold directories match the fold file.
+- **R2:** seen + P equals `rldx_per_seed.json`, with P at 0.2711 and FPR 0.03.
+- **R3:** one G for every score.
+- `INPUTS UNCHANGED`.
+
+**Table II, RLDX-1, unseen + G** (held-out test, 100 + 100, pooled over folds; mean ± sd over
+seeds 0–2; seed-averaged score in the last column). G alone: FPR 0.000 (0 FP), lead 0.026,
+TWA 0.513.
+
+| | FPR (FP per seed) | Gain over G | TWA | Seed average |
+|---|---|---|---|---|
+| Hide-and-Seek | 0.057 ± 0.032 (7, 8, 2) | +0.196 ± 0.013 | 0.583 ± 0.021 | +0.191 at 0.050 |
+| zero-input | 0.023 ± 0.040 (7, 0, 0) | +0.010 ± 0.024 | 0.506 ± 0.008 | +0.030 at 0.070 |
+| first-inference | 0.090 ± 0.010 (10, 9, 8) | +0.038 ± 0.025 | 0.487 ± 0.012 | +0.033 at 0.100 |
+| Mahalanobis | 0.030 (3, 3, 3) | +0.112 ± 0.000 | 0.554 ± 0.000 | +0.114 at 0.030 |
+| Cosine k-NN | 0.010 (1, 1, 1) | +0.112 ± 0.000 | 0.564 ± 0.000 | +0.112 at 0.010 |
+| PCA-KMeans | 0.040 (4, 4, 4) | +0.115 ± 0.004 | 0.550 ± 0.002 | +0.113 at 0.050 |
+| RND | 0.037 ± 0.012 (5, 3, 3) | +0.099 ± 0.013 | 0.544 ± 0.011 | +0.097 at 0.050 |
+
+The seen + P rows are the published ones, reproduced exactly (R2). Same-task shuffle is seen
+only.
+
+**Expectations against results.**
+- "Every score can gain a lot over G, controls included": **wrong**. The controls gain +0.010
+  and +0.038. The first-inference control's TWA (0.487) is below G's: it buys little lead with
+  8–10 false alarms.
+- "Hide-and-Seek gains the most and stays above the controls": held.
+- "Its margin should be smaller than on XR-1": **wrong**. Hide-and-Seek − zero-input is +0.186
+  here, against +0.102 on XR-1 (R6 single models).
+- "The OOD rows gain little more than the controls, and their FPR may exceed 0.05": **wrong**.
+  They gain +0.10 to +0.115 at FPR ≤ 0.040.
+- "The 5% threshold is coarse": held. G raised no false alarm on 100 test successes.
+
+**Caveats.**
+- G uses no false alarm, while the fused rows use 1 to 8. No matched-false-alarm comparison
+  was run. On XR-1, loosening G from 9 to 18–19 false alarms raised its lead from 0.126 to
+  0.20–0.22 (R5).
+- Single-seed FPR varies widely for the sequence models: Hide-and-Seek's seeds have 2 to 8
+  false alarms, and zero-input's 0 to 7.
+- 100 test failures; folds of 4 to 6 tasks.
+
+**SAFE (Stage A′, file reads).**
+- **A′1.** The final models are in `$RLDX_ROOT/final/{lstm,indep}_seed{s}`, with
+  `metrics.json` and `scores.jsonl`. `normalized_scores.jsonl`'s `full_raw_scores` equal the
+  final models' `scores` on all 1,000 rollouts, for both heads (seed 0; maximum difference
+  0.0). The frozen raw trajectories are therefore the seen reference.
+- **A′2.** The training settings are:
+  - export `.../rldx1_original_safe35_natural50_20260808_203158/official_safe_supported20_natural50`;
+  - selection manifest `$RLDX_ROOT/protocol/frozen_outer_split.json`;
+  - selection summary `$RLDX_ROOT/cv/cv_selection_summary.json`;
+  - official inverse-frequency weighting (class weights 2.183 and 1.836), rollout split unit.
+
+  The split manifest has 740 train, 60 calibration and 200 evaluation rollouts. The training
+  logs are `rldx1_safe20_natural_weighted_20260815_162530_{final_lstm,final_indep,master}.log`.
+  The exact command and the time per fit come from them before A′3.
