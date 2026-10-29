@@ -20,11 +20,16 @@ Table II, score OR-fused with a timer, per training seed and for the seed averag
           Every task is held out once, so the pooled test set is all 200 test rollouts.
   Reported: FPR, false alarms, mean lead, gain over the timer, TWA = (lead + 1 - FPR) / 2.
 
+Families. Each --fold-dirs gives one family (folds 0-3 and all) with its own detectors:
+  score_cross_task --score-train   the seven cross-task detectors (DETECTORS; required)
+  cross_task_safe assemble-export  one SAFE head each (safe_lstm, safe_indep; Stage B')
+
 Gates (no table without them):
   R1  fold directories: the fold file's folds and held-out tasks, training on exactly the seen
       tasks, seeds 0-2, --score-train, every needed rollout present with the right task, label
-      and length; fold all reproduced the earlier score_cohorts trajectories of every detector
-      in all three cohorts (score_cross_task --reference-raw).
+      and length; fold all reproduced the earlier trajectories of every detector of its family
+      in all three cohorts (score_cross_task --reference-raw; for SAFE, the frozen
+      normalized_scores.jsonl), and every other reference check it recorded passed.
   R2  seen + P, per seed and seed-averaged, equals rldx_per_seed.json (P, lead, FPR, gain) at
       its stored precision, for every detector.
   R3  G is the same timer whichever score it is fused with (it does not read the score).
@@ -32,8 +37,8 @@ Gates (no table without them):
 Usage:
   python3 -I rldx_unseen.py folds --inputs-dir RLDXHS/inputs --write rldx_folds.json
   python3 -I rldx_unseen.py run --safe-dir <SAFE20>/calibration/lstm --inputs-dir RLDXHS/inputs \\
-      --folds rldx_folds.json --fold-dirs F0 F1 F2 F3 FALL --reference-per-seed rldx_per_seed.json \\
-      --output OUT.json
+      --folds rldx_folds.json --fold-dirs F0 F1 F2 F3 FALL [--fold-dirs S0 S1 S2 S3 SALL ...] \\
+      --reference-per-seed rldx_per_seed.json --output OUT.json
 """
 import argparse
 import hashlib
@@ -135,7 +140,7 @@ def load_fold_dir(path, wanted):
     return meta, norms, scores
 
 
-def check_meta(F, meta, tasks, held, folds_sha, reference_detectors):
+def check_meta(F, meta, tasks, held, folds_sha, detectors):
     if str(meta["fold"]) != F or set(meta["held_out_tasks"]) != held[F]:
         raise ValueError(f"Fold {F}: fold or held-out tasks differ from the fold file")
     if set(meta["training_rollouts_by_task"]) != set(tasks) - held[F]:
@@ -146,17 +151,17 @@ def check_meta(F, meta, tasks, held, folds_sha, reference_detectors):
         raise ValueError(f"Fold {F}: seeds {meta['seeds']} are not 0, 1, 2")
     if not meta.get("score_train"):
         raise ValueError(f"Fold {F}: scored without --score-train")
-    missing = [d for d in DETECTORS if d not in meta["detectors"]]
+    missing = [d for d in detectors if d not in meta["detectors"]]
     if missing:
         raise ValueError(f"Fold {F}: detectors {missing} were not scored")
     if F != ALL:
         return None
     checks = meta.get("reference_checks") or {}
-    need = {f"{c}/{d}" for c in COHORTS for d in reference_detectors}
-    bad = sorted(k for k in need if not checks.get(k, {}).get("ok"))
+    need = {f"{c}/{d}" for c in COHORTS for d in detectors}
+    bad = sorted(k for k in need | set(checks) if not checks.get(k, {}).get("ok"))
     if bad:
-        raise ValueError(f"Fold all did not reproduce the earlier score_cohorts trajectories for {bad}")
-    return {k: checks[k]["max_abs_diff"] for k in sorted(need)}
+        raise ValueError(f"Fold all did not reproduce the earlier trajectories for {bad}")
+    return {k: checks[k]["max_abs_diff"] for k in sorted(checks)}
 
 
 def normalized(raw, stats):
@@ -164,7 +169,7 @@ def normalized(raw, stats):
     return (np.maximum.accumulate(raw) - stats["location"]) / stats["scale"]
 
 
-def attach(parts, F, norms, scores, held, by_fold):
+def attach(parts, F, norms, scores, held, detectors):
     """Keys d#s@F (one seed) and d@F (seed average); fold all also gets d#s@all/task and d@all/task.
 
     Fold F needs its scores on every calibration success and test rollout, and on its own
@@ -175,7 +180,7 @@ def attach(parts, F, norms, scores, held, by_fold):
             if cohort == "train" and r["task_name"] in held[F]:
                 continue
             rid = str(r["rollout_id"])
-            for d in DETECTORS:
+            for d in detectors:
                 row = scores[cohort].get(d, {}).get(rid)
                 if row is None:
                     raise ValueError(f"Fold {F}: no {d} trajectory for {rid} ({cohort})")
@@ -196,7 +201,6 @@ def attach(parts, F, norms, scores, held, by_fold):
                     for s in SEEDS:
                         r[f"{d}#{s}@all/task"] = task[s]
                     r[f"{d}@all/task"] = np.mean([task[s] for s in SEEDS], axis=0)
-    by_fold[F] = True
 
 
 # ---- fits ------------------------------------------------------------------------------------
@@ -255,25 +259,38 @@ def run(args):
     wanted = {c: {str(r["rollout_id"]) for r in parts[c]} for c in COHORTS}
 
     ref = json.loads(Path(args.reference_per_seed).read_text())
-    reference_detectors = [d for d in DETECTORS if d in ref["results"]]
-    if reference_detectors != list(DETECTORS):
-        raise ValueError(f"rldx_per_seed.json lacks {sorted(set(DETECTORS) - set(reference_detectors))}")
-
-    by_fold, metas, fold_all_refs = {}, {}, None
-    for path in args.fold_dirs:
-        meta, norms, scores = load_fold_dir(path, wanted)
-        F = str(meta["fold"])
-        if F in metas:
-            raise ValueError(f"Two directories for fold {F}")
-        refs = check_meta(F, meta, tasks, held, folds_sha, reference_detectors)
-        if F == ALL:
-            fold_all_refs = refs
-        attach(parts, F, norms, scores, held, by_fold)
-        metas[F] = dict(path=str(Path(path).resolve()), code_commit=meta.get("code_commit"),
-                        training_rollouts=sum(meta["training_rollouts_by_task"].values()))
-    if set(metas) != set(held):
-        raise ValueError(f"Need fold directories {sorted(held)}, got {sorted(metas)}")
-    checks = dict(R1=dict(folds={F: sorted(held[F]) for F in folds}, fold_dirs=metas, fold_all_reference=fold_all_refs))
+    detectors, families = [], {}
+    for family in args.fold_dirs:
+        first = json.loads((Path(family[0]) / "scoring.json").read_text())["detectors"]
+        name = "+".join(first)
+        if set(first) & set(detectors):
+            raise ValueError(f"Two families score {sorted(set(first) & set(detectors))}")
+        detectors += list(first)
+        metas, fold_all_refs = {}, None
+        for path in family:
+            meta, norms, scores = load_fold_dir(path, wanted)
+            F = str(meta["fold"])
+            if F in metas:
+                raise ValueError(f"{name}: two directories for fold {F}")
+            if list(meta["detectors"]) != list(first):
+                raise ValueError(f"{name}: fold {F} scored other detectors ({meta['detectors']})")
+            refs = check_meta(F, meta, tasks, held, folds_sha, first)
+            if F == ALL:
+                fold_all_refs = refs
+            attach(parts, F, norms, scores, held, first)
+            metas[F] = dict(path=str(Path(path).resolve()), code_commit=meta.get("code_commit"),
+                            training_rollouts=sum(meta["training_rollouts_by_task"].values()))
+        if set(metas) != set(held):
+            raise ValueError(f"{name}: need fold directories {sorted(held)}, got {sorted(metas)}")
+        families[name] = dict(fold_dirs=metas, fold_all_reference=fold_all_refs)
+    missing = [d for d in DETECTORS if d not in detectors]
+    if missing:
+        raise ValueError(f"No family scores {missing}")
+    detectors = list(DETECTORS) + [d for d in detectors if d not in DETECTORS]
+    unknown = [d for d in detectors if d not in ref["results"]]
+    if unknown:
+        raise ValueError(f"rldx_per_seed.json has no result for {unknown}")
+    checks = dict(R1=dict(folds={F: sorted(held[F]) for F in folds}, families=families))
 
     train = parts["train"]
     rk = qt.rho(rr.dev_fractions(train, tasks), rr.Q)
@@ -282,7 +299,7 @@ def run(args):
     # R2: seen + P reproduces the published per-seed rows.
     failures, worst, seen = [], [], {}
     stored_P = (ref["P"]["lead"], ref["P"]["fpr"])
-    for d in DETECTORS:
+    for d in detectors:
         out = {"seed_average": seen_plus_P(parts, f"{d}@all/task", rk)}
         for s in SEEDS:
             out[f"seed_{s}"] = seen_plus_P(parts, f"{d}#{s}@all/task", rk)
@@ -301,7 +318,7 @@ def run(args):
 
     # Unseen + G per fold, pooled.
     unseen, timers = {}, set()
-    for d in DETECTORS:
+    for d in detectors:
         out = {"seed_average": unseen_plus_G(parts, held, folds, lambda F, d=d: f"{d}@{F}", rk0)}
         for s in SEEDS:
             out[f"seed_{s}"] = unseen_plus_G(parts, held, folds, lambda F, d=d, s=s: f"{d}#{s}@{F}", rk0)
@@ -336,7 +353,7 @@ def run(args):
                              unseen="per fold, pooled normalization, + G fitted on seen-task calibration successes "
                                     "and training failures, pooled over folds"),
                   table2=dict(global_timer=dict(unseen=G),
-                              **{d: dict(seen=seen[d], unseen=unseen[d]) for d in DETECTORS}))
+                              **{d: dict(seen=seen[d], unseen=unseen[d]) for d in detectors}))
 
     print(f"RLDX-1: {counts['tasks']} tasks, train {counts['train']}, calibration successes "
           f"{counts['calibration_successes']}, test {counts['test']}; folds "
@@ -344,7 +361,7 @@ def run(args):
     print(f"P (seen): lead {stored_P[0]} FPR {stored_P[1]} | G (unseen): FPR {G['fpr']:.3f} ({G['fp']} FP) "
           f"lead {G['mean_lead']:.3f} TWA {G['twa']:.3f}")
     print("Table II RLDX-1 (FPR, gain, TWA): seen + P | unseen + G")
-    for d in DETECTORS:
+    for d in detectors:
         a, b = seen[d]["mean_std_over_seeds"], unseen[d]["mean_std_over_seeds"]
         fps = [unseen[d][f"seed_{s}"]["fp"] for s in SEEDS]
         cell = lambda m: " ".join(f"{m[k]['mean']:.3f}+-{m[k]['std']:.3f}" for k in ("fpr", "gain", "twa"))
@@ -374,7 +391,8 @@ def main(argv=None):
     r.add_argument("--safe-dir", required=True, help="<SAFE20>/calibration/lstm (defines the 15.15 rows)")
     r.add_argument("--inputs-dir", required=True)
     r.add_argument("--folds", required=True)
-    r.add_argument("--fold-dirs", nargs="+", required=True, help="score_cross_task outputs, folds 0-3 and all")
+    r.add_argument("--fold-dirs", nargs="+", action="append", required=True,
+                   help="one family's fold directories (folds 0-3 and all); repeat for each family")
     r.add_argument("--reference-per-seed", required=True, help="rldx_per_seed.json")
     r.add_argument("--output", required=True)
     args = p.parse_args(argv)

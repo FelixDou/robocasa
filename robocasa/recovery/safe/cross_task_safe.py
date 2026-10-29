@@ -14,6 +14,9 @@ alarm or metric.
              training rollouts (the cross-task formula) and per task (fit_safe_normalization).
              Fold all also checks that its scores equal the E1 rows' per_seed_raw_safe and that its
              per-task normalization equals the runtime bundle's.
+  assemble-export
+             RLDX-1 (R7 Stage B'): one SAFE head's fold directory from scores of a whole export,
+             split into calibration, test and (seen-task) training cohorts by ID lists.
   compare    largest absolute difference between two score directories (scores.jsonl).
 
 Usage:
@@ -286,6 +289,196 @@ def assemble(args):
     return status
 
 
+# ---- assemble-export (RLDX-1, R7 Stage B') ----------------------------------------------------
+
+EXPORT_COHORTS = ("calibration", "test", "train")
+
+
+def assemble_export(args):
+    """One SAFE head's fold directory from scores of a whole export (every split in one export).
+
+    RLDX-1 keeps all its rollouts in one export, so each training run scores the whole export
+    (score_seen_checkpoint_external --group all --unseen-tasks score). The ID lists split it into
+    the calibration, test and training cohorts; the training cohort is written for the fold's seen
+    tasks only (train_predictions.jsonl), as score_cross_task --score-train does. Normalization per
+    seed: pooled over the seen tasks' training rollouts (the cross-task formula) and per task with
+    SAFE's own formula (calibrate_seen_tasks.fit_task_normalization), which the published seen rows
+    use. Fold all also checks its scores and per-task normalization against the frozen
+    normalized_scores.jsonl (--frozen-normalized), and every fold checks that the external scores of
+    its training rollouts equal its training run's own scores.
+    """
+    from .calibrate_seen_tasks import fit_task_normalization
+
+    out = Path(args.output_dir)
+    if out.exists() and any(out.iterdir()):
+        raise FileExistsError(f"Output directory is not empty: {out}")
+    F = str(args.fold)
+    spec = json.loads(Path(args.folds).read_text())
+    tasks, held = fold_sets(spec)
+    if F not in held:
+        raise ValueError(f"Fold {F} is not in the fold file")
+    seen = tasks - held[F]
+    bundle = json.loads(Path(args.runtime_bundle).read_text())
+    horizons = {t: int(v) for t, v in bundle["task_horizons"].items()}
+    if set(horizons) != tasks:
+        raise ValueError("The bundle's tasks differ from the fold file's")
+    detector = f"safe_{args.head}"
+
+    ids = {}
+    for name, path in args.cohort:
+        if name not in EXPORT_COHORTS or name in ids:
+            raise ValueError(f"--cohort must name each of {EXPORT_COHORTS} once")
+        value = json.loads(Path(path).read_text())
+        ids[name] = [str(x) for x in value]
+    if sorted(ids) != sorted(EXPORT_COHORTS):
+        raise ValueError(f"--cohort must name each of {EXPORT_COHORTS} once")
+    all_ids = [i for name in EXPORT_COHORTS for i in ids[name]]
+    if len(all_ids) != len(set(all_ids)):
+        raise ValueError("The cohorts share rollouts")
+
+    runs = {str(s): Path(d).resolve() for s, d in args.training_run}
+    if len(runs) != len(args.training_run):
+        raise ValueError("A training seed is given twice")
+    seeds = sorted(runs)
+    manifest_path = str(Path(args.fold_manifest).resolve()) if args.fold_manifest else None
+    if F != ALL and manifest_path is None:
+        raise ValueError("A fold other than all needs --fold-manifest")
+    train_rows, by_task, norms = {}, None, {}
+    for s, run in runs.items():
+        metrics = json.loads((run / "metrics.json").read_text())
+        split = json.loads((run / "split_manifest.json").read_text())
+        if str(metrics["seed"]) != s:
+            raise ValueError(f"Training run {run} is seed {metrics['seed']}, not {s}")
+        if str(metrics.get("model")) != args.head:
+            raise ValueError(f"Training run {run} is model {metrics.get('model')}, not {args.head}")
+        if set(split["task_names"]) != seen:
+            raise ValueError(f"Training run {run} was not trained on exactly fold {F}'s seen tasks")
+        if manifest_path is not None and str(Path(metrics["selection_manifest"]).resolve()) != manifest_path:
+            raise ValueError(f"Training run {run} used {metrics['selection_manifest']}, not {manifest_path}")
+        rows = [r for r in jsonl(run / "scores.jsonl") if r.get("split") == "train"]
+        counts = dict(sorted(Counter(r["task_name"] for r in rows).items()))
+        if set(counts) != seen:
+            raise ValueError(f"Training scores of {run} do not cover exactly the seen tasks")
+        if by_task is None:
+            by_task = counts
+        elif counts != by_task:
+            raise ValueError("Training rollouts differ between seeds")
+        if {str(r["rollout_id"]) for r in rows} - set(ids["train"]):
+            raise ValueError(f"{run}: training rollouts outside the training ID list")
+        train_rows[s] = {str(r["rollout_id"]): r for r in rows}
+        norms[s] = {"per_task": fit_task_normalization(rows)}
+
+    scores, provenance = {}, {}
+    for s, d in args.scores:
+        d = Path(d).resolve()
+        s = str(s)
+        if s in scores:
+            raise ValueError(f"Two score directories for seed {s}")
+        if s not in runs:
+            raise ValueError(f"Scores for seed {s} have no training run")
+        prov = json.loads((d / "provenance.json").read_text())
+        if Path(prov["training_run_dir"]).resolve() != runs[s]:
+            raise ValueError(f"{d} was scored with {prov['training_run_dir']}, not {runs[s]}")
+        if prov["checkpoint_sha256"] != sha256(runs[s] / "model_final.ckpt"):
+            raise ValueError(f"{d}: checkpoint hash differs from the training run's")
+        if prov["group"] != "all":
+            raise ValueError(f"{d} is group {prov['group']}, not all")
+        if prov.get("unseen_tasks") != "score" or prov.get("cutoff_rule") != "training":
+            raise ValueError(f"{d} was not scored with --unseen-tasks score and the training cutoff rule")
+        if set(prov["unseen_task_names"]) != held[F] & set(prov["task_names"]):
+            raise ValueError(f"{d}: tasks scored as unseen differ from fold {F}'s held-out tasks")
+        scores[s] = {str(r["rollout_id"]): r for r in jsonl(d / "scores.jsonl")}
+        provenance[s] = dict(path=str(d), export_dir=prov["export_dir"], checkpoint_sha256=prov["checkpoint_sha256"])
+    if sorted(scores) != seeds:
+        raise ValueError(f"Scores for seeds {sorted(scores)}, training seeds {seeds}")
+    if len({p["export_dir"] for p in provenance.values()}) != 1:
+        raise ValueError("Seeds scored different exports")
+    for s in seeds:
+        missing = [i for i in all_ids if i not in scores[s]]
+        if missing:
+            raise ValueError(f"Seed {s}: {len(missing)} listed rollouts were not scored, e.g. {missing[:3]}")
+
+    checks, status = {}, 0
+    worst = 0.0
+    for s in seeds:
+        for rid, r in train_rows[s].items():
+            a, b = np.asarray(scores[s][rid]["scores"], float), np.asarray(r["scores"], float)
+            worst = max(worst, float(np.max(np.abs(a - b))) if a.shape == b.shape else float("inf"))
+    checks["train_scores_vs_training_run"] = dict(max_abs_diff=worst, ok=worst <= 1e-12)
+    print(f"external vs training-run scores of the training rollouts: max diff {worst} -> "
+          f"{'OK' if worst <= 1e-12 else 'MISMATCH'}", flush=True)
+    status |= int(worst > 1e-12)
+    for s in seeds:
+        records = [dict(task_name=scores[s][rid]["task_name"], scores=np.asarray(scores[s][rid]["scores"], np.float64))
+                   for rid in ids["train"] if scores[s][rid]["task_name"] in seen]
+        norms[s]["pooled"] = pooled_normalization(records, horizons)
+
+    out.mkdir(parents=True, exist_ok=True)
+    counts = {}
+    for cohort in EXPORT_COHORTS:
+        n = 0
+        with (out / f"{cohort}_predictions.jsonl").open("w") as stream:
+            for rid in sorted(ids[cohort]):
+                rows = {s: scores[s][rid] for s in seeds}
+                r0 = rows[seeds[0]]
+                if any(r["task_name"] != r0["task_name"] or bool(r["failed"]) != bool(r0["failed"])
+                       or len(r["scores"]) != len(r0["scores"]) for r in rows.values()):
+                    raise ValueError(f"{cohort}: seeds disagree on {rid}")
+                is_held = r0["task_name"] in held[F]
+                if any(bool(r.get("training_task")) == is_held for r in rows.values()):
+                    raise ValueError(f"{cohort}: training-task flag of {rid} contradicts fold {F}")
+                if cohort == "train" and is_held:
+                    continue
+                stream.write(json.dumps(dict(detector=detector, rollout_id=rid, task_name=r0["task_name"],
+                                             failed=bool(r0["failed"]), fold=F, held_out=is_held,
+                                             source_inferences=len(r0["scores"]),
+                                             per_seed_raw={s: rows[s]["scores"] for s in seeds})) + "\n")
+                n += 1
+        counts[cohort] = n
+    write_json(out / "normalizations.json", {detector: norms})
+
+    reference = {}
+    if F == ALL:
+        frozen = {str(s): Path(p) for s, p in args.frozen_normalized or []}
+        if sorted(frozen) != seeds:
+            raise ValueError("Fold all needs --frozen-normalized for every seed")
+        cohort_of = {i: name for name in EXPORT_COHORTS for i in ids[name]}
+        diffs = defaultdict(float)
+        norm_worst, n = 0.0, defaultdict(int)
+        for s in seeds:
+            for r in jsonl(frozen[s]):
+                rid = str(r["rollout_id"])
+                if rid not in cohort_of:
+                    continue
+                c = cohort_of[rid]
+                a, b = np.asarray(scores[s][rid]["scores"], float), np.asarray(r["full_raw_scores"], float)
+                diffs[c] = max(diffs[c], float(np.max(np.abs(a - b))) if a.shape == b.shape else float("inf"))
+                n[c] += 1
+                mine = norms[s]["per_task"][r["task_name"]]
+                norm_worst = max(norm_worst, abs(mine["location"] - float(r["normalization_location"])),
+                                 abs(mine["scale"] - float(r["normalization_scale"])))
+        for c in EXPORT_COHORTS:
+            full = n[c] == len(ids[c]) * len(seeds)
+            reference[f"{c}/{detector}"] = dict(rollouts_scored=n[c] // max(len(seeds), 1), max_abs_diff=diffs[c],
+                                                ok=full and diffs[c] <= 1e-12)
+        reference[f"normalization/{detector}"] = dict(max_abs_diff=norm_worst, ok=norm_worst <= 1e-12)
+        for k, v in reference.items():
+            print(f"reference {k}: max diff {v['max_abs_diff']} -> {'OK' if v['ok'] else 'MISMATCH'}", flush=True)
+            status |= int(not v["ok"])
+
+    meta = dict(protocol="cross_task_safe_export_assembled_no_metrics", plan=PLAN + " (R7)", code_commit=code_commit(),
+                fold=F, held_out_tasks=sorted(held[F]), training_rollouts_by_task=by_task,
+                folds_sha256=sha256(args.folds), detectors=[detector], head=args.head, seeds=[int(s) for s in seeds],
+                score_train=True, fold_manifest=manifest_path, training_runs={s: str(r) for s, r in runs.items()},
+                training_checkpoint_sha256={s: sha256(r / "model_final.ckpt") for s, r in runs.items()},
+                scores=provenance, counts=counts, bundle_sha256=sha256(args.runtime_bundle), checks=checks,
+                reference_checks=reference)
+    write_json(out / "scoring.json", meta)
+    print(f"fold {F} {detector}: " + ", ".join(f"{c} {n}" for c, n in counts.items()) + f", seeds {seeds}")
+    print("ASSEMBLY OK" if status == 0 else "REFERENCE MISMATCH: do not analyze this fold")
+    return status
+
+
 # ---- compare --------------------------------------------------------------------------------
 
 def compare(args):
@@ -313,6 +506,17 @@ def build_parser():
     a.add_argument("--scores", nargs=3, action="append", required=True, metavar=("COHORT", "SEED", "DIR"))
     a.add_argument("--fold-manifest")
     a.add_argument("--reference-predictions", nargs=2, action="append", metavar=("COHORT", "PREDICTIONS"))
+    e = sub.add_parser("assemble-export", help="one SAFE head's fold directory from whole-export scores (RLDX-1, R7)")
+    for name in ("--fold", "--folds", "--runtime-bundle", "--output-dir"):
+        e.add_argument(name, required=True)
+    e.add_argument("--head", required=True, choices=("lstm", "indep"))
+    e.add_argument("--cohort", nargs=2, action="append", required=True, metavar=("NAME", "IDS"),
+                   help="calibration, test and train, each with a JSON list of rollout IDs")
+    e.add_argument("--training-run", nargs=2, action="append", required=True, metavar=("SEED", "DIR"))
+    e.add_argument("--scores", nargs=2, action="append", required=True, metavar=("SEED", "DIR"))
+    e.add_argument("--fold-manifest")
+    e.add_argument("--frozen-normalized", nargs=2, action="append", metavar=("SEED", "NORMALIZED_SCORES"),
+                   help="fold all: the frozen normalized_scores.jsonl of each seed")
     c = sub.add_parser("compare")
     c.add_argument("a")
     c.add_argument("b")
@@ -321,7 +525,8 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    return {"manifests": manifests, "assemble": assemble, "compare": compare}[args.cmd](args)
+    return {"manifests": manifests, "assemble": assemble, "assemble-export": assemble_export,
+            "compare": compare}[args.cmd](args)
 
 
 if __name__ == "__main__":

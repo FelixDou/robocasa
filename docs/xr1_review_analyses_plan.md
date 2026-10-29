@@ -483,6 +483,44 @@ reference. Unlike XR-1's tuned ones, they need no pooled variant.
   - **Gate:** fold all must equal the frozen raw trajectories if A′3 is bit-exact. Otherwise
     the gate follows R5's B-G2.
 
+**Stage B′ implementation** (added 2026-10-29, after A′3 was found bit-exact for both heads,
+before any fold is trained). It changes no rule above.
+- **Code.**
+  - `score_seen_checkpoint_external --group all` is a new label for a whole export with
+    several splits. Nothing else changes.
+  - `cross_task_safe assemble-export` builds one SAFE head's fold directory in the cross-task
+    format, with detector `safe_lstm` or `safe_indep`:
+    - the whole-export scores are split by the RLDX-1 ID lists into calibration, test and
+      seen-task training cohorts;
+    - normalization is pooled by the cross-task formula over the seen tasks' training
+      rollouts, and per task by SAFE's own formula (`fit_task_normalization`).
+  - `rldx_unseen.py run` takes one `--fold-dirs` per family: the cross-task detectors, then
+    one family per SAFE head.
+  - Tests are in `tests/test_xr1_rldx_unseen.py`.
+- **Models.**
+  - The manifests come from `cross_task_safe manifests` on `frozen_outer_split.json`
+    unchanged: each fold drops its held-out tasks' training and test rollouts.
+  - Folds 0–3 × seeds 0–2 × both heads are trained with the D4 command and the fold manifest
+    (24 fits).
+  - Fold all is the frozen SAFE20 final models.
+- **Scoring:** every model (24 fold models and the 6 frozen ones) scores the whole export
+  (1,000 rollouts) with `--group all --unseen-tasks score`.
+- **Checks, all required before the table:**
+  - **B′-G1** (`assemble-export`, fold all): the scores of all 1,000 rollouts equal the frozen
+    `full_raw_scores`, and SAFE's per-task normalization recomputed from the final runs equals
+    the frozen one.
+  - **B′-G2** (`assemble-export`, every fold): the external scores of each run's training
+    rollouts equal the run's own `scores.jsonl`.
+  - **B′-G3** (cutoff): fold all seed 0 of each head, scored with
+    `--cutoff-rule rollout_length`, equals its training-cutoff scores (`compare` prints
+    `IDENTICAL`). XR-1 checked the MLP only.
+  - **R1–R3** with the three families. R2 now also requires SAFE-LSTM and SAFE-MLP + P to equal
+    `rldx_per_seed.json`.
+- **Expectation (written now):**
+  - SAFE-MLP gains little over G; its seen gain over P is +0.008.
+  - SAFE-LSTM gains less than Hide-and-Seek (+0.196). Whether it beats the OOD rows (+0.10)
+    is open.
+
 ## Runbook
 
 Run on TSUBAME from a pinned worktree, CPU only for R1–R4, following
@@ -1194,6 +1232,169 @@ PY
 ```
 
 Report `a3_compare.txt`, plus the first and last 5 lines of each retraining log.
+
+**D6. Stage B′ setup: pinned code, frozen SAFE inputs, tests, fold manifests.** Use a node with
+two GPUs (`node_h`). `R7B_SHA` is the full SHA of the pushed commit that contains this step. In a
+new shell, run the first five lines of D0 (environment and the per-seed `paths.env`) first.
+
+```bash
+source "$(ls -d $STORAGE_BS/robocasa_logs/eval/rldx1_unseen_* | sort | tail -n 1)/paths.env"
+export SAFE_REPO=$PROJECT_FS/SAFE WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+export RLDX_EXPORT=$STORAGE_BS/robocasa_rollouts/safe/rldx1_original_safe35_natural50_20260808_203158/official_safe_supported20_natural50
+export R7B_SHA=<R7B_SHA>
+export R7B_REPO=$PROJECT_FS/robocasa_rldxsafe_${R7B_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $R7B_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R7B_REPO $R7B_SHA
+test "$(git -C $R7B_REPO rev-parse HEAD)" = "$R7B_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not R7B_SHA"
+cd $R7B_REPO
+export R7S=$R7_ROOT/safe
+mkdir -p $R7S
+printf 'export %s=%q\n' R7B_SHA "$R7B_SHA" R7B_REPO "$R7B_REPO" R7S "$R7S" SAFE_REPO "$SAFE_REPO" \
+  RLDX_EXPORT "$RLDX_EXPORT" > $R7_LOG/paths_safe.env
+SAFE_INPUTS=($RLDX_ROOT/protocol/frozen_outer_split.json $RLDX_ROOT/cv/cv_selection_summary.json
+             $RLDX_ROOT/final/{lstm,indep}_seed{0,1,2}/{model_final.ckpt,scores.jsonl,metrics.json,config.yaml})
+for f in "${SAFE_INPUTS[@]}"; do test -s $f && echo "OK $f" || echo "STOP: missing $f"; done | grep -c '^OK'
+sha256sum "${SAFE_INPUTS[@]}" > $R7_LOG/frozen_safe.sha256
+git -C $SAFE_REPO rev-parse HEAD
+CUDA_VISIBLE_DEVICES="" PYTHONPATH=$R7B_REPO "$SAFE_PY" -W ignore -m unittest tests.test_xr1_rldx_unseen \
+  tests.test_xr1_cross_task_safe tests.test_safe_score_cross_task 2>&1 | tail -n 3
+ls -l --time-style=+%H:%M:%S $R7_ROOT/safe_retrain_check/*_seed0/{config.yaml,metrics.json}
+PYTHONPATH=$R7B_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.cross_task_safe manifests \
+  --selection-manifest $RLDX_ROOT/protocol/frozen_outer_split.json --folds $FOLDS \
+  --frozen-scores $RLDX_ROOT/final/lstm_seed0/scores.jsonl --output-dir $R7S/manifests | tee $R7_LOG/safe_manifests.log
+nvidia-smi --query-gpu=index,memory.used --format=csv
+```
+
+Continue only if all of these hold:
+- `HEAD OK` prints, the count is 26 and the SAFE commit is `b6036abe…`;
+- the tests end with `OK`;
+- the manifests print `MANIFESTS OK`, with one dropped count per held-out task, the same in
+  every fold (37 if every task has 37 training rollouts).
+
+The `ls` line gives A′3's time per fit (`config.yaml` written at the start, `metrics.json` at
+the end).
+
+**D7. Train 24 fold models.** GPU 0 trains the LSTM, GPU 1 the MLP. On each GPU, the three seeds
+of a fold run at once, and the folds follow one another.
+
+```bash
+source $R7_LOG/paths.env; source $R7_LOG/paths_safe.env; cd $R7B_REPO
+for G in 0 1; do
+  if [ $G = 0 ]; then M=lstm; else M=indep; fi
+  cat > $R7_LOG/safe_train_gpu$G.sh <<EOF
+#!/bin/bash
+cd $R7B_REPO
+for F in 0 1 2 3; do
+  for S in 0 1 2; do
+    ( echo "=== START $M fold \$F seed \$S \$(date -Iseconds) GPU $G ==="
+      CUDA_VISIBLE_DEVICES=$G WANDB_MODE=disabled PYTHONPATH=$R7B_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.train_seen_tasks \\
+        --export-dir $RLDX_EXPORT --safe-repo $SAFE_REPO --output-dir $R7S/train/fold_\$F/${M}_seed\$S \\
+        --model $M --seed \$S --split-seed 0 --selection-manifest $R7S/manifests/fold_\$F.json \\
+        --selection-summary $RLDX_ROOT/cv/cv_selection_summary.json \\
+        --class-weighting official_inverse_frequency --epochs 1000 --device cuda \\
+        > $R7_LOG/safe_train_${M}_fold\${F}_seed\$S.log 2>&1
+      echo "=== END $M fold \$F seed \$S rc=\$? \$(date -Iseconds) ===" ) &
+  done
+  wait
+done
+EOF
+done
+for G in 0 1; do nohup bash $R7_LOG/safe_train_gpu$G.sh > $R7_LOG/safe_train_gpu$G.log 2>&1 & echo "GPU $G PID $! on $(hostname)"; done
+```
+
+Progress: `grep -h "=== END" $R7_LOG/safe_train_gpu*.log | sort | uniq -c | head; grep -c "rc=0" $R7_LOG/safe_train_gpu*.log`.
+Training is done when both logs have 12 `END ... rc=0` lines. Any other `rc` is a stop condition.
+
+**D8. Score the whole export with all 30 models** (fold all uses the frozen models). GPU 0
+scores the LSTM, GPU 1 the MLP, three seeds at once.
+
+```bash
+source $R7_LOG/paths.env; source $R7_LOG/paths_safe.env; cd $R7B_REPO
+for G in 0 1; do
+  if [ $G = 0 ]; then M=lstm; else M=indep; fi
+  cat > $R7_LOG/safe_score_gpu$G.sh <<EOF
+#!/bin/bash
+cd $R7B_REPO
+for F in all 0 1 2 3; do
+  for S in 0 1 2; do
+    if [ \$F = all ]; then RUN=$RLDX_ROOT/final/${M}_seed\$S; else RUN=$R7S/train/fold_\$F/${M}_seed\$S; fi
+    ( echo "=== START score $M fold \$F seed \$S \$(date -Iseconds) GPU $G ==="
+      CUDA_VISIBLE_DEVICES=$G PYTHONPATH=$R7B_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.score_seen_checkpoint_external \\
+        --export-dir $RLDX_EXPORT --safe-repo $SAFE_REPO --training-run-dir \$RUN \\
+        --output-dir $R7S/score/fold_\$F/${M}_seed\$S --group all --device cuda --unseen-tasks score \\
+        > $R7_LOG/safe_score_${M}_fold\${F}_seed\$S.log 2>&1
+      echo "=== END score $M fold \$F seed \$S rc=\$? \$(date -Iseconds) ===" ) &
+  done
+  wait
+done
+EOF
+done
+for G in 0 1; do nohup bash $R7_LOG/safe_score_gpu$G.sh > $R7_LOG/safe_score_gpu$G.log 2>&1 & echo "GPU $G PID $! on $(hostname)"; done
+```
+
+Scoring is done when both logs have 15 `END ... rc=0` lines
+(`grep -c "rc=0" $R7_LOG/safe_score_gpu*.log`).
+
+**D9. Cutoff check (B′-G3).** It must print `IDENTICAL` twice.
+
+```bash
+source $R7_LOG/paths.env; source $R7_LOG/paths_safe.env; cd $R7B_REPO
+for M in lstm indep; do
+  CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$R7B_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.score_seen_checkpoint_external \
+    --export-dir $RLDX_EXPORT --safe-repo $SAFE_REPO --training-run-dir $RLDX_ROOT/final/${M}_seed0 \
+    --output-dir $R7S/score/cutoff_check/${M}_seed0 --group all --device cuda --unseen-tasks score \
+    --cutoff-rule rollout_length > $R7_LOG/safe_cutoff_${M}.log 2>&1
+  echo "== $M"
+  PYTHONPATH=$R7B_REPO "$SAFE_PY" -m robocasa.recovery.safe.cross_task_safe compare \
+    $R7S/score/fold_all/${M}_seed0 $R7S/score/cutoff_check/${M}_seed0
+done 2>&1 | tee $R7_LOG/safe_cutoff_compare.log
+```
+
+**D10. Assemble the ten fold directories (B′-G1, B′-G2).** It must count 10 `ASSEMBLY OK`.
+Fold all of each head also prints four `reference ... -> OK` lines.
+
+```bash
+source $R7_LOG/paths.env; source $R7_LOG/paths_safe.env; cd $R7B_REPO
+for M in lstm indep; do for F in all 0 1 2 3; do
+  A=(--fold $F --folds $FOLDS --head $M --runtime-bundle $RLDXHS_ROOT/inputs/rldx_bundle.json
+     --cohort train $RLDXHS_ROOT/inputs/train_ids.json --cohort calibration $RLDXHS_ROOT/inputs/calibration_ids.json
+     --cohort test $RLDXHS_ROOT/inputs/test_ids.json --output-dir $R7S/folds/$M/fold_$F)
+  for S in 0 1 2; do
+    if [ $F = all ]; then
+      RUN=$RLDX_ROOT/final/${M}_seed$S
+      A+=(--frozen-normalized $S $RLDX_ROOT/calibration/$M/${M}_seed$S/normalized_scores.jsonl)
+    else
+      RUN=$R7S/train/fold_$F/${M}_seed$S
+    fi
+    A+=(--training-run $S $RUN --scores $S $R7S/score/fold_$F/${M}_seed$S)
+  done
+  if [ $F != all ]; then A+=(--fold-manifest $R7S/manifests/fold_$F.json); fi
+  PYTHONPATH=$R7B_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.cross_task_safe assemble-export "${A[@]}" 2>&1 | tail -n 7
+done; done | tee $R7_LOG/safe_assemble.log
+grep -c "ASSEMBLY OK" $R7_LOG/safe_assemble.log
+```
+
+**D11. The table with the SAFE rows.**
+
+```bash
+source $R7_LOG/paths.env; source $R7_LOG/paths_safe.env; cd $R7B_REPO
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/rldx_unseen.py run \
+  --safe-dir $RLDX_ROOT/calibration/lstm --inputs-dir $RLDXHS_ROOT/inputs --folds $FOLDS \
+  --fold-dirs $R7_ROOT/folds/fold_{0,1,2,3,all} \
+  --fold-dirs $R7S/folds/lstm/fold_{0,1,2,3,all} --fold-dirs $R7S/folds/indep/fold_{0,1,2,3,all} \
+  --reference-per-seed $RLDXPS_ROOT/rldx_per_seed.json --output $R7_ROOT/rldx_unseen_safe.json 2>&1 | tee $R7_LOG/unseen_safe.log
+sha256sum -c --quiet $R7_LOG/frozen_inputs.sha256 && sha256sum -c --quiet $R7_LOG/frozen_safe.sha256 && echo INPUTS UNCHANGED
+sha256sum $R7_ROOT/rldx_unseen_safe.json
+```
+
+Report:
+- `safe_manifests.log`;
+- the two training and two scoring `rc=0` counts;
+- `safe_cutoff_compare.log`, `safe_assemble.log` and the whole `unseen_safe.log`, which ends
+  in `RLDX-1 UNSEEN TABLE OK`;
+- `INPUTS UNCHANGED` and the SHA-256.
+
+Then copy `rldx_unseen_safe.json` to the evidence folder, as in D3.
 
 **D3. The table (CPU, minutes; after D1).**
 
