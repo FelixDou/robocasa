@@ -17,6 +17,12 @@ Outputs in --output-dir:
                               replication (docs/rldx_hide_and_seek_plan.md) chooses the fused
                               path on training failures, as report section 15.15 did for SAFE.
 
+``--save-models DIR`` (Hide-and-Seek only) writes each seed's fitted model to
+DIR/<detector>_seed<s>.npz (named arrays, no pickle: PCA, input standardization, LSTM
+weights), reloads it and requires identical scores on every cohort rollout. scoring.json
+records each file's SHA-256 and a content hash (detectors.content_hash). E2 freezes these
+models (docs/xr1_review_analyses_plan.md, R10).
+
 ``--reference COHORT FILE`` compares a cohort's trajectories with an earlier
 run_baselines predictions file (for every detector present in both) and exits with
 status 1 if any differs, after writing the outputs.
@@ -42,7 +48,7 @@ import time
 import numpy as np
 
 from ..analyze_time_safe_hybrid import fit_safe_normalization
-from .detectors import DETECTOR_REGISTRY, build_detector
+from .detectors import DETECTOR_REGISTRY, SAVABLE, build_detector, load_detector, save_detector
 from .run_baselines import (
     _json_default,
     _write_json,
@@ -95,6 +101,16 @@ def run(args):
     development = set(bundle.get("development_rollout_ids", train_ids))
     if not set(train_ids) <= development:
         raise ValueError("Training IDs are not part of the bundle's development rollouts")
+
+    models_dir = None
+    if args.save_models:
+        unsavable = [d for d in args.detectors if d not in SAVABLE]
+        if unsavable:
+            raise ValueError(f"--save-models supports {SAVABLE} only, not {unsavable}")
+        models_dir = Path(args.save_models).resolve()
+        if models_dir.exists() and any(models_dir.iterdir()):
+            raise FileExistsError(f"Models directory is not empty: {models_dir}")
+        models_dir.mkdir(parents=True, exist_ok=True)
 
     names = [name for name, _ in args.cohort]
     if args.score_train and "train" in names:
@@ -159,7 +175,7 @@ def run(args):
                 print(f"Skipping {detector_name}: {reason}", flush=True)
                 meta["skipped"][detector_name] = reason
                 continue
-            train_scores, cohort_scores, configs = {}, {n: {} for n in cohorts}, {}
+            train_scores, cohort_scores, configs, models = {}, {n: {} for n in cohorts}, {}, {}
             for seed in args.seeds:
                 detector = build_detector(detector_name, seed=seed,
                                           **detector_kwargs(detector_name, args, tasks))
@@ -173,6 +189,9 @@ def run(args):
                         if values.shape != (len(r["features"]),) or not np.all(np.isfinite(values)):
                             raise ValueError(f"{detector_name} produced invalid scores for {r['rollout_id']}")
                         cohort_scores[name][seed][r["rollout_id"]] = values
+                if models_dir is not None:
+                    models[str(seed)] = _save_and_check(detector, models_dir / f"{detector_name}_seed{seed}.npz",
+                                                        cohorts, cohort_scores, seed)
                 print(f"{detector_name} seed {seed} done", flush=True)
             normalizations = {
                 seed: fit_safe_normalization(
@@ -196,7 +215,7 @@ def run(args):
                     streams["train"].write(json.dumps({"detector": detector_name, **record},
                                                       default=_json_default) + "\n")
                 streams["train"].flush()
-            meta["detectors"][detector_name] = {"configs": configs}
+            meta["detectors"][detector_name] = {"configs": configs, **({"models": models} if models else {})}
             _write_json(output / "scoring.json", meta)
     finally:
         for stream in streams.values():
@@ -233,6 +252,19 @@ def run(args):
     return status
 
 
+def _save_and_check(detector, path, cohorts, cohort_scores, seed):
+    """Save a fitted detector, reload it and require identical scores on every cohort rollout."""
+    content = save_detector(detector, path)
+    loaded, reloaded = load_detector(path)
+    if reloaded != content:
+        raise ValueError(f"{path}: content hash changed on reload")
+    for name, rows in cohorts.items():
+        for r in rows:
+            if not np.array_equal(np.asarray(loaded.score(r), np.float64), cohort_scores[name][seed][r["rollout_id"]]):
+                raise ValueError(f"{path}: the reloaded model scores {r['rollout_id']} differently")
+    return {"path": str(path), "sha256": _sha256(path), "content_sha256": content, "reload_identical": True}
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dataset-dir", nargs="+", required=True)
@@ -250,6 +282,8 @@ def build_parser():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--score-train", action="store_true",
                         help="also write train_predictions.jsonl (in-sample training trajectories)")
+    parser.add_argument("--save-models", metavar="DIR",
+                        help=f"write each fitted model to DIR/<detector>_seed<s>.npz (supported: {', '.join(SAVABLE)})")
     parser.add_argument("--reference", nargs=2, action="append", metavar=("COHORT", "PREDICTIONS"),
                         help="earlier run_baselines predictions to reproduce exactly for this cohort")
     return parser

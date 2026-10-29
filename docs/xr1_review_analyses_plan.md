@@ -687,6 +687,143 @@ Both are exploratory sizing on opened cohorts. They size Stage 2 and test nothin
 **Code.** `scripts/xr1_lead_time/stage2_frozen_sizing.py` (`e2`, `e3`), with tests in
 `tests/test_stage2_frozen_sizing.py`.
 
+## R10. E2's frozen rule and freeze manifest (written 2026-10-29, before any run)
+
+**Author's decisions (2026-10-29, after R9).**
+- **E2.** H3 holds for a detector only if all four conditions hold:
+  - (a) the 97.5% CI of its gain over P lies above zero;
+  - (b) the 97.5% CI of its gain over P loosened on the test set to its own false alarms lies
+    above zero (the matched condition);
+  - (c) its false alarms pass the binomial FPR rule;
+  - (d) it passes rule (iii)'s Monte Carlo null test: its gain beats at least 38 of 39 noise
+    fusions and 38 of 39 resampled fusions run on the same cohorts.
+
+  This replaces rule (iii) alone (2026-10-23). Every path is frozen: each detector's path,
+  and each null fusion's path, is chosen on the existing RLDX-1 data.
+- **E3.** The branching design at 1,000 scenes (50 per task), as an estimation study.
+  - Each scene runs once to 1.25 H_k without reset; this run is the no-reset arm.
+  - Each reset arm keeps that run up to its own monitor's first alarm, then restores the scene
+    and retries within the remaining budget.
+
+Two items stay pending in the paper: the type I error of the E2 rule with frozen paths, and
+the checkpoint hashes. R10 settles both. Its part A is exploratory sizing on opened cohorts.
+Part B freezes artifacts and tests nothing.
+
+### Part A: type I error and power of the frozen E2 rule (`e2_frozen_rule.py`)
+
+**Studies.**
+- n = 10, 20 and 30 per class per task, 2,000 within-task studies each.
+- These are the draws of R9 and of the co-primary sizing (same pool, seed 20261021, cell and
+  replicate numbers). So the co-primaries' frozen rows must equal R9's: the run stops unless
+  their mean gain and SD, and their matched mean and SD, match `e2_frozen.json` at every n.
+
+**Null fusions, frozen like the detectors.** Each null draw runs the E2 procedure end to end:
+1. Draw null scores for the existing data (held-out calibration successes and training
+   failures, the rows the detectors' paths were chosen on) and choose the path there with
+   `fit_fast`.
+2. Draw fresh null scores for the study's calibration and test samples.
+3. Set λ̂ on the calibration successes (`fixed_path.certify`) and evaluate on the test sample.
+
+There are two nulls, as in rule (iii):
+- **noise:** the running maximum of i.i.d. N(0, 1);
+- **resampled:** per-seed normalized SAFE values drawn from all held-out inferences of the
+  task, outcome ignored, then averaged over seeds.
+
+Null scores come from a separate random stream, so the shared draws are not disturbed.
+
+**Per study.**
+- P, SAFE + P and Hide-and-Seek + P, frozen as in R9.
+- One null detector of each kind, as the type I subjects.
+- K = 39 reference draws of each null, shared by every detector in the study. Each detector's
+  p-value is p = (1 + #{reference gains ≥ g}) / 40. Each subject is an independent draw, so
+  it is exchangeable with its references.
+
+**Decision CI.** As in R9, it is approximated by g − hw (and gm − hw for the matched gain), with
+hw from the detector's own sampling distribution at that n.
+- **Nested check.** 100 studies per n get a real inner bootstrap: 200 replicates, calibration
+  and test rollouts resampled within task and class, λ̂ re-set on each, path fixed. It covers
+  both co-primaries and both nulls. It reports nested against approximate pass rates of
+  (a), (b) and (a)–(c).
+
+**Outputs.**
+- **Type I error under each null:** the pass rate of the full rule and of each condition, with
+  Monte Carlo SEs.
+- **Co-primary power of the full rule:**
+  - at the plug-in gains;
+  - at SAFE γ = 0.034 and Hide-and-Seek γ = 0.083, 0.052 and 0.05, imposed by shift (g and gm
+    move, the references do not);
+  - the share of studies in which both co-primaries pass, at plug-in, (0.034, 0.083) and
+    (0.034, 0.052).
+- **For comparison:** the rule without (d), which is R9's (b); and the rule without (b), which
+  is rule (iii) with frozen paths.
+- **The references:** their mean and 95th percentile, and the mean second-largest of 39 (the
+  bar for (d)).
+
+**Rules, fixed before running.**
+- The full rule's type I error must be at most 0.05 under each null at every n. It is bounded
+  by construction, so a higher value means a bug; report it and stop.
+- n = 20 stands if, at n = 20 and under the full rule, SAFE (γ = 0.034) and Hide-and-Seek
+  (γ = 0.052) each have power ≥ 0.8. Otherwise report the smallest n in {10, 20, 30} at which
+  they do, or say that none does.
+- If the nested check at n = 20 puts a co-primary's plug-in pass rate for (a)–(c) more than
+  0.05 below the approximation, the paper quotes the nested value.
+
+**Expectations, written before running.**
+- **Null gains.** At or below zero on average.
+  - The null's path is chosen on independent existing-data scores, so it carries no signal.
+  - Its certified margin is at least P's, since V_fused ≥ V_timer.
+  - The score part then fires on failures no more often than on successes.
+- **Type I error.** About 0 under both nulls for every condition combination, far below 0.05.
+- **The bar for (d)** is near zero, at most about +0.01.
+- **Co-primary power.** The full rule's power equals R9's (b) to within 0.01: at n = 20,
+  ≥ 0.99 at plug-in and about 0.86 for Hide-and-Seek at γ = 0.052. Condition (d) costs
+  nothing.
+- **Nested check.** It agrees with the approximation within 0.05 for the co-primaries at
+  n = 20. We do not predict n = 10.
+
+**Limits.** These are the limits of R9 and of the 2026-10-23 null sizing:
+- one shared, small held-out pool;
+- tasks held fixed;
+- calibration and test exchangeable, so a fused detector cannot spend extra false alarms on
+  the test cohort except by sampling noise.
+
+### Part B: freeze manifest (`e2_freeze_manifest.py`)
+
+E2 freezes SAFE's LSTM head, Hide-and-Seek (three seeds), H_k, ρ_k and each detector's path.
+The manifest records each of them with a hash, and its own SHA-256 goes into the paper.
+
+- **Hide-and-Seek weights.**
+  - The §15.22 scoring kept no weights. `score_cohorts --save-models DIR` now writes, per
+    detector and seed, an `.npz` (no pickle) with the PCA, input standardization and LSTM
+    state.
+  - The freeze run retrains Hide-and-Seek (seeds 0–2, the §15.22 inputs and code defaults).
+  - It must reproduce the §15.22 calibration and test trajectories exactly (`--reference`,
+    `REFERENCE OK`) and the §15.22 normalizations exactly.
+  - The manifest records each file's SHA-256 and a content hash: a SHA-256 over sorted array
+    names, dtypes, shapes and bytes. The content hash does not depend on zip timestamps.
+  - A model loaded from the file must score exactly as the trained one (unit test).
+- **SAFE's LSTM head.** A tree hash (sorted relative paths and per-file SHA-256) of the SAFE20
+  `final/lstm_seed{0,1,2}` directories, the models §15.15 scored with.
+- **Scoring inputs.** SHA-256 of:
+  - the §15.15 normalized SAFE scores and split manifest;
+  - the Hide-and-Seek inputs (`rldx_bundle.json` and the ID lists);
+  - the raw-data manifest.
+- **Policy.** A tree hash of the `RLWRLD/RLDX-1-FT-RC365` snapshot in the Hugging Face cache,
+  with its revision, and the RLDX-1 repository commit.
+- **Frozen numbers.** For the 20 tasks: task type, H_k and ρ_k (q = 0.95), plus α = 0.05.
+  - Each detector's path (u, s), with λ at the fit.
+  - The replication check: SAFE + P +0.0342 and Hide-and-Seek + P +0.0834 must reproduce, or
+    the script stops.
+- **Code.** The commit of this repository at the freeze.
+
+### Code
+
+- `scripts/xr1_lead_time/e2_frozen_rule.py`, with tests in `tests/test_e2_frozen_rule.py`;
+- `scripts/xr1_lead_time/e2_freeze_manifest.py`, with tests in
+  `tests/test_e2_freeze_manifest.py`;
+- `score_cohorts --save-models` and `detectors.save_detector` / `load_detector` /
+  `content_hash`, with tests in `tests/test_safe_score_cohorts.py`.
+
 ## Runbook
 
 Run on TSUBAME from a pinned worktree, CPU only for R1–R4, following
@@ -1759,6 +1896,125 @@ Every `check` line must end in `OK` or `MATCH`:
 A script that stops or fails a check returns a nonzero status, and the driver then stops. A
 JSON written with a failed check says `FAILED CHECK` in its status. Keep it as evidence.
 Copy both JSONs to `reports/safe_robocasa365_research_plan_20260823/evidence/<R9_TAG>/`.
+
+### 8. R10: E2's frozen rule and freeze manifest (CPU, one allocation, a few hours)
+
+`R10_SHA` is the full SHA of the pushed commit on `claude/review-analyses` that contains this
+step. Use one CPU allocation with at least 15 cores, for example
+`qrsh -g tga-shinoda -l cpu_16=1 -l h_rt=6:00:00`. Two background jobs share it:
+- **Part A:** `e2_frozen_rule.py` with 6 workers, about an hour.
+- **Part B1:** the Hide-and-Seek retrain with saved weights, with 8 threads, as in the §15.22
+  scoring. Its duration is about that scoring's `elapsed_seconds`, printed below, times
+  about a quarter, since only one of the four detectors is retrained.
+
+**8.1 Setup, discovery, tests and both jobs**
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+# RLDX_ROOT, RLDX_CAL, RLDX_RAW, RLDX_EXPORT, RLDX_LEAD_OUT, RLDXHS_ROOT, SAFE_PY (the 15.22 run)
+source $STORAGE_BS/robocasa_logs/eval/rldx1_hide_and_seek_20261023_000418/paths.env
+: ${SAFE_PY:=$STORAGE_BS/envs/vla_safe/bin/python}
+export E2F_JSON=$STORAGE_BS/robocasa_checkpoints/safe/stage2_frozen_sizing_20261029_190042/e2_frozen.json
+export R10_SHA=<R10_SHA>
+export R10_REPO=$PROJECT_FS/robocasa_r10freeze_${R10_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $R10_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R10_REPO $R10_SHA
+test "$(git -C $R10_REPO rev-parse HEAD)" = "$R10_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not R10_SHA"
+cd $R10_REPO
+export R10_TAG=e2_freeze_$(date +%Y%m%d_%H%M%S)
+export R10_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/$R10_TAG R10_LOG=$STORAGE_BS/robocasa_logs/eval/$R10_TAG
+mkdir -p $R10_ROOT $R10_LOG
+# Discovery (read-only): the frozen SAFE heads, the policy snapshot, the 15.22 scoring time.
+ls -d $RLDX_ROOT/final/lstm_seed{0,1,2} && echo "SAFE HEADS OK" || echo "STOP: SAFE final/lstm_seed* missing"
+ls -d $STORAGE_BS/hf_home/hub/models--RLWRLD--RLDX-1-FT-RC365/snapshots/* ~/.cache/huggingface/hub/models--RLWRLD--RLDX-1-FT-RC365/snapshots/* 2>/dev/null
+export POLICY_SNAP=$(ls -d $STORAGE_BS/hf_home/hub/models--RLWRLD--RLDX-1-FT-RC365/snapshots/* 2>/dev/null | tail -n 1)
+test "$(ls -d $STORAGE_BS/hf_home/hub/models--RLWRLD--RLDX-1-FT-RC365/snapshots/* 2>/dev/null | wc -l)" = 1 \
+  && echo "POLICY SNAPSHOT OK $POLICY_SNAP" || echo "STOP: not exactly one policy snapshot under hf_home"
+git -C $PROJECT_FS/RLDX-1 rev-parse HEAD
+grep -o '"elapsed_seconds": [0-9.]*' $RLDXHS_ROOT/scores/scoring.json
+R10_INPUTS=($RLDX_CAL/lstm_seed{0,1,2}/normalized_scores.jsonl $RLDX_CAL/split_manifest.json
+            $RLDXHS_ROOT/scores/{train,calibration,test}_predictions.jsonl $RLDXHS_ROOT/scores/{scoring,normalizations}.json
+            $RLDXHS_ROOT/inputs/{rldx_bundle,train_ids,calibration_ids,test_ids}.json $RLDX_RAW/manifest.jsonl
+            $RLDX_EXPORT/conversion_report.json $RLDX_LEAD_OUT/rldx_lead_lstm.json $RLDXHS_ROOT/rldx_hide_and_seek.json $E2F_JSON)
+for f in "${R10_INPUTS[@]}"; do test -s $f && echo "OK $f" || echo "STOP: missing $f"; done | grep -c '^OK'
+sha256sum "${R10_INPUTS[@]}" > $R10_LOG/frozen_inputs.sha256
+printf 'export %s=%q\n' R10_SHA "$R10_SHA" R10_REPO "$R10_REPO" R10_ROOT "$R10_ROOT" R10_LOG "$R10_LOG" \
+  POLICY_SNAP "$POLICY_SNAP" E2F_JSON "$E2F_JSON" > $R10_LOG/paths.env
+CUDA_VISIBLE_DEVICES="" PYTHONPATH=$R10_REPO "$SAFE_PY" -W ignore -m unittest tests.test_e2_frozen_rule \
+  tests.test_e2_freeze_manifest tests.test_stage2_frozen_sizing tests.test_safe_score_cohorts tests.test_safe_baselines \
+  2>&1 | grep -E "^(Ran|OK|FAILED)"
+# Part B1: retrain Hide-and-Seek on the 15.22 inputs, reproduce 15.22 exactly, save the weights.
+PYTHONPATH=$R10_REPO CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 nohup nice -n 10 \
+  "$SAFE_PY" -u -m robocasa.recovery.safe.baselines.score_cohorts --dataset-dir $RLDX_RAW \
+  --runtime-bundle $RLDXHS_ROOT/inputs/rldx_bundle.json --train-ids $RLDXHS_ROOT/inputs/train_ids.json \
+  --cohort calibration $RLDXHS_ROOT/inputs/calibration_ids.json --cohort test $RLDXHS_ROOT/inputs/test_ids.json \
+  --detectors hide_and_seek --feature-aggregation last --seeds 0 1 2 \
+  --reference calibration $RLDXHS_ROOT/scores/calibration_predictions.jsonl \
+  --reference test $RLDXHS_ROOT/scores/test_predictions.jsonl \
+  --save-models $R10_ROOT/models --output-dir $R10_ROOT/scores > $R10_LOG/freeze_scoring.log 2>&1 &
+echo "freeze scoring PID $! on $(hostname)"
+# Part A: type I error and power of the frozen rule.
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 nohup nice -n 10 \
+  "$SAFE_PY" -I -u scripts/xr1_lead_time/e2_frozen_rule.py --calibration-dir $RLDX_CAL \
+  --hs-scores-dir $RLDXHS_ROOT/scores --replication-json $RLDX_LEAD_OUT/rldx_lead_lstm.json \
+  --hs-result $RLDXHS_ROOT/rldx_hide_and_seek.json --frozen-json $E2F_JSON --workers 6 \
+  --output $R10_ROOT/e2_frozen_rule.json > $R10_LOG/e2_frozen_rule.log 2>&1 &
+echo "rule sizing PID $! on $(hostname); R10_TAG=$R10_TAG"
+```
+
+Continue only if all of these hold:
+- `HEAD OK`, `SAFE HEADS OK` and `POLICY SNAPSHOT OK` print;
+- the input count is 18;
+- the tests end with `OK` (39 tests).
+
+If a check fails, stop both jobs (`kill <PID>`) and report the output.
+
+**8.2 Monitor**
+
+```bash
+source $(ls -d $STORAGE_BS/robocasa_logs/eval/e2_freeze_* | tail -n 1)/paths.env
+tail -n 3 $R10_LOG/freeze_scoring.log; grep -h "check\|STOP\|Error\|Traceback" $R10_LOG/e2_frozen_rule.log
+pgrep -af "score_cohorts|e2_frozen_rule" | cut -c1-100
+```
+
+- The freeze scoring prints one `hide_and_seek seed <s> done` line per seed, then a
+  `reference ... -> OK` line per cohort and `REFERENCE OK`.
+- The rule sizing prints its replication check first and its tables at the end.
+
+**8.3 Manifest (after `REFERENCE OK`)**
+
+```bash
+source $(ls -d $STORAGE_BS/robocasa_logs/eval/e2_freeze_* | tail -n 1)/paths.env
+source $STORAGE_BS/robocasa_logs/eval/rldx1_hide_and_seek_20261023_000418/paths.env
+cd $R10_REPO
+"$SAFE_PY" -I -u scripts/xr1_lead_time/e2_freeze_manifest.py --calibration-dir $RLDX_CAL \
+  --hs-scores-dir $RLDXHS_ROOT/scores --replication-json $RLDX_LEAD_OUT/rldx_lead_lstm.json \
+  --hs-result $RLDXHS_ROOT/rldx_hide_and_seek.json --freeze-scores-dir $R10_ROOT/scores \
+  --tree safe_lstm_seed0=$RLDX_ROOT/final/lstm_seed0 --tree safe_lstm_seed1=$RLDX_ROOT/final/lstm_seed1 \
+  --tree safe_lstm_seed2=$RLDX_ROOT/final/lstm_seed2 --tree safe_lstm_calibration=$RLDX_CAL \
+  --tree policy_snapshot=$POLICY_SNAP \
+  --file hs_rldx_bundle=$RLDXHS_ROOT/inputs/rldx_bundle.json --file hs_train_ids=$RLDXHS_ROOT/inputs/train_ids.json \
+  --file hs_calibration_ids=$RLDXHS_ROOT/inputs/calibration_ids.json --file hs_test_ids=$RLDXHS_ROOT/inputs/test_ids.json \
+  --file raw_manifest=$RLDX_RAW/manifest.jsonl --file export_conversion_report=$RLDX_EXPORT/conversion_report.json \
+  --git rldx_repo=$PROJECT_FS/RLDX-1 --output $R10_ROOT/e2_freeze_manifest.json 2>&1 | tee $R10_LOG/manifest.log
+```
+
+**8.4 Report**, when the manifest is written and `e2_frozen_rule.log` has its tables:
+
+```bash
+source $(ls -d $STORAGE_BS/robocasa_logs/eval/e2_freeze_* | tail -n 1)/paths.env
+grep -E "seed . done|reference|REFERENCE" $R10_LOG/freeze_scoring.log; cat $R10_LOG/manifest.log
+grep -h "check" $R10_LOG/e2_frozen_rule.log; sed -n '/^frozen paths/,$p' $R10_LOG/e2_frozen_rule.log
+sha256sum -c --quiet $R10_LOG/frozen_inputs.sha256 && echo INPUTS UNCHANGED
+sha256sum $R10_ROOT/*.json $R10_ROOT/models/*.npz; basename $R10_ROOT
+```
+
+Copy `e2_frozen_rule.json`, `e2_freeze_manifest.json` and `scores/scoring.json` to
+`reports/safe_robocasa365_research_plan_20260823/evidence/<R10_TAG>/`. The models stay on the
+cluster under `$R10_ROOT/models`; the manifest records their hashes.
 
 ## Result
 
