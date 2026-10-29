@@ -1,4 +1,4 @@
-% Fig. 2: where the gain over P comes from (XR-1, held-out test set). Data: figures/per_task_gains.csv
+% Fig. 3: where the gain over P comes from (XR-1, test set). Data: figures/per_task_gains.csv
 % and figures/matched_sweep.csv, written by analysis/per_task_figure.py from review_analyses.json
 % (run xr1_review_analyses_20261028_155557). Needs pgfplots.
 \begin{figure}[t]
@@ -62,7 +62,7 @@
 \addlegendentry{shuffle}
 \end{axis}
 \end{tikzpicture}
-\caption{Where the gain over the per-task timer P comes from (XR-1, held-out test set). (a) Atomic
+\caption{Where the gain over the per-task timer P comes from (XR-1, test set). (a) Atomic
 tasks gain about four times as much as composite ones (Hide-and-Seek: 0.160 vs.\ 0.039 on average);
 on 16 tasks the fused detector alarms later than P, as its looser timer spends the false-alarm
 budget on the score. (b) With P loosened to the fused detector's false alarms, Hide-and-Seek's

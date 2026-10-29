@@ -59,7 +59,7 @@ limit. There, elapsed time is a strong failure signal: on RoboCasa365, a timer c
 separates failures as well as one that reads the policy. Without a duration-only comparator,
 even timeliness metrics cannot show what a monitor adds. We measure how much earlier than a
 per-task timer a monitor alarms at the same target FPR, and fuse the two by an OR rule with a
-split-conformal FPR bound. On 760 held-out rollouts of one VLA on 38 tasks, with hypotheses fixed
+split-conformal FPR bound. On 760 test rollouts of one VLA on 38 tasks, with hypotheses fixed
 in advance, the SAFE failure score adds 0.030 of the time limit to the timer and the sequence
 detector Hide-and-Seek, with three seeds averaged, 0.071 (95\% CI [0.022, 0.157]); at matched
 false alarms they shrink to 0.015 and 0.056, with CIs including zero. Input ablations that see
@@ -107,7 +107,7 @@ Our contributions are:
   \item \textbf{Time-aware fusion:} an OR rule that fuses any monitor with a timer, whose
   split-conformal calibration bounds the FPR in finite samples (Proposition~\ref{prop:fpr}).
   \item \textbf{An evaluation on 38 RoboCasa365 tasks} with hypotheses fixed before the
-  held-out test. SAFE adds 0.030 of the time limit over the per-task timer and
+  test. SAFE adds 0.030 of the time limit over the per-task timer and
   Hide-and-Seek~\cite{park2026hideseek} 0.071, a warning that develops during the rollout
   (Sec.~\ref{sec:results}). On XR-1's unseen tasks, only Hide-and-Seek's gain carries over; the
   ordering holds on a second VLA, and on FIPER's benchmark the test credits FIPER.
@@ -218,7 +218,7 @@ $V_1, \dots, V_{n+1}$ is uniform (ties broken at random), so $\Pr(V_{n+1} > V_{(
 
 The path may use any data except calibration successes, such as development rollouts or
 calibration \emph{failures}. The guarantee is per trajectory and marginal over tasks and
-calibration draws, not a cap on a finite test set or on each task (on the held-out set, one task
+calibration draws, not a cap on a finite test set or on each task (on the test set, one task
 had 4 of 10 successes alarmed); a per-task version needs 19 calibration successes per task.
 
 \textbf{Choosing the path.} For every detector fused with P we use the path $\delta = \lambda$,
@@ -246,7 +246,7 @@ Hide-and-Seek + P also lead P, including at matched false alarms.
 \textbf{Value of earlier warning (H4).} Within a budget of $1.25\,H_k$, resetting and retrying
 when Hide-and-Seek + P alarms yields a higher success rate than resetting when P alarms.
 
-We fixed H1, H2, P and the lead metric before scoring the held-out test set, first for SAFE and
+We fixed H1, H2, P and the lead metric before scoring the test set, first for SAFE and
 then for Hide-and-Seek. Stage~2 addresses H3 and H4 (Sec.~\ref{sec:plan}).
 
 \section{Experiments}
@@ -263,9 +263,9 @@ tasks~\cite{nasiriany2024robocasa,robocasa365} whose published success lies betw
 \textbf{Data.} Disjoint sets of rollouts serve one purpose each. A \emph{training set} (1,824
 rollouts) fits every learned detector and P's $\rho_k$. A \emph{validation set} (380 successes
 and 380 failures, 10 per class per task), with its own calibration set (3 successes and 3
-failures per task), was used to develop the timers and the fused detectors. A \emph{held-out
-test set} of the same size, with new seeds, and a new calibration set of 380 successes and 380
-failures served the tests of H1 and H2.
+failures per task), was used to develop the timers and the fused detectors. A \emph{test set} of the same size,
+with new seeds, and a new calibration set of 380 successes and 380 failures served the tests of
+H1 and H2.
 
 \textbf{Unseen tasks.} Each task is held out once (4 folds): monitors are retrained and
 thresholds calibrated without it, with OOD references and score normalization pooled over the
@@ -294,7 +294,7 @@ alarms, which favors the timer.
 
 \begin{table}[t]
 \centering
-\caption{Standalone failure detection with XR-1 (held-out test set, 380 + 380 rollouts) at
+\caption{Standalone failure detection with XR-1 (test set, 380 + 380 rollouts) at
 thresholds calibrated for 5\% FPR. Mean and std over 3 seeds; \textbf{bold}/\underline{underline}:
 best/second best.}
 \label{tab:raw}
@@ -335,7 +335,7 @@ best/second best.}
 
 \begin{table}[t]
 \centering
-\caption{Warning lead on held-out test sets. Each monitor is OR-fused at a 5\% FPR target with P
+\caption{Warning lead on the test sets. Each monitor is OR-fused at a 5\% FPR target with P
 on seen tasks and with G on unseen tasks. $\Delta\bar\ell$: gain in mean lead over that timer.
 Mean and std over 3 seeds; \textbf{bold}/\underline{underline}: best/second-best monitor.}
 \label{tab:lead}
@@ -415,7 +415,7 @@ detector above the global timer's TWA, and ActProbe's thresholds almost never fi
 
 \subsection{Warning lead over the per-task timer}
 
-\textbf{SAFE: a small gain (H1, H2).} On the held-out test set (Table~\ref{tab:lead}), SAFE + P
+\textbf{SAFE: a small gain (H1, H2).} On the test set (Table~\ref{tab:lead}), SAFE + P
 leads P by 0.030 of the time limit ([0.007, 0.093]) at 0.061 FPR. Random and within-task
 resampled scores gain at most 0.009, so the gain comes from the policy, not from the fusion
 itself. At matched false alarms, however, it shrinks to 0.015 ([$-0.007$, 0.041]).
@@ -439,7 +439,7 @@ composite ones (0.008 to 0.039). Hide-and-Seek + P alarms earlier than P on 21 t
 
 A recurrent detector trained on rollouts that all fail at the limit could learn task durations.
 The zero-input ablation separates failures as well as Hide-and-Seek (Sec.~I), yet adds only
-0.001 over P at matched false alarms on the validation set. On the held-out set, Hide-and-Seek
+0.001 over P at matched false alarms on the validation set. On the test set, Hide-and-Seek
 beats the first-step, zero-input and shuffle ablations by 0.070, 0.059 and 0.060 (CIs above
 zero): its warning develops during the rollout and is neither elapsed time nor the task's typical
 trajectory.
@@ -503,7 +503,7 @@ early warning wherever it occurs.
 \subsection{When do failures become irreversible?}
 
 One annotator, blind to alarms, marked the point of no return (the first state from which the
-task could not be completed without outside help) on 48 held-out failures: 38 (79\%) reached no
+task could not be completed without outside help) on 48 test-set failures: 38 (79\%) reached no
 such state before the limit (\emph{recoverable}), most often because the robot was slow or
 nearly succeeded; a second annotator agreed on 11 of 12 ($\kappa = 0.80$). An early ``failure''
 alarm thus mostly flags an attempt that is not yet lost. On all 10 failures that did become
@@ -537,17 +537,17 @@ annotated failures.
 \section{Conclusion and Limitations}
 
 When failure means running out of time, a monitor must beat a timer at the same false-alarm
-rate. Against a per-task timer at the same target FPR, SAFE added 0.030 of the time limit on a
-held-out test set and Hide-and-Seek 0.071 (0.015 and 0.056 at matched false alarms), a warning
+rate. Against a per-task timer at the same target FPR, SAFE added 0.030 of the time limit on new
+test rollouts and Hide-and-Seek 0.071 (0.015 and 0.056 at matched false alarms), a warning
 that input ablations trace to the rollout and that carries over to unseen tasks. Stage~2 tests
 both on a second policy and measures their value in closed-loop retry.
 
 \textbf{Limitations.} Alarms were recorded, not acted on, in simulation, and lead is measured to
 the time limit, not to an irreversible failure. RLDX-1 is evaluated only on recorded rollouts.
 The timers and fusions were designed on the validation set, and the matched, per-task,
-unseen-task and FIPER analyses were added after the held-out test set was scored;
+unseen-task and FIPER analyses were added after the test set was scored;
 Hide-and-Seek, the better of two supervised baselines on the validation set, was tested on a
-held-out set already used for SAFE. Monitors assume a known task and time limit; fixed-horizon
+test set already used for SAFE. Monitors assume a known task and time limit; fixed-horizon
 data need failure-time labels. Only 10 annotated failures became irreversible.
 
 % References start on page 6 (RSS: up to 5 pages of content and 1 page of references).
