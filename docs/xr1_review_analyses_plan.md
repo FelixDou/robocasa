@@ -1137,8 +1137,63 @@ print("split manifest keys:", sorted(s), {k: len(v) for k, v in s.items() if isi
 PY
 ```
 
-Report `a_listing.txt` and `a_settings.txt`. A′3 (one GPU) and the Stage B′ code are written
-from them.
+Report `a_listing.txt` and `a_settings.txt`. A′3 and the Stage B′ code are written from them.
+
+**D4. Stage A′3: retrain LSTM seed 0 and MLP seed 0 (two GPUs at once).**
+
+```bash
+source $R7_LOG/paths.env; cd $R7_REPO
+export SAFE_REPO=$PROJECT_FS/SAFE
+export RLDX_EXPORT=$STORAGE_BS/robocasa_rollouts/safe/rldx1_original_safe35_natural50_20260808_203158/official_safe_supported20_natural50
+git -C $SAFE_REPO rev-parse HEAD
+test -s $RLDX_EXPORT/conversion_report.json && echo "EXPORT OK" || echo "STOP: no export"
+nvidia-smi --query-gpu=index,memory.used --format=csv
+mkdir -p $R7_ROOT/safe_retrain_check
+for M in lstm indep; do
+  if [ $M = lstm ]; then G=0; else G=1; fi
+  CUDA_VISIBLE_DEVICES=$G WANDB_MODE=disabled nohup "$SAFE_PY" -u -m robocasa.recovery.safe.train_seen_tasks \
+    --export-dir $RLDX_EXPORT --safe-repo $SAFE_REPO --output-dir $R7_ROOT/safe_retrain_check/${M}_seed0 \
+    --model $M --seed 0 --split-seed 0 \
+    --selection-manifest $RLDX_ROOT/protocol/frozen_outer_split.json \
+    --selection-summary $RLDX_ROOT/cv/cv_selection_summary.json \
+    --class-weighting official_inverse_frequency --epochs 1000 --device cuda \
+    > $R7_LOG/a3_retrain_${M}_seed0.log 2>&1 &
+  echo "$M PID $! on GPU $G ($(hostname))"
+done
+```
+
+The SAFE commit must be `b6036abe07b2b2bb9996afb2c07f13d6a9f507c0`, and `EXPORT OK` must print.
+Progress: `tail -c 300 $R7_LOG/a3_retrain_*_seed0.log; echo`. Each run ends with a JSON block,
+like the original final logs.
+
+**D5. Stage A′3 comparison (after both runs end).**
+
+```bash
+source $R7_LOG/paths.env; cd $R7_REPO
+for M in lstm indep; do
+  echo "== $M"
+  sha256sum $RLDX_ROOT/final/${M}_seed0/model_final.ckpt $R7_ROOT/safe_retrain_check/${M}_seed0/model_final.ckpt
+  diff $RLDX_ROOT/final/${M}_seed0/config.yaml $R7_ROOT/safe_retrain_check/${M}_seed0/config.yaml && echo "SAME CONFIG $M"
+done 2>&1 | tee $R7_LOG/a3_compare.txt
+"$SAFE_PY" -I - <<'PY' 2>&1 | tee -a $R7_LOG/a3_compare.txt
+import json, os
+import numpy as np
+root, new = os.environ["RLDX_ROOT"] + "/final", os.environ["R7_ROOT"] + "/safe_retrain_check"
+def load(path):
+    with open(path) as stream:
+        return {r["rollout_id"]: r for r in (json.loads(line) for line in stream if line.strip())}
+for m in ("lstm", "indep"):
+    a, b = load(f"{root}/{m}_seed0/scores.jsonl"), load(f"{new}/{m}_seed0/scores.jsonl")
+    diffs = [float(np.max(np.abs(np.asarray(a[k]["scores"]) - np.asarray(b[k]["scores"]))))
+             if len(a[k]["scores"]) == len(b[k]["scores"]) else float("inf") for k in a if k in b]
+    ma, mb = (json.load(open(f"{x}/{m}_seed0/metrics.json")) for x in (root, new))
+    keys = ("selected_hyperparameters", "task_min_steps", "training_class_weights", "training_objective", "counts")
+    print(m, "rollouts", len(a), len(b), "same ids", set(a) == set(b), "max |diff|", max(diffs) if diffs else None,
+          "metrics equal", {k: ma.get(k) == mb.get(k) for k in keys})
+PY
+```
+
+Report `a3_compare.txt`, plus the first and last 5 lines of each retraining log.
 
 **D3. The table (CPU, minutes; after D1).**
 
@@ -1712,3 +1767,32 @@ only.
   The split manifest has 740 train, 60 calibration and 200 evaluation rollouts. The training
   logs are `rldx1_safe20_natural_weighted_20260815_162530_{final_lstm,final_indep,master}.log`.
   The exact command and the time per fit come from them before A′3.
+- **A′2, continued** (`a2b_commands.txt`).
+  - **Pipeline:** one driver ran on 2026-08-15 from 16:25 to 20:46. It did a 6-fit smoke run,
+    810 inner-CV fits, 6 final refits (3 seeds × 2 heads), calibration and an audit
+    (`COMPLETE, FROZEN, AND HEALTHY`). Its log prints stage banners only, and the driver
+    script is not in the repo, so the exact final command is not recorded.
+  - **Final settings** (`metrics.json`):
+    - LSTM: h 0.0, d 1.0, lr 3e-5, λ_reg 1e-2.
+    - MLP: h concat-2, d concat-2, lr 1e-3, λ_reg 1e-3.
+    - Both: official loss (`pinned_safe_output`, focal γ 2.0 recorded) and official
+      inverse-frequency weights.
+    - Train 740 (402 S / 338 F), test 260; `task_min_step` from the training split.
+  - **Files:** each `final/<head>_seed<s>` has `config.yaml`, `metrics.json`,
+    `model_final.ckpt`, `scores.jsonl`, `split_manifest.json` and `train_history.json`.
+  - **Split:** `frozen_outer_split.json` has train 740 and test 260 (60 calibration + 200
+    evaluation), with 20 included tasks.
+- **A′3 (written now, two GPUs).** The command is rebuilt from `train_seen_tasks`' options:
+  - the recorded selection manifest and selection summary;
+  - the trainer's defaults for everything else recorded: class weighting, loss mode, focal γ,
+    split seed 0, 1,000 epochs, no online mode.
+
+  The check is the proof that the command is right. All of these must hold:
+  - `config.yaml` is identical;
+  - the checkpoint SHA-256 is identical;
+  - all 1,000 trajectories are equal;
+  - selected hyperparameters, task cutoffs, class weights, objective and counts are equal.
+
+  If `config.yaml` differs, its diff names the setting to fix, and nothing else follows until
+  A′3 is exact. If the config is equal but the scores differ, Stage B′ uses R5's approximate
+  B-G2 instead.
