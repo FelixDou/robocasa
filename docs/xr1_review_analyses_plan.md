@@ -1638,14 +1638,15 @@ lead 0.026 with no false alarm.
 - Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_unseen_20261029_135501`
   (`rldx_unseen.json`, SHA-256 `58a68f5b…`, copied to
   `reports/safe_robocasa365_research_plan_20260823/evidence/rldx1_unseen_20261029_135501/`;
-  `rldx_folds.json`, SHA-256 `079ce858…`).
+  `rldx_folds.json`, SHA-256 `079ce858…`, also copied).
 - Logs: `/gs/bs/tga-shinoda/felid/robocasa_logs/eval/rldx1_unseen_20261029_135501`.
 - Code: pinned worktree `robocasa_rldxunseen_9fef3adf` on r4n5, CPU only.
   - The five folds were scored at once. The run folder was created at 13:55, and the last
     fold (all) finished at 14:28.
   - The table took minutes.
-- **Folds:** 6, 6, 4 and 4 tasks. The rule deals each task type from fold 0, so folds 0 and 1
-  get the remainders.
+- **Folds:** 6, 6, 4 and 4 tasks. RLDX-1 has 14 atomic and 6 composite tasks, so the folds
+  are 4 + 2, 4 + 2, 3 + 1 and 3 + 1. The rule deals each task type from fold 0, so folds 0 and
+  1 get the remainders.
 
 **Checks.** All passed:
 - Five scoring runs with rc=0.

@@ -1,0 +1,70 @@
+{
+ "plan": "docs/xr1_review_analyses_plan.md (R7)",
+ "seed": 20261029,
+ "k": 4,
+ "rule": "per task type (atomic, then composite): sort names, numpy default_rng(seed).permutation, deal round-robin into folds 0..k-1",
+ "tasks": {
+  "CloseFridge": "atomic",
+  "CloseToasterOvenDoor": "atomic",
+  "CoffeeSetupMug": "atomic",
+  "LoadDishwasher": "composite",
+  "NavigateKitchen": "atomic",
+  "OpenCabinet": "atomic",
+  "OpenDrawer": "atomic",
+  "OpenStandMixerHead": "atomic",
+  "PickPlaceCounterToCabinet": "atomic",
+  "PickPlaceCounterToStove": "atomic",
+  "PickPlaceDrawerToCounter": "atomic",
+  "PreSoakPan": "composite",
+  "RinseSinkBasin": "composite",
+  "ScrubCuttingBoard": "composite",
+  "SlideDishwasherRack": "atomic",
+  "StackBowlsCabinet": "composite",
+  "TurnOnElectricKettle": "atomic",
+  "TurnOnMicrowave": "atomic",
+  "TurnOnSinkFaucet": "atomic",
+  "WashLettuce": "composite"
+ },
+ "folds": [
+  {
+   "fold": 0,
+   "held_out": [
+    "CoffeeSetupMug",
+    "LoadDishwasher",
+    "OpenCabinet",
+    "PickPlaceCounterToCabinet",
+    "PickPlaceDrawerToCounter",
+    "PreSoakPan"
+   ]
+  },
+  {
+   "fold": 1,
+   "held_out": [
+    "NavigateKitchen",
+    "OpenStandMixerHead",
+    "StackBowlsCabinet",
+    "TurnOnElectricKettle",
+    "TurnOnSinkFaucet",
+    "WashLettuce"
+   ]
+  },
+  {
+   "fold": 2,
+   "held_out": [
+    "CloseFridge",
+    "CloseToasterOvenDoor",
+    "PickPlaceCounterToStove",
+    "ScrubCuttingBoard"
+   ]
+  },
+  {
+   "fold": 3,
+   "held_out": [
+    "OpenDrawer",
+    "RinseSinkBasin",
+    "SlideDishwasherRack",
+    "TurnOnMicrowave"
+   ]
+  }
+ ]
+}
