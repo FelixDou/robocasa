@@ -395,6 +395,94 @@ per-seed scripts and docs of `claude/time-aware-fusion-paper` (`per_seed_detecti
 `ood_per_seed_fused.py`, `run_offline_detector_baselines.py`) are copied unchanged into this
 branch, then extended with the fold mode.
 
+## R7. RLDX-1 unseen columns for Table II (written 2026-10-29, before any run)
+
+**Why.** After R6, Table II's RLDX-1 block has seen rows only. R7 fills its Unseen (+ G)
+columns, as R6 did for XR-1. Table I stays XR-1 only (author's choice, 2026-10-29). Like R5–R6,
+this is exploratory on opened cohorts.
+
+**Data and protocol.** These are the RLDX-1 cohorts of report §15.15/§15.22, unchanged:
+- 20 tasks; 740 training rollouts; 60 held-out calibration successes (3 per task); 200 test
+  rollouts (5 + 5 per task).
+- H_k is the longest training failure of task k.
+- Everything is fitted with `confirm_lead.fit_fast`. The calibration successes set the FPR,
+  and the training failures choose the fused path. On RLDX-1 the training failures are scored
+  in-sample.
+
+**Folds.** `rldx_unseen.py folds` deals the 20 tasks into 4 folds:
+- the rule is `cross_task_lead.make_folds`, stratified by the bundle's task types, seed
+  20261029;
+- the file is written in the run folder before anything is trained, and its SHA-256 is
+  recorded by every fold directory;
+- a fold with no held-out task is refused.
+
+**Arms.**
+- **Seen (+ P).** Fold all, per-task normalization, every task. These are the published
+  per-seed rows (`rldx1_per_seed_20261028_145711`), recomputed here and gated.
+- **Unseen (+ G).** Per fold, G (P with ρ_k = 0) and the fused path are fitted on the seen
+  tasks' calibration successes and their training failures. The scores are the fold's models
+  with pooled normalization. They are applied to the held-out tasks' test rollouts and pooled
+  over folds. Every task is held out once, so the pooled set is all 200 test rollouts.
+- **Statistics:** mean and std (ddof 1) over seeds 0–2, plus the seed average.
+
+**Rows.**
+
+| Row | Seen | Unseen |
+|---|---|---|
+| Hide-and-Seek, zero-input, first-inference | §15.22 scores | `score_cross_task --score-train` per fold |
+| Mahalanobis, cosine k-NN, PCA-KMeans, RND (default settings) | `rldx1_per_seed` OOD scores | the same per fold |
+| same-task shuffle | §15.22 | — (needs the task's own rollouts) |
+| SAFE-LSTM, SAFE-MLP | §15.15 | Stage B′, below |
+| G | as published | per fold, fitted on the seen tasks |
+
+The default OOD detectors fit one model over all training successes, with no per-task
+reference. Unlike XR-1's tuned ones, they need no pooled variant.
+
+**Code.**
+- `score_cross_task --score-train` is new and off by default. It writes the fold's
+  (seen-task) training trajectories, as `score_cohorts --score-train` does.
+- `scripts/xr1_lead_time/rldx_unseen.py` (`folds`, `run`), with tests in
+  `tests/test_xr1_rldx_unseen.py`.
+- `rldx_per_seed.py` and its test are copied unchanged from `claude/time-aware-fusion-paper`.
+
+**Gates (no table without them).**
+- **R1.** Every fold directory matches the fold file (folds, held-out tasks, training on exactly
+  the seen tasks, seeds 0–2, `--score-train`). Fold all reproduces the earlier `score_cohorts`
+  trajectories of all seven detectors in all three cohorts (`--reference-raw`; 21 checks).
+- **R2.** Seen + P equals `rldx_per_seed.json` exactly (P, lead, FPR, gain), per seed and
+  seed-averaged, for every detector.
+- **R3.** G is the same timer whichever score it is fused with.
+
+**Expectations (written before running).**
+- G is weak on RLDX-1: seen lead 0.032, against P's 0.271. So every score can gain a lot over
+  G, controls included. The controls' gains, not zero, are the yardstick.
+- Hide-and-Seek gains the most and stays above the zero-input and first-inference controls, as
+  on XR-1. The margin should be smaller: its seen gain on RLDX-1 comes from atomic tasks, and
+  each fold holds out only a few of them.
+- The OOD rows gain little more than the controls. Their unseen FPR may exceed 0.05, as on
+  XR-1.
+- About 45 seen calibration successes per fold make the 5% threshold coarse (two false alarms
+  among them), and one false alarm on the 100 test successes moves the FPR by 0.01.
+
+**SAFE (staged, as R5).**
+- **Stage A′** (file reads, then one GPU). Each answer decides how Stage B′ is built:
+  - **A′1.** Where are the SAFE20 final models, their raw scores and settings? Do
+    `normalized_scores.jsonl`'s `full_raw_scores` equal the final models' scores?
+  - **A′2.** What are the training command, selection summary, time per fit, split manifest
+    (740 / 260) and official export?
+  - **A′3** (written after A′2). Retrain LSTM seed 0 and MLP seed 0 on the 740 training
+    rollouts, and compare with the frozen raw trajectories.
+- **Stage B′** design, fixed now:
+  - **Folds:** R7's.
+  - **Training:** both heads with the frozen settings and seeds 0–2, without the fold's tasks
+    (24 fits).
+  - **Scoring:** every RLDX-1 rollout, through the unseen-task scorer path.
+  - **Assembly:** fold directories in the cross-task format (calibration, test and train
+    predictions; pooled normalization by the cross-task formula).
+  - **Seen rows:** these keep SAFE's own normalization, since they are the published rows.
+  - **Gate:** fold all must equal the frozen raw trajectories if A′3 is bit-exact. Otherwise
+    the gate follows R5's B-G2.
+
 ## Runbook
 
 Run on TSUBAME from a pinned worktree, CPU only for R1–R4, following
@@ -913,6 +1001,168 @@ Report the whole `tables.log` (it ends in `SEEN/UNSEEN TABLES OK` or `REPRODUCTI
 # local machine
 rsync -av tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/<R6_TAG>/seen_unseen_tables.json \
   reports/safe_robocasa365_research_plan_20260823/evidence/<R6_TAG>/
+```
+
+### 5. R7: RLDX-1 unseen columns (CPU, one large allocation; Stage A′ file reads)
+
+`R7_SHA` is the full SHA of the pushed commit on `claude/review-analyses` that contains this
+step. The RLDX-1 OOD scoring of `rldx1_per_seed` peaked at 23 GB. Five fold processes at once
+need about 120 GB and 40 cores, so use a `node_h` allocation.
+
+**D0. Environment, pinned code, inputs, folds, unit tests.**
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+source $STORAGE_BS/robocasa_logs/eval/rldx1_per_seed_20261028_145711/paths.env
+echo "RLDXPS_ROOT=$RLDXPS_ROOT RLDXHS_ROOT=$RLDXHS_ROOT RLDX_ROOT=$RLDX_ROOT RLDX_RAW=$RLDX_RAW SAFE_PY=$SAFE_PY"
+
+export R7_SHA=<R7_SHA>
+export R7_REPO=$PROJECT_FS/robocasa_rldxunseen_${R7_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $R7_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R7_REPO $R7_SHA
+test "$(git -C $R7_REPO rev-parse HEAD)" = "$R7_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not R7_SHA"
+cd $R7_REPO
+export R7_TAG=rldx1_unseen_$(date +%Y%m%d_%H%M%S)
+export R7_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/$R7_TAG R7_LOG=$STORAGE_BS/robocasa_logs/eval/$R7_TAG
+mkdir -p $R7_ROOT $R7_LOG
+export FOLDS=$R7_ROOT/rldx_folds.json
+printf 'export %s=%q\n' R7_SHA "$R7_SHA" R7_REPO "$R7_REPO" R7_TAG "$R7_TAG" R7_ROOT "$R7_ROOT" R7_LOG "$R7_LOG" \
+  FOLDS "$FOLDS" RLDXPS_ROOT "$RLDXPS_ROOT" RLDXHS_ROOT "$RLDXHS_ROOT" RLDX_ROOT "$RLDX_ROOT" RLDX_RAW "$RLDX_RAW" \
+  SAFE_PY "$SAFE_PY" > $R7_LOG/paths.env
+echo "R7_TAG=$R7_TAG"
+
+R7_INPUTS=($RLDXHS_ROOT/inputs/rldx_bundle.json $RLDXHS_ROOT/inputs/{train,calibration,test}_ids.json
+           $RLDXHS_ROOT/scores/{train,calibration,test}_predictions.jsonl $RLDXHS_ROOT/scores/normalizations.json
+           $RLDXPS_ROOT/ood_scores/{train,calibration,test}_predictions.jsonl $RLDXPS_ROOT/ood_scores/normalizations.json
+           $RLDXPS_ROOT/rldx_per_seed.json
+           $RLDX_ROOT/calibration/lstm/lstm_seed{0,1,2}/normalized_scores.jsonl
+           $RLDX_ROOT/calibration/indep/indep_seed{0,1,2}/normalized_scores.jsonl $RLDX_RAW/manifest.jsonl)
+for f in "${R7_INPUTS[@]}"; do test -s $f && echo "OK $f" || echo "STOP: missing $f"; done > $R7_LOG/inputs_check.log
+grep -v '^OK' $R7_LOG/inputs_check.log; grep -c '^OK' $R7_LOG/inputs_check.log
+sha256sum "${R7_INPUTS[@]}" > $R7_LOG/frozen_inputs.sha256
+
+"$SAFE_PY" -I scripts/xr1_lead_time/rldx_unseen.py folds --inputs-dir $RLDXHS_ROOT/inputs --write $FOLDS \
+  | tee $R7_LOG/folds.log
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_safe_score_cross_task tests.test_xr1_rldx_unseen \
+  tests.test_rldx_per_seed tests.test_rldx_hide_and_seek tests.test_rldx_lead_replication 2>&1 | tail -n 3
+free -g | head -n 2; nproc
+```
+
+Continue only if all of these hold:
+- `HEAD OK` is printed, no `STOP` line appears, and the count is 20;
+- `folds.log` lists four folds whose tasks add up to 20;
+- the tests end with `OK` (15 tests).
+
+**D1. Score the five folds (background).**
+
+```bash
+cd $R7_REPO
+cat > $R7_LOG/score.sh <<'EOF'
+set -u
+source $R7_LOG/paths.env
+cd $R7_REPO
+export CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
+COMMON=(--dataset-dir $RLDX_RAW --runtime-bundle $RLDXHS_ROOT/inputs/rldx_bundle.json
+        --train-ids $RLDXHS_ROOT/inputs/train_ids.json --folds $FOLDS
+        --cohort calibration $RLDXHS_ROOT/inputs/calibration_ids.json --cohort test $RLDXHS_ROOT/inputs/test_ids.json
+        --detectors hide_and_seek hide_and_seek_zero hide_and_seek_first mahalanobis cosine_knn pca_kmeans rnd
+        --feature-aggregation last --seeds 0 1 2 --score-train)
+one() {
+  F=$1; EXTRA=()
+  if [ $F = all ]; then
+    for c in calibration test train; do
+      EXTRA+=(--reference-raw $c $RLDXHS_ROOT/scores/${c}_predictions.jsonl
+              --reference-raw $c $RLDXPS_ROOT/ood_scores/${c}_predictions.jsonl)
+    done
+  fi
+  "$SAFE_PY" -u -m robocasa.recovery.safe.baselines.score_cross_task "${COMMON[@]}" --fold $F "${EXTRA[@]}" \
+    --output-dir $R7_ROOT/folds/fold_$F > $R7_LOG/score_fold_$F.log 2>&1
+  echo "=== FOLD $F rc=$? $(date -Iseconds)"
+}
+one all & one 0 & one 1 & one 2 & one 3 & wait
+echo "=== SCORING DONE"
+EOF
+nohup nice -n 10 bash $R7_LOG/score.sh > $R7_LOG/score.log 2>&1 &
+echo "scoring PID $! on $(hostname)"
+```
+
+Progress: `cat $R7_LOG/score.log; tail -qn 2 $R7_LOG/score_fold_*.log`. It is done when:
+- `score.log` shows five `rc=0` lines and `=== SCORING DONE`;
+- `score_fold_all.log` ends with 21 `reference ... -> OK` lines and `REFERENCE OK`.
+
+Any other `rc` is a stop condition.
+
+**D2. Stage A′ (file reads; can run while D1 scores).**
+
+```bash
+source $R7_LOG/paths.env; cd $R7_REPO
+ls $RLDX_ROOT | tee $R7_LOG/a_listing.txt
+find $RLDX_ROOT -maxdepth 3 \( -name model_final.ckpt -o -name scores.jsonl -o -name metrics.json \
+  -o -name config.yaml -o -name "*selection*.json" -o -name split_manifest.json \) | sort | tee -a $R7_LOG/a_listing.txt
+ls $STORAGE_BS/robocasa_logs/eval | grep -i -E "safe20|supported20" | tee -a $R7_LOG/a_listing.txt
+"$SAFE_PY" -I - <<'PY' 2>&1 | tee $R7_LOG/a_settings.txt
+import glob, json, os
+import numpy as np
+root = os.environ["RLDX_ROOT"]
+words = ("arg", "command", "selection", "export", "weight", "loss", "epoch", "second", "elapsed", "split",
+         "seed", "config", "horizon", "diffusion", "lr", "lambda", "device")
+for model in ("lstm", "indep"):
+    for path in sorted(glob.glob(f"{root}/**/{model}_seed0/metrics.json", recursive=True)):
+        m = json.load(open(path))
+        print("==", path, "\nkeys:", sorted(m))
+        for k in sorted(m):
+            if any(w in k.lower() for w in words):
+                print("  ", k, "=", json.dumps(m[k], default=str)[:400])
+    norm = f"{root}/calibration/{model}/{model}_seed0/normalized_scores.jsonl"
+    rows = [json.loads(line) for line in open(norm) if line.strip()]
+    print(model, "normalized rows", len(rows), "fields", sorted(rows[0]))
+    finals = sorted(glob.glob(f"{root}/**/{model}_seed0/scores.jsonl", recursive=True))
+    print(model, "final scores files:", finals)
+    if finals:
+        fin = {}
+        for line in open(finals[0]):
+            if line.strip():
+                r = json.loads(line)
+                fin[r["rollout_id"]] = r
+        diffs = [float(np.max(np.abs(np.asarray(r["full_raw_scores"]) - np.asarray(fin[r["rollout_id"]]["scores"]))))
+                 for r in rows if r["rollout_id"] in fin]
+        print(model, "rows matched", len(diffs), "of", len(rows), "max |full_raw_scores - final scores|",
+              max(diffs) if diffs else None)
+        print(model, "final scores fields:", sorted(next(iter(fin.values()))))
+s = json.load(open(f"{root}/calibration/lstm/split_manifest.json"))
+print("split manifest keys:", sorted(s), {k: len(v) for k, v in s.items() if isinstance(v, (list, dict))})
+PY
+```
+
+Report `a_listing.txt` and `a_settings.txt`. A′3 (one GPU) and the Stage B′ code are written
+from them.
+
+**D3. The table (CPU, minutes; after D1).**
+
+```bash
+source $R7_LOG/paths.env; cd $R7_REPO
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/rldx_unseen.py run \
+  --safe-dir $RLDX_ROOT/calibration/lstm --inputs-dir $RLDXHS_ROOT/inputs --folds $FOLDS \
+  --fold-dirs $R7_ROOT/folds/fold_{0,1,2,3,all} --reference-per-seed $RLDXPS_ROOT/rldx_per_seed.json \
+  --output $R7_ROOT/rldx_unseen.json 2>&1 | tee $R7_LOG/unseen.log
+sha256sum -c --quiet $R7_LOG/frozen_inputs.sha256 && echo INPUTS UNCHANGED
+sha256sum $R7_ROOT/rldx_unseen.json $FOLDS; echo "R7_TAG=$R7_TAG"
+```
+
+Report the whole `unseen.log` (it ends in `RLDX-1 UNSEEN TABLE OK` or `REPRODUCTION FAILED`),
+`INPUTS UNCHANGED`, both SHA-256 values and `R7_TAG`. Then copy both files to the local evidence
+folder:
+
+```bash
+# local machine
+mkdir -p reports/safe_robocasa365_research_plan_20260823/evidence/<R7_TAG>
+for f in rldx_unseen.json rldx_folds.json; do
+  rsync -av tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/<R7_TAG>/$f \
+    reports/safe_robocasa365_research_plan_20260823/evidence/<R7_TAG>/
+done
 ```
 
 ## Result

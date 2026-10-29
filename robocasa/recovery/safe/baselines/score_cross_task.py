@@ -20,6 +20,8 @@ The analysis (scripts/xr1_lead_time/cross_task_lead.py) applies them; this step 
 Outputs in --output-dir:
   <cohort>_predictions.jsonl  one row per (detector, rollout): per_seed_raw, task, label,
                               whether the task is held out in this fold
+  train_predictions.jsonl     with --score-train: the same for the fold's own (in-sample)
+                              training rollouts, i.e. the seen tasks' training rollouts
   normalizations.json         detector -> seed -> {pooled, per_task}
   scoring.json                fold, held-out tasks, training rollouts per task, inputs with
                               SHA-256, detector configs, reference checks
@@ -31,6 +33,10 @@ Usage:
       --cohort lead_calibration IDS.jsonl --cohort confirmatory_test IDS.jsonl \\
       --detectors hide_and_seek hide_and_seek_zero hide_and_seek_first cosine_knn \\
       --feature-aggregation last --seeds 0 1 2 --output-dir OUT [--reference-raw COHORT FILE ...]
+
+``--score-train`` (off by default; nothing else changes) also writes the training rollouts'
+trajectories, as ``score_cohorts --score-train`` does. RLDX-1's fused paths are chosen on
+training failures (docs/xr1_review_analyses_plan.md, R7), so its unseen arm needs them.
 """
 
 from __future__ import annotations
@@ -121,6 +127,8 @@ def run(args):
         raise ValueError("Training IDs are not part of the bundle's development rollouts")
 
     names = [name for name, _ in args.cohort]
+    if args.score_train and "train" in names:
+        raise ValueError("A cohort cannot be named 'train' when --score-train is set")
     if len(set(names)) != len(names):
         raise ValueError(f"Cohort names repeat: {names}")
     cohort_ids = {name: list(dict.fromkeys(load_rollout_ids(path))) for name, path in args.cohort}
@@ -181,10 +189,12 @@ def run(args):
         "detectors": list(args.detectors),
         "detector_configs": {},
         "counts": {"train": len(train), **{name: len(rows) for name, rows in cohorts.items()}},
+        "score_train": bool(args.score_train),
     }
     output.mkdir(parents=True, exist_ok=True)
     normalizations_out = {}
-    streams = {name: (output / f"{name}_predictions.jsonl").open("w") for name in cohorts}
+    written = {**cohorts, **({"train": train} if args.score_train else {})}
+    streams = {name: (output / f"{name}_predictions.jsonl").open("w") for name in written}
     seen_horizons = {t: horizons[t] for t in seen}
     try:
         for detector_name in args.detectors:
@@ -193,13 +203,19 @@ def run(args):
             if reason:
                 raise ValueError(f"{detector_name} cannot run on these rollouts: {reason}")
             configs, norms = {}, {}
-            cohort_scores = {name: {} for name in cohorts}
+            cohort_scores = {name: {} for name in written}
             for seed in args.seeds:
                 detector = build_detector(detector_name, seed=seed, **detector_kwargs(detector_name, args, sorted(horizons)))
                 detector.fit(train)
                 configs[str(seed)] = detector.config()
                 fit_records = [{"task_name": r["task_name"], "scores": np.asarray(detector.score(r), np.float64)}
                                for r in train]
+                if args.score_train:
+                    for r, record in zip(train, fit_records):
+                        values = record["scores"]
+                        if values.shape != (len(r["features"]),) or not np.all(np.isfinite(values)):
+                            raise ValueError(f"{detector_name} produced invalid scores for {r['rollout_id']}")
+                        cohort_scores["train"].setdefault(r["rollout_id"], {})[str(seed)] = values
                 norms[str(seed)] = {"pooled": pooled_normalization(fit_records, horizons),
                                     "per_task": fit_safe_normalization(fit_records, seen_horizons)}
                 for name, rows in cohorts.items():
@@ -210,7 +226,7 @@ def run(args):
                         cohort_scores[name].setdefault(r["rollout_id"], {})[str(seed)] = values
                 print(f"{detector_name} seed {seed} done", flush=True)
             normalizations_out[detector_name] = norms
-            for name, rows in cohorts.items():
+            for name, rows in written.items():
                 for r in rows:
                     streams[name].write(json.dumps({
                         "detector": detector_name, "rollout_id": r["rollout_id"], "task_name": r["task_name"],
@@ -229,7 +245,7 @@ def run(args):
     status = 0
     meta["reference_checks"] = {}
     for name, path in args.reference_raw or []:
-        if name not in cohorts:
+        if name not in written:
             raise ValueError(f"--reference-raw names unknown cohort {name}")
         ref = _raw_reference(path)
         now = _raw_reference(output / f"{name}_predictions.jsonl")
@@ -277,6 +293,8 @@ def build_parser():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--reference-raw", nargs=2, action="append", metavar=("COHORT", "PREDICTIONS"),
                         help="earlier per_seed_raw trajectories to reproduce exactly (fold all only)")
+    parser.add_argument("--score-train", action="store_true",
+                        help="also write the fold's training rollouts' trajectories (train_predictions.jsonl)")
     return parser
 
 
