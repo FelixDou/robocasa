@@ -737,7 +737,7 @@ printf 'export %s=%q\n' R6_SHA "$R6_SHA" R6_REPO "$R6_REPO" R6_TAG "$R6_TAG" R6_
   > $R6_LOG/paths.env
 
 for f in $E1_OUT/calibration_predictions.jsonl $E1_OUT/test_predictions.jsonl $XR1_RUNTIME_BUNDLE $XR1_TRAIN_IDS \
-         $XR1_EVAL_IDS $AMEND2_ROOT/august_calibration_ids.json \
+         $PSEED_ROOT/august_test_balanced_ids.json $AMEND2_ROOT/august_calibration_ids.json \
          $AMEND2_ROOT/scores/lead_calibration_predictions.jsonl $AMEND2_ROOT/scores/confirmatory_test_predictions.jsonl \
          $AMEND2_ROOT/scores/normalizations.json $XT_ROOT/cross_task_lead.json $RS_ROOT/cross_task_safe.json \
          $PSEED_ROOT/per_seed_fused_heldout.json $PSEED_ROOT/actprobe_scores/normalizations.json \
@@ -822,7 +822,8 @@ COMMON=(--dataset-dir "${XR1_RAW_DIRS[@]}" $XR1_LCAL_ROOT/merged_all_retained $X
 one() {
   F=$1; EXTRA=()
   if [ $F = all ]; then
-    EXTRA=(--cohort august_calibration $AMEND2_ROOT/august_calibration_ids.json --cohort august_test $XR1_EVAL_IDS
+    EXTRA=(--cohort august_calibration $AMEND2_ROOT/august_calibration_ids.json
+           --cohort august_test $PSEED_ROOT/august_test_balanced_ids.json
            --reference-raw august_calibration $PSEED_ROOT/actprobe_scores/august_calibration_predictions.jsonl
            --reference-raw august_test $PSEED_ROOT/actprobe_scores/august_test_predictions.jsonl)
   fi
@@ -841,6 +842,46 @@ echo "ActProbe PID $! on $(hostname)"
 Progress: `cat $R6_LOG/actprobe.log; tail -qn 2 $R6_LOG/actprobe_fold_*.log`. Done when
 `actprobe.log` shows five `rc=0` lines and `=== ACTPROBE DONE`, and `actprobe_fold_all.log` ends
 with two `reference ... -> OK` lines and `REFERENCE OK`. Any other `rc` is a stop condition.
+
+**C2b. Rerun of fold all (2026-10-29).**
+
+*What went wrong.* The first run, `xr1_seen_unseen_20261028_235911` at `8ef49963`, passed
+`$XR1_EVAL_IDS` as the August test cohort. That is the full prospective-test file, 1,643
+rollouts. B1 had scored `$PSEED_ROOT/august_test_balanced_ids.json`, 760 rollouts, sha256
+`f8cbd6d3…`. The reference check counts a rollout missing from B1 as `inf`, so fold all
+reported `max diff inf -> MISMATCH`, rc=1. T4 then failed, and no tables were written.
+
+*What still matched.* Checked locally on the copied files, B1's 760 rollouts are all in the
+new file and match exactly (difference 0.0, same seeds, lengths and labels). August
+calibration (228) and the normalization also matched exactly.
+
+*What gets rerun.* Fold all is rerun with B1's balanced list. The first run's folder, including
+its `fold_all` and failed `seen_unseen_tables.json`, is kept as evidence. Folds 0–3 and the OOD
+folds are reused unchanged.
+
+```bash
+cd $R6_REPO
+export AUG_TEST_IDS=$PSEED_ROOT/august_test_balanced_ids.json
+echo "f8cbd6d306b914163b0ed41dc7614937693b8eb26bc82874f350de2ab819a00c  $AUG_TEST_IDS" | sha256sum -c -
+if test -e $R6_ROOT/actprobe/fold_all_b1ids; then echo "STOP: $R6_ROOT/actprobe/fold_all_b1ids exists"; else
+  CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 nohup nice -n 10 \
+    "$SAFE_PY" -u -m robocasa.recovery.safe.baselines.score_cross_task \
+    --dataset-dir "${XR1_RAW_DIRS[@]}" $XR1_LCAL_ROOT/merged_all_retained $XR1_CONFIRM_ROOT/confirmatory_collection/merged_all_retained \
+    --runtime-bundle $XR1_RUNTIME_BUNDLE --train-ids $XR1_TRAIN_IDS --folds $FOLDS \
+    --cohort lead_calibration $E1_OUT/calibration_predictions.jsonl \
+    --cohort confirmatory_test $E1_OUT/test_predictions.jsonl \
+    --cohort august_calibration $AMEND2_ROOT/august_calibration_ids.json --cohort august_test $AUG_TEST_IDS \
+    --reference-raw august_calibration $PSEED_ROOT/actprobe_scores/august_calibration_predictions.jsonl \
+    --reference-raw august_test $PSEED_ROOT/actprobe_scores/august_test_predictions.jsonl \
+    --detectors actprobe --feature-aggregation last --seeds 0 1 2 --fold all \
+    --output-dir $R6_ROOT/actprobe/fold_all_b1ids > $R6_LOG/actprobe_fold_all_b1ids.log 2>&1 &
+  echo "ActProbe fold all PID $! on $(hostname)"
+fi
+```
+
+The log must end with two `reference ... -> OK` lines (228 and 760 rollouts) and `REFERENCE OK`.
+C3 then reads `fold_all_b1ids` in place of `fold_all` and writes `seen_unseen_tables_b1ids.json`
+and `tables_b1ids.log`, since the script refuses to overwrite an existing output.
 
 **C3. The tables (CPU, minutes).** Only after C1 and C2 are done.
 
@@ -882,7 +923,9 @@ Recorded 2026-10-28.
   unchanged from `4a558327`.
 - After the R1–R4 run and Stage A, two things were added before any fold is trained: "Stage B
   implementation" under R5, and runbook step 3.
-- R5 Stage B ran from `9d0353be` with no code change. Its result is the last section below.
+- R5 Stage B ran from `9d0353be` with no code change. Its result follows R5 Stage A below.
+- R6 ran from `8ef49963` with no code change. Only its runbook was fixed (C2b, the August
+  test list) before fold all was rerun. Its result is the last section below.
 
 **Run.**
 - Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_review_analyses_20261028_155557`
@@ -1236,3 +1279,98 @@ Hide-and-Seek − SAFE is +0.111 [0.036, 0.166].
   controlling for duration", rather than "SAFE mostly tracks time".
 - **Report matched false alarms beside every G comparison.** Against G alone, SAFE's α = 0.05 CI
   excludes 0.
+
+### R6
+
+**On unseen tasks, Hide-and-Seek is the only learned detector that beats the global timer.**
+Standalone, every other learned detector's unseen TWA (0.500 to 0.547) is at or below G's
+(0.551). Fused with G, their gains come with two to three times G's false alarms, and their TWA
+(0.549 to 0.554) equals G's. Hide-and-Seek has standalone TWA 0.595 and gains
++0.122 ± 0.005 over G at FPR 0.059.
+
+**Run.**
+- Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_seen_unseen_20261028_235911`
+  (`seen_unseen_tables_b1ids.json`, SHA-256 `d927f67e…`, copied to
+  `reports/safe_robocasa365_research_plan_20260823/evidence/xr1_seen_unseen_20261028_235911/`).
+- Logs: `/gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_seen_unseen_20261028_235911`.
+- Code: pinned worktree `robocasa_seenunseen_8ef49963` on r1n8, CPU only, with no code change.
+- The first table run failed T4 because the runbook passed the wrong August test list (C2b).
+  Fold all was rerun with B1's list as `fold_all_b1ids`. The first `fold_all` and its failed
+  `seen_unseen_tables.json` are kept.
+
+**Checks.**
+- **C1, C2:** the four OOD folds ended with `=== OOD FOLD F DONE`, and ActProbe folds 0–3 with
+  rc=0.
+- **Fold all rerun:** `REFERENCE OK`. August calibration (228 rollouts) and August test (760)
+  match B1 with maximum difference 0.0.
+- **T1:** every fold directory matches the fold file. ActProbe has folds 0–3 and all; SAFE, the
+  cross-task folds and OOD have folds 0–3.
+- **T2:** seen + P equals run C and `ood_per_seed_fused_heldout.json` for all nine rows
+  (maximum difference 0.0).
+- **T3:** the seed-averaged unseen + G gains equal the stored ones: Hide-and-Seek 0.1273,
+  zero-input 0.0331, first-inference 0.0000, SAFE 0.0166.
+- **T4:** reference differences 0.0 and 0.0; normalization relative difference 0.0.
+- **T5:** every OOD fold is the pooled variant of bundle `c62d225a…`.
+- **Inputs:** `INPUTS UNCHANGED`. The local copy has the cluster file's SHA-256.
+
+**Table I, standalone** (one threshold per detector and seed: largest calibration lead at
+calibration FPR ≤ 0.05; held-out test cohort, 380 + 380; mean ± sd over seeds 0–2).
+
+| | Seen bACC | Seen TWA | Seen TPR / FPR | Unseen bACC | Unseen TWA | Unseen TPR / FPR |
+|---|---|---|---|---|---|---|
+| Mahalanobis | 0.818 ± 0.001 | 0.582 ± 0.001 | 0.689 / 0.053 | 0.726 ± 0.000 | 0.543 ± 0.000 | 0.518 / 0.066 |
+| Cosine k-NN | 0.788 ± 0.000 | 0.577 ± 0.000 | 0.637 / 0.061 | 0.729 ± 0.000 | 0.544 ± 0.000 | 0.526 / 0.068 |
+| PCA-KMeans | 0.796 ± 0.001 | 0.578 ± 0.001 | 0.657 / 0.064 | 0.728 ± 0.001 | 0.542 ± 0.001 | 0.523 / 0.067 |
+| RND | 0.793 ± 0.002 | 0.572 ± 0.001 | 0.650 / 0.065 | 0.728 ± 0.001 | 0.547 ± 0.001 | 0.525 / 0.068 |
+| SAFE-MLP | 0.763 ± 0.003 | 0.582 ± 0.011 | 0.568 / 0.043 | 0.713 ± 0.003 | 0.541 ± 0.001 | 0.472 / 0.046 |
+| ActProbe | 0.654 ± 0.003 | 0.558 ± 0.006 | 0.356 / 0.048 | 0.500 ± 0.000 | 0.500 ± 0.001 | 0.009 / 0.009 |
+| Hide-and-Seek | 0.742 ± 0.033 | 0.599 ± 0.005 | 0.532 / 0.048 | 0.790 ± 0.002 | 0.595 ± 0.005 | 0.642 / 0.061 |
+| Time risk | 0.837 | 0.545 | 0.711 / 0.037 | — | — | — |
+| Global timer G | 0.988 | 0.550 | 1.000 / 0.024 | 0.988 | 0.551 | 1.000 / 0.024 |
+| Per-task timer P | 0.972 | 0.585 | 1.000 / 0.055 | — | — | — |
+
+- Seen DT: P 0.775, Hide-and-Seek 0.754, the OOD rows 0.780 to 0.792, SAFE 0.792, ActProbe
+  0.836, G 0.877.
+- ActProbe's seen-task thresholds almost never fire on unseen tasks. Seeds 0 and 2 raise no
+  alarm at all, and seed 1 raises 10 on failures and 10 on successes.
+
+**Table II, fused** (seen: score + P, the published per-seed rows; unseen: score + G per fold,
+pooled; mean ± sd over seeds 0–2. P: lead 0.225, 21 FP. G unseen: lead 0.126, 9 FP).
+
+| | Seen FPR | Seen gain over P | Seen TWA | Unseen FPR (FP) | Unseen gain over G | Unseen TWA |
+|---|---|---|---|---|---|---|
+| Mahalanobis | 0.055 | +0.034 ± 0.000 | 0.602 | 0.073 (27–28) | +0.044 ± 0.001 | 0.549 |
+| Cosine k-NN | 0.058 | +0.021 ± 0.000 | 0.594 | 0.079 (30) | +0.053 ± 0.000 | 0.550 |
+| PCA-KMeans | 0.060 | +0.022 ± 0.001 | 0.594 | 0.071 (27) | +0.053 ± 0.001 | 0.554 |
+| RND | 0.060 | +0.021 ± 0.001 | 0.593 | 0.073 (27–28) | +0.050 ± 0.001 | 0.551 |
+| SAFE-MLP | 0.058 | +0.024 ± 0.015 | 0.596 | 0.053 (20) | +0.028 ± 0.009 | 0.551 |
+| Hide-and-Seek | 0.055 | +0.039 ± 0.006 | 0.605 | 0.059 (21–24) | +0.122 ± 0.005 | 0.595 |
+| zero-input | 0.062 | +0.013 ± 0.003 | 0.588 | 0.037 (13–15) | +0.020 ± 0.008 | 0.554 |
+| first-inference | 0.055 | +0.001 ± 0.001 | 0.586 | 0.027 (10–11) | +0.002 ± 0.003 | 0.550 |
+| same-task shuffle | 0.058 | +0.005 ± 0.001 | 0.586 | — | — | — |
+| G | 0.024 | −0.102 | 0.550 | 0.024 (9) | — | 0.551 |
+
+**Expectations against results.**
+- "Unseen bACC and TWA fall for every learned detector; the global timer barely moves": **partly
+  wrong**. They fall for the OOD rows, SAFE and ActProbe, and G moves by 0.001. Hide-and-Seek's
+  bACC rises (0.742 → 0.790; its seen seeds spread 0.713 to 0.778), and its TWA stays
+  (0.599 → 0.595).
+- "Hide-and-Seek keeps the best unseen TWA among learned detectors": held (0.595 standalone and
+  fused; next best 0.547 and 0.554).
+- "The pooled OOD variants lose most of their seen-task advantage": held. Their standalone TWA
+  goes from 0.572–0.582 to 0.542–0.547, below G. Their + G gains (+0.044 to +0.053) come with 27
+  to 30 false alarms against G's 9, and their TWA equals G's.
+- "SAFE's unseen + G gain stays near noise (+0.017 seed-averaged), with single models at or
+  below it": **wrong on the second part**. Single models gain +0.028 ± 0.009, more than the seed
+  average, all at 20 FP. The noise maximum in Stage B was +0.019.
+
+**What this changes for the paper.**
+- Tables I and II get a Seen | Unseen column group each. Table I moves to the held-out set, so
+  its seen numbers change: OOD bACC 0.79–0.82 (was 0.76–0.80), G 0.988 (was 0.976), P 0.972
+  (was 0.978); Hide-and-Seek TWA 0.599 (was 0.595), P 0.585 (was 0.575).
+- On unseen tasks the standalone ranking is clearer than on seen ones. Only Hide-and-Seek's TWA
+  is above G's, and the timer still has the best bACC.
+- The unseen + G gains of the OOD rows are spent false alarms, not earlier warning: TWA equal to
+  G's at three times its FPR. The table needs the FPR column beside the gain.
+- Table IV becomes redundant. Its inferential numbers stay in the text: Hide-and-Seek − SAFE
+  +0.111 [0.036, 0.166]; G at matched false alarms (SAFE −0.079, Hide-and-Seek +0.051); P_n.
