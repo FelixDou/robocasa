@@ -531,12 +531,12 @@ From the existing data we freeze SAFE's LSTM head (the MLP head falls back to th
 Hide-and-Seek (three seeds), $H_k$ (longest training failure), $\rho_k$ and each detector's
 fused path $(u, s)$, chosen there; the fresh calibration successes set only $\hat\lambda$, so
 Proposition~\ref{prop:fpr} covers the evaluated detector.\pending{checkpoint hashes} For each of the two detectors, H3 holds if the 97.5\% CI
-(rollouts resampled within task) lies above zero for the gain over P and for the gain over P
-loosened on the test set to the fused detector's FPR, so that a larger false-alarm budget alone
-cannot pass.\todo{matched-FPR condition proposed; author to confirm} With the paths fixed,
-simulated power at $n = 20$ is $\ge 0.99$ per detector, matched condition included (0.86 if
-Hide-and-Seek gains 0.052); type I error under the noise and resampled nulls is simulated before
-collection.\pending{type I error, path fixed} We also report Hide-and-Seek + P against its
+(rollouts resampled within task, path fixed) lies above zero for the gain over P and for the gain
+over P loosened on the test set to its FPR, and the gain beats 38 of 39 noise and 38 of 39
+resampled-score fusions, each frozen the same way, on the same rollouts (type I error $\le 0.05$
+by exchangeability). With the
+paths fixed, simulated power at $n = 20$ is $\ge 0.99$ per detector (0.86 if Hide-and-Seek gains
+0.052).\pending{power and type I error with the null test} We also report Hide-and-Seek + P against its
 first-inference control, task-resampled CIs (no claim) and the 14 atomic tasks; the sizing is
 optimistic.
 
@@ -544,15 +544,15 @@ optimistic.
 $\alpha = 0.05$; test-set false alarms must not reject ``true FPR $\le 0.075$'' in a
 one-sided exact binomial test at level 0.05 ($\le 39$ of 400 in E2).
 
-\textbf{E3: Reset and retry (H4).} On RLDX-1's 20 tasks, about 1,000 scenes (50 per task) each
-run three times within $1.25\,H_k$: reset and retry when Hide-and-Seek + P alarms, the same reset
-when P alarms, and no reset. The primary estimand is the paired success difference between the
-two triggered resets (same retry procedure and budget, monitor latency charged); reset against no
-reset is secondary. Resets restore the scene, checked on the first frame. We report 95\% CIs,
+\textbf{E3: Reset and retry (H4).} On RLDX-1, each of 1,000 scenes (50 per task) runs once to
+$1.25\,H_k$ without reset, the no-reset arm. At each monitor's first alarm, its reset arm restores
+the scene (checked on the first frame) and retries in the remaining budget, so the arms share the
+attempt up to their alarms. The primary estimand is the paired success difference between the
+Hide-and-Seek + P and P resets (same retry procedure, monitor latency charged); reset against no
+reset is secondary. We report 95\% CIs,
 unnecessary resets and wasted time. Sizing (XR-1's retry success, 0.245) puts the difference at
-$+0.011$, CI half-width 0.043, or 0.019 if each reset arm shares the no-reset run up to its
-alarm; a test needs 29,000 or 5,700 scenes, so H4 is estimated, not
-tested.\todo{sizing recommends the shared-run (branching) design; author to decide}
+$+0.011$ with CI half-width 0.019 (0.043 with independent runs); a test needs about 5,700 scenes,
+so H4 is estimated, not tested.
 
 \textbf{E4, E5 (exploratory).} E4 adds action-only monitors, richer time baselines and a
 prospective unseen-task test. E5 measures lead from the point of no return, fused detector against P, on about 250 to

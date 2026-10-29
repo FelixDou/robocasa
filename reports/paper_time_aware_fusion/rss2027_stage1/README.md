@@ -758,3 +758,28 @@ R9 on `claude/review-analyses` (`docs/xr1_review_analyses_plan.md`; run
   - Sec. VI-F drops "(2 per atomic and 1 per composite task)".
   - FPR criterion: "test-set false alarms"; "≤ 39 of 400".
 - **Pages.** The submission build is 6 pages, with references alone on page 6.
+
+## Update 2026-10-29 (h): author's E2 rule and E3 design
+
+The author decided both open Stage 2 points on 2026-10-29 (R10 on `claude/review-analyses`).
+- **E2 rule.** H3 holds for a detector if four conditions hold, with paths fixed:
+  - the 97.5% CI of the gain over P is above zero;
+  - the 97.5% CI of the gain over P loosened to its FPR is above zero;
+  - the binomial FPR rule passes;
+  - the gain beats 38 of 39 noise and 38 of 39 resampled-score fusions on the same rollouts,
+    each frozen the same way.
+
+  The last condition is rule (iii)'s Monte Carlo null test (2026-10-23), now with frozen null
+  paths. It bounds the type I error at 0.05 by exchangeability.
+  - The matched-FPR `\todo` is removed.
+  - The power and type I error of the full rule are `\pending` until R10 part A returns.
+- **E3 design.** Branching at 1,000 scenes (50 per task), as an estimation study.
+  - Each scene runs once to 1.25 H_k without reset, which is the no-reset arm.
+  - At each monitor's first alarm, its reset arm restores the scene (checked on the first
+    frame) and retries in the remaining budget.
+  - The sizing line now gives half-width 0.019 (0.043 with independent runs) and about 5,700
+    scenes for a test. The branching `\todo` is removed.
+- **Checkpoint hashes** stay `\pending` until the R10 freeze manifest is written. Hide-and-Seek
+  is retrained with saved weights and must reproduce the §15.22 trajectories exactly.
+- **Trims:** "its FPR"; the "neither ... can pass" clause; "On RLDX-1, each of 1,000 scenes".
+- **Pages.** 6, with references alone on page 6.
