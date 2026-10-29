@@ -2495,3 +2495,140 @@ tightened on the test set to the fused detector's false alarms, test-only CI):
   E2's fresh calibration successes. E2's power must be re-sized with the path fixed. The paper
   (`claude/time-aware-fusion-paper` `7c5c18bf`) states this, and E3's primary estimand is now
   Hide-and-Seek + P vs P-triggered reset.
+
+### R9
+
+**E2: with each path frozen, n = 20 still stands for both detectors, with or without the
+matched condition. E3: the Hide-and-Seek reset gains about +0.011 over the P reset, too
+little to test at 1,000 scenes. E3 stays an estimation study, and the branching design halves
+its CI.**
+
+**Run.**
+- Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/stage2_frozen_sizing_20261029_190042`
+  (`e2_frozen.json` SHA-256 `78474051…`, `e3_hs_reset.json` SHA-256 `cb8cc331…`); logs under
+  `robocasa_logs/eval/` with the same tag.
+- Code: pinned worktree `robocasa_r9sizing_91e64fa2` on r4n5, CPU only, 8 workers for E2.
+- **Checks, all passed.**
+  - `HEAD OK`, 11 inputs, 30 tests OK.
+  - Replication gains SAFE + P +0.0342 and Hide-and-Seek + P +0.0834 (both subcommands).
+  - SAFE + P reproduces both 2026-10-23 E3 runs (r = 0.245 and 0.17; `MATCH`).
+  - The none and P arms are identical across the two E3 runs.
+  - The adaptive rows reproduce `e2_coprimary_sizing_20261023_011537/e2_coprimary.json`
+    (`MATCH`).
+  - `INPUTS UNCHANGED`.
+
+#### E2 with the path frozen
+
+**Frozen paths** (the §15.15 / §15.22 fit):
+- SAFE: u = 7.931, s = 0. This is a fixed score threshold; the drawn successes move only the
+  timer margin.
+- Hide-and-Seek: u = −0.17, s = 20. The threshold is u + 20 λ̂, so it moves with the margin.
+
+**Table R9a — plug-in sampling distribution (within task, 2,000 studies per n).**
+- Gain over P, mean (SD), frozen against adaptive on the same draws.
+- Power under the E2 FPR rule with a 97.5% within-task CI:
+  - (a) the gain's CI above zero;
+  - (b) (a) together with the matched gain's CI above zero.
+
+| n | SAFE frozen | SAFE adaptive | SAFE (a) / (b) | H&S frozen | H&S adaptive | H&S (a) / (b) |
+|---:|---|---|---|---|---|---|
+| 10 | +0.0325 (0.0062) | +0.0398 (0.0122) | 0.99 / 0.80 | +0.0638 (0.0217) | +0.0830 (0.0173) | 0.54 / 0.38 |
+| 20 | +0.0316 (0.0037) | +0.0360 (0.0070) | 1.00 / 1.00 | +0.0643 (0.0144) | +0.0800 (0.0109) | 0.99 / 0.99 |
+| 30 | +0.0316 (0.0031) | +0.0352 (0.0058) | 1.00 / 1.00 | +0.0655 (0.0121) | +0.0802 (0.0092) | 1.00 / 1.00 |
+| 60 | +0.0315 (0.0023) | +0.0340 (0.0039) | 1.00 / 1.00 | +0.0663 (0.0092) | +0.0808 (0.0070) | 1.00 / 1.00 |
+
+- **Matched gains at n = 20:** SAFE +0.0320 (0.0044); Hide-and-Seek +0.0679 (0.0157). Both are
+  at least the same-α gains.
+- **97.5% half-widths at n = 20:** SAFE 0.0076; Hide-and-Seek 0.0313.
+- **Disabled monitors:** none at any n. The E2 FPR rule passes in 0.99 of studies at
+  n = 10 and 1.00 from n = 20.
+- **Adaptive path on the same draws:** plug-in power 0.99–1.00 at every n. Its tables equal
+  the co-primary run's exactly.
+- **Hide-and-Seek at assumed gains, 97.5%, (a) / (b):**
+
+  | Assumed gain | n = 20 | n = 30 |
+  |---|---|---|
+  | 0.083 | 1.00 / 1.00 | 1.00 / 1.00 |
+  | 0.052 | 0.92 / 0.86 | 0.99 / 0.97 |
+  | 0.05 | 0.89 / 0.81 | 0.98 / 0.95 |
+
+- **Joint, 97.5%, plug-in, n = 20.** At least one co-primary passes in 1.00 of studies; both
+  pass in 0.99, or 0.98 with the matched condition. At assumed gains (0.034, 0.052), both pass
+  in 0.92 (0.86) at n = 20 and 0.99 (0.97) at n = 30.
+- **Task-level CI (no power claim), 97.5%, n = 20, (a):** SAFE 0.94; Hide-and-Seek 0.41
+  (0.81 at 0.083, 0.12 at 0.052).
+- **Recommendation under the pre-stated rule:** n = 20 stands for both detectors, under (a)
+  and (b).
+
+#### E3: Hide-and-Seek + P reset vs P reset (RLDX-1)
+
+**Table R9b — success rate within 1.25 H_k.**
+- Scenes per arm for a test (two-sided 0.05, power 0.8): independent three-run design
+  (unpaired) and branching at the alarm (McNemar).
+- 95% CI half-width at 50 scenes per task.
+
+| r | Tasks (scenes) | P reset | H&S + P reset | Δ | Independent: scenes / hw | Branching: pairs / hw |
+|---|---|---:|---:|---:|---|---|
+| 0.245 | all (1,000) | 0.608 | 0.619 | +0.011 | 28,643 / 0.043 | 5,727 / 0.019 |
+| 0.245 | atomic (700) | 0.696 | 0.710 | +0.014 | 16,487 / 0.048 | 5,267 / 0.027 |
+| 0.245 | composite (300) | 0.402 | 0.407 | +0.005 | 157,453 / 0.079 | 1,570 / 0.008 |
+| 0.17 | all (1,000) | 0.591 | 0.598 | +0.007 | 73,007 / 0.043 | 11,773 / 0.017 |
+
+- **SAFE + P for reference** (all tasks, r = 0.245): Δ +0.006, needing 91,103 scenes or 16,050
+  pairs. This agrees with the 2026-10-23 finding (at least 11,000 pairs).
+- **Other budgets (r = 0.245, all tasks):** Δ is +0.008 at 1.0 H_k, +0.013 at 1.5 and +0.012
+  at 2.0. The branching design needs at least 5,700 pairs at every budget. Composite tasks turn
+  negative from 1.5 H_k.
+- **Secondary contrast: reset − continuation at the pilot's c = 0.0405.**
+  - At r = 0.245: P +0.028 (the pilot's figure, reproduced) and Hide-and-Seek + P +0.039.
+  - At r = 0.17: +0.011 and +0.018.
+  - The crossover c\* is about 0.10 for P and 0.13 for Hide-and-Seek + P.
+- **Decision under the pre-stated rule: ESTIMATION.**
+  - 5,727 branching pairs exceed 1,000.
+  - Branching is recommended. Its half-width (0.019) is less than half the independent design's
+    (0.043); at r = 0.17 the figures are 0.017 and 0.043.
+
+**Expectations against results.**
+- **E2:**
+  - "Frozen gains close to adaptive, with larger spread": half held. Hide-and-Seek's spread is
+    larger (SD 0.014 against 0.011), but its mean is lower (0.064 against 0.080). SAFE's
+    spread is smaller.
+  - "Hide-and-Seek's power at n = 20 stays ≥ 0.8": held (0.99).
+  - "SAFE's may fall below": did not (1.00). With s = 0, its threshold does not move with
+    λ̂, which the expectation missed.
+  - "(b) lowers power": only at n = 10 and at lower assumed Hide-and-Seek gains.
+- **E3:** all three held.
+  - Δ is at most about 0.02 (+0.011).
+  - The independent design needs tens of thousands of scenes, with half-width 0.043.
+  - The branching design needs several thousand pairs, with half-width 0.019.
+
+**Reading.**
+- **Hide-and-Seek's gain with the path frozen.** It falls from 0.080 to 0.064 in simulation.
+  The adaptive sizing chose its path on failures drawn from the same small pool (5 per task)
+  as the test failures, so Table S5 was optimistic in-sample. The frozen path was chosen on
+  training failures, outside that pool. The frozen figures are the more realistic ones, but
+  they are still optimistic: one small held-out pool, with tasks held fixed.
+- **The matched condition costs almost nothing at n = 20.** The frozen detectors do not buy
+  their lead with extra false alarms in these simulations.
+- **Why R8 differed.** R8's frozen-path CIs included zero because Amendment 2's decision
+  bootstrap resamples tasks. E2's criterion resamples within task, where the frozen
+  Hide-and-Seek half-width is 0.031 at n = 20. With tasks resampled, power stays low (0.41),
+  as in Table S6's task-level row.
+- **E3 cannot settle H4 at 1,000 scenes.**
+  - The expected difference (+0.011, or +0.007 at r = 0.17) is smaller than even the branching
+    half-width.
+  - A test would need about 5,700 branching pairs (290 per task), or 11,800 at r = 0.17.
+  - Under the author's rule, H4 is estimated, not tested.
+  - Hide-and-Seek's latency is not charged here, so these differences are upper bounds.
+- **The branching design** is three arms from one run per scene:
+  - each scene runs once to 1.25 H_k without reset, which is the no-reset arm;
+  - each monitor's reset arm keeps that run up to its own first alarm, then restores the scene
+    and retries within the remaining budget.
+  - This is the model's shared first attempt. It also costs fewer rollouts than three
+    independent runs. Whether to adopt it is the author's decision.
+
+**What this changes for the paper.**
+- E2: replace "power with the path fixed" with the R9 power (n = 20 stands). The type I error
+  with the path fixed stays pending.
+- E3: state both half-widths and that H4 is estimated, not tested. Flag the branching design as
+  the author's decision.
