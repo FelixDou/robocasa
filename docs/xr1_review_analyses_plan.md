@@ -2090,3 +2090,42 @@ only.
   - `rldx_unseen.py` now refuses a fold directory whose own recorded checks failed. Before this
     change it would have accepted the first, failed LSTM fold 0 directory.
   - The failed directory (`folds/lstm/fold_0`) and the rerun scores are kept.
+- **D12.** LSTM fold 0 was re-assembled into `folds/lstm/fold_0_f32` from the original scores,
+  at code `19d098a5`, with the training cross-check at ≤ 1e-6.
+- **D13.** `RLDX-1 UNSEEN TABLE OK`.
+  - **Output:** `rldx_unseen_safe.json`. The local copy's SHA-256 is `1bcbbd97…`, in the
+    evidence folder.
+  - **R1:** three families. The cross-task family is unchanged (its 21 reference checks are
+    those above). Both SAFE families have four exact fold-all reference checks: calibration,
+    test, train and normalization all 0.0.
+  - **R2:** exact (maximum difference 0.0) for all nine detectors, P 0.2711 / 0.03.
+  - **R3:** one G.
+  - The seven cross-task rows equal the first R7 run exactly.
+
+**SAFE on RLDX-1's unseen tasks** (+ G; mean ± sd over seeds; FP per seed; seed-averaged
+score last):
+
+| | FPR (FP) | Gain over G | TWA | Seed average |
+|---|---|---|---|---|
+| SAFE-LSTM | 0.067 ± 0.006 (7, 7, 6) | +0.101 ± 0.006 | 0.530 ± 0.000 | +0.104 at 0.080 |
+| SAFE-MLP | 0.070 (7, 7, 7) | +0.044 ± 0.000 | 0.500 ± 0.000 | +0.045 at 0.070 |
+
+- SAFE-LSTM gains about as much over G as the default OOD detectors (+0.099 to +0.115). It
+  uses more false alarms (6–7 against 1–5), so its TWA (0.530) is below theirs (0.544–0.564).
+  It remains far below Hide-and-Seek (+0.196, TWA 0.583).
+- SAFE-MLP's gain (+0.044) comes with 7 false alarms. Its TWA (0.500) is below G's (0.513).
+  In three folds its fused path turns the timer off (λ > 1) and alarms on the score alone.
+- **Expectations:**
+  - "SAFE-MLP gains little over G": held; it is below G on TWA.
+  - "SAFE-LSTM gains less than Hide-and-Seek": held.
+  - "Whether it beats the OOD rows is open": it matches them on gain and trails them on TWA.
+
+**What this changes for the paper.**
+- Table II's RLDX-1 block gets its Unseen (+ G) cells for every row except P and the
+  same-task shuffle.
+- On both policies, Hide-and-Seek gains the most over G on unseen tasks, with the best TWA.
+- On RLDX-1, unlike XR-1, the default OOD detectors and SAFE-LSTM also gain over G (+0.10 to
+  +0.115). But G is very weak there (lead 0.026, no false alarm), and no matched-false-alarm
+  comparison was run.
+- So "only Hide-and-Seek's gain carries over to unseen tasks" holds for XR-1 only, and the
+  paper must say so.
