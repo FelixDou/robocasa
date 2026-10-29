@@ -594,3 +594,51 @@ cohorts.
 - **Pages.** The submission build (notes off, pdflatex from TinyTeX) has 6 pages: content ends on
   page 5 and the references are alone on page 6. It has no overfull boxes and no undefined
   references.
+
+## Update 2026-10-29 (c): wording after the second review
+
+The second review of the revised paper and proposal raised four main points and three smaller
+ones. This update fixes the wording. Two Stage 2 design decisions stay with the author: E2's
+selection set and matched condition, and E3's primary contrast. A re-analysis with the fused
+path chosen on the validation set (R8, branch `claude/review-analyses`, plan R8, code
+`9acf1aa6`) is ready to run, and its result will go into Sec. IV-D and VI-C.
+
+- **Matched FPR (point 1).**
+  - The abstract says "at the same *target* FPR" and adds that at matched false alarms the
+    gains shrink to 0.015 and 0.056, with CIs including zero.
+  - The conclusion gives the same pair.
+- **Guarantee (point 2).** The abstract now says the split-conformal margin bounds the FPR of a
+  path fixed in advance. Sec. IV-D already said the selected path is not covered.
+- **SAFE and RESCUE (point 3).**
+  - Related Work: SAFE identifies the duration shortcut and removes it by equal-length
+    evaluation (its App. B.5) and a fixed horizon. These controls suit fixed-horizon
+    evaluation, while under success-terminated execution duration is legitimate online
+    evidence.
+  - "A deployed monitor can do neither" is removed.
+- **Recoverability.**
+  - The point of no return is now "the first state from which the task could not be
+    completed without outside help". *Recoverable* means that no such state was reached
+    before the limit.
+  - The intro's "failure here mostly means being too slow" and "an early alarm mostly
+    predicts slowness" are softened: an early alarm "mostly flags an attempt that is not yet
+    lost".
+- **Data.** The held-out sets "served" the preregistered tests; "used once" is dropped, since
+  later exploratory analyses reused them.
+- **Cuts to stay within 5 + 1:**
+  - Sec. IV-D's "Validation-set fusions used an unguaranteed joint search";
+  - the unseen paragraph's one-success timer sentence (0.086), which stays in the proposal;
+  - the Table II note on seed averaging, which Metrics already states;
+  - "collected" and "number of" (two words);
+  - "standard deviation" becomes "std";
+  - a compressed fixed-horizon limitation.
+- **Pages.** The submission build (notes off, pdflatex) has 6 pages: content ends on page 5 and
+  the references are alone on page 6. It has no overfull boxes.
+- **Proposal** (`../venue_proposal/venue_proposal.tex`, untracked; the previous version is
+  backed up). It is still 3 pages (tectonic). Changes:
+  - the matched gains get CIs, and both gains are labeled as being at the same 5% target;
+  - the method bullet says the Stage 1 bound covers each candidate path only;
+  - SAFE's App. B.5 equal-length control is acknowledged;
+  - "two preregistered tests on disjoint cohorts" becomes "(SAFE, then Hide-and-Seek) on one
+    fresh held-out cohort, disjoint from all development data";
+  - recoverability is worded as in the paper;
+  - the "Even a rejection is useful" bullet is shortened.

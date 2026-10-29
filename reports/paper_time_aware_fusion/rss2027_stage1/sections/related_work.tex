@@ -15,10 +15,11 @@ SAFE learns a failure score from a VLA's last-layer features and thresholds it w
 functional conformal band~\cite{gu2025safe}; we reuse its implementation. Follow-ups change
 the training data~\cite{rajaprakash2026safecast}, labels~\cite{park2026hideseek,ma2026failurespot},
 or policy~\cite{soddy2026memoryvla}. None
-reports an elapsed-time detector. SAFE removes the duration shortcut by truncating rollouts to
-equal length and, on its real robot, by running every rollout to a fixed
-horizon~\cite{gu2025safe}; a deployed monitor can do neither. Duration is a shortcut
-feature~\cite{geirhos2020shortcut}, but its causal form is legitimate online evidence.
+reports an elapsed-time detector. SAFE identifies the duration shortcut and removes it by
+evaluating rollouts at equal length (its App.~B.5) and, on its real robot, by running every
+rollout to a fixed horizon~\cite{gu2025safe}. These controls suit fixed-horizon evaluation;
+under success-terminated execution, duration is a shortcut~\cite{geirhos2020shortcut} for offline
+metrics but legitimate online evidence.
 
 \textbf{Action-space and success-only detectors.}
 STAC~\cite{agia2024sentinel} and VLA-FAIL~\cite{seligmann2026vlafail} compare overlapping
