@@ -580,6 +580,113 @@ review's repair instead:
 
 **Code.** `scripts/xr1_lead_time/fixed_path.py`, with tests in `tests/test_xr1_fixed_path.py`.
 
+## R9. Stage 2 sizing after the author's decisions (written 2026-10-29, before any run)
+
+**Why.** After the third review, the author made two decisions (2026-10-29), and each leaves a
+sizing marked pending in the paper:
+- **E2** freezes each detector's fused path (u, s), chosen on the existing RLDX-1 data. Only
+  λ̂ comes from E2's fresh calibration successes. The earlier power (Table S6 of
+  `stage2_sizing.md`) was for the adaptive path, and R8 showed that fixing the path widens the
+  decision CI a lot.
+- **E3's primary estimand** is now the paired success difference between a reset triggered by
+  Hide-and-Seek + P and the same reset triggered by P, within 1.25 H_k on RLDX-1. The earlier
+  E3 sizing covered P vs no monitor and reset vs continuation, and SAFE + P vs P only at
+  1.0 H_k.
+
+Both are exploratory sizing on opened cohorts. They size Stage 2 and test nothing.
+
+**E2: power with the path fixed** (`stage2_frozen_sizing.py e2`).
+- **Pool, draws and sizes:** those of the E2 co-primary sizing (the held-out RLDX-1 pool,
+  seed 20261021, the same cell and replicate numbering, n = 10–60 per class per task, 2,000
+  replicates). The simulated studies are the same rollouts as Table S5's.
+- **Frozen paths.** For SAFE-LSTM and Hide-and-Seek, (u, s) is the path of the §15.15/§15.22
+  fit: held-out calibration successes and training failures. That fit is the existing data E2
+  freezes it on. It is chosen once.
+- **Per simulated study:**
+  - the margins of P and of each frozen path are set on the drawn calibration successes only
+    (`fixed_path.certify`). If λ̂ = ∞, the monitor is disabled and raises no alarm;
+  - both are evaluated on the drawn test sample, giving the gain over P, the fused false alarms
+    and the matched gain (P loosened on the test sample to the fused detector's false alarms);
+  - the adaptive gain (`fit_fast`) on the same draws is recorded for comparison.
+- **Decision CI.** As in Table S6: the per-study gain minus the within-task half-width at 95%
+  and 97.5%. The half-width comes from the gain's own sampling distribution (frozen path) or
+  the matched gain's.
+- **Power at 97.5% under the E2 FPR rule** (at most 39 of 400 false alarms at n = 20), per
+  detector:
+  - (a) the gain's CI above zero;
+  - (b) (a) and the matched gain's CI above zero. This is H3's criterion with the matched
+    condition the draft proposes.
+- **Plug-in power** (no shift) is the primary result. Assumed gains by shift (SAFE 0.034;
+  Hide-and-Seek 0.083 and 0.052) are a sensitivity check; the shift moves the gain and the
+  matched gain by the same amount.
+- **Also reported:** plug-in mean gain and SD, frozen vs adaptive, the disabled rate and the
+  task-level variant (no power claim).
+
+**E3: Hide-and-Seek + P vs P reset** (`stage2_frozen_sizing.py e3`).
+- **Model and inputs:** `stage2_sizing.e3_policy`, unchanged. Alarm times come from the
+  replication fit on the evaluation split, success rates from all rows, and durations from
+  training successes, as in the 2026-10-23 E3 sizing. The fused detector is Hide-and-Seek + P
+  (its §15.22 path, the path E2 freezes) instead of SAFE + P.
+- **Retry success** r = 0.245 (XR-1's measured same-scene rate) and 0.17 (its Wilson lower
+  bound), for every task.
+- **Budget:** 1.25 H_k. Reported for all tasks and by type:
+  - the success difference between the two triggered resets, Δ;
+  - the pairs needed for a two-sided 0.05 test at power 0.8, in two designs:
+    - *three independent runs per scene* (unpaired formula), as the draft words E3;
+    - *branching at the first alarm* (shared first attempt, independent retries; McNemar,
+      Connor 1987);
+  - the 95% CI half-width at 1,000 scenes in each design: 1.96 √(Σ p(1−p) / N) unpaired, and
+    1.96 √((ψ − Δ²) / N) branching, with ψ the discordant total.
+- **Check.** The SAFE + P run, with the 2026-10-23 seed, budgets and retry rate, must reproduce
+  that run's RLDX-1 single and multi tables (`--e3-reference`). Otherwise the script stops.
+
+**Checks for both.**
+- The replication fits reproduce SAFE + P +0.0342 (§15.15) and Hide-and-Seek + P +0.0834
+  (§15.22).
+- The inputs are unchanged after the run.
+- On synthetic data, the fast loosened timer equals `review_analyses.loosen_timer`.
+
+**Expectations (written before running).**
+- **E2.** The frozen-path plug-in gains are close to the adaptive ones (R8 kept Hide-and-Seek's
+  point gain), but their spread is larger.
+  - Under (a), Hide-and-Seek's power at n = 20 stays at least 0.8. SAFE's may fall below it,
+    because its path is a high score threshold whose margin moves with the drawn successes.
+  - (b) lowers power, most for the detector that uses more false alarms than P.
+- **E3.** Δ is small, at most about 0.02, because a triggered reset helps only on failures where
+  Hide-and-Seek alarms earlier and leaves enough budget for a retry that succeeds a quarter of
+  the time.
+  - Independent runs need tens of thousands of scenes, with a half-width of about 0.04 at
+    1,000.
+  - The branching design needs several thousand pairs, with a half-width of about 0.01–0.02 at
+    1,000.
+
+**Recommendation rules (fixed before running).**
+- **E2.**
+  - If power (a) at n = 20 is ≥ 0.8 for a detector, n = 20 stands for it.
+  - Otherwise report the smallest n ≤ 60 that reaches 0.8, or say that the frozen-path test is
+    underpowered at E2's size.
+  - Report (b) beside it. The matched condition stays the author's decision.
+- **E3.**
+  - If the branching pairs at r = 0.245 are ≤ 1,000, H4 can be a registered test with the
+    branching design.
+  - Otherwise E3 stays an estimation study. Recommend the branching design if its half-width
+    at 1,000 scenes is at most half the independent design's, and state both half-widths in
+    the paper.
+
+**Limits.**
+- **Matched comparator.** The matched condition compares with P tuned on the test sample (the
+  smallest grid margin with at most the fused detector's false alarms). It is stricter than
+  P: a fused detector identical to P has a slightly negative matched gain, because the
+  calibrated λ̂ of P is conservative.
+- **E3 latency.** As in the 2026-10-23 E3 sizing, alarms are at inference indices, so
+  Hide-and-Seek's compute latency is not charged. A positive Δ here is an upper bound for a
+  latency-charged contrast.
+- **E3 model.** The model and its retry rate are borrowed from XR-1's pilot. Scenes have no
+  effect beyond their task, so pairing by scene helps only through the shared first attempt.
+
+**Code.** `scripts/xr1_lead_time/stage2_frozen_sizing.py` (`e2`, `e3`), with tests in
+`tests/test_stage2_frozen_sizing.py`.
+
 ## Runbook
 
 Run on TSUBAME from a pinned worktree, CPU only for R1–R4, following
@@ -1574,6 +1681,84 @@ Continue only if all of these hold:
 Report the whole `fixed_path.log`, `INPUTS UNCHANGED`, the SHA-256 and `R8_TAG`. The log ends in
 `FIXED-PATH ANALYSIS OK` or `REPRODUCTION FAILED`. Then copy the JSON to
 `reports/safe_robocasa365_research_plan_20260823/evidence/<R8_TAG>/`.
+
+### 7. R9: Stage 2 sizing with the path frozen (CPU, about 30–60 minutes)
+
+`R9_SHA` is the full SHA of the pushed commit on `claude/review-analyses` that contains this
+step. Use a CPU allocation with at least 9 cores, for example
+`qrsh -g tga-shinoda -l cpu_16=1 -l h_rt=2:00:00`.
+- E3 runs first (a few minutes).
+- E2 follows with 8 workers. It makes the same fits as the 2026-10-23 co-primary run, plus
+  cheap additions.
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+# RLDX_CAL, RLDXHS_ROOT, RLDX_LEAD_OUT (the 15.22 run, as in the E2 co-primary sizing)
+source $STORAGE_BS/robocasa_logs/eval/rldx1_hide_and_seek_20261023_000418/paths.env
+: ${SAFE_PY:=$STORAGE_BS/envs/vla_safe/bin/python}
+export E2CO_JSON=$STORAGE_BS/robocasa_checkpoints/safe/e2_coprimary_sizing_20261023_011537/e2_coprimary.json
+ls $STORAGE_BS/robocasa_checkpoints/safe/e3_retry_sizing_*/e3_r_0_245.json      # must list exactly one file
+export E3R_DIR=$(dirname $(ls $STORAGE_BS/robocasa_checkpoints/safe/e3_retry_sizing_*/e3_r_0_245.json | tail -n 1))
+export R9_SHA=<R9_SHA>
+export R9_REPO=$PROJECT_FS/robocasa_r9sizing_${R9_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $R9_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R9_REPO $R9_SHA
+test "$(git -C $R9_REPO rev-parse HEAD)" = "$R9_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not R9_SHA"
+cd $R9_REPO
+export R9_TAG=stage2_frozen_sizing_$(date +%Y%m%d_%H%M%S)
+export R9_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/$R9_TAG R9_LOG=$STORAGE_BS/robocasa_logs/eval/$R9_TAG
+mkdir -p $R9_ROOT $R9_LOG
+R9_INPUTS=($RLDX_CAL/lstm_seed{0,1,2}/normalized_scores.jsonl $RLDXHS_ROOT/scores/{train,calibration,test}_predictions.jsonl
+           $RLDX_LEAD_OUT/rldx_lead_lstm.json $RLDXHS_ROOT/rldx_hide_and_seek.json $E2CO_JSON
+           $E3R_DIR/e3_r_0_245.json $E3R_DIR/e3_r_0_17.json)
+for f in "${R9_INPUTS[@]}"; do test -s $f && echo "OK $f" || echo "STOP: missing $f"; done | grep -c '^OK'
+sha256sum "${R9_INPUTS[@]}" > $R9_LOG/frozen_inputs.sha256
+printf 'export %s=%q\n' R9_SHA "$R9_SHA" R9_REPO "$R9_REPO" R9_ROOT "$R9_ROOT" R9_LOG "$R9_LOG" > $R9_LOG/paths.env
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_stage2_frozen_sizing tests.test_e2_coprimary_sizing \
+  tests.test_stage2_sizing 2>&1 | tail -n 3
+COMMON="--calibration-dir $RLDX_CAL --hs-scores-dir $RLDXHS_ROOT/scores \
+  --replication-json $RLDX_LEAD_OUT/rldx_lead_lstm.json --hs-result $RLDXHS_ROOT/rldx_hide_and_seek.json"
+export CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+nohup sh -c "
+nice -n 10 $SAFE_PY -I -u scripts/xr1_lead_time/stage2_frozen_sizing.py e3 $COMMON \
+  --reference-json $E3R_DIR/e3_r_0_245.json --reference-json $E3R_DIR/e3_r_0_17.json \
+  --output $R9_ROOT/e3_hs_reset.json > $R9_LOG/e3.log 2>&1 || exit 1
+nice -n 10 $SAFE_PY -I -u scripts/xr1_lead_time/stage2_frozen_sizing.py e2 $COMMON --coprimary-json $E2CO_JSON \
+  --workers 8 --output $R9_ROOT/e2_frozen.json > $R9_LOG/e2.log 2>&1 || exit 1
+echo ALL DONE > $R9_LOG/done.txt" > $R9_LOG/driver.log 2>&1 &
+echo "driver PID $! on $(hostname); R9_TAG=$R9_TAG"
+```
+
+Continue only if all of these hold:
+- `HEAD OK` prints;
+- `ls` lists exactly one `e3_r_0_245.json`;
+- the count is 11;
+- the tests end with `OK` (30 tests).
+
+When `done.txt` exists, or the driver has stopped, report the output of:
+
+```bash
+source $(ls -d $STORAGE_BS/robocasa_logs/eval/stage2_frozen_sizing_* | tail -n 1)/paths.env
+cat $R9_LOG/driver.log; ls $R9_LOG
+grep -h "check" $R9_LOG/e3.log $R9_LOG/e2.log
+sed -n '/^## E3/,$p' $R9_LOG/e3.log
+sed -n '/^frozen paths/,$p' $R9_LOG/e2.log
+sha256sum -c --quiet $R9_LOG/frozen_inputs.sha256 && echo INPUTS UNCHANGED
+sha256sum $R9_ROOT/*.json; basename $R9_ROOT
+```
+
+Every `check` line must end in `OK` or `MATCH`:
+- the two replication gains;
+- SAFE + P against both earlier E3 runs;
+- the shared arms;
+- the adaptive rows against `e2_coprimary.json`.
+
+A script that stops or fails a check returns a nonzero status, and the driver then stops. A
+JSON written with a failed check says `FAILED CHECK` in its status. Keep it as evidence.
+Copy both JSONs to `reports/safe_robocasa365_research_plan_20260823/evidence/<R9_TAG>/`.
 
 ## Result
 
