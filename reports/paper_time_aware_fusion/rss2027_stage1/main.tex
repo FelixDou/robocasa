@@ -523,21 +523,21 @@ after the point of no return, and no detector flags more than 8\% of failures by
 
 % Stage 2 sizing: docs/stage2_sizing.md on main (E2 co-primary results: commit ac382f2e; earlier sizing 173a0274).
 % Path-fixed E2 power and the E3 primary contrast: R9 in docs/xr1_review_analyses_plan.md (claude/review-analyses),
-% run stage2_frozen_sizing_20261029_190042.
+% run stage2_frozen_sizing_20261029_190042. Frozen E2 rule (type I, power): R10, run e2_freeze_20261029_205743.
 % Offline: resample the opened cohorts, refit, count. Design decisions by the author, 2026-10-21.
 \textbf{E2: Second policy, prospectively (H3).} We run RLDX-1 on its 20 tasks with fresh
 calibration and test sets of 20 successes and 20 failures per task (about 2,500 rollouts).
 From the existing data we freeze SAFE's LSTM head (the MLP head falls back to the timer),
 Hide-and-Seek (three seeds), $H_k$ (longest training failure), $\rho_k$ and each detector's
 fused path $(u, s)$, chosen there; the fresh calibration successes set only $\hat\lambda$, so
-Proposition~\ref{prop:fpr} covers the evaluated detector.\pending{checkpoint hashes} For each of the two detectors, H3 holds if the 97.5\% CI
+Proposition~\ref{prop:fpr} covers the evaluated detector.\pending{checkpoint hashes} For each detector, H3 holds if the 97.5\% CI
 (rollouts resampled within task, path fixed) lies above zero for the gain over P and for the gain
 over P loosened on the test set to its FPR, and the gain beats 38 of 39 noise and 38 of 39
 resampled-score fusions, each frozen the same way, on the same rollouts (type I error $\le 0.05$
-by exchangeability). With the
-paths fixed, simulated power at $n = 20$ is $\ge 0.99$ per detector (0.86 if Hide-and-Seek gains
-0.052).\pending{power and type I error with the null test} We also report Hide-and-Seek + P against its
-first-inference control, task-resampled CIs (no claim) and the 14 atomic tasks; the sizing is
+by exchangeability). Simulated with
+paths frozen, no null of 2,000 passed; power at $n = 20$ is 1.00 for SAFE and 0.94 for
+Hide-and-Seek (about 0.86 if it gains only 0.052). We also report Hide-and-Seek + P against its
+first-inference control, task-resampled CIs and the 14 atomic tasks; the sizing is
 optimistic.
 
 \textbf{FPR criterion.}\pending{author to confirm the FPR rule} Calibration targets
@@ -546,13 +546,13 @@ one-sided exact binomial test at level 0.05 ($\le 39$ of 400 in E2).
 
 \textbf{E3: Reset and retry (H4).} On RLDX-1, each of 1,000 scenes (50 per task) runs once to
 $1.25\,H_k$ without reset, the no-reset arm. At each monitor's first alarm, its reset arm restores
-the scene (checked on the first frame) and retries in the remaining budget, so the arms share the
-attempt up to their alarms. The primary estimand is the paired success difference between the
+the scene (checked on the first frame) and retries in the remaining budget; arms share the
+attempt up to their alarms. The primary estimand is the paired success difference of the
 Hide-and-Seek + P and P resets (same retry procedure, monitor latency charged); reset against no
 reset is secondary. We report 95\% CIs,
 unnecessary resets and wasted time. Sizing (XR-1's retry success, 0.245) puts the difference at
-$+0.011$ with CI half-width 0.019 (0.043 with independent runs); a test needs about 5,700 scenes,
-so H4 is estimated, not tested.
+$+0.011$, CI half-width 0.019 (0.043 with independent runs); a test needs about 5,700 scenes,
+so H4 is only estimated.
 
 \textbf{E4, E5 (exploratory).} E4 adds action-only monitors, richer time baselines and a
 prospective unseen-task test. E5 measures lead from the point of no return, fused detector against P, on about 250 to

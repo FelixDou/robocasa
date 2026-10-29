@@ -783,3 +783,23 @@ The author decided both open Stage 2 points on 2026-10-29 (R10 on `claude/review
   is retrained with saved weights and must reproduce the §15.22 trajectories exactly.
 - **Trims:** "its FPR"; the "neither ... can pass" clause; "On RLDX-1, each of 1,000 scenes".
 - **Pages.** 6, with references alone on page 6.
+
+## Update 2026-10-29 (i): E2 power and type I error with every path frozen (R10)
+
+R10 part A (`e2_freeze_20261029_205743`; every check passed) simulated the author's full E2
+rule with every path frozen, including the null fusions' paths.
+- **Type I error.** No null passed in 2,000 subjects of either null at n = 10, 20 and 30.
+- **Power at n = 20.**
+  - SAFE: 1.00.
+  - Hide-and-Seek: 0.94 by nested bootstrap, 0.99 by approximation. The pre-stated rule quotes
+    the nested value.
+  - Hide-and-Seek at γ = 0.052: about 0.86 (approximate).
+  - The null test costs no power.
+- **Paper.** The `\pending` on power and type I error is replaced by these numbers. Checkpoint
+  hashes stay `\pending`:
+  - the Hide-and-Seek weights are frozen and reproduce §15.22 exactly;
+  - the RLDX-1 policy copy on the cluster has not been located yet.
+- **Trims to stay at 5 + 1:**
+  - "For each detector";
+  - "(no claim)" dropped;
+  - E3: "arms share", "difference of", "so H4 is only estimated".
