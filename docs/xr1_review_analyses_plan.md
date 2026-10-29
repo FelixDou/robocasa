@@ -1636,7 +1636,9 @@ lead 0.026 with no false alarm.
 
 **Run.**
 - Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_unseen_20261029_135501`
-  (`rldx_unseen.json`, SHA-256 `58a68f5b…`; `rldx_folds.json`, SHA-256 `079ce858…`).
+  (`rldx_unseen.json`, SHA-256 `58a68f5b…`, copied to
+  `reports/safe_robocasa365_research_plan_20260823/evidence/rldx1_unseen_20261029_135501/`;
+  `rldx_folds.json`, SHA-256 `079ce858…`).
 - Logs: `/gs/bs/tga-shinoda/felid/robocasa_logs/eval/rldx1_unseen_20261029_135501`.
 - Code: pinned worktree `robocasa_rldxunseen_9fef3adf` on r4n5, CPU only.
   - The five folds were scored at once. The run folder was created at 13:55, and the last
@@ -1647,9 +1649,14 @@ lead 0.026 with no false alarm.
 
 **Checks.** All passed:
 - Five scoring runs with rc=0.
-- **R1:** fold all ends with `REFERENCE OK`; the last check printed was
-  `train/rnd: 740 rollouts, max diff 0.0`. The table script requires all 21 checks, and the
-  fold directories match the fold file.
+- **R1:** fold all ends with `REFERENCE OK`, and all 21 reference checks pass.
+  - 18 are exactly 0.
+  - PCA-KMeans differs by at most 1.4e-14 in the three cohorts. That is floating-point
+    rounding, within the 1e-12 tolerance, and R2 is still exact.
+  - The fold directories match the fold file. The folds' tasks are recorded in
+    `rldx_unseen.json` (`checks.R1.folds`).
+- **Timer and calibration:** G's λ is 0.947–0.973 per fold. Each fold calibrates on 42–48
+  seen-task successes and 225–293 seen-task training failures.
 - **R2:** seen + P equals `rldx_per_seed.json`, with P at 0.2711 and FPR 0.03.
 - **R3:** one G for every score.
 - `INPUTS UNCHANGED`.
