@@ -704,3 +704,25 @@ decided both design questions on 2026-10-29.
   - the irreversibility paragraph drops "the two mostly coincide" and describes the Stage 2 test
     as paired monitor-vs-timer resets;
   - one bullet is slightly trimmed.
+
+## Update 2026-10-29 (f): final review, precision edits
+
+The final review judged the draft a credible Stage 1 submission and asked for three precision
+edits.
+- **Proposition 1.**
+  - If λ̂ = ∞ (the rank exceeds n, or no point silences enough successes), the calibration rule
+    "cannot certify a usable point at the target" and the monitor is disabled: it raises no
+    alarm. This replaces "no point of the path meets the target".
+  - The bound is now stated as Pr(monitor enabled and false alarm on the new success) ≤ α,
+    over calibration draws. It is not conditional on the monitor being enabled.
+  - The proof shows that this event is {V_{n+1} > V_(r)}, with V_(r) = ∞ for r > n.
+  - The OR-fusion paragraph says the timer catches every failure once calibration certifies a
+    usable point.
+- **Proposal** (untracked; previous version backed up):
+  - Fig. 2's caption and the method bullet now say "when calibration returns a usable
+    operating point" wherever they combine the FPR bound with complete timeout recall;
+  - Fig. 1 gives each realized test FPR: 0.055 for the per-task timer, 0.061 for both designs
+    fused with it, 0.024 for the global timer;
+  - three of the previous round's additions are tightened to stay at 3 pages.
+- **Pages.** The paper's submission build is 6 pages, with references alone on page 6; the
+  proposal is 3 pages.

@@ -181,8 +181,8 @@ The fused monitor alarms at
 \begin{equation}
   T = \min\{\, t : s_t > \tau_s \ \text{or}\ t \ge c\,H_k \,\}.
 \end{equation}
-Neither signal is restricted in time: the score may alarm early, and the timer guarantees an
-alarm on every failure, at $c\,H_k$ at the latest. Any lead gain over the timer comes from
+Neither signal is restricted in time: the score may alarm early, and, once calibration certifies
+a usable point (Sec.~\ref{sec:guarantee}), the timer alarms on every failure by $c\,H_k$. Any lead gain over the timer comes from
 failures on which the score crosses first.
 
 \subsection{Calibration with a finite-sample FPR guarantee}
@@ -206,15 +206,16 @@ inference) or the score changes the alarm, so the minimum is attained.}
 \begin{proposition}
 \label{prop:fpr}
 Let $n$ calibration successes and a new successful rollout be exchangeable, and let the path
-$\gamma$ not depend on the calibration successes. Set $\hat\lambda = V_{(\lceil (n+1)(1-\alpha)
-\rceil)}$, the $\lceil (n+1)(1-\alpha) \rceil$-th smallest $V_i$. If that rank exceeds $n$ or
-$\hat\lambda = \infty$, no point of the path meets the target and the monitor is not used.
-Otherwise the OR-fused monitor at $\gamma(\hat\lambda)$ raises a false alarm on the new success
-with probability at most $\alpha$.
+$\gamma$ not depend on the calibration successes. Set $\hat\lambda = V_{(r)}$, the $r$-th smallest
+$V_i$ with $r = \lceil (n+1)(1-\alpha) \rceil$, or $\hat\lambda = \infty$ if $r > n$. If
+$\hat\lambda = \infty$, the calibration rule cannot certify a usable point at the target and the
+monitor is disabled: it raises no alarm. Otherwise it runs at $\gamma(\hat\lambda)$. Then, over
+calibration draws, $\Pr(\text{monitor enabled and false alarm on the new success}) \le \alpha$.
 \end{proposition}
 \begin{IEEEproof}
-The new rollout alarms if and only if $V_{n+1} > \hat\lambda = V_{(r)}$,
-$r = \lceil (n+1)(1-\alpha) \rceil$. By exchangeability, the rank of $V_{n+1}$ among
+An enabled monitor alarms on the new success if and only if $V_{n+1} > \hat\lambda$, and a
+disabled one ($\hat\lambda = \infty$) never does, so the event is $\{V_{n+1} > V_{(r)}\}$ with
+$V_{(r)} = \infty$ for $r > n$. By exchangeability, the rank of $V_{n+1}$ among
 $V_1, \dots, V_{n+1}$ is uniform (ties broken at random), so $\Pr(V_{n+1} > V_{(r)}) \le
 1 - r/(n+1) \le \alpha$: the split-conformal quantile lemma~\cite{angelopoulos2021gentle}.
 \end{IEEEproof}
