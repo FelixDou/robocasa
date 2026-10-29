@@ -662,3 +662,45 @@ then covers the evaluated detector.
   - the fallback note is one line.
 - **Pages:** the paper's submission build is 6 pages, with references alone on page 6; the
   proposal is 3 pages.
+
+## Update 2026-10-29 (e): third review; E3 and E2 decisions
+
+The third review found the draft defensible and named three remaining priorities. The author
+decided both design questions on 2026-10-29.
+
+- **E3 / H4.** The primary comparison is now monitor vs timer.
+  - H4 is "a scene reset and retry triggered by Hide-and-Seek + P yields a higher success rate
+    than the same reset triggered by P alone", within 1.25 H_k.
+  - E3 runs on RLDX-1, the pilot's decision: about 1,000 scenes (50 per task), each run three
+    times (Hide-and-Seek + P reset, P reset, no reset).
+  - The primary estimand is the paired difference between the two triggered resets, with the
+    same retry procedure and budget and the monitor's latency charged to it. Reset vs no reset
+    is secondary.
+  - Scenes are restored explicitly and checked on the first frame.
+  - It is an estimation study with 95% CIs; H4 is tested only if sizing shows the difference
+    decidable (`\pending{sizing of the primary contrast}`).
+  - The old XR-1/McNemar text and its TODOs are gone.
+- **E2.** Each detector's fused path (u, s) is chosen on the existing RLDX-1 data and frozen with
+  the models, H_k and ρ_k. The fresh calibration successes set only λ̂, so Proposition 1 covers
+  the evaluated detector (`\pending{... power with the path fixed}`). The power figures sized for
+  the adaptive path (1.00, ≥ 0.98, 0.89–0.92) are removed, since they no longer apply.
+- **Adaptive vs frozen paths.** Sec. IV-D names both. All results except R8 use the registered
+  *adaptive* path, and Table II's caption says so. The caption also says "at a 5% FPR target".
+- **Specification.**
+  - After Eq. 1: on unseen tasks, m and σ are pooled over the training tasks.
+  - Proposition 1: λ ≥ 0 on the finite set of points where the alarm changes; c ≤ 1; V_i = ∞
+    for a success no point silences (e.g. one lasting the whole limit). If the rank exceeds n
+    or λ̂ = ∞, the monitor is not used.
+  - The proof is tightened.
+- **Removed:** the promised but unreported 0.75/0.90/1.0 sensitivity sentence. Limitations
+  already discloses that the timers came after the validation set was opened. The time-risk
+  sentence is shortened.
+- **Pages.** The submission build is 6 pages, with references alone on page 6.
+- **Proposal** (untracked; previous version backed up). It is 3 pages. Changes:
+  - Fig. 1: "5% calibration target (realized test FPR 0.055–0.061)";
+  - Fig. 2: "for a path fixed in advance";
+  - the unseen-task headline is scoped to XR-1, with one sentence on RLDX-1;
+  - Table 1 and the key observation are labeled as the validation cohort;
+  - the irreversibility paragraph drops "the two mostly coincide" and describes the Stage 2 test
+    as paired monitor-vs-timer resets;
+  - one bullet is slightly trimmed.

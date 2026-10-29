@@ -150,6 +150,7 @@ scale $\sigma^{(j)}_k$ estimated on training rollouts, the policy score is
   s_t = \frac{1}{3}\sum_{j=1}^{3} \frac{\max_{t' \le t} u^{(j)}_{t'} - m^{(j)}_k}{\sigma^{(j)}_k}.
 \end{equation}
 The running maximum makes $s_t$ monotone, so it does not change once a threshold is crossed.
+On unseen tasks, $m^{(j)}$ and $\sigma^{(j)}$ are pooled over training tasks.
 Success-only alternatives (Mahalanobis~\cite{lee2018mahalanobis}, kNN~\cite{sun2022knn},
 PCA-KMeans~\cite{liu2024siriusfleet} and RND~\cite{burda2019rnd,he2024rediffuser}) are fitted on
 successful training rollouts and aggregated the same way.
@@ -169,12 +170,10 @@ The \emph{global timer} alarms once $t \ge c\,H_k$, with one fraction $c \in (0,
 tasks. The \emph{per-task timer} P uses $c_k = \min(1, \rho_k + \delta)$, where $\rho_k$ is the
 95th percentile of task $k$'s training success durations (as fractions of $H_k$) and the shared
 margin $\delta$ is set by Proposition~\ref{prop:fpr}. P needs successful rollouts of each task,
-but no failures and no policy features. As we fixed the 95th percentile after inspecting the
-validation set, we report 0.75, 0.90 and 1.0 (the longest success) as sensitivity. The
+but no failures and no policy features. The
 \emph{time risk} estimates $\Pr(\text{failure} \mid k, \text{still running at } t)$ from
 training rollouts by an increasing isotonic regression in $t/H_k$. As every failure runs to
-$H_k$, it is a task-specific timer, but its smoothing keeps it low in tasks with few training
-failures.
+$H_k$, it is a task-specific timer, kept low by smoothing where training failures are few.
 
 \subsection{OR-fusion}
 
@@ -192,31 +191,32 @@ failures on which the score crosses first.
 A successful rollout $i$ of length $L_i$ (in inferences) raises a false alarm under
 $(\tau_s, c)$ if and only if $M_i = \max_{t \le L_i} s_t > \tau_s$ or $\rho_i = L_i/H_{k_i}
 \ge c$, so its false alarm depends only on the pair $(M_i, \rho_i)$. Fix in advance a path
-$\gamma(\lambda) = (\tau_s(\lambda), c(\lambda))$, $\lambda \in [0, 1]$, with both
-coordinates continuous and nondecreasing, so that a larger $\lambda$ is more conservative and
-$\gamma(1)$ never alarms on a success. For each calibration success define
+$\gamma(\lambda) = (\tau_s(\lambda), c(\lambda))$, $\lambda \ge 0$, with both coordinates
+nondecreasing and $c \le 1$, so that a larger $\lambda$ is more conservative. For each
+calibration success define
 \begin{equation}
   V_i = \min\{\lambda : M_i \le \tau_s(\lambda) \ \text{and}\ \rho_i < c(\lambda)\},
 \end{equation}
-the least conservative point on the path at which rollout $i$ stays silent. Because the path
-is monotone, rollout $i$ is silent at $\lambda$ exactly when $\lambda \ge V_i$.\footnote{The
-strict $\rho_i < c(\lambda)$ makes the set right-open; taking $c$ on a finite grid, as the
-timer's resolution of one inference does anyway, makes the minimum attained.}
+the least conservative point on the path at which rollout $i$ stays silent, and $V_i = \infty$
+if none is: a success that lasts the whole limit ($\rho_i \ge 1$) alarms at every point.
+Because the path is monotone, rollout $i$ is silent at $\lambda$ exactly when
+$\lambda \ge V_i$.\footnote{$\lambda$ takes the finitely many values at which the timer (one
+inference) or the score changes the alarm, so the minimum is attained.}
 
 \begin{proposition}
 \label{prop:fpr}
 Let $n$ calibration successes and a new successful rollout be exchangeable, and let the path
 $\gamma$ not depend on the calibration successes. Set $\hat\lambda = V_{(\lceil (n+1)(1-\alpha)
-\rceil)}$, the $\lceil (n+1)(1-\alpha) \rceil$-th smallest $V_i$ (or $\hat\lambda = 1$ if
-that rank exceeds $n$). Then the OR-fused monitor at $\gamma(\hat\lambda)$ raises a false
-alarm on the new success with probability at most $\alpha$.
+\rceil)}$, the $\lceil (n+1)(1-\alpha) \rceil$-th smallest $V_i$. If that rank exceeds $n$ or
+$\hat\lambda = \infty$, no point of the path meets the target and the monitor is not used.
+Otherwise the OR-fused monitor at $\gamma(\hat\lambda)$ raises a false alarm on the new success
+with probability at most $\alpha$.
 \end{proposition}
 \begin{IEEEproof}
-The new rollout alarms at $\hat\lambda$ if and only if $V_{n+1} > \hat\lambda = V_{(r)}$ with
+The new rollout alarms if and only if $V_{n+1} > \hat\lambda = V_{(r)}$,
 $r = \lceil (n+1)(1-\alpha) \rceil$. By exchangeability, the rank of $V_{n+1}$ among
-$V_1, \dots, V_{n+1}$ is uniform on $\{1, \dots, n+1\}$ (ties broken at random), so
-$\Pr(V_{n+1} > V_{(r)}) \le 1 - r/(n+1) \le \alpha$; this is the split-conformal quantile
-lemma~\cite{angelopoulos2021gentle} applied to the scalar $V$.
+$V_1, \dots, V_{n+1}$ is uniform (ties broken at random), so $\Pr(V_{n+1} > V_{(r)}) \le
+1 - r/(n+1) \le \alpha$: the split-conformal quantile lemma~\cite{angelopoulos2021gentle}.
 \end{IEEEproof}
 
 The path may use any data except calibration successes, such as development rollouts or
@@ -231,10 +231,11 @@ at its own $\hat\lambda$ from the calibration successes. The selected path thus 
 successes: Proposition~\ref{prop:fpr} bounds the FPR of each candidate path, not of the one
 chosen among them, which is why our criteria also check the test FPR
 (Sec.~\ref{sec:hypotheses}); over 200 re-splits of the successes, the selection raised the
-expected test FPR from 0.047 (P) to about 0.055. A path chosen on other rollouts restores the
-bound: chosen on the validation set (exploratory), Hide-and-Seek + P still gains 0.072 at 0.061
-FPR and SAFE + P 0.007, but with the path held fixed both decision CIs include zero
-([$-0.069$, 0.143], [$-0.222$, 0.067]).\todo{R4/R8: separate selection set for E2?}
+expected test FPR from 0.047 (P) to about 0.055. A path chosen on other rollouts and frozen
+restores the bound: with a \emph{frozen} path chosen on the validation set (exploratory),
+Hide-and-Seek + P still gains 0.072 at 0.061 FPR and SAFE + P 0.007, but both decision CIs
+include zero ([$-0.069$, 0.143], [$-0.222$, 0.067]). All other results use the registered
+\emph{adaptive} path; E2 freezes its paths (Sec.~\ref{sec:plan}).
 
 \section{Hypotheses}
 \label{sec:hypotheses}
@@ -253,8 +254,9 @@ the mean lead over P: each 97.5\% CI (Bonferroni over the two) lies above zero, 
 criterion of Sec.~\ref{sec:plan}. No margin is required, and the claim is conditional on these
 20 tasks.
 
-\textbf{H4 (utility).} Within a budget of $1.25\,H_k$, resetting the scene and retrying when P
-alarms yields a higher task success rate than continuing the attempt to the same budget.
+\textbf{H4 (utility of the extra warning).} Within a budget of $1.25\,H_k$, a scene reset and
+retry triggered by Hide-and-Seek + P yields a higher task success rate than the same reset
+triggered by P alone.
 
 We fixed H1, H2, P, the metric and the criteria before computing any timer or lead on a fresh
 held-out test set, and preregistered the same test for Hide-and-Seek before scoring it there.
@@ -349,7 +351,7 @@ instead uses one random 7/3 task split per seed, FPR 0.15--0.25 and no per-task 
 \begin{table}[t]
 \centering
 \caption{Warning lead on held-out RoboCasa365 test sets: XR-1 (preregistered, 380 + 380
-rollouts) and RLDX-1 (offline, 100 + 100). Each score is OR-fused at 5\% FPR with our per-task
+rollouts) and RLDX-1 (offline, 100 + 100). Each score is OR-fused (adaptive path) at a 5\% FPR target with our per-task
 timer P on seen tasks, and with the global timer G on unseen tasks, where P is undefined. We
 report FPR, the gain in mean lead over that timer ($\Delta\bar\ell$) and TWA, mean and std over 3
 seeds. \textbf{Bold}/\underline{underline}: best/second-best monitor per column.}
@@ -524,35 +526,31 @@ after the point of no return, and no detector flags more than 8\% of failures by
 % Stage 2 sizing: docs/stage2_sizing.md on main (E2 co-primary results: commit ac382f2e; earlier sizing 173a0274).
 % Offline: resample the opened cohorts, refit, count. Design decisions by the author, 2026-10-21.
 \textbf{E2: Second policy, prospectively (H3).} We run RLDX-1 on its 20 tasks with fresh
-calibration and test sets of 20 successes and 20 failures per task (about 2,500 rollouts), with
-held-out calibration failures. From the existing data we freeze SAFE's LSTM head (the MLP head
-falls back to the timer), Hide-and-Seek (three seeds), $H_k$ (longest training failure) and
-$\rho_k$.\pending{checkpoint hashes} For each of the two detectors, H3 holds if the 97.5\% CI
+calibration and test sets of 20 successes and 20 failures per task (about 2,500 rollouts).
+From the existing data we freeze SAFE's LSTM head (the MLP head falls back to the timer),
+Hide-and-Seek (three seeds), $H_k$ (longest training failure), $\rho_k$ and each detector's
+fused path $(u, s)$, chosen there; the fresh calibration successes set only $\hat\lambda$, so
+Proposition~\ref{prop:fpr} covers the evaluated detector.\pending{checkpoint hashes; power with
+the path fixed} For each of the two detectors, H3 holds if the 97.5\% CI
 (rollouts resampled within task) lies above zero for the gain over P and for the gain over P
 loosened on the test set to the fused detector's FPR, so that a larger false-alarm budget alone
-cannot pass.\todo{matched-FPR condition proposed; author to confirm} Without the second
-condition, offline sizing gives power 1.00 for SAFE (gain 0.034) and $\ge 0.98$ for Hide-and-Seek
-(even at 0.052). Before collection we simulate the criterion's power and false-positive rate
-under the noise and resampled nulls, with $n = 20$ unless more is needed.\pending{type I error,
+cannot pass.\todo{matched-FPR condition proposed; author to confirm} Before collection we
+simulate the criterion's power (path fixed) and false-positive rate under the noise and
+resampled nulls, with $n = 20$ unless more is needed.\pending{type I error,
 power, final $n$} We also report Hide-and-Seek + P against its first-inference control, CIs with tasks
 resampled (no claim) and the 14 atomic tasks; the sizing is optimistic.
 
 \textbf{FPR criterion.}\pending{author to confirm the FPR rule} Calibration targets
 $\alpha = 0.05$; on the test set, the false alarms must not reject ``true FPR $\le 0.075$'' in a
-one-sided exact binomial test at level 0.05 (at most 39 of 400 in E2). Under H1's fixed limit,
-E2's power would be 0.89--0.92.
+one-sided exact binomial test at level 0.05 (at most 39 of 400 in E2).
 
-\textbf{E3: Reset and retry (H4).} On XR-1's 38 tasks\pending{policy: XR-1 proposed, author to
-confirm} with a budget of $1.25\,H_k$, we compare resetting the scene for a new attempt when P
-alarms against continuing the same attempt, since most failures are still recoverable at the
-limit.\todo{primary contrast proposed; author to confirm} We also compare P-triggered reset with
-no monitor (reset only at $H_k$). Each seed runs under every condition, a retry reuses the scene
-with a new policy sampling seed, and conditions are compared by McNemar's test on discordant
-pairs. Resets triggered by Hide-and-Seek + P are reported descriptively, with unnecessary resets,
-wasted time and inference latency.\todo{arm was SAFE + P; confirm, resize} The comparison with no monitor needs at least about 650 episodes
-per condition (optimistic for a same-scene retry); a pilot of about 100 re-attempts sets the
-final size.\pending{pilot result;
-final size}
+\textbf{E3: Reset and retry (H4).} On RLDX-1's 20 tasks, about 1,000 scenes (50 per task) each
+run three times within $1.25\,H_k$: reset and retry when Hide-and-Seek + P alarms, the same reset
+when P alarms, and no reset. The primary estimand is the paired success difference between the
+two triggered resets (same retry procedure and budget, the monitor's latency charged to it); reset
+against no reset is secondary. Resets restore the scene explicitly, checked on the first frame.
+We report 95\% CIs, unnecessary resets and wasted time; H4 is tested only if sizing shows the
+difference decidable.\pending{sizing of the primary contrast}
 
 \textbf{E4, E5 (exploratory).} E4 adds action-only monitors, richer time baselines and a
 prospective unseen-task test. E5 measures lead from the point of no return, fused detector against P, on about 250 to
