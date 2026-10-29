@@ -824,3 +824,21 @@ rule with every path frozen, including the null fusions' paths.
 - **Open items now:** two `\pending`/`\todo`, both older author decisions: confirm the FPR rule,
   and whether to register E5.
 - **Pages.** 6, with references alone on page 6.
+
+## Update 2026-10-29 (k): last author decisions; no open items
+
+The author accepted both remaining drafts as written (2026-10-29).
+- **FPR criterion confirmed.** Calibration targets α = 0.05. Test-set false alarms must not
+  reject "true FPR ≤ 0.075" in a one-sided exact binomial test at level 0.05 (≤ 39 of 400 in
+  E2). The R9 and R10 sizings already used this rule. The `\pending` is removed.
+- **E5 stays exploratory.** It is reported only if the pilot of at least 20 doubly labeled
+  decided failures reaches mean |Δt_u|/H_k ≤ 0.10. The `\todo` is removed.
+- **Venue proposal** (untracked, main checkout; previous version backed up in the session
+  scratchpad).
+  - Stage 2 now "measures" the timer-vs-Hide-and-Seek reset in closed loop.
+  - The difference is "sized at about +0.01, CI half-width 0.02 at 1,000 scenes; not tested".
+  - It is still 3 pages.
+- **State.**
+  - The paper has no `\pending` or `\todo` left; even the notes build shows none.
+  - The submission build is 6 pages, with references alone on page 6, and no undefined
+    references.
