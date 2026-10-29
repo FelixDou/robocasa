@@ -2888,3 +2888,127 @@ its CI.**
   with the path fixed stays pending.
 - E3: state both half-widths and that H4 is estimated, not tested. Flag the branching design as
   the author's decision.
+
+### R10
+
+**Part A: with every path frozen, the author's E2 rule has a simulated type I error of 0 under
+both nulls, and n = 20 stands.**
+- Power at n = 20 under the full rule:
+  - SAFE: 1.00.
+  - Hide-and-Seek: 0.99 by approximation and 0.94 by the nested check. The pre-stated rule
+    makes the paper quote 0.94.
+- **Part B:** the Hide-and-Seek weights are frozen, and their retrain reproduces §15.22
+  exactly. The manifest waits for the policy checkpoint's location.
+
+**Run.**
+- Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/e2_freeze_20261029_205743`;
+  logs under `robocasa_logs/eval/` with the same tag.
+- Code: pinned worktree `robocasa_r10freeze_e6abadec` on r4n5, CPU only.
+- **Checks:**
+  - `HEAD OK`, `SAFE HEADS OK`, 18 inputs, 39 tests OK.
+  - Replication gains +0.0342 and +0.0834.
+  - Co-primary frozen rows reproduce R9 (`MATCH`).
+  - `INPUTS UNCHANGED`.
+- `e2_frozen_rule.json` SHA-256 `b4e8ec3b…`.
+
+**First freeze run: a mismatch, and its cause.**
+- **The mismatch.** The first retrain (`scores/`, `models/`, kept as evidence) differed from
+  §15.22 by up to 1.9 in the normalized scores. Every seed and every normalization differed.
+- **The cause.** The shell still had `OPENBLAS_NUM_THREADS=1` exported from the R9 run. The
+  command set OMP and MKL to 8 but not OpenBLAS, so numpy's BLAS (the PCA) ran with 1 thread
+  instead of 8. Last-bit differences in the PCA then grew over 200 epochs of LSTM training.
+- **Unchanged:** packages (dated 2026-07-16), CPU (AMD EPYC 9654), code path, inputs and
+  configs.
+- **The rerun.** With the thread variables unset and OMP/MKL set to 8, the rerun
+  (`scores_run2/`, `models_run2/`) reproduced §15.22 exactly: `max diff 0.0` on 60 calibration
+  and 200 test rollouts, `REFERENCE OK`.
+- **Lesson for E2.** A retrain reproduces exactly only under the same BLAS threading. E2
+  therefore loads the saved weights and does not retrain. Any future retrain sets every thread
+  variable explicitly.
+- **Frozen weights** (file SHA-256; content hashes in `scores_run2/scoring.json`): seed 0
+  `5a5a40f0…`, seed 1 `f8846679…`, seed 2 `8b8e84c6…`.
+
+**Table R10a: frozen detectors and nulls (within task)**, at n = 10 / 20 / 30.
+
+| Detector | Mean gain (SD) at n = 20 | Matched (SD) | Path uses the score |
+|---|---|---|---|
+| SAFE + P | +0.0316 (0.0037) | +0.0320 (0.0044) | 1.00 |
+| Hide-and-Seek + P | +0.0643 (0.0144) | +0.0679 (0.0157) | 1.00 |
+| noise + P (null) | −0.0205 (0.0348) | −0.0186 (0.0270) | 0.92 |
+| resampled SAFE + P (null) | −0.0000 (0.0001) | +0.0004 (0.0024) | 0.02 |
+
+- **The bar for (d)** (mean second-largest of 39 references) is small:
+  - noise: +0.010, +0.005 and +0.004 at n = 10 / 20 / 30;
+  - resampled: 0.000 at every n. Its path falls back to the timer in 98% of draws, so ties
+    count against the detector.
+
+**Table R10b: type I error** (share of 2,000 null subjects passing).
+- **Full rule:** 0.000 under both nulls at n = 10, 20 and 30.
+- **Without (d), and without (b):** at most 0.001.
+- **Condition (d) alone, noise:** 0.053, 0.042 and 0.038 at n = 10 / 20 / 30. This matches its
+  0.05 bound within Monte Carlo error (SE about 0.005).
+- **Condition (d) alone, resampled:** at most 0.001.
+
+**Table R10c: co-primary power under the full rule** (within-task approximation).
+
+| Detector, assumed gain | n = 10 | n = 20 | n = 30 |
+|---|---:|---:|---:|
+| SAFE, plug-in | 0.79 | 1.00 | 1.00 |
+| SAFE, 0.034 | 0.84 | 1.00 | 1.00 |
+| Hide-and-Seek, plug-in | 0.38 | 0.99 | 1.00 |
+| Hide-and-Seek, 0.083 | 0.77 | 1.00 | 1.00 |
+| Hide-and-Seek, 0.052 | 0.17 | 0.86 | 0.97 |
+| Hide-and-Seek, 0.05 | 0.15 | 0.81 | 0.95 |
+
+- **The full rule equals the rule without (d) in every cell**, so the null test costs no power.
+  Without (b), power is higher only at n = 10 and at the lower Hide-and-Seek gains (0.92 at
+  0.052 for n = 20).
+- **Both co-primaries pass, n = 20:**
+  - 0.98 at plug-in;
+  - 1.00 at (0.034, 0.083);
+  - 0.86 at (0.034, 0.052), and 0.97 at n = 30.
+- **Nested check** (100 studies, 200 inner replicates, path fixed), (a)–(c) nested against
+  approximate:
+
+  | Detector | n = 10 | n = 20 | n = 30 |
+  |---|---|---|---|
+  | SAFE | 0.60 / 0.81 | 0.99 / 1.00 | 1.00 / 1.00 |
+  | Hide-and-Seek | 0.57 / 0.33 | 0.94 / 1.00 | 0.99 / 1.00 |
+  | Both nulls | 0.00 / 0.00 | 0.00 / 0.00 | 0.00 / 0.00 |
+
+  - At n = 10 the approximation is off in both directions.
+  - At n = 20 it overstates Hide-and-Seek by 0.06, so the paper quotes 0.94.
+  - The power at γ = 0.052 (0.86) is approximate and probably optimistic by about as much.
+- **Recommendation (pre-stated rules):** the type I error is not above 0.05 anywhere, n = 20
+  stands, and the nested value is quoted for Hide-and-Seek.
+
+**Expectations against results.**
+- Null gains at or below zero: held (noise −0.02, resampled 0.000).
+- Type I error about 0: held (0.000).
+- Bar for (d) at most about +0.01: held (+0.010 at n = 10, smaller after).
+- Full-rule power equal to R9's (b) within 0.01: held in every cell.
+- Nested check within 0.05 of the approximation at n = 20: held for SAFE (0.01). It missed for
+  Hide-and-Seek (0.06).
+
+**Part B: the policy checkpoint.**
+- **No local copy found.** The `RLWRLD/RLDX-1-FT-RC365` snapshot is not under `hf_home`,
+  `~/.cache`, the RLDX-1 checkout or `robocasa_checkpoints`.
+- **Revisions on Hugging Face** (API, 2026-10-29):
+
+  | Revision | Date | Change |
+  |---|---|---|
+  | `587e9ecd` | 2026-05-06 | release |
+  | `e53351cb` | 2026-10-03 | `processor_config.json`: `image_max_area` null → 65536; the commit says weights unchanged |
+  | `c53d0bc0` | 2026-10-13 | code links pinned to RLDX-1 v1.0.2 |
+
+- The three weight shards' LFS SHA-256 are identical in `587e9ecd` and `main`:
+  `2a2f48bd…`, `4bb91b90…`, `f348bb0a…`. So are `config.json`, `statistics.json`,
+  `embodiment_id.json` and the index.
+- The August data predate the processor change, so they came from `587e9ecd` (or a copy of
+  it).
+- **Still open:** which copy and processor config the cluster's RLDX server loads, and that
+  copy's file hashes. The RLDX-1 checkout is at `ef05cd4a`.
+
+**What this changes for the paper.**
+- E2's power and type I sentence gets the R10 numbers.
+- Checkpoint hashes stay pending until the policy copy is located and hashed.
