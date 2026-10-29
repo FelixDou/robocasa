@@ -2305,3 +2305,8 @@ tightened on the test set to the fused detector's false alarms, test-only CI):
 - Sec. IV-D gets one sentence on R8: the same point gain, and CIs that include zero once the path
   is fixed.
 - The registered results stay as they are.
+- **Decision (author, 2026-10-29, after the third review).** E2 freezes each detector's fused
+  path (u, s), chosen on the existing RLDX-1 data, before final calibration. Only λ̂ comes from
+  E2's fresh calibration successes. E2's power must be re-sized with the path fixed. The paper
+  (`claude/time-aware-fusion-paper` `7c5c18bf`) states this, and E3's primary estimand is now
+  Hide-and-Seek + P vs P-triggered reset.
