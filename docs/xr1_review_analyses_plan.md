@@ -3052,3 +3052,18 @@ both nulls, and n = 20 stands.**
 
 **What this changes for the paper.** The checkpoint-hash `\pending` becomes the manifest's
 SHA-256.
+
+**Evidence (copied 2026-10-29).** The files are in
+`reports/safe_robocasa365_research_plan_20260823/evidence/e2_freeze_20261029_205743/`, and
+each matches its cluster hash:
+- `e2_freeze_manifest.json` (`917c06e6…`);
+- `e2_frozen_rule.json` (`b4e8ec3b…`);
+- `scores_run2/scoring.json` (`396c9365…`);
+- `scores_run1/scoring.json` (`08aa8bf5…`), from the mismatched first retrain, kept as evidence.
+
+Hugging Face's raw file listings for both policy revisions (`hf_tree_*.json`, fetched from the
+API on 2026-10-29) sit beside them.
+- Every LFS file (the three weight shards and two images) matches the manifest's SHA-256 in
+  full.
+- The small config files are identified on Hugging Face only by git blob IDs. The manifest
+  records their SHA-256.

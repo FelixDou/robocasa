@@ -1,0 +1,1187 @@
+{
+ "purpose": "E2 freeze manifest: frozen detectors, timer and fused paths for the RLDX-1 Stage 2 collection",
+ "plan": "docs/xr1_review_analyses_plan.md (R10 part B, 2026-10-29)",
+ "alpha": 0.05,
+ "q": 0.95,
+ "tasks": {
+  "CloseFridge": {
+   "type": "atomic",
+   "H_k": 113,
+   "rho_k": 0.5442477876106194
+  },
+  "CloseToasterOvenDoor": {
+   "type": "atomic",
+   "H_k": 57,
+   "rho_k": 0.9228070175438591
+  },
+  "CoffeeSetupMug": {
+   "type": "atomic",
+   "H_k": 75,
+   "rho_k": 0.3766666666666667
+  },
+  "LoadDishwasher": {
+   "type": "composite",
+   "H_k": 225,
+   "rho_k": 0.9637777777777777
+  },
+  "NavigateKitchen": {
+   "type": "atomic",
+   "H_k": 57,
+   "rho_k": 0.6587719298245613
+  },
+  "OpenCabinet": {
+   "type": "atomic",
+   "H_k": 132,
+   "rho_k": 0.5829545454545454
+  },
+  "OpenDrawer": {
+   "type": "atomic",
+   "H_k": 94,
+   "rho_k": 0.45744680851063807
+  },
+  "OpenStandMixerHead": {
+   "type": "atomic",
+   "H_k": 57,
+   "rho_k": 0.27719298245614027
+  },
+  "PickPlaceCounterToCabinet": {
+   "type": "atomic",
+   "H_k": 94,
+   "rho_k": 0.6579787234042552
+  },
+  "PickPlaceCounterToStove": {
+   "type": "atomic",
+   "H_k": 75,
+   "rho_k": 0.6053333333333331
+  },
+  "PickPlaceDrawerToCounter": {
+   "type": "atomic",
+   "H_k": 94,
+   "rho_k": 0.6920212765957444
+  },
+  "PreSoakPan": {
+   "type": "composite",
+   "H_k": 300,
+   "rho_k": 0.9145
+  },
+  "RinseSinkBasin": {
+   "type": "composite",
+   "H_k": 169,
+   "rho_k": 0.7943786982248521
+  },
+  "ScrubCuttingBoard": {
+   "type": "composite",
+   "H_k": 150,
+   "rho_k": 0.9193333333333333
+  },
+  "SlideDishwasherRack": {
+   "type": "atomic",
+   "H_k": 57,
+   "rho_k": 0.5078947368421052
+  },
+  "StackBowlsCabinet": {
+   "type": "composite",
+   "H_k": 263,
+   "rho_k": 0.8693916349809886
+  },
+  "TurnOnElectricKettle": {
+   "type": "atomic",
+   "H_k": 57,
+   "rho_k": 0.623684210526315
+  },
+  "TurnOnMicrowave": {
+   "type": "atomic",
+   "H_k": 57,
+   "rho_k": 0.9263157894736841
+  },
+  "TurnOnSinkFaucet": {
+   "type": "atomic",
+   "H_k": 75,
+   "rho_k": 0.6733333333333333
+  },
+  "WashLettuce": {
+   "type": "composite",
+   "H_k": 207,
+   "rho_k": 0.6608695652173913
+  }
+ },
+ "detectors": {
+  "safe_plus_P": {
+   "score": "SAFE-LSTM, seeds 0-2, seed-averaged normalized running maximum (report 15.15)",
+   "path": {
+    "u": 7.9314,
+    "s": 0.0,
+    "lam_at_fit": 0.0421
+   },
+   "replication_gain": 0.0342,
+   "artifacts": [
+    "safe_lstm_calibration",
+    "safe_lstm_seed0",
+    "safe_lstm_seed1",
+    "safe_lstm_seed2"
+   ]
+  },
+  "hide_and_seek_plus_P": {
+   "score": "Hide-and-Seek, seeds 0-2, seed-averaged normalized running maximum (report 15.22)",
+   "path": {
+    "u": -0.17,
+    "s": 20.0,
+    "lam_at_fit": 0.068
+   },
+   "replication_gain": 0.0834,
+   "models": {
+    "0": {
+     "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/e2_freeze_20261029_205743/models_run2/hide_and_seek_seed0.npz",
+     "sha256": "5a5a40f055ae598bb170d41408af95a374756eb082d15dbc9560803f0993d0d5",
+     "content_sha256": "602221f8f69726deb995255d401dfe0c11615002dc6b554eba5603f81321c550",
+     "config": {
+      "batch_size": 32,
+      "epochs": 200,
+      "hidden_dim": 128,
+      "intra_weight": 1.0,
+      "learning_rate": 0.001,
+      "margin": 0.2,
+      "name": "hide_and_seek",
+      "pca_components": 128,
+      "seed": 0,
+      "weight_decay": 0.0001
+     }
+    },
+    "1": {
+     "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/e2_freeze_20261029_205743/models_run2/hide_and_seek_seed1.npz",
+     "sha256": "f8846679083a0851172c581234a165423d2d555a30d283cc6f88770d1af789e5",
+     "content_sha256": "2801812550b8f322ef5beaaaeb5b601cb6b02d7e2edd334c1ee6a246cb22e43f",
+     "config": {
+      "batch_size": 32,
+      "epochs": 200,
+      "hidden_dim": 128,
+      "intra_weight": 1.0,
+      "learning_rate": 0.001,
+      "margin": 0.2,
+      "name": "hide_and_seek",
+      "pca_components": 128,
+      "seed": 1,
+      "weight_decay": 0.0001
+     }
+    },
+    "2": {
+     "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/e2_freeze_20261029_205743/models_run2/hide_and_seek_seed2.npz",
+     "sha256": "8b8e84c6253100dc04604ac128344e199fcef3bfb035e11a865df8a1c6116020",
+     "content_sha256": "afa71d218280fdb59d71e1c52acff29215d25b976caa821af26ed910580076ed",
+     "config": {
+      "batch_size": 32,
+      "epochs": 200,
+      "hidden_dim": 128,
+      "intra_weight": 1.0,
+      "learning_rate": 0.001,
+      "margin": 0.2,
+      "name": "hide_and_seek",
+      "pca_components": 128,
+      "seed": 2,
+      "weight_decay": 0.0001
+     }
+    }
+   },
+   "normalizations": {
+    "0": {
+     "CloseFridge": {
+      "fit_rollouts": 37,
+      "location": 0.44817501306533813,
+      "scale": 0.27621616723846926
+     },
+     "CloseToasterOvenDoor": {
+      "fit_rollouts": 37,
+      "location": 0.4594009518623352,
+      "scale": 0.30042708719748745
+     },
+     "CoffeeSetupMug": {
+      "fit_rollouts": 37,
+      "location": 0.9493611454963684,
+      "scale": 0.36703097148919955
+     },
+     "LoadDishwasher": {
+      "fit_rollouts": 37,
+      "location": 0.9575666189193726,
+      "scale": 0.19196891017018475
+     },
+     "NavigateKitchen": {
+      "fit_rollouts": 37,
+      "location": 0.9812816381454468,
+      "scale": 0.23395504020048222
+     },
+     "OpenCabinet": {
+      "fit_rollouts": 37,
+      "location": 0.36885860562324524,
+      "scale": 0.3277280860395981
+     },
+     "OpenDrawer": {
+      "fit_rollouts": 37,
+      "location": 0.0772540345788002,
+      "scale": 0.37548217499327496
+     },
+     "OpenStandMixerHead": {
+      "fit_rollouts": 37,
+      "location": 0.05170494690537453,
+      "scale": 0.3263039333232753
+     },
+     "PickPlaceCounterToCabinet": {
+      "fit_rollouts": 37,
+      "location": 0.2754785120487213,
+      "scale": 0.33207824165676314
+     },
+     "PickPlaceCounterToStove": {
+      "fit_rollouts": 37,
+      "location": 0.367475301027298,
+      "scale": 0.3244586615592241
+     },
+     "PickPlaceDrawerToCounter": {
+      "fit_rollouts": 37,
+      "location": 0.429472416639328,
+      "scale": 0.34251604549884795
+     },
+     "PreSoakPan": {
+      "fit_rollouts": 37,
+      "location": 0.9734233617782593,
+      "scale": 0.2083587376621783
+     },
+     "RinseSinkBasin": {
+      "fit_rollouts": 37,
+      "location": 0.9401341080665588,
+      "scale": 0.2308101800678046
+     },
+     "ScrubCuttingBoard": {
+      "fit_rollouts": 37,
+      "location": 0.5784285664558411,
+      "scale": 0.2253066817851656
+     },
+     "SlideDishwasherRack": {
+      "fit_rollouts": 37,
+      "location": 0.11846083402633667,
+      "scale": 0.36571673171232605
+     },
+     "StackBowlsCabinet": {
+      "fit_rollouts": 37,
+      "location": 0.8909440636634827,
+      "scale": 0.17647934395680706
+     },
+     "TurnOnElectricKettle": {
+      "fit_rollouts": 37,
+      "location": 0.07920698821544647,
+      "scale": 0.4365759446839811
+     },
+     "TurnOnMicrowave": {
+      "fit_rollouts": 37,
+      "location": 0.966809093952179,
+      "scale": 0.20300606924494624
+     },
+     "TurnOnSinkFaucet": {
+      "fit_rollouts": 37,
+      "location": 0.25462716817855835,
+      "scale": 0.38875804250189216
+     },
+     "WashLettuce": {
+      "fit_rollouts": 37,
+      "location": 0.9745761752128601,
+      "scale": 0.2384756687631181
+     }
+    },
+    "1": {
+     "CloseFridge": {
+      "fit_rollouts": 37,
+      "location": 0.35861900448799133,
+      "scale": 0.352100449343381
+     },
+     "CloseToasterOvenDoor": {
+      "fit_rollouts": 37,
+      "location": 0.4004247188568115,
+      "scale": 0.40050486888885495
+     },
+     "CoffeeSetupMug": {
+      "fit_rollouts": 37,
+      "location": 0.9291714429855347,
+      "scale": 0.29011130013204905
+     },
+     "LoadDishwasher": {
+      "fit_rollouts": 37,
+      "location": 0.9752134680747986,
+      "scale": 0.24781688983814174
+     },
+     "NavigateKitchen": {
+      "fit_rollouts": 37,
+      "location": 0.977379322052002,
+      "scale": 0.21759053814692314
+     },
+     "OpenCabinet": {
+      "fit_rollouts": 37,
+      "location": 0.20141921937465668,
+      "scale": 0.42016698798473945
+     },
+     "OpenDrawer": {
+      "fit_rollouts": 37,
+      "location": 0.019768478348851204,
+      "scale": 0.40155715242934786
+     },
+     "OpenStandMixerHead": {
+      "fit_rollouts": 37,
+      "location": 0.02576371282339096,
+      "scale": 0.33852531924731855
+     },
+     "PickPlaceCounterToCabinet": {
+      "fit_rollouts": 37,
+      "location": 0.36850079894065857,
+      "scale": 0.3117827190825831
+     },
+     "PickPlaceCounterToStove": {
+      "fit_rollouts": 37,
+      "location": 0.03063799999654293,
+      "scale": 0.3926718483969149
+     },
+     "PickPlaceDrawerToCounter": {
+      "fit_rollouts": 37,
+      "location": 0.435735821723938,
+      "scale": 0.5669924277462065
+     },
+     "PreSoakPan": {
+      "fit_rollouts": 37,
+      "location": 0.9767901301383972,
+      "scale": 0.24871144778400311
+     },
+     "RinseSinkBasin": {
+      "fit_rollouts": 37,
+      "location": 0.9561346173286438,
+      "scale": 0.2908348390214647
+     },
+     "ScrubCuttingBoard": {
+      "fit_rollouts": 37,
+      "location": 0.5315804481506348,
+      "scale": 0.48593394348621366
+     },
+     "SlideDishwasherRack": {
+      "fit_rollouts": 37,
+      "location": 0.011685561388731003,
+      "scale": 0.4080981767672195
+     },
+     "StackBowlsCabinet": {
+      "fit_rollouts": 37,
+      "location": 0.9363656640052795,
+      "scale": 0.20118789869257547
+     },
+     "TurnOnElectricKettle": {
+      "fit_rollouts": 37,
+      "location": 0.0947863757610321,
+      "scale": 0.4491975071461783
+     },
+     "TurnOnMicrowave": {
+      "fit_rollouts": 37,
+      "location": 0.9831954836845398,
+      "scale": 0.20197738462689457
+     },
+     "TurnOnSinkFaucet": {
+      "fit_rollouts": 37,
+      "location": 0.04017163813114166,
+      "scale": 0.44202154293923546
+     },
+     "WashLettuce": {
+      "fit_rollouts": 37,
+      "location": 0.9773423075675964,
+      "scale": 0.1957999592245071
+     }
+    },
+    "2": {
+     "CloseFridge": {
+      "fit_rollouts": 37,
+      "location": 0.2830381393432617,
+      "scale": 0.3480519376589922
+     },
+     "CloseToasterOvenDoor": {
+      "fit_rollouts": 37,
+      "location": 0.37364089488983154,
+      "scale": 0.30577749783347485
+     },
+     "CoffeeSetupMug": {
+      "fit_rollouts": 37,
+      "location": 0.993724524974823,
+      "scale": 0.3687339496446515
+     },
+     "LoadDishwasher": {
+      "fit_rollouts": 37,
+      "location": 0.9722676873207092,
+      "scale": 0.19824680030286457
+     },
+     "NavigateKitchen": {
+      "fit_rollouts": 37,
+      "location": 0.9930015802383423,
+      "scale": 0.22098991699733397
+     },
+     "OpenCabinet": {
+      "fit_rollouts": 37,
+      "location": 0.2749577462673187,
+      "scale": 0.374700285388168
+     },
+     "OpenDrawer": {
+      "fit_rollouts": 37,
+      "location": 0.04500835761427879,
+      "scale": 0.38257145883320604
+     },
+     "OpenStandMixerHead": {
+      "fit_rollouts": 37,
+      "location": 0.05661588907241821,
+      "scale": 0.32415608853561634
+     },
+     "PickPlaceCounterToCabinet": {
+      "fit_rollouts": 37,
+      "location": 0.32085752487182617,
+      "scale": 0.31194321374259404
+     },
+     "PickPlaceCounterToStove": {
+      "fit_rollouts": 37,
+      "location": 0.07903389632701874,
+      "scale": 0.3685030439001296
+     },
+     "PickPlaceDrawerToCounter": {
+      "fit_rollouts": 37,
+      "location": 0.3873330056667328,
+      "scale": 0.3262340483725778
+     },
+     "PreSoakPan": {
+      "fit_rollouts": 37,
+      "location": 0.9907910823822021,
+      "scale": 0.23433747715363595
+     },
+     "RinseSinkBasin": {
+      "fit_rollouts": 37,
+      "location": 0.991388738155365,
+      "scale": 0.29150654476352883
+     },
+     "ScrubCuttingBoard": {
+      "fit_rollouts": 37,
+      "location": 0.5231963396072388,
+      "scale": 0.3750864313960075
+     },
+     "SlideDishwasherRack": {
+      "fit_rollouts": 37,
+      "location": 0.047829966992139816,
+      "scale": 0.3951909500028879
+     },
+     "StackBowlsCabinet": {
+      "fit_rollouts": 37,
+      "location": 0.9246464371681213,
+      "scale": 0.18922889049736658
+     },
+     "TurnOnElectricKettle": {
+      "fit_rollouts": 37,
+      "location": 0.10079827159643173,
+      "scale": 0.4318992551608546
+     },
+     "TurnOnMicrowave": {
+      "fit_rollouts": 37,
+      "location": 0.9920175075531006,
+      "scale": 0.18184188031228815
+     },
+     "TurnOnSinkFaucet": {
+      "fit_rollouts": 37,
+      "location": 0.20653828978538513,
+      "scale": 0.3825121206290177
+     },
+     "WashLettuce": {
+      "fit_rollouts": 37,
+      "location": 0.9942731261253357,
+      "scale": 0.2781429948132023
+     }
+    }
+   }
+  }
+ },
+ "trees": {
+  "safe_lstm_seed0": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530/final/lstm_seed0",
+   "files": 6,
+   "bytes": 8497809,
+   "digest": "46e21a19fcfb0d7c8682c9b60032e89d7f2def9881726ceb26edcada4ca27c58",
+   "entries": [
+    {
+     "path": "config.yaml",
+     "sha256": "f6831613238f963a5a2fd88f529a33cd8a0e05f7f3fbdf37028820531e98ac95"
+    },
+    {
+     "path": "metrics.json",
+     "sha256": "1a6e82eab979d6527f98bf3e9a2cef0264f11649136a632d858fe91adc981503"
+    },
+    {
+     "path": "model_final.ckpt",
+     "sha256": "8bccbab9580b2a188a1e88ba4b37e1d016ac1b1823a304fd571dc78be5b08805"
+    },
+    {
+     "path": "scores.jsonl",
+     "sha256": "a0359308979d945c8b1a41144c9189b944bdd0e786e0acd27e3f39fdcff51deb"
+    },
+    {
+     "path": "split_manifest.json",
+     "sha256": "31de9ba3834d4d1e5ae2d7a7080459969a066509c9a890b894b49fd5f2b3648d"
+    },
+    {
+     "path": "train_history.json",
+     "sha256": "c0fcaad7bdbabf54af572ddfc5d0d387e5a1883abf6182da008bf50a3c91729f"
+    }
+   ]
+  },
+  "safe_lstm_seed1": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530/final/lstm_seed1",
+   "files": 6,
+   "bytes": 8493867,
+   "digest": "c2e7332c0cae31f3947392fba066a9999773ae2092537db4c89e5e36d8778306",
+   "entries": [
+    {
+     "path": "config.yaml",
+     "sha256": "cac6bfbbcf723fa58f8558a126c2eb0fbbc288a7465a94efc51a60183ba5d84e"
+    },
+    {
+     "path": "metrics.json",
+     "sha256": "7281bdba8a2457bc73d877c17d592986868bb20abf68691a7c231c8f42c9f5ee"
+    },
+    {
+     "path": "model_final.ckpt",
+     "sha256": "8d4baced9213056ef1362f3e41dabae7c39ff7bc98ac960a6dea91932f25c80c"
+    },
+    {
+     "path": "scores.jsonl",
+     "sha256": "ab029421e6acb04ec43162c9d27ea39ebfa33a8751bb2eeab1547430081e6d33"
+    },
+    {
+     "path": "split_manifest.json",
+     "sha256": "31de9ba3834d4d1e5ae2d7a7080459969a066509c9a890b894b49fd5f2b3648d"
+    },
+    {
+     "path": "train_history.json",
+     "sha256": "53dcdcd7e841376f9ea13fd19fe60796ec0db2b3b3fda3e5fa463e27992171af"
+    }
+   ]
+  },
+  "safe_lstm_seed2": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530/final/lstm_seed2",
+   "files": 6,
+   "bytes": 8494446,
+   "digest": "7fea638f35ab31aee24dbb7f6b64e1e5be4f097bdf9cf893fc172d7fca997c6e",
+   "entries": [
+    {
+     "path": "config.yaml",
+     "sha256": "3cfb78f57d58f8a2ddfbf1463eb88f162b944f958cdfe9ff9a2dc2bcee2c846d"
+    },
+    {
+     "path": "metrics.json",
+     "sha256": "4f8c0ee15cd631f27255d1bd048743a3b3878b1fb38967f1aa93a7f2ed8ba30c"
+    },
+    {
+     "path": "model_final.ckpt",
+     "sha256": "faf3f2dc87127f7def432c236a68d08e2540b0f9d8c09cd595d13ae8711fac33"
+    },
+    {
+     "path": "scores.jsonl",
+     "sha256": "ac0729dd8b86ce43f3194843f6621d1f86a15e10a7560378b2b5b0157dfa4149"
+    },
+    {
+     "path": "split_manifest.json",
+     "sha256": "31de9ba3834d4d1e5ae2d7a7080459969a066509c9a890b894b49fd5f2b3648d"
+    },
+    {
+     "path": "train_history.json",
+     "sha256": "4fde43e24f389858f113fcb4121a3480219604c60467d3125a6ef7b064e2f77d"
+    }
+   ]
+  },
+  "safe_lstm_calibration": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530/calibration/lstm",
+   "files": 97,
+   "bytes": 23248795,
+   "digest": "f4b3a8bf18200f5e68cc8b0ed92f45ce778e48eaaa191442324524f5021f05d6",
+   "entries": [
+    {
+     "path": "conformal_tradeoff.png",
+     "sha256": "ac1cefb21f44aaefb64311478cea18d2246493f310066f4c66a5be68e12296cd"
+    },
+    {
+     "path": "detection_events.csv",
+     "sha256": "ebf54aabed2934283f76b890d9e92c0b181bcf92ad256852b6445ad40abb81d0"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p05/calibration.json",
+     "sha256": "4d558421d666076346cc51448c8e7dd905fbbbda3e891303518f4e91a4d90f85"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p05/elapsed_time_calibration.json",
+     "sha256": "2a864edf5ef19acbb0adf9a4eca4fa233839fc28447dfc89ea1747e91fa3c0e3"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p05/metrics.json",
+     "sha256": "75c2cd40a5c0c2ce8b4a4b79662c41c6eea7d977655381d556f5225714e4a10d"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p1/calibration.json",
+     "sha256": "6e4e90b02298ea53487de09ebfbbcb5683dd2f9ca0736ef169558f8baf08472d"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p1/elapsed_time_calibration.json",
+     "sha256": "eada56f8cff4479d9f44496ad2bc855e9d3767163882dafd51db3401577dd84c"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p1/metrics.json",
+     "sha256": "0481f81711717f3731e5c55bd6c4de634e2e556c5a2e017e42782e5402c3b917"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p15/calibration.json",
+     "sha256": "623752d8655333e56b5ac00d2b3cdf93ca9a21494d59ff78cfd5afac0a2c0bfd"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p15/elapsed_time_calibration.json",
+     "sha256": "e273f86c694db73745252e91ca101566bf86fded4d5623ab7e9131f7beb8f7b7"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p15/metrics.json",
+     "sha256": "4018b8102308e85239d890b6d881b66009749a25f03512756a8a6b32ae1229a7"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p2/calibration.json",
+     "sha256": "7331b223f65f24df8aab703d6de12d1f41fe88be5bb28c1234c232d5f86ad947"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p2/elapsed_time_calibration.json",
+     "sha256": "a4384bc7c68692126f217a2777206f8f58c840316640987aeceef7121ce1d848"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p2/metrics.json",
+     "sha256": "3e1ff3cfb745a179317e1b603dc6bd260244c29ea2e9c6ba02454a0f8bcdc85d"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p25/calibration.json",
+     "sha256": "8d17e4271ae312624d8e0bd43db01d5c423c612cb28be1dcfccc0f4cc5da6841"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p25/elapsed_time_calibration.json",
+     "sha256": "0b3bbf7be6b3362ec50b981aba364fa65c5565b6375139a5c2baa195d922c1da"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p25/metrics.json",
+     "sha256": "a5a7b2dbe1564c21fd9247d0644419040295c15a8e660c283cf6a925cae18c30"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p3/calibration.json",
+     "sha256": "4c0ba4e9aa21c5a2e581bf24cbca6994d4946c5f98adbd300263b49cafc2049d"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p3/elapsed_time_calibration.json",
+     "sha256": "49b858261acfd06c071a84c486c806c42c82e24cc4689fecf103640d0127e276"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p3/metrics.json",
+     "sha256": "7099ed42a7a3bb18455e7e6e50471f1d7f383cf47369abfc9170c997a858dfcb"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p35/calibration.json",
+     "sha256": "03070345006312184bcb463b9f16087452b698ec1e4b8be1942f3373af0b6e18"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p35/elapsed_time_calibration.json",
+     "sha256": "6848f5bebeb8bc1dda3fe05001fad7a969569cf462e2c08782152f0682ad83f1"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p35/metrics.json",
+     "sha256": "841a4d7f017a2ed57ed52c8ef2bcdb354086ac3e9a132b9791b13b4b97ae6a62"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p4/calibration.json",
+     "sha256": "693aa45cc012b5ed1511622e233a1b67df3ba5c1bf0a21702a8be12c0e503dc1"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p4/elapsed_time_calibration.json",
+     "sha256": "ca79d0accb279519acba7f2580749b99015ba53f05858472cb21fc3630059f12"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p4/metrics.json",
+     "sha256": "7805cfb33f1fb816b3eff3af27b282b2b0634540d92161502146fde0aef2d54c"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p5/calibration.json",
+     "sha256": "e986566f7c7ee67f2b8472a216e412528542a41a1351223e6b129b1714580bd6"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p5/elapsed_time_calibration.json",
+     "sha256": "da00155ff9720eb79d56fc92f957071321df4cbe1b8dc7f5e8a1149646a24ed9"
+    },
+    {
+     "path": "lstm_seed0/alpha_0p5/metrics.json",
+     "sha256": "228cd7ceb0ebcefa8db6f0c2ffc63f65aad45171e9762adc9b45f0e46a6b9ba6"
+    },
+    {
+     "path": "lstm_seed0/elapsed_hazard_model.json",
+     "sha256": "e536201f8ab764e60a69872a0ad921df43193e867d1e244c17040150e50b0e7a"
+    },
+    {
+     "path": "lstm_seed0/normalized_scores.jsonl",
+     "sha256": "d9bb88f1cf3281a5f3f33ad9443d6fa0174815dc3cacc6ccb24d47bad845a145"
+    },
+    {
+     "path": "lstm_seed0/task_normalization.json",
+     "sha256": "e3d6d700ac9b0f7c54300c41c4f6a865d1a5d58715f5445202dc0069af47984d"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p05/calibration.json",
+     "sha256": "339d080f40d3490af6636d832a635e8ffa08a0c4ccffac95ec3dd86ef189e1c3"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p05/elapsed_time_calibration.json",
+     "sha256": "4a766f49f93a9faf3d48955617126717322d4d75e04ebc3e8f4b7f9c02bd92bb"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p05/metrics.json",
+     "sha256": "33a3c6dc7b023411864b45db7f657077c0d179e88a55bda4b8f86b0197e60f28"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p1/calibration.json",
+     "sha256": "ed824a2543a1b549166a6be3aa3fe6b9f1cf268ef9fb2fdc440f23e822a277d9"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p1/elapsed_time_calibration.json",
+     "sha256": "fce7e6eac7f441b8f26c6cbdcab5325dce14c55f1c17dcaaf13faec96e9b6855"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p1/metrics.json",
+     "sha256": "7fec345a8e957311f9e341a8d7355da424fbc98c3fa0bb00b5c447e5bfbdfa8e"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p15/calibration.json",
+     "sha256": "67829e7f5d8ba2a0cde8c6e0be69c9d86214dc5347b61ead0527c640b69c690c"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p15/elapsed_time_calibration.json",
+     "sha256": "15190cbc365e45216befdee8059de011ff4f330afadcb8b5fed5cb15a905e372"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p15/metrics.json",
+     "sha256": "213862a09c9176cf9077324e3313c6bd42c9f7b9c24cffc13d20a136ae6c826a"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p2/calibration.json",
+     "sha256": "e621a523085a0e766af80fdcc30be47cf3fa0fb898db10df6208467f8171868a"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p2/elapsed_time_calibration.json",
+     "sha256": "b1415b3d5e2b831afec6c4a33e6a06850954161e3d62840d3295a8a108db74e8"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p2/metrics.json",
+     "sha256": "f3900dcb00a4605b7706980a694aa7db7727214f0a49789976c8afa16849427e"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p25/calibration.json",
+     "sha256": "f526b7a47c52533eee62e2e2b0503a8d3af6fc1c15dbb1e7a5acad1952a08ef9"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p25/elapsed_time_calibration.json",
+     "sha256": "461e42c706a4d80f04be68efccd119ff1fde6c7f6aeecb6871fa82f98c4b1465"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p25/metrics.json",
+     "sha256": "9e92eb03309b396f7f90ea4045b30176f3cb306cbd619720ce9ae9d4c7b605bb"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p3/calibration.json",
+     "sha256": "7d90c11fd217e9bc2f79362472f52e618718ce6acdfdba398de6b07d7abf7488"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p3/elapsed_time_calibration.json",
+     "sha256": "f9ca2844cf43fc78ed9c4eabb48471fbbc592c9af9e3072b92843b60dd2f3330"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p3/metrics.json",
+     "sha256": "b24dc3bc9f97c4aef0896c13b8b1d9fb4e4e8cf21b51fa1a53aa9e61bdc059ac"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p35/calibration.json",
+     "sha256": "7b0f08abdcaa8750276baed01ab230e6228fa00008b8f84b2ae36870293eea6c"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p35/elapsed_time_calibration.json",
+     "sha256": "7748b95b8efa930c2a6fabb17b655d782dafd4789167e6fb2a95fca82cbe419e"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p35/metrics.json",
+     "sha256": "918e63bea09db79c5e78d9f5a2497dfe170077e98349ac47f26df2dfc15a106a"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p4/calibration.json",
+     "sha256": "0324aed9d28c46ba4d5c21b443774f9d05e24d17ec0fe37fc16df34706bd5092"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p4/elapsed_time_calibration.json",
+     "sha256": "50c55e40aee95fb72fdacc215c20f1ca5b099a07e742c290c32f8e0d66da6cb1"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p4/metrics.json",
+     "sha256": "48705ea2a5771089492f33276247e829d87e38d8edc50bb233f6b47c3454fe8a"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p5/calibration.json",
+     "sha256": "e4ea5b27d631e011f0ede99dd21353d9497672da51bd395e64c1b30af5f0e08d"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p5/elapsed_time_calibration.json",
+     "sha256": "368bd673cf1ab28dcebcc3170140381d89ab824fc6e76b711334fae2fdb2ca09"
+    },
+    {
+     "path": "lstm_seed1/alpha_0p5/metrics.json",
+     "sha256": "dc002806243a09de1bcc70163cf62d4dedda6e7372a8a3934f52a778319c1ae7"
+    },
+    {
+     "path": "lstm_seed1/elapsed_hazard_model.json",
+     "sha256": "e536201f8ab764e60a69872a0ad921df43193e867d1e244c17040150e50b0e7a"
+    },
+    {
+     "path": "lstm_seed1/normalized_scores.jsonl",
+     "sha256": "f9cf649a65c5d49f62ac557716efda8f4e854dba6aaa549310a3000d5c6b6a21"
+    },
+    {
+     "path": "lstm_seed1/task_normalization.json",
+     "sha256": "5d8b11ec1dc882c3281565e331d88d105535aca39864850ab7680ac48b2c27dc"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p05/calibration.json",
+     "sha256": "e760a62c64a715ac5bce34f28e6569f04048695b585a42ac60b63684db8588c8"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p05/elapsed_time_calibration.json",
+     "sha256": "4f99c247ede2cfd67507f7bdce04cbd9f0a8fceb48339af8c7c354f3351cca3d"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p05/metrics.json",
+     "sha256": "6c47ab8384aa71234c46d0c524e160e17a47d02729053b955e1b1802f3a744fe"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p1/calibration.json",
+     "sha256": "3ec0156321b844e1f6812ad2d77268a9fc7170c31473b47781ad00a0f6b01a7d"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p1/elapsed_time_calibration.json",
+     "sha256": "990ef98a59bf4f4fe2eef56e65138bdd842d3633bf39050f659303039d52d2a1"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p1/metrics.json",
+     "sha256": "1bd45f02911bfcd56599413fae22fab5bd7c1bea91f6755416ecc6d211737fc9"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p15/calibration.json",
+     "sha256": "0455e4e52c9d7e94d11adc1a91575161638d7e7b1a6feb686763a6c8919e75af"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p15/elapsed_time_calibration.json",
+     "sha256": "81c038f04498490982872647b8416f2363380a458a8e385ad37d109c0803edeb"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p15/metrics.json",
+     "sha256": "14d741120d7b2e5d17dc82b381dc9476e64004738e93b142da9ccbdd3e4077f5"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p2/calibration.json",
+     "sha256": "e9af2cdc0934abf48df12c68c5e51dca645a8535e0bbf4791241e2e5195bf90a"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p2/elapsed_time_calibration.json",
+     "sha256": "e070d15ccae736c099f89edaaeaa46bf0a2cee54c9a49c915efc2bac4436f739"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p2/metrics.json",
+     "sha256": "b68604d4ac5edaeddb69b3a640d9d8afd8fd1ceda72b35e2035052306f64486c"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p25/calibration.json",
+     "sha256": "30b2ee0b582825ab933bc13b592c915c354676e8add6cf83e40787a2090c0cd2"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p25/elapsed_time_calibration.json",
+     "sha256": "93918983ccbf30f80165031f9faf17cb56901c4664cad7558638238df4f6417a"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p25/metrics.json",
+     "sha256": "ecdc5dd8a491f1806e9daaa0e4a23f3c68377fb21a1fdc7be5d3b3c05b3a7389"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p3/calibration.json",
+     "sha256": "49f0c6c486809ea935019f485a85969ca502b2cad3f03ea782e2fea5ebb20a97"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p3/elapsed_time_calibration.json",
+     "sha256": "59216912a4301a7aa4510a2421c945aeb0eb3e3205d993b562ba004eeac56e01"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p3/metrics.json",
+     "sha256": "136c058209786a0f6c1e1036636b15df2175816a24d43c7fa3f3347ef3f35b6f"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p35/calibration.json",
+     "sha256": "7cad5e754b7ced2f4569697c90a3f337e45815a18fd48bed6a7c6c0c3fa977f4"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p35/elapsed_time_calibration.json",
+     "sha256": "119907812bf7adbef5623a2556fe3aa21c7fcca86e2ffada1a07ca1fb9e8f5af"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p35/metrics.json",
+     "sha256": "6ffcf49d23303ebe09488773f78241295bc96c07153bbf8326c7ff25889a113f"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p4/calibration.json",
+     "sha256": "c63ada32afe80059f12adcf3b0a867870ecf3709cff67a7e979e3324d41b5138"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p4/elapsed_time_calibration.json",
+     "sha256": "b6d896d251c01984ae05491757de7d2c455860bf835cb05fd16963d65263deea"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p4/metrics.json",
+     "sha256": "291d7893790c3f983aca27e3fa25f715072bc938b6fa791a488efed3bee99bb0"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p5/calibration.json",
+     "sha256": "8aa838c6e9c5bc61425a6d8f3d8e93319c13087722aacdb352ee92c98ea5ddd5"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p5/elapsed_time_calibration.json",
+     "sha256": "c7959b15af24dc8ec086e08df59e348deeb55bd8917880653b84f9169eb47a3d"
+    },
+    {
+     "path": "lstm_seed2/alpha_0p5/metrics.json",
+     "sha256": "5d42ef780713746a4a2ff9e58b1713a9ec8bf144e5554f3448e8421783093af4"
+    },
+    {
+     "path": "lstm_seed2/elapsed_hazard_model.json",
+     "sha256": "e536201f8ab764e60a69872a0ad921df43193e867d1e244c17040150e50b0e7a"
+    },
+    {
+     "path": "lstm_seed2/normalized_scores.jsonl",
+     "sha256": "a3487be1b1a6bf59cdc979f46a08e5d698f28066bcf4ae2051fac0f611dc85f9"
+    },
+    {
+     "path": "lstm_seed2/task_normalization.json",
+     "sha256": "f7e311fe22d214a2b87eb05060539613b153bfb8c66139f072c4fac31dda61bd"
+    },
+    {
+     "path": "per_seed_alpha_metrics.csv",
+     "sha256": "61348663d9bbb1c9ab6738e472abada4c5da57f3d2a4c954749c8e51476427b4"
+    },
+    {
+     "path": "per_task_alpha_metrics.csv",
+     "sha256": "90c45ca02dd478578ab131895f5cbadea63811e0ad4f853b49ca5d2b9aa4ca0d"
+    },
+    {
+     "path": "per_task_balanced_accuracy.png",
+     "sha256": "0a7f4dea3e0d63847b3bda1f97fefa796438859526f67e02aa40b0f9033008eb"
+    },
+    {
+     "path": "split_manifest.json",
+     "sha256": "c1056ed0a95bb94a764eb499b8e2f28a9b8019f3cbbfd5a408bb24e403ff600f"
+    },
+    {
+     "path": "summary.json",
+     "sha256": "eaa6026a061aabbba900c486b311b783bd3c5416f2155e8e7885f38bd0ab27fc"
+    }
+   ]
+  },
+  "policy_rc365_587e9ecd": {
+   "path": "/gs/bs/tga-shinoda/felid/hf_home/hub/models--RLWRLD--RLDX-1-FT-RC365/snapshots/587e9ecdcc5e7184fcc17f58713908edff5af041",
+   "files": 13,
+   "bytes": 13837739662,
+   "digest": "f1a6048dfce7c138dc20337ac93ce112e055b4184bae7347d67b65698b6c3eb6",
+   "entries": [
+    {
+     "path": ".gitattributes",
+     "sha256": "14af14ba743cb7821649b0478ab0ffa935c64681b9fad08836a0ddf7d7a9600d"
+    },
+    {
+     "path": "LICENSE.md",
+     "sha256": "7922f5705d0a5b6c150ec7c1d3106f8b823500808051fd3fad57f01db33774e2"
+    },
+    {
+     "path": "README.md",
+     "sha256": "c123441624166804ac91e549bd69efb7d790b17dec240bfb6b154ebcb6b3d678"
+    },
+    {
+     "path": "architecture.png",
+     "sha256": "8d0e305139502965d4289446add15e9e11c34dcc8106ad526fa8c957c12595d3"
+    },
+    {
+     "path": "config.json",
+     "sha256": "dab438af2c898e60337cc82756fd98494fdaede6a49f545b9661a77c8799bf58"
+    },
+    {
+     "path": "embodiment_id.json",
+     "sha256": "ccf32782b105603c2fc8c36939d37ea9cf1f0ca4fec1b4d6a358d091e3027b7f"
+    },
+    {
+     "path": "model-00001-of-00003.safetensors",
+     "sha256": "2a2f48bd2d2979979700c85c44051c37c3256de528842d82883ba756b070e541"
+    },
+    {
+     "path": "model-00002-of-00003.safetensors",
+     "sha256": "4bb91b9038d7825809c09da425d5dbd6a52ba1a1af25de09bc94ff218e1f80fc"
+    },
+    {
+     "path": "model-00003-of-00003.safetensors",
+     "sha256": "f348bb0aee031e6fd32cad2ff51aa5e4eaf74fa42299dae051f7e3ca0b8adf53"
+    },
+    {
+     "path": "model.safetensors.index.json",
+     "sha256": "017ebdc3d66b8c755d59964c227c4d898dc1aa013d06d58ab8866f07c4082f08"
+    },
+    {
+     "path": "processor_config.json",
+     "sha256": "67c2b1319213aec7009ffd0329adbafe318dd24ef7cc643a93a8b880ab0780da"
+    },
+    {
+     "path": "statistics.json",
+     "sha256": "516d2c5f52a271fa5f0ebe03ac7816b993f8b5d46e4db0efd11c1559c8974a01"
+    },
+    {
+     "path": "teaser.png",
+     "sha256": "6b34b11f6c8e2699766e26aa210be9e4b3e5f3f8f45ed009ae5c7ef07c7c7cd7"
+    }
+   ]
+  },
+  "policy_rc365_c53d0bc0": {
+   "path": "/gs/bs/tga-shinoda/felid/hf_home/hub/models--RLWRLD--RLDX-1-FT-RC365/snapshots/c53d0bc01f723dd536fe505d9a3dac25bacbe78a",
+   "files": 13,
+   "bytes": 13837739685,
+   "digest": "411fd081b230b21a100b31896b04e39bd27bf786d60e620ac0a402ace00d08e0",
+   "entries": [
+    {
+     "path": ".gitattributes",
+     "sha256": "14af14ba743cb7821649b0478ab0ffa935c64681b9fad08836a0ddf7d7a9600d"
+    },
+    {
+     "path": "LICENSE.md",
+     "sha256": "7922f5705d0a5b6c150ec7c1d3106f8b823500808051fd3fad57f01db33774e2"
+    },
+    {
+     "path": "README.md",
+     "sha256": "d882fba557191e2c148ab35c711e67ca183cab6965ccc8f68fa6198d1c2815be"
+    },
+    {
+     "path": "architecture.png",
+     "sha256": "8d0e305139502965d4289446add15e9e11c34dcc8106ad526fa8c957c12595d3"
+    },
+    {
+     "path": "config.json",
+     "sha256": "dab438af2c898e60337cc82756fd98494fdaede6a49f545b9661a77c8799bf58"
+    },
+    {
+     "path": "embodiment_id.json",
+     "sha256": "ccf32782b105603c2fc8c36939d37ea9cf1f0ca4fec1b4d6a358d091e3027b7f"
+    },
+    {
+     "path": "model-00001-of-00003.safetensors",
+     "sha256": "2a2f48bd2d2979979700c85c44051c37c3256de528842d82883ba756b070e541"
+    },
+    {
+     "path": "model-00002-of-00003.safetensors",
+     "sha256": "4bb91b9038d7825809c09da425d5dbd6a52ba1a1af25de09bc94ff218e1f80fc"
+    },
+    {
+     "path": "model-00003-of-00003.safetensors",
+     "sha256": "f348bb0aee031e6fd32cad2ff51aa5e4eaf74fa42299dae051f7e3ca0b8adf53"
+    },
+    {
+     "path": "model.safetensors.index.json",
+     "sha256": "017ebdc3d66b8c755d59964c227c4d898dc1aa013d06d58ab8866f07c4082f08"
+    },
+    {
+     "path": "processor_config.json",
+     "sha256": "68780c8d45ea60051c0c09b8c9318d34831764f6beb1b1f054c4eff95c1fac7e"
+    },
+    {
+     "path": "statistics.json",
+     "sha256": "516d2c5f52a271fa5f0ebe03ac7816b993f8b5d46e4db0efd11c1559c8974a01"
+    },
+    {
+     "path": "teaser.png",
+     "sha256": "6b34b11f6c8e2699766e26aa210be9e4b3e5f3f8f45ed009ae5c7ef07c7c7cd7"
+    }
+   ]
+  }
+ },
+ "files": {
+  "hs_rldx_bundle": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/inputs/rldx_bundle.json",
+   "sha256": "21714e2d008918a40db45167ad1c923df24e27c6ccf84c22f0669da2b5a63b4c"
+  },
+  "hs_train_ids": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/inputs/train_ids.json",
+   "sha256": "b5a29501931c9f07f61f27541826663bba45c7d3169f6832ee4e4be5761ccd99"
+  },
+  "hs_calibration_ids": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/inputs/calibration_ids.json",
+   "sha256": "d8b5ac546264916f29014d820d6bd796c6c8f3444627e7197f53e519d4201577"
+  },
+  "hs_test_ids": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/inputs/test_ids.json",
+   "sha256": "802adbe916dcb787c137328388e68f25f1f0c23364bfaa58f6b4ec2967860513"
+  },
+  "raw_manifest": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/rldx1_original_safe35_natural50_20260808_203158/filtered_supported20_natural50/manifest.jsonl",
+   "sha256": "02ff17d82355d9e19c06be2aa3bbbc5559822d92c0a14d23e0996245d9bdae20"
+  },
+  "export_conversion_report": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/rldx1_original_safe35_natural50_20260808_203158/official_safe_supported20_natural50/conversion_report.json",
+   "sha256": "03c6efeb2773b566231629696ba76d9ac5ace6849c1608db8ba0e63656e3ea50"
+  }
+ },
+ "git": {
+  "rldx_repo": {
+   "path": "/gs/fs/tga-shinoda/felid/RLDX-1",
+   "commit": "ef05cd4ae634ff97d672d42275febbc0b92cc192",
+   "dirty": true
+  },
+  "this_repository": {
+   "path": "/gs/fs/tga-shinoda/felid/robocasa_r10freeze_e6abadec",
+   "commit": "e6abadec915533efcc203646e67714af7f5f56bd",
+   "dirty": false
+  }
+ },
+ "inputs": {
+  "hs_train": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/scores/train_predictions.jsonl",
+   "sha256": "90a00dba5f0234425af74708216f615bf344fb16aa854ac03f89b55cf5524eaa"
+  },
+  "hs_calibration": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/scores/calibration_predictions.jsonl",
+   "sha256": "ce3805819437e80f90f42575bcec5a426628dc8ce7e877ebaf1ed13cce418fa4"
+  },
+  "hs_test": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/scores/test_predictions.jsonl",
+   "sha256": "170cb1545713d2f2cfb2425b45ef459e5dd15e0b9e610a4b8759fa3e0661b1c8"
+  },
+  "replication_json": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_lead_replication_20261021_123506/rldx_lead_lstm.json",
+   "sha256": "f081442d9c52aed7909527967f5306d1d00234fdc68d3dc9a536e7e7b52b8ff1"
+  },
+  "hs_result": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/rldx_hide_and_seek.json",
+   "sha256": "70306c5731c0b905aeae91a6126de407d628579b407b8612a783f170cad5bf50"
+  }
+ },
+ "checks": {
+  "replication": {
+   "safe": 0.0342,
+   "hide_and_seek": 0.0834
+  },
+  "reference": {
+   "safe": 0.0342,
+   "hide_and_seek": 0.0834
+  },
+  "ok": true,
+  "freeze_run": {
+   "ok": true,
+   "failures": [],
+   "code_commit": "e6abadec915533efcc203646e67714af7f5f56bd",
+   "scoring_json_sha256": "396c9365adc2f7452b15ca49f5ac18ec1c1b4542eaca7181a8be5193a176b8ac",
+   "normalizations_sha256": "a1dd6ca9c4c5f47327c4bafe6dfbe42c9be8a8f9b73f2963dc354f0c983de5c6"
+  }
+ }
+}
