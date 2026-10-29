@@ -521,6 +521,65 @@ before any fold is trained). It changes no rule above.
   - SAFE-LSTM gains less than Hide-and-Seek (+0.196). Whether it beats the OOD rows (+0.10)
     is open.
 
+## R8. Fused path chosen on the validation set (written 2026-10-29, before any run)
+
+**Why.** Proposition 1 bounds the FPR of a path (u, s) fixed in advance. E1 and Amendment 2
+chose the path on the same calibration successes that then set its margin. So the bound covers
+each candidate path, not the evaluated detector (Sec. IV-D; second review, point 2). R4a split
+the calibration set, which restores the bound but halves the certification set. R8 follows the
+review's repair instead:
+- choose the path on independent development data (the validation set);
+- freeze it;
+- set its margin on the held-out calibration successes;
+- evaluate once on the held-out test set.
+
+**Protocol.**
+- **Selection: the validation set.** It has 3 + 3 calibration and 10 + 10 test rollouts per
+  task, 494 + 494 in all. It uses E1's per-task score normalization and P's ρ_k, both from the
+  training set. The path (u, s) is chosen as `fit_fast` chooses it: the largest validation lead
+  at each path's λ̂ from the validation successes.
+- **Certification.** The margins of the frozen path and of P are set by Proposition 1 on the
+  380 E1 lead-calibration successes only. P is therefore E1's P.
+- **Evaluation:** once on the 380 + 380 E1 test rollouts.
+- **Scores.** SAFE-MLP and Hide-and-Seek, seed-averaged (as registered) and each seed alone.
+  The controls present in both cohorts' score files (first-inference, zero-input, shuffle) are
+  seed-averaged.
+- **Reported per score:**
+  - the chosen path, the test FPR (Wilson), lead, gain over P and TWA;
+  - the decision CI from Amendment 2's bootstrap: the same draws (tasks, then each class of
+    each cohort), with the path fixed and the margins re-set on the resampled successes;
+  - the matched gains (P loosened on the test set to the fused detector's false alarms, and the
+    fused detector tightened to P's), with test-only CIs;
+  - the contrasts Hide-and-Seek − SAFE and Hide-and-Seek − each control.
+- **Per seed:** mean and std (ddof 1) over seeds.
+
+**Gates (no result without them).**
+- **F1.** The registered procedure reproduces E1 (SAFE + P) and Amendment 2 (Hide-and-Seek and
+  controls + P) exactly. When B equals Amendment 2's, this includes the decision CIs, computed
+  on the same replicates as R8's.
+- **F2.** The validation and E1 cohorts are disjoint, by rollout ID and by (task, seed, reset).
+- **F3.** The stored seed-averaged trajectories equal the normalized per-seed scores on all
+  cohorts (≤ 1e-9): SAFE with the runtime bundle's normalization, Hide-and-Seek with Amendment
+  2's.
+- **F4.** P from the certification step equals E1's P.
+
+**Expectations (written before running).**
+- The validation set favored Hide-and-Seek (+0.098 over P on its own calibration, +0.083 at
+  matched FPR) and not SAFE (+0.007). A path chosen there should keep most of Hide-and-Seek's
+  gain (+0.04 to +0.08) and give SAFE little (≤ +0.03).
+- The test FPR should be near 0.05 for both, since the margin is now set on successes that
+  played no part in the choice.
+- The contrasts against the controls keep their sign.
+
+**Use.**
+- **In the paper:** one sentence or row, next to the registered results, which stay as they
+  are: "with the path chosen on the validation set, so that Proposition 1 covers the evaluated
+  detector, the gains are …".
+- **For E2:** the same procedure is the candidate fix for the separate-selection TODO. That is
+  the author's decision.
+
+**Code.** `scripts/xr1_lead_time/fixed_path.py`, with tests in `tests/test_xr1_fixed_path.py`.
+
 ## Runbook
 
 Run on TSUBAME from a pinned worktree, CPU only for R1–R4, following
@@ -1464,6 +1523,57 @@ for f in rldx_unseen.json rldx_folds.json; do
     reports/safe_robocasa365_research_plan_20260823/evidence/<R7_TAG>/
 done
 ```
+
+### 6. R8: fused path chosen on the validation set (CPU, under an hour)
+
+`R8_SHA` is the full SHA of the pushed commit on `claude/review-analyses` that contains this
+step. Any CPU allocation will do, for example `qrsh -g tga-shinoda -l cpu_16=1 -l h_rt=2:00:00`.
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export SAFE_PY=$STORAGE_BS/envs/vla_safe/bin/python
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+export R8_SHA=<R8_SHA>
+export R8_REPO=$PROJECT_FS/robocasa_fixedpath_${R8_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $R8_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R8_REPO $R8_SHA
+test "$(git -C $R8_REPO rev-parse HEAD)" = "$R8_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not R8_SHA"
+cd $R8_REPO
+export R8_TAG=xr1_fixed_path_$(date +%Y%m%d_%H%M%S)
+export R8_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/$R8_TAG R8_LOG=$STORAGE_BS/robocasa_logs/eval/$R8_TAG
+mkdir -p $R8_ROOT $R8_LOG
+R8_INPUTS=($E1_OUT/calibration_predictions.jsonl $E1_OUT/test_predictions.jsonl $E1_OUT/confirm_lead.json
+           $AMEND2_ROOT/scores/{lead_calibration,confirmatory_test,august_calibration,august_test}_predictions.jsonl
+           $AMEND2_ROOT/scores/normalizations.json $AMEND2_ROOT/confirm_hide_and_seek.json
+           $XR1_PS_INPUTS/calibration_predictions.jsonl $XR1_PS_INPUTS/event_predictions.jsonl $XR1_RUNTIME_BUNDLE)
+for f in "${R8_INPUTS[@]}"; do test -s $f && echo "OK $f" || echo "STOP: missing $f"; done | grep -c '^OK'
+sha256sum "${R8_INPUTS[@]}" > $R8_LOG/frozen_inputs.sha256
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_xr1_fixed_path tests.test_xr1_review_analyses \
+  2>&1 | tail -n 3
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/fixed_path.py \
+  --calibration $E1_OUT/calibration_predictions.jsonl --test $E1_OUT/test_predictions.jsonl \
+  --scores-calibration $AMEND2_ROOT/scores/lead_calibration_predictions.jsonl \
+  --scores-test $AMEND2_ROOT/scores/confirmatory_test_predictions.jsonl \
+  --val-calibration $XR1_PS_INPUTS/calibration_predictions.jsonl --val-test $XR1_PS_INPUTS/event_predictions.jsonl \
+  --val-scores-calibration $AMEND2_ROOT/scores/august_calibration_predictions.jsonl \
+  --val-scores-test $AMEND2_ROOT/scores/august_test_predictions.jsonl \
+  --normalizations $AMEND2_ROOT/scores/normalizations.json --runtime-bundle $XR1_RUNTIME_BUNDLE \
+  --e1-result $E1_OUT/confirm_lead.json --amend2-result $AMEND2_ROOT/confirm_hide_and_seek.json \
+  --output $R8_ROOT/fixed_path.json 2>&1 | tee $R8_LOG/fixed_path.log
+sha256sum -c --quiet $R8_LOG/frozen_inputs.sha256 && echo INPUTS UNCHANGED
+sha256sum $R8_ROOT/fixed_path.json; echo "R8_TAG=$R8_TAG"
+```
+
+Continue only if all of these hold:
+- `HEAD OK` prints and the count is 12;
+- the tests end with `OK` (10 tests).
+
+Report the whole `fixed_path.log`, `INPUTS UNCHANGED`, the SHA-256 and `R8_TAG`. The log ends in
+`FIXED-PATH ANALYSIS OK` or `REPRODUCTION FAILED`. Then copy the JSON to
+`reports/safe_robocasa365_research_plan_20260823/evidence/<R8_TAG>/`.
 
 ## Result
 
