@@ -1,0 +1,72 @@
+% Fig. 2: where the gain over P comes from (XR-1, held-out test set). Data: figures/per_task_gains.csv
+% and figures/matched_sweep.csv, written by analysis/per_task_figure.py from review_analyses.json
+% (run xr1_review_analyses_20261028_155557). Needs pgfplots.
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\pgfplotsset{every axis/.append style={
+  scaled y ticks=false, scaled x ticks=false,
+  tick label style={font=\tiny, /pgf/number format/fixed},
+  label style={font=\scriptsize}, title style={font=\scriptsize},
+  axis x line*=bottom, axis y line*=left, ymajorgrids, grid style={gray!18},
+  extra y ticks={0}, extra y tick labels={}, extra y tick style={grid=major, grid style={black!55}},
+  legend style={font=\tiny, draw=none, fill=white, fill opacity=0.9, text opacity=1, inner sep=1pt},
+  legend cell align=left}}
+\begin{axis}[
+  name=pt, width=\columnwidth, height=3.3cm,
+  xmin=0.3, xmax=38.7, ymin=-0.25, ymax=0.6,
+  xtick=\empty, ytick={-0.2,0,0.2,0.4,0.6},
+  ylabel={gain over P}, ylabel shift=-3pt,
+  xlabel={38 tasks, sorted by Hide-and-Seek's gain}, xlabel shift=-2pt,
+  legend style={at={(0.995,0.99)}, anchor=north east, row sep=-1.5pt},
+  unbounded coords=jump,
+  title={(a) Gain over P per task at the 5\% target}, title style={yshift=-5pt}]
+\addplot[ybar, bar width=1.5pt, bar shift=0pt, fill=blue!65!black, draw=none, area legend]
+  table[x=rank, y=hs_atomic, col sep=comma] {figures/per_task_gains.csv};
+\addlegendentry{Hide-and-Seek + P, atomic task}
+\addplot[ybar, bar width=1.5pt, bar shift=0pt, fill=blue!25, draw=none, area legend]
+  table[x=rank, y=hs_composite, col sep=comma] {figures/per_task_gains.csv};
+\addlegendentry{Hide-and-Seek + P, composite task}
+\addplot[only marks, mark=*, mark size=0.8pt, black]
+  table[x=rank, y=safe, col sep=comma] {figures/per_task_gains.csv};
+\addlegendentry{SAFE + P}
+\end{axis}
+\begin{axis}[
+  at={(pt.south west)}, yshift=-0.95cm, anchor=north west,
+  width=\columnwidth, height=3.4cm,
+  xmin=0.01, xmax=0.1, ymin=-0.075, ymax=0.175,
+  xtick={0.01,0.02,0.03,0.04,0.05,0.06,0.075,0.1},
+  xticklabels={0.01,,0.03,,0.05,,0.075,0.10},
+  ytick={-0.05,0,0.05,0.1,0.15}, yticklabel style={/pgf/number format/precision=2},
+  xlabel={FPR target $\alpha$}, xlabel shift=-4pt,
+  ylabel={matched gain}, ylabel shift=-3pt,
+  legend style={at={(0.5,0.99)}, anchor=north, legend columns=3, column sep=3pt, row sep=-1.5pt},
+  title={(b) Gain over P at matched false alarms}, title style={yshift=-5pt}]
+\addplot[blue!65!black, thick, mark=*, mark size=0.9pt]
+  table[x=alpha, y=hide_and_seek, col sep=comma] {figures/matched_sweep.csv};
+\addlegendentry{Hide-and-Seek}
+\addplot[black, thick, mark=square*, mark size=0.8pt]
+  table[x=alpha, y=safe, col sep=comma] {figures/matched_sweep.csv};
+\addlegendentry{SAFE}
+\addplot[teal!70!black, mark=triangle*, mark size=1pt]
+  table[x=alpha, y=mahalanobis, col sep=comma] {figures/matched_sweep.csv};
+\addlegendentry{Mahalanobis}
+\addplot[gray!75, densely dashed]
+  table[x=alpha, y=hide_and_seek_zero, col sep=comma] {figures/matched_sweep.csv};
+\addlegendentry{zero input}
+\addplot[gray!75, densely dotted, thick]
+  table[x=alpha, y=hide_and_seek_first, col sep=comma] {figures/matched_sweep.csv};
+\addlegendentry{first step}
+\addplot[gray!75, dashdotted]
+  table[x=alpha, y=hide_and_seek_task_shuffle, col sep=comma] {figures/matched_sweep.csv};
+\addlegendentry{shuffle}
+\end{axis}
+\end{tikzpicture}
+\caption{Where the gain over the per-task timer P comes from (XR-1, held-out test set). (a) Atomic
+tasks gain about four times as much as composite ones (Hide-and-Seek: 0.160 vs.\ 0.039 on average);
+on 16 tasks the fused detector alarms later than P, as its looser timer spends the false-alarm
+budget on the score. (b) With P loosened to the fused detector's false alarms, Hide-and-Seek's
+gain stays positive at every target from 2\% to 10\%; its input ablations never gain more than 0.01.}
+\label{fig:pertask}
+\vspace{-6pt}
+\end{figure}

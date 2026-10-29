@@ -842,3 +842,15 @@ The author accepted both remaining drafts as written (2026-10-29).
   - The paper has no `\pending` or `\todo` left; even the notes build shows none.
   - The submission build is 6 pages, with references alone on page 6, and no undefined
     references.
+
+## Update 2026-10-29 (c): author review of paper and proposal
+
+- **Statistics.** Tables give mean and std over 3 seeds only (as SAFE, FIPER, Hide-and-Seek and ActProbe do; none of them reports CIs). 95% bootstrap CIs stay in the text only for the gains over the timer, where seed std ignores test-set variation; Wilson bounds and the FIPER-table CI column are gone.
+- **Internal rules removed.** No 0.05 margin, no H1 "not supported" for SAFE, no completion criteria in the hypotheses, no sizing, power or SHA-256 in the text.
+- **Vocabulary.** "preregistered", "prospective", "cohort", "exploratory", "post hoc", "offline" (for RLDX-1), "controls", "labeler", "arm", "estimand" replaced by "hypotheses fixed in advance", "new/recorded rollouts", "test set", "input ablations", "annotator".
+- **Time risk detector deleted** (method, Table I, related work; Kaplan-Meier citation dropped).
+- **Hypotheses** named first: Early warning (H1), Policy evidence (H2), Second policy (H3), Value of earlier warning (H4). **Stage 2** renumbered E1 (second policy), E2 (reset and retry), E3 (further analyses), no criteria.
+- **Tables.** P no longer marked "(ours)" or highlighted; Table II repeats the Seen + P / Unseen + G and metric headers under each policy; captions and footnotes shortened; unseen-task protocol moved to Sec. VI-A.
+- **Figures.** New Fig. 1 (`figures/teaser.tex`): frames, any monitor's score, per-task timer, fused first alarm and the extra warning. New Fig. 2 (`figures/per_task.tex`): per-task gain over P with atomic/composite colours and the matched-gain sweep over FPR targets; data from `analysis/per_task_figure.py` (review_analyses.json, run xr1_review_analyses_20261028_155557).
+- **References.** Added RLDX-1 report, Kress-Gazit et al. (evaluation practice), Pardo et al. (time limits), LIBERO, OpenVLA, pi0; all checked on arXiv on 2026-10-29. 29 entries, still on page 6.
+- Content ends about halfway down page 5, column 2.

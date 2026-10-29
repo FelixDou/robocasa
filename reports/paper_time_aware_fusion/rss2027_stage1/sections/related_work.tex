@@ -19,7 +19,8 @@ reports an elapsed-time detector. SAFE identifies the duration shortcut and remo
 evaluating rollouts at equal length (its App.~B.5) and, on its real robot, by running every
 rollout to a fixed horizon~\cite{gu2025safe}. These controls suit fixed-horizon evaluation;
 under success-terminated execution, duration is a shortcut~\cite{geirhos2020shortcut} for offline
-metrics but legitimate online evidence.
+metrics but legitimate online evidence, much as time limits make the remaining time part of the
+agent's state in reinforcement learning~\cite{pardo2018timelimits}.
 
 \textbf{Action-space and success-only detectors.}
 STAC~\cite{agia2024sentinel} and VLA-FAIL~\cite{seligmann2026vlafail} compare overlapping
@@ -38,8 +39,8 @@ FIPER argues that late detection is not enough~\cite{romer2025fiper} and Hide-an
 accuracy by time~\cite{park2026hideseek}. Our lead is one minus FIPER's detection time and, when
 failures run to the limit, determines Hide-and-Seek's TWA at equal FPR (Sec.~\ref{sec:setup}): the
 metric is not new, the duration-only comparator is. Lead at a fixed false-alarm budget is the
-accuracy--earliness trade-off of early time-series classification~\cite{xing2012early}, and our
-time risk a survival-style estimate~\cite{kaplan1958}. Split-conformal thresholds give finite-sample
+accuracy--earliness trade-off of early time-series classification~\cite{xing2012early}.
+Split-conformal thresholds give finite-sample
 false-positive control under exchangeability~\cite{angelopoulos2021gentle}; we extend the
 construction to a two-signal OR rule (Sec.~\ref{sec:guarantee}). RESCUE~\cite{ahmedt2026rescue}
 finds that good detection scores do not guarantee lower intervention cost, and CheckVLA

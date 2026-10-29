@@ -1,38 +1,76 @@
-% Fig. 1 teaser (RSS only): one failed OpenCabinet validation rollout (H_k = 66 inferences),
-% frames at t = 10, 30, 60, 66 (figures/qualitative/frames, see its README), and the alarm times
-% of SAFE (t = 30), the per-task timer P (t = 38) and the global timer (t = 60); data in
-% figures/qualitative/frames.json. Needs tikz and graphicx.
+% Fig. 1 (RSS only): one failed OpenCabinet validation rollout of XR-1 (H_k = 66 inferences).
+% Frames at t = 10, 30, 60, 66 (figures/qualitative/frames, see its README). Score curves: the SAFE
+% score of this failure and of one success (figures/qualitative/rollout_curves.csv, y = 1.62 +
+% 0.28 (s + 0.7)), threshold tau_s = 0.648 crossed at t = 30; per-task timer P alarms at t = 38
+% (figures/qualitative/frames.json and README). x unit: 1 mm per inference. Needs tikz, graphicx.
 \begin{figure}[t]
 \centering
-\begin{tikzpicture}[x=0.0149\columnwidth, y=1cm, font=\scriptsize,
-  alarm/.style={line width=1.4pt}, lbl/.style={font=\scriptsize, inner sep=1pt}]
-% frames, evenly spaced, each linked to its time on the episode bar
-\foreach \t/\f/\cx in {10/f1/7.6, 30/f2/24.6, 60/f3/41.6, 66/f4/58.6} {
-  \node[inner sep=0, anchor=south] (\f) at (\cx, 0.75)
-    {\includegraphics[width=0.235\columnwidth]{figures/qualitative/frames/\f.png}};
-  \draw[gray!55, densely dotted] (\f.south) -- (\t, 0.16);
+\resizebox{\columnwidth}{!}{%
+\begin{tikzpicture}[x=1mm, y=1cm, font=\scriptsize,
+  lane/.style={font=\scriptsize, align=right, anchor=east, inner sep=1pt},
+  mon/.style={blue!65!black}, tim/.style={orange!85!black}, alm/.style={red!75!black}]
+% ---------------------------------------------------------------- frames
+\foreach \t/\f/\cx/\lab in {10/f1/-10.9/{$t=10$}, 30/f2/11.2/{$t=30$}, 60/f3/33.3/{$t=60$},
+    66/f4/55.4/{$t=66$ (limit)}} {
+  \node[inner sep=0, anchor=south] (\f) at (\cx, 2.78)
+    {\includegraphics[width=21.2mm]{figures/qualitative/frames/\f.png}};
+  \node[anchor=north west, inner sep=1.2pt, fill=white, fill opacity=0.8, text opacity=1,
+    font=\tiny] at (\f.north west) {\lab};
+  \draw[gray!70, densely dotted, thick] (\f.south) -- (\t, 2.62);
 }
-% episode bar: start to time limit
-\fill[gray!12, rounded corners=1.5pt] (0,-0.13) rectangle (66,0.13);
-\draw[gray!60, rounded corners=1.5pt] (0,-0.13) rectangle (66,0.13);
-% alarms
-\draw[alarm, red!75!black]    (30,-0.22) -- (30,0.22);
-\draw[alarm, orange!85!black] (38,-0.22) -- (38,0.22);
-\draw[alarm, gray!60!black]   (60,-0.22) -- (60,0.22);
-\draw[alarm, black]           (66,-0.22) -- (66,0.22);
-\node[lbl, anchor=north, text=red!75!black]    at (30,-0.24) {SAFE};
-\node[lbl, anchor=north, text=orange!75!black] at (38,-0.24) {timer P};
-\node[lbl, anchor=north, text=gray!50!black]   at (59.2,-0.24) {global};
-\node[lbl, anchor=north east]                  at (66.6,-0.24) {limit};
-% what is measured
-\draw[<->, >=stealth, thick, orange!85!black] (38,-0.72) -- (66,-0.72)
-  node[midway, below, lbl] {lead of P, without the policy};
-\draw[<->, >=stealth, thick, red!75!black] (30,-0.72) -- (38,-0.72)
-  node[midway, below, lbl, align=center] {extra\\warning};
-\end{tikzpicture}
-\caption{On timeout-defined benchmarks a failed episode runs to its time limit, so a timer flags
-every failure. A learned monitor helps only if it alarms \emph{earlier} at the same false-alarm
-rate. We measure this extra warning over a per-task timer P, which never reads the policy.
-Example: a failed \emph{OpenCabinet} rollout, $H_k = 66$ inferences.}
+% the interval the monitor gains over the timer, shaded across the lanes
+\fill[red!7] (30, -0.22) rectangle (38, 2.6);
+% ---------------------------------------------------------------- lane 1: monitor score
+\node[lane] at (-2, 2.08) {\textbf{Monitor}\\any failure score $s_t$};
+\draw[gray!45] (0, 1.58) -- (66, 1.58);
+\draw[gray!70, dashed] (0, 1.997) -- (66, 1.997) node[right, inner sep=1pt, text=gray!50!black] {$\tau_s$};
+\draw[gray!60, thick, densely dashed] plot coordinates {(1,1.634) (2,1.642) (3,1.649) (4,1.656)
+  (5,1.664) (6,1.671) (7,1.679) (8,1.686) (9,1.695) (10,1.709) (11,1.725) (12,1.745) (13,1.753)
+  (14,1.761) (15,1.768) (16,1.775) (17,1.789) (18,1.802) (19,1.810) (20,1.817) (21,1.824)
+  (22,1.832) (23,1.839) (24,1.846) (25,1.853) (26,1.873) (27,1.880) (28,1.900) (29,1.908)
+  (30,1.926) (31,1.934) (32,1.941) (33,1.948)};
+\node[anchor=south west, inner sep=1pt, text=gray!50!black, font=\tiny] at (33.6, 1.60) {a success ends at $t=33$};
+\draw[mon, thick] plot coordinates {(1,1.634) (2,1.642) (3,1.649) (4,1.669) (5,1.688) (6,1.698)
+  (7,1.706) (8,1.713) (9,1.733) (10,1.752) (11,1.773) (12,1.790) (13,1.809) (14,1.828) (15,1.836)
+  (16,1.843) (17,1.851) (18,1.871) (19,1.878) (20,1.886) (21,1.903) (22,1.923) (23,1.931)
+  (24,1.938) (25,1.945) (26,1.953) (27,1.963) (28,1.971) (29,1.978) (30,1.998) (31,2.013)
+  (32,2.034) (33,2.052) (34,2.063) (35,2.083) (36,2.104) (37,2.124) (38,2.141) (39,2.162)
+  (40,2.181) (41,2.191) (42,2.211) (43,2.219) (44,2.231) (45,2.239) (46,2.247) (47,2.255)
+  (48,2.275) (49,2.285) (50,2.304) (51,2.323) (52,2.342) (53,2.350) (54,2.357) (55,2.365)
+  (56,2.372) (57,2.392) (58,2.408) (59,2.418) (60,2.436) (61,2.454) (62,2.462) (63,2.469)
+  (64,2.484) (65,2.500) (66,2.520)};
+\node[mon, anchor=south east, inner sep=1pt, font=\tiny] at (52, 2.36) {failure};
+\fill[alm] (30, 1.998) circle (0.75mm);
+% ---------------------------------------------------------------- lane 2: per-task timer
+\node[lane] at (-2, 1.10) {\textbf{Per-task timer P}\\$t \ge c_k H_k$};
+\draw[gray!35, line width=2.2pt] (0, 1.10) -- (66, 1.10);
+\draw[tim, line width=2.2pt] (38, 1.10) -- (66, 1.10);
+\fill[tim] (38, 1.10) circle (0.75mm);
+\node[tim, anchor=south, inner sep=1.5pt, font=\tiny] at (38, 1.16) {success durations run out};
+% ---------------------------------------------------------------- lane 3: fused alarm
+\node[lane] at (-2, 0.50) {\textbf{Fused: first of the two}\\calibrated: FPR $\le 5\%$};
+\draw[gray!35, line width=2.2pt] (0, 0.50) -- (66, 0.50);
+\draw[alm, line width=2.2pt] (30, 0.50) -- (66, 0.50);
+\draw[alm, densely dashed] (30, 1.95) -- (30, 0.56);
+\draw[orange!55, densely dashed] (38, 1.04) -- (38, 0.56);
+\fill[alm] (30, 0.50) circle (0.95mm);
+\node[alm, anchor=east, inner sep=1.5pt, font=\tiny\bfseries] at (29, 0.50) {alarm};
+% ---------------------------------------------------------------- time axis and leads
+\draw[gray!70] (0, 0.12) -- (66, 0.12);
+\foreach \x/\l in {0/0, 30/30, 38/38} {\draw[gray!70] (\x, 0.12) -- (\x, 0.06)
+  node[below, inner sep=1pt, font=\tiny, text=gray!40!black] {\l};}
+\draw[black, line width=1pt] (66, 0.62) -- (66, 0.02) node[below, inner sep=1pt, font=\tiny]
+  {$H_k = 66$};
+\node[anchor=north, inner sep=1pt, font=\tiny, text=gray!40!black] at (15, 0.06) {policy inferences $t$};
+\draw[{Stealth[length=1.6mm]}-{Stealth[length=1.6mm]}, tim, thick] (38, -0.36) -- (66, -0.36)
+  node[midway, below, inner sep=1.5pt] {lead of the timer alone};
+\draw[{Stealth[length=1.6mm]}-{Stealth[length=1.6mm]}, alm, thick] (30, -0.36) -- (38, -0.36)
+  node[midway, below, inner sep=1.5pt, align=center] {extra\\warning};
+\end{tikzpicture}}
+\caption{In success-terminated, time-limited benchmarks every failed rollout runs to its time
+limit $H_k$, so a per-task timer that alarms once an attempt outlasts the task's successes flags
+all failures. A monitor helps only if it alarms \emph{earlier}. We fuse any monitor with the timer
+(first alarm wins), calibrate both for a 5\% false-alarm rate, and measure the extra warning over
+the timer. Example: a failed XR-1 \emph{OpenCabinet} rollout, monitor score from SAFE.}
 \label{fig:qualitative}
 \end{figure}
