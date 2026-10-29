@@ -3012,3 +3012,43 @@ both nulls, and n = 20 stands.**
 **What this changes for the paper.**
 - E2's power and type I sentence gets the R10 numbers.
 - Checkpoint hashes stay pending until the policy copy is located and hashed.
+
+**Part B result: the manifest is written.**
+- **File:** `e2_freeze_20261029_205743/e2_freeze_manifest.json`, SHA-256
+  `917c06e6ab701f9f2dcc81f4e54086e210c67cebd35aa39aebd9444d9f431f68`.
+- **Checks:**
+  - replication gains +0.0342 / +0.0834;
+  - the freeze run (`scores_run2`, `scoring.json` SHA-256 `396c9365…`) reproduces §15.22
+    exactly and holds three reloadable models.
+- **Frozen contents:**
+  - **The 20 tasks:** type, H_k and ρ_k (q = 0.95), with α = 0.05.
+  - **Paths:** SAFE u = 7.9314, s = 0; Hide-and-Seek u = −0.17, s = 20.
+  - **Hide-and-Seek weights** (content hash / file SHA-256):
+
+    | Seed | Content hash | File SHA-256 |
+    |---|---|---|
+    | 0 | `602221f8…` | `5a5a40f0…` |
+    | 1 | `28018125…` | `f8846679…` |
+    | 2 | `afa71d21…` | `8b8e84c6…` |
+
+  - **SAFE LSTM heads** (`final/lstm_seed{0,1,2}`, 6 files each), tree digests `46e21a19…`,
+    `c2e7332c…` and `7fea638f…`. The SAFE calibration directory: 97 files, digest
+    `f4b3a8bf…`.
+  - **The Hide-and-Seek inputs, raw manifest and export report** (file SHA-256).
+- **Policy `RLWRLD/RLDX-1-FT-RC365`.** No persistent local copy existed, so both revisions were
+  downloaded into `hf_home/hub`:
+  - `587e9ecd`, the release that produced the existing data; tree digest `f1a6048d…`;
+  - `c53d0bc0`, the current one the E3 pilot ran; tree digest `411fd081…`.
+  - The three weight shards are identical in both, and match Hugging Face's LFS SHA-256
+    (`2a2f48bd…`, `4bb91b90…`, `f348bb0a…`).
+  - Only `processor_config.json` differs: `67c2b131…` (May, `image_max_area` null) against
+    `68780c8d…` (October, 65536).
+- **For the RLDX-1 dry run before E2:**
+  - **Policy revision.** E2 uses `587e9ecd`. If RLDX-1 code `ef05cd4a` fails on its null
+    `image_max_area`, E2 uses `c53d0bc0`, whose only change is that documented default.
+  - **Dirty checkout.** The RLDX-1 checkout `ef05cd4a` has uncommitted changes. The dry run
+    must record their diff and hash, and compare them with the E3 pilot's
+    `rldx_repo_status.txt`.
+
+**What this changes for the paper.** The checkpoint-hash `\pending` becomes the manifest's
+SHA-256.
