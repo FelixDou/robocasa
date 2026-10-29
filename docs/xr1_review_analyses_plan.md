@@ -2239,3 +2239,69 @@ score last):
   comparison was run.
 - So "only Hide-and-Seek's gain carries over to unseen tasks" holds for XR-1 only, and the
   paper must say so.
+
+### R8
+
+**With the path chosen on the validation set, Hide-and-Seek's point gain is unchanged, but its
+decision CI includes zero.**
+- Hide-and-Seek + P gains +0.072 over P at test FPR 0.061, decision CI [−0.069, 0.143]. The
+  registered result is +0.071 at 0.061, CI [0.022, 0.157].
+- SAFE + P drops to +0.007 at 0.042 (CI [−0.222, 0.067]); registered +0.030.
+- Proposition 1 now covers the evaluated detectors.
+
+**Run.**
+- Folder: `/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_fixed_path_20261029_164116`
+  (`fixed_path.json`, SHA-256 `5b4c7b6a…`).
+- Code: pinned worktree `robocasa_fixedpath_9acf1aa6` on r4n5, CPU only.
+- **Checks:** `HEAD OK`, 12 inputs, 10 tests OK, `FIXED-PATH ANALYSIS OK` (F1–F4; with
+  B = 2,000, F1 includes Amendment 2's decision CIs, computed on R8's replicates), and
+  `INPUTS UNCHANGED`.
+- **Cohorts:** validation 988 rollouts (494 successes); E1 calibration successes 380; E1 test
+  760.
+- **P** equals E1's: lead 0.2252, FPR 0.0553 (21 FP).
+
+**Results** (seed-averaged; gain over P; decision CI with the path fixed; matched = P loosened or
+tightened on the test set to the fused detector's false alarms, test-only CI):
+
+| Score | Path (u, s, λ) | FPR [Wilson] | Lead | Gain [decision CI] | Matched [test-only] | Registered gain [CI] |
+|---|---|---|---|---|---|---|
+| SAFE | 0.834, 0, 0.141 | 0.042 [0.026, 0.067] | 0.233 | +0.007 [−0.222, 0.067] | +0.039 [0.009, 0.072] | +0.030 [0.007, 0.093] |
+| Hide-and-Seek | 0.055, 2, 0.287 | 0.061 [0.041, 0.089] | 0.297 | +0.072 [−0.069, 0.143] | +0.057 [−0.014, 0.121] | +0.071 [0.022, 0.157] |
+| first-inference | 1.689, 10, 0.084 | 0.055 | 0.223 | −0.002 [−0.051, 0.014] | −0.006 [−0.013, 0.007] | +0.001 [−0.015, 0.036] |
+| zero-input | 1.870, 0, 0.074 | 0.058 | 0.234 | +0.009 [−0.034, 0.021] | −0.004 [−0.014, 0.011] | +0.012 [0.001, 0.044] |
+| shuffle | 0.091, 10, 0.091 | 0.063 | 0.235 | +0.010 [−0.049, 0.030] | −0.012 [−0.026, 0.003] | +0.011 [0.000, 0.064] |
+
+- **Contrasts** (decision CIs): Hide-and-Seek − SAFE +0.065 [−0.058, 0.226];
+  − first-inference +0.074 [−0.063, 0.154]; − zero-input +0.063 [−0.069, 0.141]; − shuffle
+  +0.062 [−0.061, 0.144].
+- **Single models:**
+  - Hide-and-Seek: +0.029 ± 0.001 at FPR 0.037, TWA 0.609. Registered: +0.039 ± 0.006, TWA
+    0.605.
+  - SAFE: +0.011 ± 0.023 at FPR 0.046, TWA 0.595. Registered: +0.024 ± 0.015.
+- **SAFE's frozen path** alarms on 16 successes against P's 21. Its matched gain (+0.039,
+  test-only CI above zero) compares with P tightened to 16 false alarms, and its TWA (0.595)
+  exceeds P's (0.585). At the same target, it adds almost no lead.
+
+**Expectations against results.**
+- "Hide-and-Seek keeps +0.04 to +0.08": held (+0.072, the same as registered).
+- "SAFE gets ≤ +0.03": held (+0.007).
+- "Test FPR near 0.05 for both": SAFE 0.042. Hide-and-Seek's 0.061 equals its registered FPR,
+  so the chosen path did not raise it here.
+- "Contrasts keep their sign": held, but every decision CI now includes zero.
+
+**Reading.**
+- Choosing the path on the calibration successes did not inflate Hide-and-Seek's point gain or
+  its test FPR.
+- With the path held fixed, the decision bootstrap no longer re-selects the path on each
+  resampled calibration set. Its intervals become much wider, and none excludes zero. The
+  registered CIs adapted the path in every replicate.
+- Under a procedure that Proposition 1 covers, the evidence for Hide-and-Seek's gain at the same
+  target is therefore not significant on this cohort. That matches the review's point 1: the
+  central claim is promising, not established.
+- For E2, a separate selection set closes the guarantee gap. Its power must then be sized with
+  the path fixed, since the R8 intervals are much wider than the registered ones.
+
+**What this changes for the paper.**
+- Sec. IV-D gets one sentence on R8: the same point gain, and CIs that include zero once the path
+  is fixed.
+- The registered results stay as they are.
