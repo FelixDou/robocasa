@@ -29,7 +29,8 @@ Gates (no table without them):
       tasks, seeds 0-2, --score-train, every needed rollout present with the right task, label
       and length; fold all reproduced the earlier trajectories of every detector of its family
       in all three cohorts (score_cross_task --reference-raw; for SAFE, the frozen
-      normalized_scores.jsonl), and every other reference check it recorded passed.
+      normalized_scores.jsonl), and every other reference check it recorded passed; every fold
+      directory's own recorded checks passed.
   R2  seen + P, per seed and seed-averaged, equals rldx_per_seed.json (P, lead, FPR, gain) at
       its stored precision, for every detector.
   R3  G is the same timer whichever score it is fused with (it does not read the score).
@@ -151,6 +152,9 @@ def check_meta(F, meta, tasks, held, folds_sha, detectors):
         raise ValueError(f"Fold {F}: seeds {meta['seeds']} are not 0, 1, 2")
     if not meta.get("score_train"):
         raise ValueError(f"Fold {F}: scored without --score-train")
+    failed = sorted(k for k, v in (meta.get("checks") or {}).items() if isinstance(v, dict) and not v.get("ok", True))
+    if failed:
+        raise ValueError(f"Fold {F}: the directory recorded failed checks {failed}")
     missing = [d for d in detectors if d not in meta["detectors"]]
     if missing:
         raise ValueError(f"Fold {F}: detectors {missing} were not scored")

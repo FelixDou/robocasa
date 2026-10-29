@@ -404,10 +404,11 @@ def assemble_export(args):
         for rid, r in train_rows[s].items():
             a, b = np.asarray(scores[s][rid]["scores"], float), np.asarray(r["scores"], float)
             worst = max(worst, float(np.max(np.abs(a - b))) if a.shape == b.shape else float("inf"))
-    checks["train_scores_vs_training_run"] = dict(max_abs_diff=worst, ok=worst <= 1e-12)
-    print(f"external vs training-run scores of the training rollouts: max diff {worst} -> "
-          f"{'OK' if worst <= 1e-12 else 'MISMATCH'}", flush=True)
-    status |= int(worst > 1e-12)
+    tol = float(args.train_check_tolerance)
+    checks["train_scores_vs_training_run"] = dict(max_abs_diff=worst, tolerance=tol, ok=worst <= tol)
+    print(f"external vs training-run scores of the training rollouts: max diff {worst} (tolerance {tol:g}) -> "
+          f"{'OK' if worst <= tol else 'MISMATCH'}", flush=True)
+    status |= int(worst > tol)
     for s in seeds:
         records = [dict(task_name=scores[s][rid]["task_name"], scores=np.asarray(scores[s][rid]["scores"], np.float64))
                    for rid in ids["train"] if scores[s][rid]["task_name"] in seen]
@@ -517,6 +518,9 @@ def build_parser():
     e.add_argument("--fold-manifest")
     e.add_argument("--frozen-normalized", nargs=2, action="append", metavar=("SEED", "NORMALIZED_SCORES"),
                    help="fold all: the frozen normalized_scores.jsonl of each seed")
+    e.add_argument("--train-check-tolerance", type=float, default=1e-12,
+                   help="largest allowed difference between the external and the training run's own scores of "
+                        "the training rollouts (default exact; R7 allows 1e-6, float32, for LSTM fold 0 only)")
     c = sub.add_parser("compare")
     c.add_argument("a")
     c.add_argument("b")

@@ -371,7 +371,15 @@ class RldxUnseenTest(unittest.TestCase):
         status, text = assemble(args["lstm", "all"])
         self.assertEqual(status, 1)
         self.assertIn("REFERENCE MISMATCH", text)
-        # Fold 0: the external score of a training rollout differs from the training run's.
+        # A wrong group label is refused before anything is written.
+        a = args["indep", "1"]
+        prov = Path(a[a.index("--scores") + 2]) / "provenance.json"
+        p = json.loads(prov.read_text())
+        prov.write_text(json.dumps(dict(p, group="confirmatory_test")))
+        with self.assertRaisesRegex(ValueError, "not all"):
+            assemble(a)
+        prov.write_text(json.dumps(p))
+        # Fold 0: the external score of a training rollout differs from the training run's by 1e-6.
         a = args["indep", "0"]
         sc = Path(a[a.index("--scores") + 2]) / "scores.jsonl"
         rows = [json.loads(l) for l in sc.read_text().splitlines()]
@@ -382,15 +390,29 @@ class RldxUnseenTest(unittest.TestCase):
         status, text = assemble(a)
         self.assertEqual(status, 1)
         self.assertIn("MISMATCH", text)
-        # Wrong group label.
-        a = args["indep", "1"]
-        prov = Path(a[a.index("--scores") + 2]) / "provenance.json"
-        p = json.loads(prov.read_text())
-        p["group"] = "confirmatory_test"
-        prov.write_text(json.dumps(p))
-        with self.assertRaisesRegex(ValueError, "not all"):
-            assemble(a)
-
+        # The same fold passes only when a larger tolerance is asked for, and records it.
+        tol = list(a)
+        tol[tol.index("--output-dir") + 1] += "_tol"
+        status, text = assemble(tol + ["--train-check-tolerance", "1e-5"])
+        self.assertEqual(status, 0, text)
+        meta = json.loads((Path(tol[tol.index("--output-dir") + 1]) / "scoring.json").read_text())
+        self.assertEqual(meta["checks"]["train_scores_vs_training_run"]["tolerance"], 1e-5)
+        # rldx_unseen refuses a fold directory whose own recorded check failed, and accepts the rerun.
+        for F in ("1", "2", "3", "all"):
+            status, text = assemble(args["indep", F])
+            self.assertEqual(status, 0, text)
+        base = self.root / "safe_folds" / "indep"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.ps.main(["--safe-dir", f"lstm={self.root / 'safe'}", f"indep={self.root / 'safe'}",
+                          "--inputs-dir", str(self.root / "inputs"), "--scores-dir", str(self.root / "score_cohorts"),
+                          "--output", str(self.root / "per_seed_safe.json")])
+        failed = [base / "fold_0"] + [base / f"fold_{F}" for F in ("1", "2", "3", "all")]
+        with self.assertRaisesRegex(ValueError, "recorded failed checks"):
+            self.run_unseen("failed.json", reference=self.root / "per_seed_safe.json", families=[failed])
+        rerun = [base / "fold_0_tol"] + failed[1:]
+        status, text, out = self.run_unseen("rerun.json", reference=self.root / "per_seed_safe.json", families=[rerun])
+        self.assertEqual(status, 0, text)
+        self.assertIn("safe_indep", out["table2"])
 
 if __name__ == "__main__":
     unittest.main()

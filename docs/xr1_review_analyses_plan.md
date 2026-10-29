@@ -1396,6 +1396,50 @@ Report:
 
 Then copy `rldx_unseen_safe.json` to the evidence folder, as in D3.
 
+**D12. Re-assemble LSTM fold 0 at float32 precision (author's decision, 2026-10-29).**
+
+D11 was not run successfully: the first D10 ran before scoring had finished, and LSTM fold 0
+failed its training cross-check by 1.19e-7 (see Result, R7 Stage B′). Folds 2 and 3 were then
+assembled exactly. D12 re-assembles LSTM fold 0 into a new directory from the original scores,
+with that one cross-check at ≤ 1e-6. `R7C_SHA` is the full SHA of the pushed commit that
+contains this step.
+
+```bash
+source $R7_LOG/paths.env; source $R7_LOG/paths_safe.env
+export R7C_SHA=<R7C_SHA>
+export R7C_REPO=$PROJECT_FS/robocasa_rldxsafe_${R7C_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $R7C_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R7C_REPO $R7C_SHA
+test "$(git -C $R7C_REPO rev-parse HEAD)" = "$R7C_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not R7C_SHA"
+cd $R7C_REPO
+A=(--fold 0 --folds $FOLDS --head lstm --runtime-bundle $RLDXHS_ROOT/inputs/rldx_bundle.json
+   --cohort train $RLDXHS_ROOT/inputs/train_ids.json --cohort calibration $RLDXHS_ROOT/inputs/calibration_ids.json
+   --cohort test $RLDXHS_ROOT/inputs/test_ids.json --output-dir $R7S/folds/lstm/fold_0_f32
+   --fold-manifest $R7S/manifests/fold_0.json --train-check-tolerance 1e-6)
+for S in 0 1 2; do A+=(--training-run $S $R7S/train/fold_0/lstm_seed$S --scores $S $R7S/score/fold_0/lstm_seed$S); done
+PYTHONPATH=$R7C_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.cross_task_safe assemble-export "${A[@]}" 2>&1 \
+  | tee $R7_LOG/safe_assemble_lstm_fold0_f32.log
+```
+
+It must print `max diff 1.1920928955078125e-07 (tolerance 1e-06) -> OK` and `ASSEMBLY OK`.
+
+**D13. The table with the SAFE rows.**
+
+```bash
+source $R7_LOG/paths.env; source $R7_LOG/paths_safe.env; cd $R7C_REPO
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/rldx_unseen.py run \
+  --safe-dir $RLDX_ROOT/calibration/lstm --inputs-dir $RLDXHS_ROOT/inputs --folds $FOLDS \
+  --fold-dirs $R7_ROOT/folds/fold_{0,1,2,3,all} \
+  --fold-dirs $R7S/folds/lstm/fold_0_f32 $R7S/folds/lstm/fold_{1,2,3,all} \
+  --fold-dirs $R7S/folds/indep/fold_{0,1,2,3,all} \
+  --reference-per-seed $RLDXPS_ROOT/rldx_per_seed.json --output $R7_ROOT/rldx_unseen_safe.json 2>&1 | tee $R7_LOG/unseen_safe.log
+sha256sum -c --quiet $R7_LOG/frozen_inputs.sha256 && sha256sum -c --quiet $R7_LOG/frozen_safe.sha256 && echo INPUTS UNCHANGED
+sha256sum $R7_ROOT/rldx_unseen_safe.json
+```
+
+Report the whole `unseen_safe.log` (it ends in `RLDX-1 UNSEEN TABLE OK`), `INPUTS UNCHANGED`
+and the SHA-256. Then copy `rldx_unseen_safe.json` to the evidence folder.
+
 **D3. The table (CPU, minutes; after D1).**
 
 ```bash
@@ -2007,3 +2051,42 @@ only.
     equal.
   - **Consequence for Stage B′:** the gate is the exact form. Fold all is the frozen SAFE20
     models, and the rebuilt command trains the folds.
+
+### R7 Stage B′ (SAFE per fold): run so far and one decision
+
+- **D6.** `MANIFESTS OK`. 37 training rollouts are dropped per held-out task.
+  - Folds 0 and 1: 14 seen tasks, train 518 (222 dropped), test 182.
+  - Folds 2 and 3: 16 seen tasks, train 592 (148 dropped), test 208.
+- **D7.** All 24 fits ended with rc=0. Each round of three seeds took 2–3 minutes: LSTM
+  15:56–16:06, MLP 15:56–16:04 (2026-10-29, r4n5).
+- **D8.** All 30 scorings ended with rc=0. LSTM fold 3 finished training at 16:06:16, and its
+  scoring started at 16:08:14.
+- **D9 (B′-G3).** `IDENTICAL` for both heads: 1,000 rollouts, maximum difference 0.0.
+- **D10 (B′-G1, B′-G2).**
+  - The first D10 ran before scoring had finished. Folds 2 and 3 had no scores yet and wrote
+    nothing. Run again after scoring, they assembled exactly (`safe_assemble_folds23.log`,
+    4 × `ASSEMBLY OK`).
+  - Fold all of both heads is exact. The four reference checks (calibration, test, train,
+    normalization) are 0.0, and so is the training cross-check.
+  - LSTM fold 1 and MLP folds 0–3 are exact.
+  - **LSTM fold 0:** the external scores of its training rollouts differ from the training
+    run's own `scores.jsonl` by 1.19e-7, for every seed. The fold was refused (`REFERENCE
+    MISMATCH`).
+- **Diagnosis** (`safe_lstm_fold0_diagnosis.txt`).
+  - Rescored alone on an idle GPU (`score_rerun/fold_0`), the external scores equal the first
+    external scoring on all 1,000 rollouts and all seeds (difference 0). External scoring is
+    deterministic, so contention is not the cause.
+  - Both external scorings differ from the run's own scores of its 700 rollouts by exactly
+    1.19e-7. That is one float32 rounding step at magnitude 1–2.
+  - The two paths score different sets of rollouts together: the training run its 700, the
+    external scorer all 1,000. That is the likely cause, though it was not tested.
+  - The analysis uses the external scores for every rollout and fold. The training-run scores
+    are only a cross-check.
+- **Decision** (author, 2026-10-29).
+  - That one cross-check is accepted at float32 precision (≤ 1e-6) for LSTM fold 0 only. Every
+    other check stays exact (1e-12), including fold all, the other nine fold directories and
+    R2.
+  - The code records the change: `assemble-export --train-check-tolerance`, default 1e-12.
+  - `rldx_unseen.py` now refuses a fold directory whose own recorded checks failed. Before this
+    change it would have accepted the first, failed LSTM fold 0 directory.
+  - The failed directory (`folds/lstm/fold_0`) and the rerun scores are kept.
