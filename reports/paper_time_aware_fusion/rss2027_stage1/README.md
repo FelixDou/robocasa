@@ -525,3 +525,42 @@ statistical precision) and two prose fixes. The numbers come from the review ana
   the red notes.
 - The 3-page proposal (`../venue_proposal/venue_proposal.tex`, untracked in the main checkout)
   was revised the same way and still fits 3 pages.
+
+## Update 2026-10-29: seen and unseen columns in Tables I and II (R6)
+
+Tables I and II now report seen and unseen tasks side by side, as Hide-and-Seek does. The
+numbers come from R6 on branch `claude/review-analyses` (`docs/xr1_review_analyses_plan.md`,
+section R6; run `xr1_seen_unseen_20261028_235911`, file `seen_unseen_tables_b1ids.json`,
+SHA-256 `d927f67e…`). All gates passed. The analysis is exploratory, on opened cohorts.
+
+- **Table I** moves from the validation set to the held-out test set (380 + 380), as the unseen
+  arm needs. Its seen numbers change (e.g. OOD bACC 0.79–0.82, G 0.988, P 0.972; Hide-and-Seek TWA
+  0.599, P 0.585).
+  - Columns are bACC and TWA for Seen and Unseen. wACC is dropped, since it equals bACC on balanced
+    sets.
+  - Unseen means 4 folds, each task held out once. Monitors are retrained and thresholds
+    calibrated without the held-out task, and the OOD references are pooled over the seen tasks.
+    Time risk and P show "–".
+  - The venue column is gone, to fit the width.
+  - The note says how Hide-and-Seek's protocol differs: a random 7/3 split per seed, FPR
+    0.15–0.25, no per-task normalization.
+- **Table II.** Columns are FPR, Δℓ̄ and TWA for seen (+ P) and unseen (+ G).
+  - The ℓ̄ column is dropped; the note gives the timers' leads instead.
+  - RLDX-1 has seen rows only.
+  - Row names lose "+ P", since the column groups say which timer is used.
+  - It is a `tabular` scaled to the column width (about 95%), because eight columns do not fit at
+    `\scriptsize`.
+- **Table IV removed.** Its inferential numbers moved into the text:
+  - Sec. VI-C: Hide-and-Seek − SAFE over P, 0.041 [−0.011, 0.103].
+  - The unseen paragraph: Hide-and-Seek − SAFE over G, 0.111 [0.036, 0.166]; matched G, −0.079
+    and +0.051; P from one success, 0.086 [0.018, 0.155]; and the OOD rows' gains, which cost
+    three times G's false alarms.
+- **Text.**
+  - The standalone paragraph uses the held-out numbers. It adds that on unseen tasks only
+    Hide-and-Seek is above G's TWA, and that ActProbe's thresholds almost never fire there.
+  - The Metrics paragraph drops wACC.
+  - Limitations now list the standalone analyses among those done after the held-out set was
+    opened.
+- **Pages.** The submission build (notes off, pdflatex from TinyTeX) has 6 pages: content ends on
+  page 5 and the references are alone on page 6. It has no overfull boxes and no undefined
+  references.
