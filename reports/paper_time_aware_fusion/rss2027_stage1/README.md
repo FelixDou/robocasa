@@ -803,3 +803,24 @@ rule with every path frozen, including the null fusions' paths.
   - "For each detector";
   - "(no claim)" dropped;
   - E3: "arms share", "difference of", "so H4 is only estimated".
+
+## Update 2026-10-29 (j): freeze manifest (R10 part B)
+
+- **Checkpoint hashes.** The `\pending{checkpoint hashes}` is replaced by "A manifest
+  (SHA-256 917c06e6) hashes them and the policy". The manifest is
+  `e2_freeze_20261029_205743/e2_freeze_manifest.json`, full SHA-256
+  `917c06e6ab701f9f2dcc81f4e54086e210c67cebd35aa39aebd9444d9f431f68`. It records:
+  - the 20 tasks' H_k and ρ_k, and the two fused paths;
+  - the Hide-and-Seek weights (seeds 0–2), which reproduce §15.22 exactly;
+  - SAFE's LSTM heads;
+  - the RLDX-1-FT-RC365 policy at revisions `587e9ecd` and `c53d0bc0`. The weights are
+    identical in both and match Hugging Face's published SHA-256. Only the processor config
+    differs.
+- **For the RLDX-1 dry run:**
+  - E2 uses `587e9ecd`, or `c53d0bc0` if the code fails on its null `image_max_area`;
+  - the RLDX-1 checkout `ef05cd4a` is dirty, and its diff must be recorded.
+- **Trims to stay at 5 + 1:** "hashes them and the policy", "(within-task resampling, path
+  fixed)", "In simulation", and E3's "arms share" clause.
+- **Open items now:** two `\pending`/`\todo`, both older author decisions: confirm the FPR rule,
+  and whether to register E5.
+- **Pages.** 6, with references alone on page 6.
