@@ -3716,3 +3716,68 @@ parentheses).
 - **The full-pipeline matched CIs include 0** for both scores.
 
 **Evidence.** The JSON is to be copied with the user's SSH key. This session's shell was refused.
+
+### R11
+
+**Run.** `xr1_r11_rows_20261030_220636`, node r7n4. The worktree is pinned at `59f08634`. The
+RLDX-1 table ran from `840d16a7`, which lets `--unreferenced` also waive the fold-all reference
+of R1: ActProbe had never been scored on RLDX-1, so it has no earlier trajectory to reproduce.
+Every other gate is unchanged.
+
+- **Unit tests:** all passed on the cluster.
+- **L-G0:** OK. The cross-validated LSTM setting is horizon and diffusion `concat-2`, learning
+  rate 3e-4, λ 0.1.
+- **SAFE-LSTM training:** 15 fits, `rc=0`, about 4 minutes each.
+- **L-G2:** every run is `model lstm`, trained on 38 / 28 / 28 / 29 / 29 tasks.
+- **Scoring:** 45 scorings, `rc=0`. `--group all` worked on the training export.
+- **L-G1:** the external scores of the training rollouts equal the training runs' own scores
+  exactly (max difference 0.0) in all five folds. `ASSEMBLY OK` ×5.
+- **ActProbe-T (XR-1):** 5 folds, `rc=0`.
+- **R0 (RLDX-1):** OK. 1,000 rollouts, chunks of shape (inferences, 16, 12), replanning every
+  8 steps. RLDX-1 chunks overlap, so ActProbe's consistency signal is defined there. The RLDX-1
+  ActProbe scoring ran 5 folds, `rc=0`.
+- **XR-1 tables:** `SEEN/UNSEEN TABLES OK`, with T1–T6 passing; T6 means every R6 row is
+  reproduced. `seen_unseen_tables_r11.json` has SHA-256 `2dd19df0…`. `INPUTS UNCHANGED`.
+- **RLDX-1 table:** `RLDX-1 UNSEEN TABLE OK`, with R2 reproducing every published row.
+  `rldx_unseen_r11.json` has SHA-256 `761e1ded…`. `INPUTS UNCHANGED`.
+
+**New rows** (single models, mean ± std over seeds 0–2; Table II gains over P on seen tasks and
+over G on unseen tasks).
+
+| Row | T. I seen bACC / TWA | T. I unseen bACC / TWA | T. II seen FPR / gain / TWA | T. II unseen FPR / gain / TWA |
+|---|---|---|---|---|
+| XR-1 SAFE-MLP (published) | 0.763 / 0.582 | 0.713 / 0.541 | 0.058 / +0.024 / 0.596 | 0.053 / +0.028 / 0.551 |
+| XR-1 SAFE-LSTM | 0.610 / 0.547 | 0.686 / 0.560 | 0.059 / +0.031±0.013 / 0.599 | 0.040 / +0.058±0.020 / 0.572 |
+| XR-1 ActProbe | (published) 0.654 / 0.558 | 0.500 / 0.500 | 0.061 / +0.025±0.008 / 0.594 | 0.026 / −0.046±0.011 / 0.527 |
+| XR-1 ActProbe-T | 0.661 / 0.562 | 0.500 / 0.500 | 0.061 / +0.028±0.002 / 0.596 | 0.015 / −0.069±0.011 / 0.521 |
+| RLDX-1 ActProbe | — | — | 0.040 / +0.050±0.011 / 0.641 | 0.000 / −0.019±0.004 / 0.503 |
+| RLDX-1 ActProbe-T | — | — | 0.053 / +0.031±0.023 / 0.625 | 0.000 / −0.012±0.002 / 0.507 |
+
+**Against the expectations.**
+- **ActProbe + P (XR-1): met.** It gains about SAFE's amount, +0.025 against +0.024.
+- **ActProbe + G (unseen): not as expected.** It is negative, not about 0.
+  - ActProbe never fires on unseen tasks (standalone bACC 0.500).
+  - The fused path relaxes the timer to spend the false-alarm budget on the score, as the
+    16-task finding of R3 showed. Since the score is silent, the fused detector alarms later
+    than G alone.
+- **ActProbe-T: not met.**
+  - The published timestep input changes little: seen bACC 0.661 against 0.654.
+  - On unseen tasks it still never fires (0.500), so the timestep was not what kept our
+    ActProbe silent.
+  - Its fused gains are no larger.
+- **SAFE-LSTM (XR-1): met for seen + P.** It gains +0.031, within 0.02 of the MLP's +0.024.
+  - Its standalone detection is weaker than the MLP's: bACC 0.610 against 0.763.
+  - It transfers better to unseen tasks: + G gains +0.058 at FPR 0.040, against +0.028 for the
+    MLP.
+  - That is still about half of Hide-and-Seek's +0.122.
+- **RLDX-1 ActProbe:** + P gains +0.050. That is second to Hide-and-Seek's +0.074, and above
+  SAFE-LSTM's +0.036. It is silent on unseen tasks, like on XR-1.
+
+**What this changes for the paper.**
+- Table I and Table II (XR-1) can carry SAFE-LSTM rows.
+- Table II can carry ActProbe for both policies.
+- ActProbe-T can be one sentence: adding the published timestep input changes neither result.
+- The negative unseen + G for a silent score is worth one clause. With a silent score, the
+  adaptive path is costly, a reason for Stage 2's frozen paths.
+
+**Evidence.** The JSONs are to be copied with the user's SSH key.
