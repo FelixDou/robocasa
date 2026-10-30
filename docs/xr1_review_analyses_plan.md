@@ -3715,7 +3715,8 @@ parentheses).
   failures; P never does.
 - **The full-pipeline matched CIs include 0** for both scores.
 
-**Evidence.** The JSON is to be copied with the user's SSH key. This session's shell was refused.
+**Evidence (copied 2026-10-31).** The JSON is `evidence/xr1_list_b_20261030_212017/list_b.json`. Its hash
+matches the cluster's (`0e755875…`), and its checks list G0–G6 with no failures.
 
 ### R11
 
@@ -3780,4 +3781,8 @@ over G on unseen tasks).
 - The negative unseen + G for a silent score is worth one clause. With a silent score, the
   adaptive path is costly, a reason for Stage 2's frozen paths.
 
-**Evidence.** The JSONs are to be copied with the user's SSH key.
+**Evidence (copied 2026-10-31).** The JSONs are in `evidence/xr1_r11_rows_20261030_220636/`:
+- `seen_unseen_tables_r11.json` (`2dd19df0…`): T6 compared 1,335 values, max difference 0.0;
+- `rldx_unseen_r11.json` (`761e1ded…`): R2 is OK.
+
+Both match the cluster's hashes.

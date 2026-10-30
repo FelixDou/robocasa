@@ -1,0 +1,11 @@
+{
+ "analysis": "scripts/xr1_lead_time/review_analyses_b.py run (R12)",
+ "cluster_file": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_list_b_20261030_212017/list_b.json",
+ "export_sha256": {"list_b.json": "0e7558757880e3a665a50f8fb91558240c1037f10e9a2058eacda869d7072ee7"},
+ "pinned_worktree_commit": "59f0863461db1e68eb503ddadb81c587289b073b",
+ "frozen_inputs_unchanged": true,
+ "plan": "docs/xr1_review_analyses_plan.md (R12, Result)",
+ "received_date": "2026-10-31",
+ "source": "Copied byte for byte from the cluster with rsync by the user; not edited",
+ "status": "exploratory (opened cohorts)"
+}
