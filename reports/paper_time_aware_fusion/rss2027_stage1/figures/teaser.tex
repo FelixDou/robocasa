@@ -71,6 +71,6 @@
 limit $H_k$, so a per-task timer that alarms once an attempt outlasts the task's successes flags
 all failures. A monitor helps only if it alarms \emph{earlier}. We fuse any monitor with the timer
 (first alarm wins), calibrate both at a 5\% false-alarm target, and measure the extra warning over
-the timer. Example: a failed XR-1 \emph{OpenCabinet} rollout, monitor score from SAFE.}
+the timer (the fused timer can be looser than P's). Example: a failed XR-1 \emph{OpenCabinet} rollout, monitor score from SAFE.}
 \label{fig:qualitative}
 \end{figure}
