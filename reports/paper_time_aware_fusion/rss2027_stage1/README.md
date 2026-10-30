@@ -845,7 +845,7 @@ The author accepted both remaining drafts as written (2026-10-29).
 
 ## Update 2026-10-29 (c): author review of paper and proposal
 
-- **Statistics.** Tables give mean and std over 3 seeds only (as SAFE, FIPER, Hide-and-Seek and ActProbe do; none of them reports CIs). 95% bootstrap CIs stay in the text only for the gains over the timer, where seed std ignores test-set variation; Wilson bounds and the FIPER-table CI column are gone.
+- **Statistics.** Mean and std over 3 seeds only (as SAFE, FIPER, Hide-and-Seek and ActProbe do; none of them reports CIs). Update 2026-10-30: all CIs removed from the text too (author), and "hypotheses fixed in advance" dropped; uncertain gains are described in words ("not clearly above zero", "uncertain"). The CIs remain in the evidence files and the report. Kress-Gazit et al. citation dropped with them.
 - **Internal rules removed.** No 0.05 margin, no H1 "not supported" for SAFE, no completion criteria in the hypotheses, no sizing, power or SHA-256 in the text.
 - **Vocabulary.** "preregistered", "prospective", "cohort", "exploratory", "post hoc", "offline" (for RLDX-1), "controls", "labeler", "arm", "estimand" replaced by "hypotheses fixed in advance", "new/recorded rollouts", "test set", "input ablations", "annotator".
 - **Time risk detector deleted** (method, Table I, related work; Kaplan-Meier citation dropped).

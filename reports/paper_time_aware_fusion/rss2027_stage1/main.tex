@@ -59,10 +59,10 @@ limit. There, elapsed time is a strong failure signal: on RoboCasa365, a timer c
 separates failures as well as one that reads the policy. Without a duration-only comparator,
 even timeliness metrics cannot show what a monitor adds. We measure how much earlier than a
 per-task timer a monitor alarms at the same target FPR, and fuse the two by an OR rule with a
-split-conformal FPR bound. On 760 test rollouts of one VLA on 38 tasks, with hypotheses fixed
-in advance, the SAFE failure score adds 0.030 of the time limit to the timer and the sequence
-detector Hide-and-Seek, with three seeds averaged, 0.071 (95\% CI [0.022, 0.157]); at matched
-false alarms they shrink to 0.015 and 0.056, with CIs including zero. Input ablations that see
+split-conformal FPR bound. On 760 test rollouts of one VLA on 38 tasks, the SAFE failure
+score adds 0.030 of the time limit to the timer and the sequence detector Hide-and-Seek, with
+three seeds averaged, 0.071; at matched false alarms they shrink to 0.015 and 0.056, neither
+clearly above zero. Input ablations that see
 only elapsed time or another rollout's features add at most 0.012. On unseen tasks, where no
 per-task timer exists, Hide-and-Seek still adds 0.127 over a global timer, SAFE about as much as
 random noise. The ordering holds on recorded rollouts of a second VLA, and on FIPER's benchmark
@@ -106,8 +106,7 @@ Our contributions are:
   evidence from learned elapsed time (Sec.~\ref{sec:setting}, \ref{sec:method}).
   \item \textbf{Time-aware fusion:} an OR rule that fuses any monitor with a timer, whose
   split-conformal calibration bounds the FPR in finite samples (Proposition~\ref{prop:fpr}).
-  \item \textbf{An evaluation on 38 RoboCasa365 tasks} with hypotheses fixed before the
-  test. SAFE adds 0.030 of the time limit over the per-task timer and
+  \item \textbf{An evaluation on 38 RoboCasa365 tasks.} SAFE adds 0.030 of the time limit over the per-task timer and
   Hide-and-Seek~\cite{park2026hideseek} 0.071, a warning that develops during the rollout
   (Sec.~\ref{sec:results}). On XR-1's unseen tasks, only Hide-and-Seek's gain carries over; the
   ordering holds on a second VLA, and on FIPER's benchmark the test credits FIPER.
@@ -227,8 +226,8 @@ failures, each point placed at its own $\hat\lambda$. This choice also uses the 
 successes, so Proposition~\ref{prop:fpr} bounds each candidate path, not the chosen one; over 200
 re-splits of the successes, the choice raised the expected test FPR from 0.047 (P) to about
 0.055. A path chosen on other rollouts restores the bound: chosen on the validation set,
-Hide-and-Seek + P still gains 0.072 at 0.061 FPR (SAFE + P: 0.007), but both CIs then include
-zero (Hide-and-Seek: [$-0.069$, 0.143]). Stage~2 fixes every path in advance
+Hide-and-Seek + P still gains 0.072 at 0.061 FPR (SAFE + P: 0.007), though neither gain is then
+clearly above zero. Stage~2 fixes every path in advance
 (Sec.~\ref{sec:plan}).
 
 \section{Hypotheses}
@@ -246,8 +245,7 @@ Hide-and-Seek + P also lead P, including at matched false alarms.
 \textbf{Value of earlier warning (H4).} Within a budget of $1.25\,H_k$, resetting and retrying
 when Hide-and-Seek + P alarms yields a higher success rate than resetting when P alarms.
 
-We fixed H1, H2, P and the lead metric before scoring the test set, first for SAFE and
-then for Hide-and-Seek. Stage~2 addresses H3 and H4 (Sec.~\ref{sec:plan}).
+Sec.~\ref{sec:results} tests H1 and H2; Stage~2 addresses H3 and H4 (Sec.~\ref{sec:plan}).
 
 \section{Experiments}
 \label{sec:results}
@@ -286,9 +284,7 @@ FPR $\le 0.05$ we report test FPR, balanced accuracy (bACC; equal to weighted ac
 balanced sets), time-weighted accuracy $\mathrm{TWA} = \frac{1}{2}(\bar\ell + 1 -
 \mathrm{FPR})$ and detection time $\mathrm{DT} = 1 - \bar\ell$, a miss counting as 1. As
 in~\cite{park2026hideseek}, learned detectors are trained with 3 random seeds and tables give the
-mean and std of single models. For H1 and H2, each detector averages the 3 seeds' scores; as the
-seed std ignores test-set variation, brackets give 95\% bootstrap CIs over tasks, then rollouts,
-that also resample the calibration set and refit all thresholds~\cite{kressgazit2024empirical}.
+mean and std of single models. For H1 and H2, each detector averages the 3 seeds' scores.
 \emph{Matched} gains compare with P loosened on the test set to the fused detector's false
 alarms, which favors the timer.
 
@@ -416,15 +412,15 @@ detector above the global timer's TWA, and ActProbe's thresholds almost never fi
 \subsection{Warning lead over the per-task timer}
 
 \textbf{SAFE: a small gain (H1, H2).} On the test set (Table~\ref{tab:lead}), SAFE + P
-leads P by 0.030 of the time limit ([0.007, 0.093]) at 0.061 FPR. Random and within-task
+leads P by 0.030 of the time limit at 0.061 FPR. Random and within-task
 resampled scores gain at most 0.009, so the gain comes from the policy, not from the fusion
-itself. At matched false alarms, however, it shrinks to 0.015 ([$-0.007$, 0.041]).
+itself. At matched false alarms, however, it shrinks to 0.015, not clearly above zero.
 
-\textbf{Hide-and-Seek: an earlier warning (H1, H2).} Hide-and-Seek + P leads P by 0.071 ([0.022,
-0.157]) at the same 0.061 FPR; random and resampled scores gain at most 0.012. At matched false
-alarms it gains 0.056 ([$-0.014$, 0.120]), positive at every target from 2\% to 10\%, where
-SAFE averages 0.013 (Fig.~\ref{fig:pertask}b). Its advantage over SAFE + P, 0.041 ([$-0.011$,
-0.103]), is not significant. A single Hide-and-Seek model gains only $0.039 \pm 0.006$
+\textbf{Hide-and-Seek: an earlier warning (H1, H2).} Hide-and-Seek + P leads P by 0.071 at the
+same 0.061 FPR; random and resampled scores gain at most 0.012. At matched false alarms it gains
+0.056, positive at every target from 2\% to 10\%, where SAFE averages 0.013
+(Fig.~\ref{fig:pertask}b), though not clearly above zero at the 5\% target. Its advantage over
+SAFE + P (0.041) is uncertain. A single Hide-and-Seek model gains only $0.039 \pm 0.006$
 (Table~\ref{tab:lead}), so seed averaging is part of its warning.
 
 \textbf{Where the gain comes from.} The gain is uneven across tasks (Fig.~\ref{fig:pertask}a).
@@ -440,8 +436,7 @@ composite ones (0.008 to 0.039). Hide-and-Seek + P alarms earlier than P on 21 t
 A recurrent detector trained on rollouts that all fail at the limit could learn task durations.
 The zero-input ablation separates failures as well as Hide-and-Seek (Sec.~I), yet adds only
 0.001 over P at matched false alarms on the validation set. On the test set, Hide-and-Seek
-beats the first-step, zero-input and shuffle ablations by 0.070, 0.059 and 0.060 (CIs above
-zero): its warning develops during the rollout and is neither elapsed time nor the task's typical
+beats the first-step, zero-input and shuffle ablations by 0.070, 0.059 and 0.060: its warning develops during the rollout and is neither elapsed time nor the task's typical
 trajectory.
 
 \subsection{Unseen tasks, second policy and second benchmark}
@@ -477,7 +472,7 @@ difference is a lower bound.}
 monitors more data than P (48 rollouts per task with failures, against 6 to 45 success
 durations). With no rollout of the task, as in SAFE's setting~\cite{gu2025safe}, only
 Hide-and-Seek keeps a clear gain over G on XR-1: 0.127 with 3 seeds averaged (zero-input
-ablation: 0.033), 0.111 more than SAFE ([0.036, 0.166]). SAFE's seed-averaged 0.017 is no larger
+ablation: 0.033), 0.111 more than SAFE. SAFE's seed-averaged 0.017 is no larger
 than the best of 20 random scores (0.019; single models: 0.028), and against G loosened to its
 20 false alarms it is $-0.079$ (Hide-and-Seek: $+0.051$). The OOD detectors' gains cost three
 times G's false alarms and leave TWA at G's level. Once 1 to 5 successes of the new task exist, a
@@ -486,8 +481,8 @@ per-task timer can be built, and Hide-and-Seek still adds 0.088 to 0.099 over it
 
 \textbf{Second policy.} On recorded RLDX-1 rollouts~\cite{kim2026rldx} (20 tasks;
 Table~\ref{tab:lead}, bottom), all failures again ran to the time limit. With 3 seeds averaged,
-SAFE-LSTM + P gains 0.034 ([0.008, 0.067]) and Hide-and-Seek + P, set up with the XR-1 settings
-before scoring, 0.083 ([0.033, 0.138]; 0.052 at matched false alarms). Both gains come from
+SAFE-LSTM + P gains 0.034 and Hide-and-Seek + P, set up with the XR-1 settings before scoring,
+0.083 (0.052 at matched false alarms). Both gains come from
 atomic tasks: on composite tasks no score adds clear lead (Hide-and-Seek 0.010). On unseen tasks,
 Hide-and-Seek again gains most over G ($0.196 \pm 0.013$; ablations $\le 0.038$); SAFE-LSTM and
 the OOD detectors (default settings) gain 0.10 to 0.115 over this late timer (lead 0.026).
@@ -497,7 +492,7 @@ on a real robot), length alone separates failures with ROC-AUC 0.92--1.00 in fou
 re-ran FIPER's code (reproducing its results within 0.05) with elapsed time as one more method.
 Under FIPER's thresholds and selection rule, the timer has the best balanced accuracy (0.81
 against 0.78) at a test FPR of 0.09, against 0.35 for FIPER. At FIPER's own FPR, however, FIPER
-warns 0.146 of the episode earlier ([0.104, 0.188]; Table~\ref{tab:fiper}): the test credits
+warns 0.146 of the episode earlier (Table~\ref{tab:fiper}): the test credits
 early warning wherever it occurs.
 
 \subsection{When do failures become irreversible?}
