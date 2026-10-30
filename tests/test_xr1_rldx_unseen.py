@@ -240,6 +240,10 @@ class RldxUnseenTest(unittest.TestCase):
         extra_root.mkdir()
         act = write_fold_dirs(extra_root, self.plan, self.spec, self.root / "folds.json", ["actprobe"], horizons)
         family = [act[F] for F in ("0", "1", "2", "3", "all")]
+        # As on the cluster: a new detector's fold all has no earlier trajectory, so no reference checks.
+        meta = json.loads((act["all"] / "scoring.json").read_text())
+        meta.pop("reference_checks")
+        (act["all"] / "scoring.json").write_text(json.dumps(meta))
         with self.assertRaises(ValueError):
             self.run_unseen("u_noflag.json", families=[family])
         base_status, _, base = self.run_unseen("u_base.json")

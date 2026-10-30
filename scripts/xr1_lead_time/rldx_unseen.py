@@ -141,7 +141,7 @@ def load_fold_dir(path, wanted):
     return meta, norms, scores
 
 
-def check_meta(F, meta, tasks, held, folds_sha, detectors):
+def check_meta(F, meta, tasks, held, folds_sha, detectors, unreferenced=frozenset()):
     if str(meta["fold"]) != F or set(meta["held_out_tasks"]) != held[F]:
         raise ValueError(f"Fold {F}: fold or held-out tasks differ from the fold file")
     if set(meta["training_rollouts_by_task"]) != set(tasks) - held[F]:
@@ -161,11 +161,13 @@ def check_meta(F, meta, tasks, held, folds_sha, detectors):
     if F != ALL:
         return None
     checks = meta.get("reference_checks") or {}
-    need = {f"{c}/{d}" for c in COHORTS for d in detectors}
+    # R11: a detector never scored on RLDX-1 before (--unreferenced) has no earlier trajectory to
+    # reproduce; any reference check its directory did record must still pass.
+    need = {f"{c}/{d}" for c in COHORTS for d in detectors if d not in unreferenced}
     bad = sorted(k for k in need | set(checks) if not checks.get(k, {}).get("ok"))
     if bad:
         raise ValueError(f"Fold all did not reproduce the earlier trajectories for {bad}")
-    return {k: checks[k]["max_abs_diff"] for k in sorted(checks)}
+    return {k: checks[k].get("max_abs_diff") for k in sorted(checks)}
 
 
 def normalized(raw, stats):
@@ -278,7 +280,7 @@ def run(args):
                 raise ValueError(f"{name}: two directories for fold {F}")
             if list(meta["detectors"]) != list(first):
                 raise ValueError(f"{name}: fold {F} scored other detectors ({meta['detectors']})")
-            refs = check_meta(F, meta, tasks, held, folds_sha, first)
+            refs = check_meta(F, meta, tasks, held, folds_sha, first, set(args.unreferenced or []))
             if F == ALL:
                 fold_all_refs = refs
             attach(parts, F, norms, scores, held, first)
