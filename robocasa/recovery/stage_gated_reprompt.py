@@ -1363,6 +1363,13 @@ def _load_config(args):
         value = getattr(args, key, None)
         if value is not None:
             overrides[key] = value
+    if "tasks" in overrides:
+        # A task subset (e.g. the smoke run) keeps only that subset's per-task entries;
+        # a full config still fails on per-task entries for unconfigured tasks.
+        selected = set(overrides["tasks"])
+        for key in ("reprompt_whitelist", "required_subtask_overrides", "exclude_predicates", "regression_ignore_predicates"):
+            if isinstance(config.get(key), dict):
+                overrides[key] = {task: names for task, names in config[key].items() if task in selected}
     if getattr(args, "policy_arg", None):
         overrides["policy_args"] = {**config.get("policy_args", {}), **_parse_policy_args(args.policy_arg)}
     return resolve_config(config, overrides)

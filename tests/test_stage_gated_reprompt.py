@@ -634,6 +634,20 @@ class PlanTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             gate.resolve_config(gate_config(reprompt_step_cap=0))
 
+    def test_task_subset_keeps_only_its_whitelist_entries(self):
+        # The smoke run passes --tasks ArrangeTea with the shipped config.
+        import argparse
+
+        config_path = str(Path(__file__).resolve().parents[1] / "scripts/stage_gated_reprompt_xr1.json")
+        args = argparse.Namespace(config=config_path, tasks=["ArrangeTea"], arms=None, seeds_per_task=2,
+                                  base_seed=None, num_workers=None, policy_arg=None)
+        resolved = gate._load_config(args)
+        self.assertEqual(resolved["tasks"], ["ArrangeTea"])
+        self.assertEqual(resolved["reprompt_whitelist"], {"ArrangeTea": ["mug_on_tray"]})
+        full = argparse.Namespace(config=config_path, tasks=None, arms=None, seeds_per_task=None,
+                                  base_seed=None, num_workers=None, policy_arg=None)
+        self.assertEqual(set(gate._load_config(full)["reprompt_whitelist"]), {"ArrangeTea", "BreadSelection"})
+
     def test_cli_plan_and_analyze(self):
         with tempfile.TemporaryDirectory() as tmp:
             with contextlib.redirect_stdout(io.StringIO()):
