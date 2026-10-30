@@ -245,5 +245,74 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("REPRODUCTION FAILED", buffer.getvalue())
 
 
+
+class LstmAssemblyTests(unittest.TestCase):
+    """R11: assemble --detector safe_lstm replaces the MLP's E1 reference by a train check."""
+
+    def lstm_argv(self, root, runs, score_dirs, train_dirs=None, extra=(), out="lstm_all"):
+        argv = ["assemble", "--fold", "all", "--folds", str(root / "folds.json"), "--runtime-bundle",
+                str(root / "bundle.json"), "--output-dir", str(root / out), "--detector", "safe_lstm", *extra]
+        for s in fx.SEEDS:
+            argv += ["--training-run", s, str(runs[("all", s)])]
+            for cohort, _ in COHORTS:
+                argv += ["--scores", cohort, s, str(score_dirs[("all", cohort, s)])]
+            if train_dirs:
+                argv += ["--train-scores", s, str(train_dirs[s])]
+        return argv
+
+    def train_scores(self, root, runs, shift=0.0):
+        dirs = {}
+        for s in fx.SEEDS:
+            d = root / f"train_scores_{shift}" / f"seed{s}"
+            d.mkdir(parents=True)
+            rows = jsonl(runs[("all", s)] / "scores.jsonl")
+            rows = [dict(r, scores=(np.asarray(r["scores"]) + shift).tolist()) for r in rows]
+            rows.append(dict(rollout_id="extra-not-training", task_name=rows[0]["task_name"], scores=[0.0]))
+            write_jsonl(d / "scores.jsonl", rows)
+            (d / "provenance.json").write_text(json.dumps(dict(training_run_dir=str(runs[("all", s)]))))
+            dirs[s] = d
+        return dirs
+
+    def test_lstm_assembly_needs_and_runs_the_train_check(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, _, _, _, runs, score_dirs = pipeline(root)
+            exact = self.train_scores(root, runs)
+            with self.assertRaises(ValueError):        # no train check
+                mod.main(self.lstm_argv(root, runs, score_dirs))
+            with self.assertRaises(ValueError):        # the MLP's frozen reference does not apply
+                mod.main(self.lstm_argv(root, runs, score_dirs, exact,
+                                        extra=("--reference-predictions", "lead_calibration", str(root / "cal.jsonl"))))
+            self.assertFalse((root / "lstm_all").exists())
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = mod.main(self.lstm_argv(root, runs, score_dirs, exact))
+            self.assertEqual(code, 0, buf.getvalue())
+            self.assertIn("ASSEMBLY OK", buf.getvalue())
+            meta = json.loads((root / "lstm_all" / "scoring.json").read_text())
+            self.assertEqual((meta["detectors"], meta["head"]), (["safe_lstm"], "lstm"))
+            self.assertTrue(meta["checks"]["train_scores_vs_training_run"]["ok"])
+            self.assertNotIn("bundle_normalization", meta["checks"])
+            norms = json.loads((root / "lstm_all" / "normalizations.json").read_text())
+            self.assertEqual(sorted(norms), ["safe_lstm"])
+            self.assertEqual(jsonl(root / "lstm_all" / "lead_calibration_predictions.jsonl")[0]["detector"], "safe_lstm")
+
+    def test_lstm_train_check_mismatch_and_wrong_head_block_the_fold(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, _, _, _, runs, score_dirs = pipeline(root)
+            off = self.train_scores(root, runs, shift=1e-3)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(mod.main(self.lstm_argv(root, runs, score_dirs, off)), 1)
+            self.assertIn("REFERENCE MISMATCH", buf.getvalue())
+            with contextlib.redirect_stdout(io.StringIO()):       # within a looser tolerance
+                self.assertEqual(mod.main(self.lstm_argv(root, runs, score_dirs, off, out="lstm_tol",
+                                                         extra=("--train-check-tolerance", "1e-2"))), 0)
+            m = json.loads((runs[("all", "0")] / "metrics.json").read_text())
+            (runs[("all", "0")] / "metrics.json").write_text(json.dumps(dict(m, model="indep")))
+            with self.assertRaises(ValueError):                   # trained as an MLP head
+                mod.main(self.lstm_argv(root, runs, score_dirs, self.train_scores(root, runs), out="lstm_head"))
+
 if __name__ == "__main__":
     unittest.main()

@@ -75,17 +75,18 @@ import ood_per_seed_fused as opf  # noqa: E402
 import per_seed_detection as psd  # noqa: E402
 import quantile_timer as qt  # noqa: E402
 
-PLAN = "docs/xr1_review_analyses_plan.md (R6)"
+PLAN = "docs/xr1_review_analyses_plan.md (R6; R11 rows)"
 ALL = ctl.ALL
 SEEDS = ("0", "1", "2")
 SAFE = "safe_mlp"
 HS, ZERO, FIRST, SHUFFLE = "hide_and_seek", "hide_and_seek_zero", "hide_and_seek_first", "hide_and_seek_task_shuffle"
 HS_FAMILY = (HS, ZERO, FIRST)
 ACTPROBE = "actprobe"
+SAFE_LSTM, ACTPROBE_T = "safe_lstm", "actprobe_t"          # R11 rows, from optional fold directories
 OOD = ("mahalanobis", "knn_cosine", "pca_kmeans", "rnd")
 TIMERS = ("time_risk", "global_timer", "per_task_timer")
 TABLE1 = OOD + (SAFE, ACTPROBE, HS) + TIMERS
-TABLE2 = OOD + (SAFE,) + HS_FAMILY + (SHUFFLE,)
+TABLE2 = OOD + (SAFE, ACTPROBE) + HS_FAMILY + (SHUFFLE,)   # R11 adds ActProbe to Table II
 STANDALONE_KEYS = ("tpr", "fpr", "bacc", "twa", "dt")
 FUSED_KEYS = ("fpr", "mean_lead", "gain", "twa")
 TOL = 1e-12
@@ -354,6 +355,12 @@ def run(args):
                              need_all=True),
         ood=load_family("OOD", args.ood_fold_dirs, list(OOD), tasks, held, folds_sha, wanted),
     )
+    # R11: optional families, each five fold directories (0-3 and all) of one detector.
+    extra = []
+    for name, paths in ((SAFE_LSTM, args.safe_lstm_fold_dirs), (ACTPROBE_T, args.actprobe_t_fold_dirs)):
+        if paths:
+            fam[name] = load_family(name, paths, [name], tasks, held, folds_sha, wanted, need_all=True)
+            extra.append(name)
     ood_source_sha = sha256(args.ood_source_bundle)
     for F, (meta, _, _, _) in fam["ood"].items():
         if meta.get("variant") != "pooled" or (meta.get("fixed_selection") or {}).get("bundle_sha256") != ood_source_sha:
@@ -379,9 +386,14 @@ def run(args):
     seen = {SAFE: seen_safe(cal + te, bundle)}
     for name in (*HS_FAMILY, SHUFFLE):
         seen[name] = seen_amend2(args.amend2_scores, args.amend2_normalizations, name, need)
-    a_all = {ALL: fam["actprobe"][ALL]}
-    seen[ACTPROBE] = merge(trajectories(a_all, ACTPROBE, cal, ctl.CAL_COHORT, held, "per_task")[ALL],
-                           trajectories(a_all, ACTPROBE, te, ctl.TEST_COHORT, held, "per_task")[ALL])
+    def seen_fold_all(family, det):
+        a_all = {ALL: fam[family][ALL]}
+        return merge(trajectories(a_all, det, cal, ctl.CAL_COHORT, held, "per_task")[ALL],
+                     trajectories(a_all, det, te, ctl.TEST_COHORT, held, "per_task")[ALL])
+
+    seen[ACTPROBE] = seen_fold_all("actprobe", ACTPROBE)
+    for name in extra:
+        seen[name] = seen_fold_all(name, name)
     seen.update(seen_ood(args.ood_seen, need))
 
     # Unseen trajectories (pooled normalization), per fold.
@@ -392,6 +404,8 @@ def run(args):
         return {F: merge(c[F], e[F]) for F in folds}
 
     unseen = {SAFE: unseen_traj("safe", "safe"), ACTPROBE: unseen_traj("actprobe", ACTPROBE)}
+    for name in extra:
+        unseen[name] = unseen_traj(name, name)
     for name in HS_FAMILY:
         unseen[name] = unseen_traj("xt", name)
     for name in OOD:
@@ -419,6 +433,8 @@ def run(args):
     for name in OOD:
         seen_fused[name]["mean_std_over_seeds"] = mean_std([seen_fused[name][f"seed_{s}"] for s in SEEDS], FUSED_KEYS)
     checks["T2_seen_fused_max_abs_diff"] = t2
+    for name in (ACTPROBE, *extra):          # R11 rows: no stored run to compare with
+        seen_fused[name] = psd.run_fused(seen[name], seen[name], cal, te, bundle)
     bad = {k: v for k, v in t2.items() if not v <= TOL}
     if bad:
         failures.append(f"T2: seen + P differs from the stored per-seed runs: {bad}")
@@ -426,8 +442,6 @@ def run(args):
     # Unseen + G (Table II) with the cross-task design.
     keys = []
     for name, by_fold in unseen.items():
-        if name == ACTPROBE:
-            continue
         for F in folds:
             for r in cal + te:
                 per = by_fold[F][str(r["rollout_id"])]
@@ -436,7 +450,7 @@ def run(args):
                     r[f"{name}#{s}@{F}"] = per[s]
             keys += [f"{name}@{F}"] + [f"{name}#{s}@{F}" for s in SEEDS]
     D = ctl.Design(cal, te, held, keys, dev)
-    unseen_fused = {name: fused_unseen(D, name, SEEDS) for name in OOD + (SAFE,) + HS_FAMILY}
+    unseen_fused = {name: fused_unseen(D, name, SEEDS) for name in OOD + (SAFE, ACTPROBE) + HS_FAMILY + tuple(extra)}
 
     # T3: seed-averaged unseen + G reproduces the cross-task runs.
     xt = json.loads(Path(args.cross_task_result).read_text())["detectors"]
@@ -472,7 +486,7 @@ def run(args):
 
     # Table I.
     table1 = {}
-    for name in OOD + (SAFE, ACTPROBE, HS):
+    for name in OOD + (SAFE, ACTPROBE, HS) + tuple(extra):
         table1[name] = dict(seen=standalone_seen(cal, te, seen[name], SEEDS),
                             unseen=standalone_unseen(cal, te, held, folds, unseen[name], SEEDS))
     timer_traj = {str(r["rollout_id"]): {"det": r["timer"]} for r in cal + te}
@@ -483,10 +497,38 @@ def run(args):
     table1["per_task_timer"] = dict(seen=per_task_timer_seen(cal, te, rkP), unseen=None)
 
     # Table II.
-    table2 = {name: dict(seen=seen_fused[name], unseen=unseen_fused.get(name)) for name in TABLE2}
+    table2 = {name: dict(seen=seen_fused[name], unseen=unseen_fused.get(name)) for name in TABLE2 + tuple(extra)}
     g = unseen_fused[SAFE]["seed_average"]["timer"]
     table2["global_timer"] = dict(seen=None, unseen=dict(fpr=g["fpr"], mean_lead=g["mean_lead"], fp=g["fp"],
                                                          twa=(g["mean_lead"] + 1 - g["fpr"]) / 2))
+
+    # T6 (R11): with --r6-result, every row R6 published is reproduced exactly (same inputs, same code
+    # path), so adding rows changed nothing else.
+    if args.r6_result:
+        r6 = json.loads(Path(args.r6_result).read_text())
+        worst, compared = 0.0, 0
+
+        def walk(a, b):
+            nonlocal worst, compared
+            if isinstance(b, dict):
+                for k, v in b.items():
+                    if k in ("paths", "thresholds"):
+                        continue
+                    walk(a[k], v)
+            elif isinstance(b, (int, float)) and not isinstance(b, bool):
+                worst = max(worst, abs(float(a) - float(b)))
+                compared += 1
+
+        for tab, mine in (("table1", table1), ("table2", table2)):
+            for name, row in r6[tab].items():
+                walk(mine[name], row)
+        t6 = dict(values=compared, max_abs_diff=worst, ok=compared > 0 and worst <= TOL)
+        checks["T6_r6_rows_unchanged"] = t6
+        if not t6["ok"]:
+            out_path.write_text(json.dumps(dict(base, checks=checks, reproduction_failures=[f"T6: {t6}"]), indent=1,
+                                           default=float) + "\n")
+            print(f"REPRODUCTION FAILED:\n  T6: R6 rows changed ({t6})")
+            return 1
 
     out = dict(base, checks=checks, reproduction_failures=[], table1=table1, table2=table2,
                notes=dict(std="ddof 1 over training seeds 0-2; timers are deterministic",
@@ -503,11 +545,11 @@ def run(args):
         return f"{d['seed_average'][k]:.3f}      "
 
     print("Table I (bACC, TWA): seen | unseen")
-    for name in TABLE1:
+    for name in TABLE1 + tuple(extra):
         s, u = table1[name]["seen"], table1[name]["unseen"]
         print(f"  {name:28s} {cell(s, 'bacc')} {cell(s, 'twa')} | {cell(u, 'bacc')} {cell(u, 'twa')}")
     print("Table II (FPR, gain, TWA): seen + P | unseen + G")
-    for name in TABLE2:
+    for name in TABLE2 + tuple(extra):
         s, u = table2[name]["seen"], table2[name]["unseen"]
         print(f"  {name:28s} {cell(s, 'fpr')} {cell(s, 'gain')} {cell(s, 'twa')} | "
               f"{cell(u, 'fpr')} {cell(u, 'gain')} {cell(u, 'twa')}")
@@ -538,6 +580,9 @@ def main(argv=None):
     r.add_argument("--cross-task-result", required=True)
     r.add_argument("--cross-task-safe-result", required=True)
     r.add_argument("--actprobe-reference-normalizations")
+    r.add_argument("--safe-lstm-fold-dirs", nargs="+", help="R11: SAFE-LSTM fold directories 0-3 and all")
+    r.add_argument("--actprobe-t-fold-dirs", nargs="+", help="R11: ActProbe-with-timestep fold directories 0-3 and all")
+    r.add_argument("--r6-result", help="R11 gate T6: R6's seen_unseen_tables JSON, reproduced exactly")
     r.add_argument("--output", required=True)
     args = ap.parse_args(argv)
     return run(args)

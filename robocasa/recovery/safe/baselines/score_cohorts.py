@@ -178,7 +178,7 @@ def run(args):
             train_scores, cohort_scores, configs, models = {}, {n: {} for n in cohorts}, {}, {}
             for seed in args.seeds:
                 detector = build_detector(detector_name, seed=seed,
-                                          **detector_kwargs(detector_name, args, tasks))
+                                          **detector_kwargs(detector_name, args, tasks, horizons))
                 detector.fit(train)
                 configs[str(seed)] = detector.config()
                 train_scores[seed] = {r["rollout_id"]: np.asarray(detector.score(r), np.float64) for r in train}

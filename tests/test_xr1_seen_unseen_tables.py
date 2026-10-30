@@ -241,6 +241,53 @@ class RunTests(unittest.TestCase):
             self.assertAlmostEqual(got["fpr"], fp / n, places=12)
             self.assertAlmostEqual(got["tpr"], float(np.mean(hits)), places=12)
 
+    def test_r11_rows_and_unchanged_r6_rows(self):
+        """R11: ActProbe joins Table II; SAFE-LSTM and ActProbe-T rows come from optional fold dirs; T6
+        requires every row of the earlier output to be reproduced exactly."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args, held, cal, te = build(root)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(su.main(args), 0)
+            first = json.loads((root / "tables.json").read_text())
+            self.assertIsNotNone(first["table2"][su.ACTPROBE]["seen"])
+            self.assertIsNotNone(first["table2"][su.ACTPROBE]["unseen"])
+            rng = np.random.default_rng(21)
+            FAMILY_STRENGTH.update({su.SAFE_LSTM: 0.8, su.ACTPROBE_T: 0.9})
+            dirs = {name: [str(write_family(root, name, F, held[F], rng, [name])[0]) for F in fx.FOLDS]
+                    for name in (su.SAFE_LSTM, su.ACTPROBE_T)}
+            # The R6 output had no ActProbe Table II row; T6 checks the rows it has.
+            r6 = json.loads(json.dumps(first))
+            r6["table2"].pop(su.ACTPROBE)
+            (root / "r6.json").write_text(json.dumps(r6))
+            out_arg = args.index("--output") + 1
+            argv = list(args)
+            argv[out_arg] = str(root / "tables_r11.json")
+            argv += ["--safe-lstm-fold-dirs", *dirs[su.SAFE_LSTM], "--actprobe-t-fold-dirs", *dirs[su.ACTPROBE_T],
+                     "--r6-result", str(root / "r6.json")]
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(su.main(argv), 0, buf.getvalue())
+            out = json.loads((root / "tables_r11.json").read_text())
+            t6 = out["checks"]["T6_r6_rows_unchanged"]
+            self.assertTrue(t6["ok"])
+            self.assertGreater(t6["values"], 100)
+            for name in (su.SAFE_LSTM, su.ACTPROBE_T):
+                for table in ("table1", "table2"):
+                    self.assertIsNotNone(out[table][name]["seen"])
+                    self.assertIsNotNone(out[table][name]["unseen"])
+                self.assertEqual(out["table1"][name]["unseen"]["seed_average"]["n_success"], 10 * len(fx.TASKS))
+            # A changed R6 value blocks the tables.
+            bad = json.loads(json.dumps(r6))
+            bad["table1"][su.SAFE]["seen"]["seed_0"]["bacc"] += 1e-6
+            (root / "r6_bad.json").write_text(json.dumps(bad))
+            argv[out_arg] = str(root / "tables_bad.json")
+            argv[-1] = str(root / "r6_bad.json")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(su.main(argv), 1)
+            self.assertIn("T6", buf.getvalue())
+
     def test_prerequisite_failures_block_the_tables(self):
         cases = (dict(perturb_run_c=True), dict(actprobe_reference_ok=False))
         for case in cases:

@@ -46,6 +46,7 @@ from .baselines.score_cross_task import pooled_normalization
 
 PLAN = "docs/xr1_review_analyses_plan.md"
 DETECTOR = "safe"
+HEADS = {"safe": "indep", "safe_lstm": "lstm"}   # assemble --detector: output name -> SAFE head
 COHORTS = ("lead_calibration", "confirmatory_test")
 ALL = "all"
 
@@ -151,22 +152,34 @@ def assemble(args):
     if set(horizons) != tasks:
         raise ValueError("The runtime bundle's tasks differ from the fold file's")
 
+    detector = getattr(args, "detector", DETECTOR) or DETECTOR
+    head = HEADS[detector]
+    if detector != DETECTOR:
+        if not getattr(args, "train_scores", None):
+            raise ValueError(f"{detector} needs --train-scores (the train check replaces the MLP's E1 reference)")
+        if args.reference_predictions:
+            raise ValueError("--reference-predictions holds frozen MLP scores; it applies to detector safe only")
     runs = {str(s): Path(d).resolve() for s, d in args.training_run}
     if len(runs) != len(args.training_run):
         raise ValueError("A training seed is given twice")
     seeds = sorted(runs)
     manifest_path = str(Path(args.fold_manifest).resolve()) if args.fold_manifest else None
     norms, by_task, checks = {}, None, {}
+    train_rows = {}
     for s, run in runs.items():
         metrics = json.loads((run / "metrics.json").read_text())
         split = json.loads((run / "split_manifest.json").read_text())
         if str(metrics["seed"]) != s:
             raise ValueError(f"Training run {run} is seed {metrics['seed']}, not {s}")
+        trained_head = metrics.get("model")
+        if isinstance(trained_head, str) and trained_head != head:
+            raise ValueError(f"Training run {run} is a {trained_head} head, not {head} ({detector})")
         if set(split["task_names"]) != seen:
             raise ValueError(f"Training run {run} was not trained on exactly fold {F}'s seen tasks")
         if manifest_path is not None and str(Path(metrics["selection_manifest"]).resolve()) != manifest_path:
             raise ValueError(f"Training run {run} used {metrics['selection_manifest']}, not {manifest_path}")
         train = [r for r in jsonl(run / "scores.jsonl") if r.get("split") == "train"]
+        train_rows[s] = {str(r["rollout_id"]): r for r in train if "rollout_id" in r}
         counts = dict(sorted(Counter(r["task_name"] for r in train).items()))
         if set(counts) != seen:
             raise ValueError(f"Training scores of {run} do not cover exactly the seen tasks")
@@ -177,7 +190,7 @@ def assemble(args):
         records = [dict(task_name=r["task_name"], scores=np.asarray(r["scores"], np.float64)) for r in train]
         norms[s] = dict(pooled=pooled_normalization(records, horizons),
                         per_task=fit_safe_normalization(records, {t: horizons[t] for t in seen}))
-    if F == ALL:
+    if F == ALL and detector == DETECTOR:
         worst = 0.0
         for s in seeds:
             ref = bundle["task_normalizations"][s]
@@ -238,15 +251,42 @@ def assemble(args):
                 is_held = r0["task_name"] in held[F]
                 if any(bool(r.get("training_task")) == is_held for r in rows.values()):
                     raise ValueError(f"{cohort}: training-task flag of {rid} contradicts fold {F}")
-                stream.write(json.dumps(dict(detector=DETECTOR, rollout_id=rid, task_name=r0["task_name"],
+                stream.write(json.dumps(dict(detector=detector, rollout_id=rid, task_name=r0["task_name"],
                                              failed=bool(r0["failed"]), fold=F, held_out=is_held,
                                              source_inferences=len(r0["scores"]),
                                              per_seed_raw={s: rows[s]["scores"] for s in seeds})) + "\n")
                 n += 1
         counts[cohort] = n
-    write_json(out / "normalizations.json", {DETECTOR: norms})
+    write_json(out / "normalizations.json", {detector: norms})
 
     status = 0
+    # Train check (R11, required for heads other than the frozen MLP): the external scorer, run on
+    # the training export, must reproduce each training run's own scores of its training rollouts.
+    # It stands in for fold all's E1 reference, which exists for the MLP only.
+    if getattr(args, "train_scores", None):
+        tol = float(args.train_check_tolerance)
+        worst, compared = 0.0, 0
+        given = {str(s): Path(d).resolve() for s, d in args.train_scores}
+        if sorted(given) != seeds:
+            raise ValueError(f"--train-scores for seeds {sorted(given)}, training seeds {seeds}")
+        for s in seeds:
+            prov = json.loads((given[s] / "provenance.json").read_text())
+            if Path(prov["training_run_dir"]).resolve() != runs[s]:
+                raise ValueError(f"{given[s]} was scored with {prov['training_run_dir']}, not {runs[s]}")
+            external = {str(r["rollout_id"]): r for r in jsonl(given[s] / "scores.jsonl")}
+            if not train_rows[s]:
+                raise ValueError(f"Training run of seed {s} has no rollout IDs in its training scores")
+            for rid, r in train_rows[s].items():
+                if rid not in external:
+                    raise ValueError(f"Seed {s}: training rollout {rid} was not scored by --train-scores")
+                a, b = np.asarray(external[rid]["scores"], float), np.asarray(r["scores"], float)
+                worst = max(worst, float(np.max(np.abs(a - b))) if a.shape == b.shape else float("inf"))
+                compared += 1
+        checks["train_scores_vs_training_run"] = dict(rollouts=compared, max_abs_diff=worst, tolerance=tol,
+                                                      ok=compared > 0 and worst <= tol)
+        print(f"external vs training-run scores of {compared} training rollouts: max diff {worst} "
+              f"(tolerance {tol:g}) -> {'OK' if checks['train_scores_vs_training_run']['ok'] else 'MISMATCH'}")
+        status |= int(not checks["train_scores_vs_training_run"]["ok"])
     reference = {}
     for cohort, path in args.reference_predictions or []:
         if F != ALL:
@@ -268,7 +308,7 @@ def assemble(args):
                                  ok=n > 0 and worst <= 1e-12)
         print(f"reference {cohort}: {n} rollouts, max diff {worst} -> {'OK' if reference[cohort]['ok'] else 'MISMATCH'}")
         status |= int(not reference[cohort]["ok"])
-    if F == ALL:
+    if F == ALL and detector == DETECTOR:
         checks["reference_predictions"] = reference
         if set(reference) != set(COHORTS):
             print("fold all needs --reference-predictions for both cohorts")
@@ -279,7 +319,7 @@ def assemble(args):
 
     meta = dict(protocol="cross_task_safe_assembled_no_metrics", plan=PLAN, code_commit=code_commit(), fold=F,
                 held_out_tasks=sorted(held[F]), training_rollouts_by_task=by_task, folds_sha256=sha256(args.folds),
-                detectors=[DETECTOR], seeds=seeds, fold_manifest=manifest_path,
+                detectors=[detector], head=head, seeds=seeds, fold_manifest=manifest_path,
                 training_runs={s: str(r) for s, r in runs.items()},
                 training_checkpoint_sha256={s: sha256(r / "model_final.ckpt") for s, r in runs.items()},
                 scores=provenance, counts=counts, runtime_bundle_sha256=sha256(args.runtime_bundle), checks=checks)
@@ -507,6 +547,13 @@ def build_parser():
     a.add_argument("--scores", nargs=3, action="append", required=True, metavar=("COHORT", "SEED", "DIR"))
     a.add_argument("--fold-manifest")
     a.add_argument("--reference-predictions", nargs=2, action="append", metavar=("COHORT", "PREDICTIONS"))
+    a.add_argument("--detector", default=DETECTOR, choices=sorted(HEADS),
+                   help="output detector name: safe (frozen MLP, default) or safe_lstm (R11)")
+    a.add_argument("--train-scores", nargs=2, action="append", metavar=("SEED", "DIR"),
+                   help="external scores of the training export (group all), checked against the training run's "
+                        "own training scores; required for safe_lstm")
+    a.add_argument("--train-check-tolerance", type=float, default=1e-12,
+                   help="largest allowed train-check difference (R7 allowed 1e-6, float32, for an LSTM)")
     e = sub.add_parser("assemble-export", help="one SAFE head's fold directory from whole-export scores (RLDX-1, R7)")
     for name in ("--fold", "--folds", "--runtime-bundle", "--output-dir"):
         e.add_argument(name, required=True)

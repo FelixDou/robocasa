@@ -291,9 +291,12 @@ def run(args):
     if missing:
         raise ValueError(f"No family scores {missing}")
     detectors = list(DETECTORS) + [d for d in detectors if d not in DETECTORS]
-    unknown = [d for d in detectors if d not in ref["results"]]
+    unreferenced = set(args.unreferenced or [])
+    if unreferenced - set(detectors):
+        raise ValueError(f"--unreferenced names detectors no family scores: {sorted(unreferenced - set(detectors))}")
+    unknown = [d for d in detectors if d not in ref["results"] and d not in unreferenced]
     if unknown:
-        raise ValueError(f"rldx_per_seed.json has no result for {unknown}")
+        raise ValueError(f"rldx_per_seed.json has no result for {unknown} (R11: list new rows in --unreferenced)")
     checks = dict(R1=dict(folds={F: sorted(held[F]) for F in folds}, families=families))
 
     train = parts["train"]
@@ -309,6 +312,10 @@ def run(args):
             out[f"seed_{s}"] = seen_plus_P(parts, f"{d}#{s}@all/task", rk)
         out["mean_std_over_seeds"] = mean_std([out[f"seed_{s}"] for s in SEEDS])
         seen[d] = out
+        if d in unreferenced:            # R11 rows (e.g. ActProbe): no published row to reproduce
+            if (out["seed_average"]["P"]["lead"], out["seed_average"]["P"]["fpr"]) != stored_P:
+                failures.append(f"R2: {d}: P {out['seed_average']['P']} != stored {stored_P}")
+            continue
         stored = ref["results"][d]
         pairs = [("seed_average", stored["seed_average"])] + [(f"seed_{s}", stored["per_seed"][s]) for s in SEEDS]
         for label, want in pairs:
@@ -318,7 +325,8 @@ def run(args):
             if now != exp or (got["P"]["lead"], got["P"]["fpr"]) != stored_P:
                 failures.append(f"R2: {d} {label}: + P {now} (P {got['P']}) != stored {exp} (P {stored_P})")
             worst.append(max(abs(a - b) for a, b in zip(now, exp)))
-    checks["R2_seen_plus_P"] = dict(stored_P=stored_P, max_abs_diff=max(worst), ok=not failures)
+    checks["R2_seen_plus_P"] = dict(stored_P=stored_P, max_abs_diff=max(worst) if worst else None,
+                                    unreferenced=sorted(unreferenced), ok=not failures)
 
     # Unseen + G per fold, pooled.
     unseen, timers = {}, set()
@@ -398,6 +406,8 @@ def main(argv=None):
     r.add_argument("--fold-dirs", nargs="+", action="append", required=True,
                    help="one family's fold directories (folds 0-3 and all); repeat for each family")
     r.add_argument("--reference-per-seed", required=True, help="rldx_per_seed.json")
+    r.add_argument("--unreferenced", nargs="+", help="R11: detectors with no published row (e.g. actprobe actprobe_t); "
+                                                      "R2 checks only that their P equals the stored P")
     r.add_argument("--output", required=True)
     args = p.parse_args(argv)
     return folds_cmd(args) if args.cmd == "folds" else run(args)

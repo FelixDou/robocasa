@@ -824,6 +824,129 @@ The manifest records each of them with a hash, and its own SHA-256 goes into the
 - `score_cohorts --save-models` and `detectors.save_detector` / `load_detector` /
   `content_hash`, with tests in `tests/test_safe_score_cohorts.py`.
 
+## R11. Missing rows: ActProbe in Table II, ActProbe with its timestep, SAFE-LSTM on XR-1, ActProbe on RLDX-1 (written 2026-10-30, before any run)
+
+**Why.** The mock review of 2026-10-30 (`reports/paper_time_aware_fusion/rss2027_stage1/mock_review_20261030.md`
+on `claude/time-aware-fusion-paper`) and the author asked why Table I has no SAFE-LSTM on XR-1,
+why Table II has no ActProbe, and noted that our ActProbe omits the published model's timestep
+input t/(T − 1). None of these runs exists. Like R6–R7, this is exploratory on opened cohorts.
+
+**Rows.**
+
+| Row | Seen | Unseen | New training |
+|---|---|---|---|
+| R11a ActProbe + P / + G (XR-1) | R6's ActProbe fold all (`fold_all_b1ids`) | R6's folds 0–3 | none |
+| R11b ActProbe-T (`actprobe_t`, XR-1) | `score_cross_task --fold all` | folds 0–3 | 15 CPU fits |
+| R11c SAFE-LSTM (`safe_lstm`, XR-1) | fold all, per-task normalization | folds 0–3, pooled | 15 GPU fits |
+| R11d ActProbe, ActProbe-T (RLDX-1) | R7's fold all | R7's folds 0–3 | 30 CPU fits, only if R0 passes |
+
+- **ActProbe-T** (`detectors.ActProbeTimeDetector`) is ActProbe with one more input column,
+  t/(H_k − 1), t = 0, 1, … the inference index and H_k the bundle's time limit. Everything else
+  (signals, task code, loss, training, standardization) is ActProbe's. The time limit is known
+  for an unseen task too, so its unseen row is defined.
+- **SAFE-LSTM** uses `train_seen_tasks --model lstm` with the CV selection summary's LSTM
+  setting (`best_by_model.lstm`), the frozen MLP's class weighting, loss, epochs and split seed.
+  Fold all trains on `seen38_split_seed0.json`, as the frozen MLP refit did; folds 0–3 on R5's
+  fold manifests. Seeds 0–2. Every model scores both E1 cohorts (`--unseen-tasks score`) and the
+  training export (`--group all`) for the train check. `cross_task_safe assemble --detector
+  safe_lstm` writes the fold directories. Seen normalization is per task with
+  `fit_safe_normalization` on each run's own training scores, the formula of the MLP's bundle
+  normalization; unseen is pooled, the cross-task formula.
+- **Tables.** `seen_unseen_tables.py` now puts ActProbe in Table II and takes
+  `--safe-lstm-fold-dirs` and `--actprobe-t-fold-dirs` (five directories each). RLDX-1 rows come
+  from `rldx_unseen.py run` with R7's families plus the new one and `--unreferenced actprobe
+  actprobe_t`.
+
+**Gates (no table without them).**
+- **T1–T5** as in R6, unchanged.
+- **T6** (new): with `--r6-result`, every number of R6's `seen_unseen_tables_b1ids.json`
+  (sha256 `d927f67e…`) is reproduced to 1e-12, so the new rows changed nothing else.
+- **L-G0:** the CV summary has an LSTM selection. Otherwise stop and decide.
+- **L-G1** (per fold, in `assemble`): the external scorer's scores of each run's training
+  rollouts equal the run's own training scores within 1e-6 (R7 found 1.19e-7 for a float32
+  LSTM). Anything larger stops the fold.
+- **L-G2:** every LSTM run's `metrics.json` says `model: lstm`, and its tasks are the fold's
+  seen tasks (`assemble`).
+- **RLDX-1:** R7's R1–R3. ActProbe has no published RLDX-1 row, so R2 checks only that P is
+  the stored P.
+- **R0** (RLDX-1 feasibility): the raw RLDX-1 tensors carry `policy_action_chunks`. If not,
+  R11d is not run and the paper says ActProbe needs recorded action chunks.
+
+**Expectations (written before running).**
+- **ActProbe + P (XR-1, seen):** about SAFE's gain. On the validation set it was +0.020, and
+  +0.009 matched. **Unseen + G:** about 0, since ActProbe never fires on unseen tasks.
+- **ActProbe-T:** with elapsed time as an input, its standalone bACC and TWA should move toward
+  the timers', as the zero-input ablation's did. It should now fire on unseen tasks. Its gain
+  over P at matched false alarms should stay small, since P already has the time.
+- **SAFE-LSTM (XR-1):** + P within ±0.02 of SAFE-MLP's +0.024. On RLDX-1 the LSTM head beat the
+  MLP (+0.036 against +0.008), so it may be somewhat higher. Unseen + G: no prior on XR-1; on
+  RLDX-1 it was +0.101.
+
+## R12. Mock-review list B: five analyses on the E1 cohorts (written 2026-10-30, before any run)
+
+`scripts/xr1_lead_time/review_analyses_b.py`, with tests in `tests/test_xr1_review_analyses_b.py`.
+CPU, one process. Exploratory on the opened E1 cohorts, at α = 0.05 with the registered fits
+unless stated.
+
+- **B1. Time-only comparators.**
+  - **A_fixed:** per-task fractions a_k chosen on the development successes. They maximize
+    mean_k(1 − a_k) subject to mean_k FPR_k(a_k) ≤ α, by a Lagrangian over a fixed μ grid. One
+    shared margin is then set by Proposition 1 on the calibration successes. The path never
+    reads calibration successes, so Proposition 1 holds.
+  - **A_adaptive:** the development budget β ∈ {0.01, …, 0.30} is chosen on the calibration
+    cohort exactly as the fused path (u, s) is, so it is as adaptive as the fused detectors.
+  - Reported:
+    - each timer against P;
+    - SAFE + P and Hide-and-Seek + P against each timer, at the same target and matched;
+    - each score fused with each timer, against that timer.
+- **B2. Native time-varying bands.** SAFE and Hide-and-Seek with the official SAFE functional
+  conformal upper band (`conformal.calibrate_functional_threshold`, alignment `extend`, `tfunc`
+  modulation).
+  - It is applied to the seed-averaged, per-task-normalized raw score, with no running maximum.
+  - The calibration successes are split within each task, alternating in rollout-ID order, into
+    reference and nonconformity halves.
+  - Standalone at α. OR-fused with P under a Bonferroni split, the band and P each at α/2.
+- **B3. H2 at matched FPR.**
+  - 100 draws (seed 12) of Gaussian noise and of within-task resampled SAFE and Hide-and-Seek
+    scores, each fused with P like the policy scores. Their gains are reported at the same
+    target and matched.
+  - Each policy's matched gain is ranked among its nulls (rank p).
+  - A paired test-only CI of (policy matched gain − mean null matched gain).
+- **B4. Full-pipeline bootstrap of the two central matched gains.**
+  - Each replicate resamples tasks, then rollouts within task and class in both cohorts. The
+    draw sequence is `confirm_hide_and_seek.boot_multi`'s.
+  - Each replicate refits P and the fused detector, and re-matches P on the resampled test
+    cohort.
+  - The same-target CIs at that seed must equal Amendment 2's decision CIs (gate G5).
+- **B5. Lead in seconds and by task type; lead before the point of no return.**
+  - Seconds use 0.8 s per inference, at the same target and matched, for all tasks and for
+    atomic and composite tasks.
+  - With the primary labeler's `no_return_labels.json` and the sample key: lead before the point
+    of no return, (t_u − alarm)/H, and the count of alarms before it, on the decided failures,
+    for P, SAFE + P and Hide-and-Seek + P.
+
+**Gates (no result without them):**
+- **G0:** the stored SAFE and Hide-and-Seek trajectories equal their normalized raw scores.
+- **G1:** E1 and Amendment 2 are reproduced at α = 0.05.
+- **G2:** the bisection loosening equals `review_analyses.loosen_timer`. The matched gains and
+  their test-only CIs equal R2's (`--review-result`).
+- **G3:** the allocation is monotone in the budget, and the timer fit with P's fractions is P.
+- **G5:** the B4 same-target CIs at 2,000 replicates equal Amendment 2's decision CIs.
+- **G6:** the key's P and SAFE + P alarms are reproduced from the E1 fits.
+
+**Expectations (written before running).**
+- **B1:** A_fixed gains about +0.01 to +0.03 over P at a similar FPR. Hide-and-Seek's gain
+  against A shrinks by about as much. Hide-and-Seek + A keeps a positive matched gain. If it is
+  about 0, budget reallocation explains the gain.
+- **B2:** the band fires earlier on short tasks and misses more failures than our constant
+  threshold on the running maximum. Under the α/2 split, the fused gain is below the adaptive
+  fusion's.
+- **B3:** null matched gains are ≤ 0 on average; the validation set gave mean −0.006 and max
+  +0.016. Hide-and-Seek's rank p is ≤ 0.05 against both nulls; SAFE's is not.
+- **B4:** the full-pipeline matched CIs are wider than the test-only ones, and both include 0.
+- **B5:** Hide-and-Seek's 0.071 is several seconds on average. Lead before the point of no
+  return is positive on only a few decided (mostly atomic) failures.
+
 ## Runbook
 
 Run on TSUBAME from a pinned worktree, CPU only for R1–R4, following
@@ -2015,6 +2138,410 @@ sha256sum $R10_ROOT/*.json $R10_ROOT/models/*.npz; basename $R10_ROOT
 Copy `e2_frozen_rule.json`, `e2_freeze_manifest.json` and `scores/scoring.json` to
 `reports/safe_robocasa365_research_plan_20260823/evidence/<R10_TAG>/`. The models stay on the
 cluster under `$R10_ROOT/models`; the manifest records their hashes.
+
+### 9. R11: missing rows (CPU node for ActProbe-T; two GPUs for SAFE-LSTM)
+
+`R11_SHA` is the full SHA of the pushed commit on `claude/review-analyses` that contains this
+step. Use two allocations if needed:
+- **CPU:** a large node for ActProbe-T, about 95 GB per run, three at a time, as in R6 C2. For
+  example `qrsh -g tga-shinoda -l node_h=1 -l h_rt=12:00:00`.
+- **GPU:** two GPUs for SAFE-LSTM, about 15 fits and 45 scorings.
+- The first export load per node takes 40–70 minutes.
+
+A background job dies with its allocation. In a second terminal or allocation, start with
+`source $STORAGE_BS/robocasa_logs/eval/<R11_TAG>/paths.env` after the export lines.
+
+**9.0 Environment, pinned code, inputs, gate L-G0, unit tests.**
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export SAFE_PY=$STORAGE_BS/envs/vla_safe/bin/python SAFE_REPO=$PROJECT_FS/SAFE
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+export CK=$STORAGE_BS/robocasa_checkpoints/safe
+export XT_ROOT=$CK/xr1_cross_task_20261027_212141 RS_ROOT=$CK/xr1_cross_task_safe_20261028_193716
+export R6_ROOT=$CK/xr1_seen_unseen_20261028_235911
+export PSEED_ROOT=$CK/xr1_per_seed_detection_20261027_152130 OOD_ROOT=$CK/xr1_ood_per_seed_20261027_212729
+export XR1_BASELINE_ROOT=$CK/xr1_offline_baselines_20261017_100820
+export XR1_FINAL_ROOT=$CK/xr1_pooled_39tasks_final_refits_20260814_231508
+export XR1_POOL=$STORAGE_BS/robocasa_rollouts/safe/xr1_safe_pooled_39tasks_50each_seed0_20260812_221815
+export XR1_SAFE_EXPORT=$XR1_POOL/official_safe_39tasks_50each_seed0 XR1_SEEN38_SPLIT=$XR1_POOL/seen38_split_seed0.json
+export XR1_SAFE_CV_SUMMARY=$CK/xr1_safe_pooled_39tasks_50each_seed0_20260812_221815_full_cv/cv_selection_summary.json
+
+export R11_SHA=<R11_SHA>
+export R11_REPO=$PROJECT_FS/robocasa_r11rows_${R11_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $R11_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R11_REPO $R11_SHA
+test "$(git -C $R11_REPO rev-parse HEAD)" = "$R11_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not R11_SHA"
+cd $R11_REPO
+export R11_TAG=xr1_r11_rows_$(date +%Y%m%d_%H%M%S)
+export R11_ROOT=$CK/$R11_TAG R11_LOG=$STORAGE_BS/robocasa_logs/eval/$R11_TAG
+mkdir -p $R11_ROOT $R11_LOG
+export FOLDS=$R11_REPO/scripts/xr1_lead_time/cross_task_folds.json
+export XR1_LCAL_EXPORT=$("$SAFE_PY" -I -c "import json,sys; print(json.load(open(sys.argv[1]))['export_dir'])" \
+  $XR1_LCAL_ROOT/frozen_mlp_scores/seed0/provenance.json)
+export XR1_TEST_EXPORT=$("$SAFE_PY" -I -c "import json,sys; print(json.load(open(sys.argv[1]))['export_dir'])" \
+  $XR1_CONFIRM_ROOT/confirmatory_collection/frozen_mlp_scores/seed0/provenance.json)
+printf 'export %s=%q\n' R11_SHA "$R11_SHA" R11_REPO "$R11_REPO" R11_TAG "$R11_TAG" R11_ROOT "$R11_ROOT" \
+  R11_LOG "$R11_LOG" FOLDS "$FOLDS" XR1_LCAL_EXPORT "$XR1_LCAL_EXPORT" XR1_TEST_EXPORT "$XR1_TEST_EXPORT" \
+  CK "$CK" XT_ROOT "$XT_ROOT" RS_ROOT "$RS_ROOT" R6_ROOT "$R6_ROOT" PSEED_ROOT "$PSEED_ROOT" OOD_ROOT "$OOD_ROOT" \
+  XR1_BASELINE_ROOT "$XR1_BASELINE_ROOT" XR1_SAFE_EXPORT "$XR1_SAFE_EXPORT" XR1_SEEN38_SPLIT "$XR1_SEEN38_SPLIT" \
+  XR1_SAFE_CV_SUMMARY "$XR1_SAFE_CV_SUMMARY" SAFE_PY "$SAFE_PY" SAFE_REPO "$SAFE_REPO" > $R11_LOG/paths.env
+echo "R11_TAG=$R11_TAG"
+
+R11_INPUTS=($E1_OUT/calibration_predictions.jsonl $E1_OUT/test_predictions.jsonl $XR1_RUNTIME_BUNDLE $XR1_TRAIN_IDS
+            $R6_ROOT/seen_unseen_tables_b1ids.json $XR1_SAFE_CV_SUMMARY $XR1_SEEN38_SPLIT
+            $RS_ROOT/manifests/fold_{0,1,2,3}.json $XT_ROOT/cross_task_lead.json $RS_ROOT/cross_task_safe.json
+            $PSEED_ROOT/per_seed_fused_heldout.json $PSEED_ROOT/actprobe_scores/normalizations.json
+            $OOD_ROOT/ood_per_seed_fused_heldout.json $XR1_BASELINE_ROOT/develop/baseline_bundle.json
+            $AMEND2_ROOT/scores/{lead_calibration,confirmatory_test}_predictions.jsonl $AMEND2_ROOT/scores/normalizations.json)
+for f in "${R11_INPUTS[@]}"; do test -s $f && echo "OK $f" || echo "STOP: missing $f"; done > $R11_LOG/inputs_check.log
+for d in $R6_ROOT/actprobe/fold_{0,1,2,3,all_b1ids} $R6_ROOT/ood/fold_{0,1,2,3} $XR1_SAFE_EXPORT $XR1_LCAL_EXPORT $XR1_TEST_EXPORT; do
+  test -d $d && echo "OK $d" || echo "STOP: missing $d"; done >> $R11_LOG/inputs_check.log
+grep -v '^OK' $R11_LOG/inputs_check.log; grep -c '^OK' $R11_LOG/inputs_check.log
+echo "d927f67e  R6 tables:" $(sha256sum $R6_ROOT/seen_unseen_tables_b1ids.json | cut -c1-8)
+sha256sum "${R11_INPUTS[@]}" > $R11_LOG/frozen_inputs.sha256
+"$SAFE_PY" -I - <<'PY' 2>&1 | tee $R11_LOG/lg0.log
+import json, os
+s = json.load(open(os.environ["XR1_SAFE_CV_SUMMARY"]))
+print("best_by_model keys:", sorted(s.get("best_by_model", {})), "task type:", s.get("task_type_filter", "all"))
+print("training objective:", s.get("training_objective"))
+lstm = s.get("best_by_model", {}).get("lstm")
+print("L-G0 OK, LSTM setting:" if lstm else "STOP: no LSTM selection (L-G0)", json.dumps(lstm) if lstm else "")
+PY
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_safe_baselines tests.test_xr1_cross_task_safe \
+  tests.test_xr1_seen_unseen_tables tests.test_safe_score_cross_task tests.test_xr1_rldx_unseen 2>&1 | tail -n 3
+free -g | head -n 2; nproc; nvidia-smi --query-gpu=index,memory.used --format=csv 2>/dev/null
+```
+
+Continue only if all of these hold:
+- `HEAD OK` is printed, no `STOP` line appears, and the count is 32;
+- the R6 tables hash starts with `d927f67e`;
+- `lg0.log` ends in `L-G0 OK`;
+- the tests end with `OK`.
+
+**9.1 ActProbe-T on XR-1 (CPU, background, 5 runs).** Three at a time, as in R6 C2. No reference
+exists for this new detector.
+
+```bash
+cd $R11_REPO
+cat > $R11_LOG/actprobe_t.sh <<'EOF2'
+set -u
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+source $R11_LOG/paths.env
+cd $R11_REPO
+export CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
+COMMON=(--dataset-dir "${XR1_RAW_DIRS[@]}" $XR1_LCAL_ROOT/merged_all_retained $XR1_CONFIRM_ROOT/confirmatory_collection/merged_all_retained
+        --runtime-bundle $XR1_RUNTIME_BUNDLE --train-ids $XR1_TRAIN_IDS --folds $FOLDS
+        --cohort lead_calibration $E1_OUT/calibration_predictions.jsonl
+        --cohort confirmatory_test $E1_OUT/test_predictions.jsonl
+        --detectors actprobe_t --feature-aggregation last --seeds 0 1 2)
+one() {
+  F=$1
+  "$SAFE_PY" -u -m robocasa.recovery.safe.baselines.score_cross_task "${COMMON[@]}" --fold $F \
+    --output-dir $R11_ROOT/actprobe_t/fold_$F > $R11_LOG/actprobe_t_fold_$F.log 2>&1
+  echo "=== ACTPROBE_T FOLD $F rc=$? $(date -Iseconds)"
+}
+one all & one 0 & one 1 & wait
+one 2 & one 3 & wait
+echo "=== ACTPROBE_T DONE"
+EOF2
+nohup nice -n 10 bash $R11_LOG/actprobe_t.sh > $R11_LOG/actprobe_t.log 2>&1 &
+echo "ActProbe-T PID $! on $(hostname)"
+```
+
+It is done when `actprobe_t.log` shows five `rc=0` lines and `=== ACTPROBE_T DONE`. Any other
+`rc` is a stop condition.
+
+**9.2 SAFE-LSTM training (two GPUs, background, 15 fits).** GPU 0 trains folds all, 0 and 1; GPU 1
+trains folds 2 and 3, three seeds each, one after another. Fold all uses the frozen refit's
+selection manifest.
+
+```bash
+cd $R11_REPO
+for G in 0 1; do
+  if [ $G = 0 ]; then FS="all 0 1"; else FS="2 3"; fi
+  cat > $R11_LOG/lstm_train_gpu$G.sh <<EOF2
+#!/bin/bash
+cd $R11_REPO
+for F in $FS; do for S in 0 1 2; do
+  if [ \$F = all ]; then M=$XR1_SEEN38_SPLIT; else M=$RS_ROOT/manifests/fold_\$F.json; fi
+  echo "=== START fold \$F seed \$S \$(date -Iseconds) on \$(hostname) GPU $G ==="
+  CUDA_VISIBLE_DEVICES=$G WANDB_MODE=disabled "$SAFE_PY" -u -m robocasa.recovery.safe.train_seen_tasks \\
+    --export-dir $XR1_SAFE_EXPORT --safe-repo $SAFE_REPO \\
+    --output-dir $R11_ROOT/train/fold_\$F/lstm_seed\$S \\
+    --model lstm --seed \$S --split-seed 0 \\
+    --selection-manifest \$M --selection-summary $XR1_SAFE_CV_SUMMARY \\
+    --class-weighting official_inverse_frequency --epochs 1000 --device cuda
+  echo "=== END fold \$F seed \$S rc=\$? \$(date -Iseconds) ==="
+done; done
+EOF2
+done
+cat $R11_LOG/lstm_train_gpu0.sh
+for G in 0 1; do nohup bash $R11_LOG/lstm_train_gpu$G.sh > $R11_LOG/lstm_train_gpu$G.log 2>&1 & echo "GPU $G PID $! on $(hostname)"; done
+```
+
+Check progress with `grep -h "=== " $R11_LOG/lstm_train_gpu*.log`. Training is done when there
+are 15 `END ... rc=0` lines. Then check gate L-G2 and the training time:
+
+```bash
+"$SAFE_PY" -I - <<'PY'
+import glob, json, os
+for m in sorted(glob.glob(os.environ["R11_ROOT"] + "/train/fold_*/lstm_seed*/metrics.json")):
+    d = json.load(open(m))
+    print(m.split("/train/")[1], "model", d.get("model"), "seed", d.get("seed"), "tasks",
+          len(json.load(open(m.replace("metrics.json", "split_manifest.json")))["task_names"]))
+PY
+```
+
+**9.3 SAFE-LSTM scoring (two GPUs, background, 45 scorings).**
+- GPU 0 scores the lead-calibration cohort with all 15 models, and the training export with
+  folds all and 0.
+- GPU 1 scores the confirmatory test cohort with all 15 models, and the training export with
+  folds 1–3.
+
+If `--group all` is refused for the training export, stop and report the message. The train
+check (L-G1) then needs another route.
+
+```bash
+cd $R11_REPO
+for G in 0 1; do
+  if [ $G = 0 ]; then C=lead_calibration; X=$XR1_LCAL_EXPORT; TF="all 0"; else C=confirmatory_test; X=$XR1_TEST_EXPORT; TF="1 2 3"; fi
+  cat > $R11_LOG/lstm_score_gpu$G.sh <<EOF2
+#!/bin/bash
+cd $R11_REPO
+for F in all 0 1 2 3; do for S in 0 1 2; do
+  RUN=$R11_ROOT/train/fold_\$F/lstm_seed\$S
+  echo "=== START $C fold \$F seed \$S \$(date -Iseconds) on \$(hostname) GPU $G ==="
+  CUDA_VISIBLE_DEVICES=$G PYTHONPATH=$R11_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.score_seen_checkpoint_external \\
+    --export-dir $X --safe-repo $SAFE_REPO --training-run-dir \$RUN \\
+    --output-dir $R11_ROOT/score/fold_\$F/$C/seed\$S --group $C --device cuda --unseen-tasks score
+  echo "=== END $C fold \$F seed \$S rc=\$? \$(date -Iseconds) ==="
+done; done
+for F in $TF; do for S in 0 1 2; do
+  RUN=$R11_ROOT/train/fold_\$F/lstm_seed\$S
+  echo "=== START train-export fold \$F seed \$S \$(date -Iseconds) on \$(hostname) GPU $G ==="
+  CUDA_VISIBLE_DEVICES=$G PYTHONPATH=$R11_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.score_seen_checkpoint_external \\
+    --export-dir $XR1_SAFE_EXPORT --safe-repo $SAFE_REPO --training-run-dir \$RUN \\
+    --output-dir $R11_ROOT/score/fold_\$F/train_export/seed\$S --group all --device cuda --unseen-tasks score
+  echo "=== END train-export fold \$F seed \$S rc=\$? \$(date -Iseconds) ==="
+done; done
+EOF2
+done
+for G in 0 1; do nohup bash $R11_LOG/lstm_score_gpu$G.sh > $R11_LOG/lstm_score_gpu$G.log 2>&1 & echo "GPU $G PID $! on $(hostname)"; done
+```
+
+Scoring is done when the two logs have 21 and 24 `END ... rc=0` lines.
+
+**9.4 Assemble the five SAFE-LSTM folds (L-G1, L-G2).** Every fold must print a train-check `OK`
+line and `ASSEMBLY OK`.
+
+```bash
+cd $R11_REPO
+for F in all 0 1 2 3; do
+  A=()
+  for S in 0 1 2; do
+    RUN=$R11_ROOT/train/fold_$F/lstm_seed$S
+    A+=(--training-run $S $RUN --scores lead_calibration $S $R11_ROOT/score/fold_$F/lead_calibration/seed$S
+        --scores confirmatory_test $S $R11_ROOT/score/fold_$F/confirmatory_test/seed$S
+        --train-scores $S $R11_ROOT/score/fold_$F/train_export/seed$S)
+  done
+  if [ $F != all ]; then A+=(--fold-manifest $RS_ROOT/manifests/fold_$F.json); fi
+  PYTHONPATH=$R11_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.cross_task_safe assemble --fold $F --detector safe_lstm \
+    --folds $FOLDS --runtime-bundle $XR1_RUNTIME_BUNDLE --train-check-tolerance 1e-6 \
+    "${A[@]}" --output-dir $R11_ROOT/safe_lstm/fold_$F 2>&1 | tail -n 4
+done | tee $R11_LOG/lstm_assemble.log
+```
+
+**9.5 The XR-1 tables (CPU, minutes).** These run after 9.1 and 9.4. To report ActProbe-T before
+SAFE-LSTM is done, run once without `--safe-lstm-fold-dirs`, with output
+`seen_unseen_tables_r11a.json`, then again with it.
+
+```bash
+cd $R11_REPO
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/seen_unseen_tables.py run \
+  --calibration $E1_OUT/calibration_predictions.jsonl --test $E1_OUT/test_predictions.jsonl \
+  --runtime-bundle $XR1_RUNTIME_BUNDLE --folds $FOLDS \
+  --safe-fold-dirs $RS_ROOT/folds/fold_{0,1,2,3} --xt-fold-dirs $XT_ROOT/fold_{0,1,2,3} \
+  --actprobe-fold-dirs $R6_ROOT/actprobe/fold_{0,1,2,3} $R6_ROOT/actprobe/fold_all_b1ids \
+  --ood-fold-dirs $R6_ROOT/ood/fold_{0,1,2,3} \
+  --ood-source-bundle $XR1_BASELINE_ROOT/develop/baseline_bundle.json \
+  --amend2-scores $AMEND2_ROOT/scores/lead_calibration_predictions.jsonl $AMEND2_ROOT/scores/confirmatory_test_predictions.jsonl \
+  --amend2-normalizations $AMEND2_ROOT/scores/normalizations.json \
+  --ood-seen 0 $OOD_ROOT/seed0/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed0/heldout/test_with_baselines.jsonl \
+  --ood-seen 1 $OOD_ROOT/seed1/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed1/heldout/test_with_baselines.jsonl \
+  --ood-seen 2 $OOD_ROOT/seed2/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed2/heldout/test_with_baselines.jsonl \
+  --run-c $PSEED_ROOT/per_seed_fused_heldout.json --ood-fused $OOD_ROOT/ood_per_seed_fused_heldout.json \
+  --cross-task-result $XT_ROOT/cross_task_lead.json --cross-task-safe-result $RS_ROOT/cross_task_safe.json \
+  --actprobe-reference-normalizations $PSEED_ROOT/actprobe_scores/normalizations.json \
+  --actprobe-t-fold-dirs $R11_ROOT/actprobe_t/fold_{0,1,2,3,all} \
+  --safe-lstm-fold-dirs $R11_ROOT/safe_lstm/fold_{0,1,2,3,all} \
+  --r6-result $R6_ROOT/seen_unseen_tables_b1ids.json \
+  --output $R11_ROOT/seen_unseen_tables_r11.json 2>&1 | tee $R11_LOG/tables.log
+sha256sum -c --quiet $R11_LOG/frozen_inputs.sha256 && echo INPUTS UNCHANGED
+sha256sum $R11_ROOT/seen_unseen_tables_r11.json
+```
+
+Report:
+- the whole `tables.log`, which ends in `SEEN/UNSEEN TABLES OK`;
+- `INPUTS UNCHANGED`;
+- the SHA-256.
+
+**9.6 RLDX-1 ActProbe (R11d; CPU).** Use a new terminal with R7's environment. R0 is checked
+first.
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+source $STORAGE_BS/robocasa_logs/eval/rldx1_unseen_20261029_135501/paths.env      # R7: R7_ROOT, FOLDS (RLDX-1), RLDX_RAW, ...
+export RLDX_FOLDS=$FOLDS R7S=$R7_ROOT/safe
+source $STORAGE_BS/robocasa_logs/eval/<R11_TAG>/paths.env                       # R11_ROOT, R11_LOG, R11_REPO, SAFE_PY
+cd $R11_REPO
+CUDA_VISIBLE_DEVICES="" PYTHONPATH=$R11_REPO "$SAFE_PY" - <<'PY' 2>&1 | tee $R11_LOG/rldx_r0.log
+import os
+import numpy as np
+from robocasa.recovery.safe.baselines.run_baselines import index_datasets, load_baseline_rollout
+idx = index_datasets([os.environ["RLDX_RAW"]])
+ids = sorted(idx)[:5]
+ok = True
+for rid in ids:
+    d, m = idx[rid]
+    r = load_baseline_rollout(d, m, "last")
+    a = r["actions"]
+    print(rid, r["task_name"], "actions", None if a is None else a.shape, "replan_steps", r["replan_steps"],
+          "inferences", len(r["features"]))
+    ok = ok and a is not None and a.shape[0] == len(r["features"])
+print(f"{len(idx)} RLDX-1 rollouts indexed;", "R0 OK" if ok else "STOP: no recorded action chunks (R0)")
+PY
+```
+
+Only if `rldx_r0.log` ends in `R0 OK`, run the scoring (five folds, both ActProbe variants, R7's
+folds), then the table:
+
+```bash
+cd $R11_REPO
+cat > $R11_LOG/rldx_actprobe.sh <<'EOF2'
+set -u
+source $STORAGE_BS/robocasa_logs/eval/rldx1_unseen_20261029_135501/paths.env
+export RLDX_FOLDS=$FOLDS
+source $R11_LOG/paths.env
+cd $R11_REPO
+export CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8
+COMMON=(--dataset-dir $RLDX_RAW --runtime-bundle $RLDXHS_ROOT/inputs/rldx_bundle.json
+        --train-ids $RLDXHS_ROOT/inputs/train_ids.json --folds $RLDX_FOLDS
+        --cohort calibration $RLDXHS_ROOT/inputs/calibration_ids.json --cohort test $RLDXHS_ROOT/inputs/test_ids.json
+        --detectors actprobe actprobe_t --feature-aggregation last --seeds 0 1 2 --score-train)
+one() {
+  F=$1
+  "$SAFE_PY" -u -m robocasa.recovery.safe.baselines.score_cross_task "${COMMON[@]}" --fold $F \
+    --output-dir $R11_ROOT/rldx_actprobe/fold_$F > $R11_LOG/rldx_actprobe_fold_$F.log 2>&1
+  echo "=== RLDX ACTPROBE FOLD $F rc=$? $(date -Iseconds)"
+}
+one all & one 0 & one 1 & one 2 & one 3 & wait
+echo "=== RLDX ACTPROBE DONE"
+EOF2
+nohup nice -n 10 bash $R11_LOG/rldx_actprobe.sh > $R11_LOG/rldx_actprobe.log 2>&1 &
+echo "RLDX ActProbe PID $! on $(hostname)"
+```
+
+When `rldx_actprobe.log` shows five `rc=0` lines and `=== RLDX ACTPROBE DONE`:
+
+```bash
+cd $R11_REPO
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/rldx_unseen.py run \
+  --safe-dir $RLDX_ROOT/calibration/lstm --inputs-dir $RLDXHS_ROOT/inputs --folds $RLDX_FOLDS \
+  --fold-dirs $R7_ROOT/folds/fold_{0,1,2,3,all} \
+  --fold-dirs $R7S/folds/lstm/fold_0_f32 $R7S/folds/lstm/fold_{1,2,3,all} \
+  --fold-dirs $R7S/folds/indep/fold_{0,1,2,3,all} \
+  --fold-dirs $R11_ROOT/rldx_actprobe/fold_{0,1,2,3,all} --unreferenced actprobe actprobe_t \
+  --reference-per-seed $RLDXPS_ROOT/rldx_per_seed.json --output $R11_ROOT/rldx_unseen_r11.json 2>&1 | tee $R11_LOG/rldx_unseen.log
+sha256sum -c --quiet $R7_LOG/frozen_inputs.sha256 && sha256sum -c --quiet $R7_LOG/frozen_safe.sha256 && echo INPUTS UNCHANGED
+sha256sum $R11_ROOT/rldx_unseen_r11.json
+```
+
+Report:
+- `rldx_r0.log`;
+- the whole `rldx_unseen.log`, which ends in `RLDX-1 UNSEEN TABLE OK`;
+- `INPUTS UNCHANGED` and the SHA-256.
+
+The rows already published must be unchanged. The test
+`test_unreferenced_rows_need_the_flag_and_keep_the_published_ones` checks this on synthetic data.
+
+### 10. R12: mock-review list B (CPU, one process, about 1–2 hours)
+
+`R12_SHA` is the full SHA of the pushed commit on `claude/review-analyses` that contains this
+step. B4 refits two detectors 2,000 times, and B3 fits 300 null fusions. Use 4 cores.
+
+The primary labeler's `no_return_labels.json` is on the Mac (sha256 `9ef2ca5f…`, 48 labels).
+Copy it next to the key once:
+
+```bash
+# local machine
+scp ~/Downloads/no_return_labels.json tsubame:/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_no_return_labeling/key/no_return_labels.json
+```
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export SAFE_PY=$STORAGE_BS/envs/vla_safe/bin/python
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+export CK=$STORAGE_BS/robocasa_checkpoints/safe
+export RV_JSON=$CK/xr1_review_analyses_20261028_155557/review_analyses.json
+export NR_OUT=$STORAGE_BS/robocasa_rollouts/safe/xr1_no_return_labeling
+export R12_SHA=<R12_SHA>
+export R12_REPO=$PROJECT_FS/robocasa_r12listb_${R12_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $R12_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R12_REPO $R12_SHA
+test "$(git -C $R12_REPO rev-parse HEAD)" = "$R12_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not R12_SHA"
+cd $R12_REPO
+export R12_TAG=xr1_list_b_$(date +%Y%m%d_%H%M%S)
+export R12_ROOT=$CK/$R12_TAG R12_LOG=$STORAGE_BS/robocasa_logs/eval/$R12_TAG
+mkdir -p $R12_ROOT $R12_LOG
+R12_INPUTS=($E1_OUT/calibration_predictions.jsonl $E1_OUT/test_predictions.jsonl $E1_OUT/confirm_lead.json
+            $AMEND2_ROOT/scores/lead_calibration_predictions.jsonl $AMEND2_ROOT/scores/confirmatory_test_predictions.jsonl
+            $AMEND2_ROOT/scores/normalizations.json $AMEND2_ROOT/confirm_hide_and_seek.json $XR1_RUNTIME_BUNDLE
+            $RV_JSON $NR_OUT/key/key.json $NR_OUT/key/no_return_labels.json)
+for f in "${R12_INPUTS[@]}"; do test -s $f && echo "OK $f" || echo "STOP: missing $f"; done
+sha256sum "${R12_INPUTS[@]}" | tee $R12_LOG/frozen_inputs.sha256 | cut -c1-12
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_xr1_review_analyses_b 2>&1 | tail -n 3
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 nohup nice -n 10 \
+  "$SAFE_PY" -I -u scripts/xr1_lead_time/review_analyses_b.py run \
+  --calibration $E1_OUT/calibration_predictions.jsonl --test $E1_OUT/test_predictions.jsonl \
+  --scores-calibration $AMEND2_ROOT/scores/lead_calibration_predictions.jsonl \
+  --scores-test $AMEND2_ROOT/scores/confirmatory_test_predictions.jsonl \
+  --normalizations $AMEND2_ROOT/scores/normalizations.json --runtime-bundle $XR1_RUNTIME_BUNDLE \
+  --e1-result $E1_OUT/confirm_lead.json --amend2-result $AMEND2_ROOT/confirm_hide_and_seek.json \
+  --review-result $RV_JSON --nr-labels $NR_OUT/key/no_return_labels.json --nr-key $NR_OUT/key/key.json \
+  --output $R12_ROOT/list_b.json > $R12_LOG/list_b.log 2>&1 &
+echo "R12 PID $! on $(hostname); R12_TAG=$R12_TAG"
+```
+
+Check that:
+- no `STOP` line is printed;
+- the labels hash starts with `9ef2ca5fe2d9`;
+- `review_analyses.json`'s hash starts with `8f38f3c6bed7`;
+- the tests end with `OK`.
+
+When the job ends:
+
+```bash
+tail -n 40 $R12_LOG/list_b.log
+sha256sum -c --quiet $R12_LOG/frozen_inputs.sha256 && echo INPUTS UNCHANGED
+sha256sum $R12_ROOT/list_b.json
+```
+
+Report:
+- the whole tail, which ends in `LIST B OK` or `REPRODUCTION FAILED`;
+- `INPUTS UNCHANGED`;
+- the SHA-256.
+
+Then copy `list_b.json` to the local evidence folder.
 
 ## Result
 

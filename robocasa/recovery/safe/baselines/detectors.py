@@ -406,6 +406,37 @@ class ActProbeDetector(_SequenceDetector):
         }
 
 
+class ActProbeTimeDetector(ActProbeDetector):
+    """ActProbe with its published elapsed-time input (R11 of docs/xr1_review_analyses_plan.md).
+
+    Huang et al. append the normalized timestep t / (T - 1) to the per-step inputs, with T the
+    episode timeout. Here T is the task's time limit H_k in policy inferences (the runtime
+    bundle's task_horizons) and t = 0, 1, ... the inference index. ``actprobe`` omits this input;
+    everything else (signals, task code, loss, training) is unchanged. Like every input here, the
+    timestep is standardized with the training mean and scale.
+    """
+
+    name = "actprobe_t"
+
+    def __init__(self, seed=0, action_dims=None, tasks=None, horizons=None, **kwargs):
+        super().__init__(seed, action_dims=action_dims, tasks=tasks, **kwargs)
+        if not horizons:
+            raise ValueError("actprobe_t needs the task time limits H_k (horizons)")
+        self.horizons = {str(task): int(value) for task, value in horizons.items()}
+
+    def _inputs(self, rollout):
+        base = super()._inputs(rollout)
+        task = str(rollout["task_name"])
+        if task not in self.horizons:
+            raise ValueError(f"actprobe_t: no time limit for task {task}")
+        timeout = self.horizons[task]
+        step = np.arange(len(base), dtype=np.float64) / max(timeout - 1, 1)
+        return np.concatenate([base, step[:, None]], axis=1)
+
+    def config(self):
+        return {**super().config(), "timestep_input": "t / (H_k - 1)", "horizons": self.horizons}
+
+
 class HideAndSeekDetector(_SequenceDetector):
     """Trajectory-label LSTM with peak-margin and proxy-onset losses."""
 
@@ -641,6 +672,7 @@ DETECTOR_REGISTRY = {
     for detector in (
         ActionConsistencyDetector,
         ActProbeDetector,
+        ActProbeTimeDetector,
         MahalanobisDetector,
         CosineKNNDetector,
         PCAKMeansDetector,

@@ -205,7 +205,7 @@ def run(args):
             configs, norms = {}, {}
             cohort_scores = {name: {} for name in written}
             for seed in args.seeds:
-                detector = build_detector(detector_name, seed=seed, **detector_kwargs(detector_name, args, sorted(horizons)))
+                detector = build_detector(detector_name, seed=seed, **detector_kwargs(detector_name, args, sorted(horizons), horizons))
                 detector.fit(train)
                 configs[str(seed)] = detector.config()
                 fit_records = [{"task_name": r["task_name"], "scores": np.asarray(detector.score(r), np.float64)}

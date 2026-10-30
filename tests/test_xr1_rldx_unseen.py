@@ -233,6 +233,32 @@ class RldxUnseenTest(unittest.TestCase):
                                    "--output", str(self.root / out)])
         return status, buf.getvalue(), json.loads((self.root / out).read_text())
 
+    def test_unreferenced_rows_need_the_flag_and_keep_the_published_ones(self):
+        """R11: a family with no published row (ActProbe) runs only when listed in --unreferenced."""
+        horizons = json.loads((self.root / "inputs" / "rldx_bundle.json").read_text())["task_horizons"]
+        extra_root = self.root / "actprobe"
+        extra_root.mkdir()
+        act = write_fold_dirs(extra_root, self.plan, self.spec, self.root / "folds.json", ["actprobe"], horizons)
+        family = [act[F] for F in ("0", "1", "2", "3", "all")]
+        with self.assertRaises(ValueError):
+            self.run_unseen("u_noflag.json", families=[family])
+        base_status, _, base = self.run_unseen("u_base.json")
+        self.assertEqual(base_status, 0)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            status = self.ru.main(["run", "--safe-dir", str(self.root / "safe"), "--inputs-dir", str(self.root / "inputs"),
+                                   "--folds", str(self.root / "folds.json"),
+                                   "--fold-dirs", *[str(self.dirs[F]) for F in ("0", "1", "2", "3", "all")],
+                                   "--fold-dirs", *map(str, family), "--unreferenced", "actprobe",
+                                   "--reference-per-seed", str(self.root / "per_seed.json"),
+                                   "--output", str(self.root / "u_act.json")])
+        self.assertEqual(status, 0, buf.getvalue())
+        out = json.loads((self.root / "u_act.json").read_text())
+        self.assertEqual(out["checks"]["R2_seen_plus_P"]["unreferenced"], ["actprobe"])
+        self.assertIn("actprobe", out["table2"])
+        for d in self.ru.DETECTORS:          # the published rows are unchanged by the extra family
+            self.assertEqual(out["table2"][d], base["table2"][d])
+
     def test_folds_are_stratified_and_written_once(self):
         self.assertEqual((self.spec["seed"], self.spec["k"]), (self.ru.FOLD_SEED, 4))
         self.assertEqual(sorted(t for f in self.spec["folds"] for t in f["held_out"]), list(TASKS))
