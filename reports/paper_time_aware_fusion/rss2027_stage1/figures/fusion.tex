@@ -22,11 +22,11 @@
 \node[font=\footnotesize, text=gray!35!black, align=center, anchor=north] at (3.95, -1.5)
   {calibrated jointly on successes: $\Pr(\text{false alarm}) \le \alpha$ for a fixed path};
 \end{tikzpicture}}
-\caption{Time-aware fusion. Any monitor score gives early alarms and the per-task timer a late one
-that, when calibration certifies a usable operating point, catches every timeout; the first to
-fire raises the alarm. A split-conformal rule on calibration successes sets both thresholds along
-one path; for a path fixed independently of the calibration successes, a new success raises an
-alarm with probability at most $\alpha$ (Proposition~\ref{prop:fpr}).}
+\caption{Time-aware fusion: the first of an early monitor alarm and a late timer alarm wins.
+Split-conformal calibration on successes sets both thresholds along one path. For a path fixed
+independently of the calibration successes, a new success alarms with probability at most
+$\alpha$, and once calibration certifies a usable point, every timeout is caught
+(Proposition~\ref{prop:fpr}).}
 \label{fig:fusion}
 \vspace{-6pt}
 \end{figure}

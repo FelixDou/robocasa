@@ -14,8 +14,9 @@
 SAFE learns a failure score from a VLA's last-layer features and thresholds it with a
 functional conformal band~\cite{gu2025safe}; we reuse its implementation. Follow-ups change
 the training data~\cite{rajaprakash2026safecast}, labels~\cite{park2026hideseek,ma2026failurespot},
-or policy~\cite{soddy2026memoryvla}. None
-reports an elapsed-time detector. SAFE identifies the duration shortcut and removes it by
+or policy~\cite{soddy2026memoryvla}. FIPER notes that accumulated scores flag failures mostly
+because failed rollouts are longer~\cite{romer2025fiper}, and ActProbe feeds the normalized
+timestep to its model~\cite{huang2026actprobe}, but none reports an elapsed-time detector. SAFE identifies the duration shortcut and removes it by
 evaluating rollouts at equal length (its App.~B.5) and, on its real robot, by running every
 rollout to a fixed horizon~\cite{gu2025safe}. These controls suit fixed-horizon evaluation;
 under success-terminated execution, duration is a shortcut~\cite{geirhos2020shortcut} for offline
@@ -24,8 +25,8 @@ agent's state in reinforcement learning~\cite{pardo2018timelimits}.
 
 \textbf{Action-space and success-only detectors.}
 STAC~\cite{agia2024sentinel} and VLA-FAIL~\cite{seligmann2026vlafail} compare overlapping
-action chunks, and ActProbe~\cite{huang2026actprobe} feeds chunk consistency and magnitude to
-a task-conditioned LSTM, beating internal-feature baselines on RoboCasa. FAIL-Detect~\cite{xu2025faildetect} and
+action chunks, and ActProbe~\cite{huang2026actprobe} feeds chunk consistency, magnitude and the
+normalized timestep to a task-conditioned LSTM, beating internal-feature baselines on RoboCasa. FAIL-Detect~\cite{xu2025faildetect} and
 FIPER~\cite{romer2025fiper} score inputs, outputs or embeddings against successful rollouts
 only. FIPER alarms when two conformal scores \emph{both} exceed their thresholds, which
 suppresses false alarms; we alarm when \emph{either} crosses, as the two signals catch failures
@@ -41,8 +42,10 @@ failures run to the limit, determines Hide-and-Seek's TWA at equal FPR (Sec.~\re
 metric is not new, the duration-only comparator is. Lead at a fixed false-alarm budget is the
 accuracy--earliness trade-off of early time-series classification~\cite{xing2012early}.
 Split-conformal thresholds give finite-sample
-false-positive control under exchangeability~\cite{angelopoulos2021gentle}; we extend the
-construction to a two-signal OR rule (Sec.~\ref{sec:guarantee}). RESCUE~\cite{ahmedt2026rescue}
+false-positive control under exchangeability~\cite{angelopoulos2021gentle}; our two-signal OR
+rule (Sec.~\ref{sec:guarantee}) is an instance of nested conformal
+prediction~\cite{gupta2022nested}, and Learn-then-Test~\cite{angelopoulos2025ltt} could choose
+its path from data with a guarantee. RESCUE~\cite{ahmedt2026rescue}
 finds that good detection scores do not guarantee lower intervention cost, and CheckVLA
 couples detection to repair; an earlier alarm matters only if acting
 on it raises success.
