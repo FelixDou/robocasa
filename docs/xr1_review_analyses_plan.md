@@ -3594,3 +3594,125 @@ API on 2026-10-29) sit beside them.
   full.
 - The small config files are identified on Hugging Face only by git blob IDs. The manifest
   records their SHA-256.
+
+### R12
+
+**Run.** `xr1_list_b_20261030_212017`, at `59f08634` (pinned worktree `robocasa_r12listb_59f08634`,
+node r18n8). `list_b.json` has SHA-256 `0e755875…`. The log ends in `LIST B OK` and `INPUTS
+UNCHANGED`. The labels' SHA-256 is `9ef2ca5fe2d9…` (48 labels, the primary labeler). The unit
+tests passed on the cluster (5 tests).
+
+**Gates.** All passed, since the script reports results only then:
+- G0: the pipelines match;
+- G1: E1 and Amendment 2 are reproduced: P 0.2252 at 21 FP; SAFE + P +0.0298;
+  Hide-and-Seek + P +0.0708;
+- G2: the R2 matched gains and their test-only CIs are reproduced: SAFE +0.0150 [−0.007, 0.0413];
+  Hide-and-Seek +0.0560 [−0.0141, 0.1202];
+- G3: the allocation behaves as specified;
+- G5: the B4 same-target CIs equal Amendment 2's decision CIs: SAFE [0.0068, 0.093],
+  Hide-and-Seek [0.0221, 0.1572];
+- G6: the no-return key's alarms are reproduced.
+
+**B1. Time-only comparators.** At α = 0.05, test cohort. "vs A" is the score + P against that
+timer; "+ A" is the score fused with that timer.
+
+| Timer | Budget | Lead (FP) | Over P (matched) | SAFE: vs A (matched) | SAFE: + A (matched) | Hide-and-Seek: vs A (matched) | Hide-and-Seek: + A (matched) |
+|---|---|---|---|---|---|---|---|
+| P | — | 0.2252 (21) | — | +0.030 (+0.015) | — | +0.071 (+0.056) | — |
+| A_fixed | 0.05 | 0.2122 (20) | −0.013 (+0.002) | +0.043 (+0.037) | +0.033 (+0.027) | +0.084 (+0.078) | +0.100 (+0.064) |
+| A_adaptive | 0.02 | 0.2318 (23) | +0.007 (−0.008) | +0.023 (+0.022) | +0.019 (+0.015) | +0.064 (+0.063) | +0.071 (+0.065) |
+
+- **No time-only timer beats P at matched false alarms.** Allocating the budget across tasks
+  on the development successes (A_fixed) loses lead. Choosing the budget as adaptively as the
+  fused path (A_adaptive) gains +0.007 at two more false alarms, and −0.008 matched.
+- **Budget reallocation does not explain Hide-and-Seek's gain.** Against the adaptive timer,
+  Hide-and-Seek still gains +0.063 matched, and +0.065 fused with that timer. Both are at least
+  its +0.056 against P.
+- **Expectation (A gains +0.01 to +0.03 over P):** not met. P is already a strong time-only
+  comparator.
+
+**B2. Native time-varying bands** (official SAFE functional band; seed-averaged normalized raw
+score).
+
+| Score | Standalone TPR | FPR | Lead | TWA | Band OR P (α/2 each): FPR | Lead | Gain over P | Matched |
+|---|---|---|---|---|---|---|---|---|
+| SAFE | 0.497 | 0.058 | 0.223 | 0.582 | 0.055 | 0.234 | +0.009 | +0.006 |
+| Hide-and-Seek | 0.613 | 0.071 | 0.310 | 0.619 | 0.068 | 0.326 | +0.101 | +0.068 |
+
+- **With its own band, Hide-and-Seek warns earlier than with our constant threshold.**
+  - Standalone TWA is 0.619, against 0.599 (single models, constant threshold).
+  - Fused under the Bonferroni split, it gains +0.068 matched, against +0.056 with the adaptive
+    path.
+- **SAFE's band changes little.** Standalone TWA 0.582 is the same as before, and its fused gain
+  is small (+0.006 matched).
+- **The band overshoots the target.** Hide-and-Seek's standalone band has FPR 0.071. The
+  official band uses a plain quantile and half the calibration successes, so it does not bound
+  the FPR in finite samples.
+- **Expectation:** partly met. The band fires earlier, but it did not miss more failures than
+  the constant threshold.
+
+**B3. H2 at matched false alarms** (100 draws each, seed 12).
+
+| Null | Same-target gain (mean) | Matched gain: mean | max | Mean FP |
+|---|---|---|---|---|
+| noise | +0.0025 | −0.0107 | +0.0052 | 22.6 |
+| SAFE resampled | +0.0014 | −0.0112 | +0.0002 | 22.4 |
+| Hide-and-Seek resampled | +0.0003 | −0.0074 | −0.0012 | 21.7 |
+
+- **Both policy scores beat every null draw at matched false alarms.** The rank p is 1/101 =
+  0.0099 against noise and against their own resampled scores.
+- **Paired test-only CI of (policy matched gain − mean null matched gain):**
+  - SAFE: +0.026 [0.003, 0.052] against noise, +0.026 [0.004, 0.053] against resampled SAFE;
+  - Hide-and-Seek: +0.067 [−0.003, 0.131] against noise, +0.063 [−0.006, 0.128] against
+    resampled Hide-and-Seek.
+- **Expectation:** partly met. The nulls are ≤ 0 on average, as expected. SAFE also reaches the
+  minimum rank p, and its paired CI excludes 0, while Hide-and-Seek's touches 0. Its gain is
+  larger but more variable across tasks.
+
+**B4. Full-pipeline bootstrap of the matched gains** (2,000 replicates; refit and re-match in
+each).
+
+| | Matched gain | Test-only CI (R2) | Full-pipeline CI |
+|---|---|---|---|
+| SAFE + P | +0.015 | [−0.007, 0.041] | [−0.035, 0.063] |
+| Hide-and-Seek + P | +0.056 | [−0.014, 0.120] | [−0.017, 0.130] |
+| Hide-and-Seek − SAFE | +0.041 | — | [−0.039, 0.117] |
+
+- **Expectation (wider, both include 0):** met. SAFE's interval widens much more than
+  Hide-and-Seek's.
+
+**B5. Lead in seconds** (0.8 s per inference; test failures; same target, matched in
+parentheses).
+
+| | All tasks | Atomic | Composite |
+|---|---|---|---|
+| P lead | 23.3 s | 9.7 s | 28.2 s |
+| SAFE + P gain | +1.4 s (+0.1 s) | +2.7 s (+2.1 s) | +1.0 s (−0.5 s) |
+| Hide-and-Seek + P gain | +2.6 s (+1.3 s) | +5.6 s (+5.0 s) | +1.5 s (−0.04 s) |
+
+- **The matched gain is in the atomic tasks.** On composite tasks it is about 0 for both
+  scores.
+- **Point of no return** (48 labeled failures, 10 decided). The detectors alarmed before the
+  point of no return on:
+  - P: 0 of 10;
+  - SAFE + P: 2 of 10;
+  - Hide-and-Seek + P: 2 of 10.
+
+  The mean signed lead before it is −0.35, −0.33 and −0.32 of H; a negative value means the
+  alarm came after the point of no return.
+
+**What this changes for the paper.**
+- **Time-only comparators:** P is the strongest time-only comparator tested. A
+  budget-allocated timer, fixed or adaptive, does not beat it at matched false alarms. Against
+  the adaptive one, Hide-and-Seek keeps +0.063.
+- **H2 at matched false alarms:** both scores beat all 100 noise and resampled-score fusions.
+  Their mean null gain is negative (−0.007 to −0.011).
+- **Native bands:** with Hide-and-Seek's own time-varying band, its fused matched gain is
+  +0.068.
+- **Seconds:** Hide-and-Seek + P warns 2.6 s earlier on average, 5.6 s on atomic tasks, and
+  about 0 s on composite tasks at matched false alarms.
+- **Point of no return:** the fused detectors alarm before it on 2 of the 10 irreversible
+  failures; P never does.
+- **The full-pipeline matched CIs include 0** for both scores.
+
+**Evidence.** The JSON is to be copied with the user's SSH key. This session's shell was refused.
