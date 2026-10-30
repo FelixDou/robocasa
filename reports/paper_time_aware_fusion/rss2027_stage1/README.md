@@ -855,3 +855,13 @@ The author accepted both remaining drafts as written (2026-10-29).
 - **References.** Added RLDX-1 report, Kress-Gazit et al. (evaluation practice), Pardo et al. (time limits), LIBERO, OpenVLA, pi0; all checked on arXiv on 2026-10-29. 29 entries, still on page 6.
 - **Method figure** (`figures/fusion.tex`, Fig. 2): the venue proposal's fusion diagram (monitor score and per-task timer, OR, alarm, joint calibration), placed with Sec. IV-C. The per-task figure is now Fig. 3.
 - Content ends near the bottom of page 5, column 2; references alone on page 6.
+
+## Update 2026-10-30: review edits, and where the decision records live
+
+- **Paper.** Hypotheses stay scientific statements (no pass/fail wording). The two central matched gains have 95% CIs again: SAFE + P 0.015 [-0.007, 0.041], Hide-and-Seek + P 0.056 [-0.014, 0.120]. These are the *test-only* bootstrap of `review_analyses.py` (`quantile_timer.boot`): test-set tasks, then failures within each task, 2,000 resamples, paired across methods, thresholds fixed. They do not resample calibration or refit thresholds (only the registered same-target decision CIs did). Tables are labelled as single models, mean ± std across 3 training seeds; text results are three-seed ensembles. The FPR guarantee is qualified "for a path fixed independently of the calibration successes" (abstract, contributions, Fig. 2), complete timeout recall "when calibration certifies a usable operating point" (Fig. 2). Fig. 1 says "5% calibration target". Table II and Sec. IV-D name the adaptive-path calibration and separate it from the fixed path of Proposition 1. Fig. 3(b) speaks of positive point estimates. E2 charges monitor latency to the shared budget, uses identical reset/retry accounting and reports the paired success difference with a 95% CI.
+- **Research record (not in the paper).** The original decision rules and their chronology are kept, unchanged:
+  - Amendment 1 (lead over P, 0.05 margin, decision CI, Wilson bound): `docs/xr1_confirmatory_amendment_1_lead_time.md`, `preregistration_amendment.md` in this folder; result in the experiment report §15.13.
+  - Amendment 2 (Hide-and-Seek, same rule): `docs/xr1_confirmatory_amendment_2_hide_and_seek.md`; result §15.21.
+  - Earlier fused test: `docs/xr1_confirmatory_fused_test.md`.
+  - Stage 2 rules and sizing (E1 97.5% CIs, binomial FPR rule, frozen null test; E2 branching design): `docs/stage2_sizing.md` and R9/R10 in `docs/xr1_review_analyses_plan.md` (branch `claude/review-analyses`).
+  - The last draft that stated these rules in the text is commit `5653b073`.
