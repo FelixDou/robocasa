@@ -3971,3 +3971,142 @@ over G on unseen tasks).
 - `rldx_unseen_r11.json` (`761e1ded…`): R2 is OK.
 
 Both match the cluster's hashes.
+
+### R13
+
+Run `xr1_list_c_20261103_211633`, code `59d8c56c`, CPU on r23n6.
+- **Gates.** All passed: H0–H4 (`LIST C OK`) and the reset gates (`RESET OK`). The reset gates
+  include the R9 replication check (SAFE +0.0342, Hide-and-Seek +0.0834), P's cutoffs equal to the
+  time-only arm, and the none, P and fused arms reproducing `e3_hs_reset.json` at r = 0.245 and 0.17.
+  `INPUTS UNCHANGED`.
+- **Hashes.** `list_c.json` `3b48bccd…`, `reset.json` `3dac8155…`.
+- **Earlier run.** The first run (`xr1_list_c_20261103_210219`, code `efb7e7b8`) stopped at H4,
+  where the oracle overshot its target (see the C4 amendment). Its folder is kept.
+
+**Training objective (C2).** Every XR-1 final refit (14 records) and every RLDX-1 SAFE20 record
+(835–836) has `loss_mode: official`, `score_output: pinned_safe_output`. The stored SAFE-MLP
+score is SAFE's cumulative sum of per-step sigmoid outputs.
+
+**C1. Ensemble size (α = 0.05; mean ± SD over seed subsets).**
+
+| Detector | k | Gain | Matched | FP | AUC | Calibration success SD | Score first |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| SAFE-MLP | 1 | +0.024 ± 0.012 | +0.013 ± 0.007 | 22.0 | 0.915 | 1.158 | 0.23 |
+| SAFE-MLP | 2 | +0.026 ± 0.004 | +0.013 ± 0.005 | 22.3 | 0.916 | 1.154 | 0.27 |
+| SAFE-MLP | 3 | +0.030 | +0.015 | 23 | 0.918 | 1.153 | 0.32 |
+| Hide-and-Seek | 1 | +0.039 ± 0.005 | +0.036 ± 0.018 | 21.0 | 0.892 | 1.142 | 0.21 |
+| Hide-and-Seek | 2 | +0.055 ± 0.002 | +0.065 ± 0.019 | 19.7 | 0.894 | 1.113 | 0.43 |
+| Hide-and-Seek | 3 | +0.071 | +0.056 | 23 | 0.895 | 1.104 | 0.57 |
+| First step | 1–3 | +0.001 | −0.002 to −0.003 | 21 | 0.52 | | ≤ 0.01 |
+| Zero input | 1–3 | +0.012 | −0.003 to −0.006 | 23–24 | 0.89–0.90 | | 0.11–0.13 |
+| Shuffle | 1–3 | +0.005 to +0.011 | −0.005 to −0.011 | 22–24 | 0.88–0.89 | | 0.06–0.29 |
+
+- Max-of-mean aggregation, full ensemble:
+  - SAFE: +0.030, matched +0.015, the same as Eq. 1;
+  - Hide-and-Seek: +0.071, matched +0.102 at 17 FP (P is tightened to 17);
+  - ablations: matched ≤ +0.001.
+- The single-model rows reproduce Table II's seen + P cells. Hide-and-Seek is +0.039 here with a
+  population SD of 0.005 (0.006 sample SD), against Table II's +0.039 ± 0.006. SAFE-MLP is +0.024
+  (0.015 sample SD), against +0.024 ± 0.015. So Table II's single models and Table III's ensembles
+  share one pipeline.
+
+**C2. SAFE-MLP form and time-free variants.** All 4,560 per-seed series are cumulative, with
+increments between 0 and 1.000015. The per-step output is above 0.9 on 85% of success steps and
+92% of failure steps (means 0.89 and 0.95). The time-free variants:
+- `safe_mean` (running mean): its fit chose no score; gain 0.000, matched −0.004, AUC 0.58;
+- `safe_win8` (last-8 mean): gain −0.005, matched −0.027, AUC 0.78.
+
+**C3. Time-limit truncation.**
+
+| τ | Test failures / successes | P lead | P FP | SAFE + P gain (matched) | Hide-and-Seek + P gain (matched) | FP (SAFE, H&S) |
+|---|---|---:|---:|---|---|---|
+| 0.8 | 398 / 362 | 0.134 | 18 | +0.029 (+0.024) | +0.107 (+0.062) | 19, 27 |
+| 0.9 | 387 / 373 | 0.171 | 22 | +0.024 (+0.010) | +0.097 (+0.110) | 23, 21 |
+| 1.0 | 380 / 380 | 0.225 | 21 | +0.030 (+0.015) | +0.071 (+0.056) | 23, 23 |
+
+**C4. Per-task false alarms (of 10 test successes) and the test oracle.**
+- Per task:
+  - P: max 3, one task at 3 or more;
+  - SAFE + P: max 3, one task;
+  - Hide-and-Seek + P: max 4, three tasks at 3 or more, one at 4;
+  - P matched to either detector: max 3, two tasks at 3 or more.
+- Oracle per-task time-only allocation tuned on the test successes:
+  - at 21 FP: lead 0.389, +0.164 over P;
+  - at 23 FP: lead 0.397, +0.172 over P.
+- Fused minus oracle at 23 FP:
+  - SAFE + P −0.142 [−0.201, −0.088];
+  - Hide-and-Seek + P −0.101 [−0.191, −0.016] (test-only bootstrap).
+
+**C5. Success-optimal reset (RLDX-1, 1.25 H_k; task-macro success above the first attempt;
+paired half-width at 1,000 scenes with branching).**
+
+| r | Tasks | P | SAFE-LSTM + P | H&S + P | R_opt | R_oracle | R_opt − P | H&S − P | H&S − R_opt | R_opt < c_P |
+|---|---|---:|---:|---:|---:|---:|---|---|---|---|
+| 0.245 | all | 0.046 | 0.052 | 0.057 | 0.051 | 0.087 | +0.006 (±0.019) | +0.011 (±0.019) | +0.006 (±0.020) | 8/20 |
+| 0.245 | atomic | 0.070 | 0.079 | 0.084 | 0.073 | 0.103 | +0.003 | +0.014 | +0.011 | 6/14 |
+| 0.245 | composite | −0.012 | −0.012 | −0.007 | +0.001 | 0.049 | +0.012 | +0.005 | −0.007 | 2/6 |
+| 0.17 | all | 0.029 | 0.034 | 0.036 | 0.027 | 0.062 | −0.002 (±0.017) | +0.007 (±0.017) | +0.009 (±0.019) | 7/20 |
+
+The 1.5 and 2.0 H_k budgets are in `reset.json`.
+
+**Expectations against results.**
+- **C1: partly met.**
+  - Hide-and-Seek's same-target gain rises with k, but evenly (0.039, 0.055, 0.071), not mostly
+    from 1 to 2.
+  - Its matched gain peaks at k = 2 (+0.065) and is +0.056 at k = 3. The seed-to-seed SD
+    (±0.018) is about a third of the gain.
+  - The AUC barely moves (0.892 to 0.895) and the success spread falls a little (1.14 to 1.10),
+    as expected.
+  - The main change is that the score alarms before the timer on more failures (0.21, 0.43,
+    0.57). Ensembling makes the score a usable early alarm; it does not make it more
+    discriminative.
+  - The ablations stay at or below 0 matched at every k, and SAFE moves less, as expected.
+- **C2: met, and stronger.**
+  - The score is cumulative, with per-step outputs near 1 on most steps of both outcomes.
+  - Without elapsed time SAFE adds nothing: the running-mean fit chose the timer alone, and the
+    window score is below P.
+  - SAFE-MLP's small gain therefore lives in a score that mostly counts inferences.
+- **C3: not met, in the monitors' favour.**
+  - Gains over P keep their sign at shorter limits, as expected.
+  - Hide-and-Seek's gain grows instead of shrinking: +0.107 and +0.097 at the same target,
+    matched +0.062 and +0.110.
+  - SAFE's stays at +0.024 to +0.029.
+  - Lead is therefore not an artefact of where the limit falls.
+- **C4: per-task false alarms met; the oracle far outside the expected range.**
+  - Hide-and-Seek + P's worst task has 4 of 10, P's 3.
+  - The test-tuned oracle gains +0.16 to +0.17 over P, not +0.02 to +0.04, and leads both fused
+    detectors.
+  - The oracle sets each task's cutoff just above its 10 test successes, so this is a loose
+    upper bound.
+  - The rules that can be built without the test successes (R12's A_fixed and A_adaptive) do
+    not beat P.
+  - So most of the gap is in estimating each task's success-duration tail from few successes,
+    not in information a monitor could add.
+- **C5: not met.**
+  - R_opt is earlier than P's cutoff on only 7–8 of 20 tasks, and does not beat P clearly
+    (+0.006 and −0.002).
+  - Hide-and-Seek + P stays ahead of R_opt (+0.006 to +0.009), within the half-width (±0.02).
+  - The test oracle gains +0.03 to +0.04 over P, the room a perfectly tuned timer would have.
+
+**What this changes for the paper.**
+- **Ensemble.** One sentence: averaging seeds does not raise AUC. It makes Hide-and-Seek alarm
+  before the timer more often (21% to 57% of failures). Matched gains by ensemble size are
+  +0.036, +0.065 and +0.056.
+- **SAFE-MLP.**
+  - Its score sums per-step outputs that are near 1 on 85–92% of steps, so it mostly counts
+    inferences. Its time-free variants add nothing over P.
+  - This explains SAFE's small gain, and supports the paper's thesis.
+  - Remove the `\verifynote`.
+- **Truncation.** One clause: at 0.8 and 0.9 of the limit, Hide-and-Seek's gain over P stays
+  positive (+0.06 to +0.11 matched).
+- **Oracle.**
+  - A per-task timer tuned on the test successes would lead P by 0.16, more than any monitor.
+  - Achievable time-only rules do not beat P, so the reported gains are over a realistic timer,
+    not the best possible one.
+  - This is a limitation worth stating, and a Stage 2 item (more successes per task for P).
+- **E2.** R_opt does not change the design. Adding it as an arm (no new rollouts beyond its
+  branch) answers the reviewers. The expected Hide-and-Seek + P advantage over R_opt is about
+  +0.01, with half-width 0.02.
+
+**Evidence.** The JSONs are to be copied to `evidence/xr1_list_c_20261103_211633/` and their
+hashes checked against the above.
