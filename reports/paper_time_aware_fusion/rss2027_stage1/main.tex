@@ -495,10 +495,10 @@ scores (up to 0.019), and $-0.079$ matched (Hide-and-Seek: 0.051). Once 1 to 5 s
 per-task timer can be built, and Hide-and-Seek still adds 0.088 to 0.099 over it (SAFE about
 0.01).
 
-\textbf{Second policy.} On recorded RLDX-1 rollouts~\cite{kim2026rldx} (20 tasks;
-Table~\ref{tab:lead}, bottom), all failures again ran to the limit. As ensembles, SAFE-LSTM + P
+\textbf{Second policy.} On recorded RLDX-1 rollouts~\cite{kim2026rldx}
+(Table~\ref{tab:lead}, bottom), all failures again ran to the limit. As ensembles, SAFE-LSTM + P
 gains 0.034 and Hide-and-Seek + P 0.083 (0.052 matched), both on atomic tasks only. On unseen tasks,
-Hide-and-Seek again gains most over G, a late timer here (lead 0.026).
+Hide-and-Seek again gains most over G (lead only 0.026).
 
 \textbf{FIPER's benchmark.} In FIPER's released rollouts~\cite{romer2025fiper} (five tasks, two
 on a real robot), length alone gives ROC-AUC 0.92--1.00 in four tasks. In FIPER's code (results
@@ -531,11 +531,10 @@ an exact binomial bound (at most 39 of 400); simulated power is at least 0.94.
 \textbf{Reset and retry (E2).} We evaluate H4 in closed loop on 1,000 RLDX-1 scenes (50 per
 task) with a shared budget of $1.25\,H_k$. Each scene runs once without reset to $1.25\,H_k$
 (the no-reset outcome); each monitor's arm branches from this run at its first alarm, restores
-the initial simulator state and retries with the same policy seed, with latency charged to the
-budget. We report the paired success-rate difference between Hide-and-Seek + P and P resets with
+the initial simulator state and retries with a seed that differs from the first attempt's but is
+shared by all monitors, with latency charged to the budget. We report the paired success-rate difference between Hide-and-Seek + P and P resets with
 a 95\% CI, plus reset against no reset, unnecessary resets, and a time-only reset with per-task
-cutoffs that maximize success on the recorded rollouts (in simulation, within 0.01 of P). Simulations from the
-recorded rollouts put it at about $+0.01$ (half-width 0.02), so E2 estimates H4 rather than tests it; in a pilot, only 4\% of RLDX-1 failures succeeded when continued to $1.25\,H_k$.
+cutoffs that maximize success on the recorded rollouts (in simulation, within 0.01 of P). Simulations put it at about $+0.01$ (half-width 0.02), so E2 estimates H4 rather than tests it; in a pilot, only 4\% of failures succeeded if left running.
 
 \textbf{Further analyses (E3).} Action-only and multi-sample monitors, and lead from the
 point of no return.
@@ -544,10 +543,11 @@ point of no return.
 
 At matched false alarms, policy monitors add an uncertain 0.015 to 0.056 of the time limit over
 a per-task timer, so early warning (H1) is not yet established; Stage~2 tests it further.
-\textbf{Limitations.} Alarms were recorded in simulation (free resets), not acted on; lead
-runs to the time limit, not to irreversibility; RLDX-1 rollouts are recorded. Hide-and-Seek
-was tested on a test set already used for SAFE, and analyses beyond H1 and H2 followed scoring.
-Monitors assume a known task, a time limit and a success check.
+\textbf{Limitations.} Alarms were recorded in simulation (free resets), not acted on, and lead
+runs to the time limit, not to irreversibility. Hide-and-Seek reused SAFE's test set, but its
+comparison with P, ablations and nulls had written rules before it was scored there (matched:
+descriptive only); other analyses came after scoring. Monitors assume a known task, a time
+limit and a success check.
 
 % References start on page 6 (RSS: up to 5 pages of content and 1 page of references).
 \clearpage

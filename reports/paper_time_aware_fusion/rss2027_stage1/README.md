@@ -889,3 +889,9 @@ From `claude/review-analyses` run `xr1_list_c_20261103_211633` (`list_c.json` `3
 - **Oracle timer.** Per-task cutoffs tuned on the test successes lead P by 0.16, more than either monitor; stated as "P is a realistic timer, not the best possible one".
 - **E2.** Adds a time-only reset with per-task cutoffs that maximize success on recorded rollouts (in simulation within 0.01 of P).
 - **Trims for space.** SAFE-LSTM unseen sentence (in Table II), RLDX-1 unseen numbers, FIPER selection-rule detail, elapsed-time paragraph, null means, E1 power clause, 18/444 count; conclusion merged with limitations. Still 6 pages (references alone on page 6), notes and submission builds, no undefined references.
+
+## Update 2026-11-03 (c): E2 retry seeds, Hide-and-Seek's advance rules
+
+- **E2 retries** now use "a seed that differs from the first attempt's but is shared by all monitors". The earlier "the same policy seed" could be read as replaying the failed first attempt. Shared retry seeds reduce variance; the ±0.02 half-width assumed independent retries, so it is conservative. Scene replay is not fully reproducible (pilot: 192/194 scenes), so this is variance reduction, not identical retries.
+- **Limitations** now say that Hide-and-Seek's comparison with P, ablations and nulls had written rules before any Hide-and-Seek score on the test set existed. The matched comparison was declared then only as descriptive. Other analyses came after scoring. Record: `docs/xr1_confirmatory_amendment_2_hide_and_seek.md`, commit `7abfd271` (2026-10-22 21:35 JST), before the first Hide-and-Seek scoring of the E1 cohorts (run `xr1_amend2_hide_and_seek_20261022_214209`). Show it in the rebuttal: Stage 1 allows no links.
+- **Trims:** RLDX-1 "20 tasks" (stated in E1), "from the recorded rollouts", "RLDX-1 rollouts are recorded" in Limitations (stated in Sec. VI-C), "when continued to 1.25 H_k" → "if left running". Still 6 pages, both builds, no undefined references.
