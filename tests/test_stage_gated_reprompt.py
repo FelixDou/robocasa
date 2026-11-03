@@ -172,6 +172,50 @@ class GateRuntime:
         return policy
 
 
+class FeaturePolicy(XR1LikePolicy):
+    """XR1LikePolicy that returns a SAFE-like feature per inference when collecting."""
+
+    def __init__(self, replan_steps=4):
+        self.collect_safe_features = False
+        self.pending = None
+        super().__init__(replan_steps)
+
+    def __call__(self, obs, instruction=None):
+        before = sum(1 for entry in self.log if entry[0] == "inference")
+        action = super().__call__(obs, instruction)
+        if self.collect_safe_features and sum(1 for entry in self.log if entry[0] == "inference") > before:
+            self.pending = {"features": np.full((2, 3), self.inference_index, dtype=np.float32)}
+        return action
+
+    def pop_inference_record(self):
+        record, self.pending = self.pending, None
+        return record
+
+
+class FeatureRuntime(GateRuntime):
+    def make_policy(self, env):
+        policy = FeaturePolicy()
+        self.policies.append(policy)
+        return policy
+
+
+def stall_config(**overrides):
+    config = gate_config(
+        tasks=["GateTask"],
+        arms=["baseline", "gated_reprompt", "stall_gated_reprompt"],
+        reprompt_delay_steps={"GateTask": {"b": 8}},
+        primary_contrast=["stall_gated_reprompt", "baseline"],
+        primary_tasks=["GateTask"],
+        record_policy_features=True,
+        feature_stride_inferences=1,
+        reprompt_step_cap=20,
+        expected_success_rates={"GateTask": 0.5},
+        horizons={"GateTask": HORIZON},
+    )
+    config.update(overrides)
+    return config
+
+
 def gate_config(**overrides):
     config = {
         "tasks": ["GateTask", "ControlTask"],
@@ -249,6 +293,47 @@ class StageGateTest(unittest.TestCase):
         record = controller.records[0]
         self.assertEqual((record["stage"], record["switch_step"], record["return_step"]), ("b", 3, 6))
         self.assertEqual((record["return_reason"], record["steps_active"], record["target_completed"]), ("target_complete", 3, True))
+
+    def test_stall_gate_switches_only_after_the_delay(self):
+        controller = gate.StageGate(
+            arm="stall_gated_reprompt", task_name="GateTask", task_instruction=TASK_INSTRUCTION,
+            whitelist=("b",), step_cap=20, reprompt_level="subtask", delays={"b": 5},
+        )
+        timeline = [(0, {"a": False, "b": False, "c": False}), (3, {"a": True, "b": False, "c": False})]
+        timeline += [(s, {"a": True, "b": False, "c": False}) for s in range(4, 10)]
+        out = self.drive(controller, timeline)
+        # Stage b entered at step 3; the switch comes at step 8 = 3 + 5.
+        self.assertEqual(out[:6], [TASK_INSTRUCTION] * 6)
+        self.assertEqual(out[6:], ["Do b."] * 2)
+        record = controller.records[0]
+        self.assertEqual((record["entry_step"], record["decision_step"], record["switch_step"], record["delay_steps"]), (3, 8, 8, 5))
+
+    def test_stall_gate_never_switches_when_the_stage_completes_first(self):
+        controller = gate.StageGate(
+            arm="stall_gated_reprompt", task_name="GateTask", task_instruction=TASK_INSTRUCTION,
+            whitelist=("b",), step_cap=20, reprompt_level="subtask", delays={"b": 5},
+        )
+        out = self.drive(controller, [
+            (0, {"a": False, "b": False, "c": False}),
+            (3, {"a": True, "b": False, "c": False}),
+            (6, {"a": True, "b": True, "c": False}),
+            (7, {"a": True, "b": True, "c": False}),
+        ])
+        self.assertEqual(out, [TASK_INSTRUCTION] * 4)
+        self.assertEqual(len(controller.records), 1)
+        record = controller.records[0]
+        self.assertEqual((record["switched"], record["skip_reason"], record["steps_in_stage"]), (False, "completed_before_delay", 3))
+        self.assertEqual([e["event"] for e in controller.events], ["skip"])
+
+    def test_stall_gate_with_zero_delay_matches_the_entry_gate(self):
+        timeline = [(0, {"a": False, "b": False, "c": False}), (3, {"a": True, "b": False, "c": False}),
+                    (4, {"a": True, "b": False, "c": False}), (6, {"a": True, "b": True, "c": False})]
+        entry = self.drive(self.make("gated_reprompt", cap=20), timeline)
+        stall = self.drive(gate.StageGate(
+            arm="stall_gated_reprompt", task_name="GateTask", task_instruction=TASK_INSTRUCTION,
+            whitelist=("b",), step_cap=20, reprompt_level="subtask", delays={"b": 0},
+        ), timeline)
+        self.assertEqual(entry, stall)
 
     def test_step_cap_returns_and_the_stage_never_fires_again(self):
         controller = self.make("gated_reprompt", cap=5)
@@ -634,6 +719,28 @@ class PlanTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             gate.resolve_config(gate_config(reprompt_step_cap=0))
 
+    def test_stall_trial_config_validation(self):
+        gate.resolve_config(stall_config())
+        with self.assertRaises(ValueError):
+            gate.resolve_config(stall_config(reprompt_delay_steps={"GateTask": {"a": 8}}))
+        with self.assertRaises(ValueError):
+            gate.resolve_config(stall_config(reprompt_delay_steps={"GateTask": {"b": -1}}))
+        with self.assertRaises(ValueError):
+            gate.resolve_config(stall_config(primary_contrast=["always_reprompt", "baseline"]))
+        with self.assertRaises(ValueError):
+            gate.resolve_config(stall_config(primary_tasks=["Elsewhere"]))
+
+    def test_trial2_config_plan(self):
+        config = json.loads((REPO / "scripts/stage_gated_reprompt_xr1_trial2.json").read_text())
+        plan = gate.build_plan(config, horizons={"ArrangeTea": 2250, "BreadSelection": 1950})
+        self.assertEqual(plan["arms"], ["baseline", "gated_reprompt", "stall_gated_reprompt"])
+        self.assertEqual((plan["primary_contrast"], plan["primary_tasks"]), (["stall_gated_reprompt", "baseline"], ["ArrangeTea"]))
+        self.assertEqual(plan["seed_range"], [410007, 410206])
+        self.assertTrue(plan["totals"]["expected"]["fits_single_allocation"])
+        self.assertEqual(plan["warnings"], [])
+        resolved = gate.resolve_config(config)
+        self.assertEqual(resolved["reprompt_delay_steps"], {"ArrangeTea": {"mug_on_tray": 617}, "BreadSelection": {"jam_on_cutting_board": 0}})
+
     def test_task_subset_keeps_only_its_whitelist_entries(self):
         # The smoke run passes --tasks ArrangeTea with the shipped config.
         import argparse
@@ -662,3 +769,67 @@ class PlanTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StallTrialTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_trial(self):
+        runtime = FeatureRuntime()
+        status = gate.run_collection(stall_config(), self.root, runtime=runtime, log=lambda *_: None)
+        return runtime, status
+
+    def test_stall_gate_rescues_stalls_and_spares_normal_stages(self):
+        _, status = self.run_trial()
+        self.assertEqual(status["status"], "complete")
+        rows = rollouts_by_key(self.root)
+        for seed in range(6):
+            mode = seed % 3
+            base = rows[("GateTask", seed, "baseline")]
+            entry = rows[("GateTask", seed, "gated_reprompt")]
+            stall = rows[("GateTask", seed, "stall_gated_reprompt")]
+            # mode 1 stalls in b: both gates rescue it, the stall gate 8 steps after entry.
+            # mode 2 completes b normally: the entry gate breaks it, the stall gate never fires.
+            self.assertTrue(stall["success"], seed)
+            if mode == 1:
+                self.assertFalse(base["success"])
+                record = [r for r in stall["gate_stages"] if r.get("switched")][0]
+                self.assertEqual(record["switch_step"] - record["entry_step"], 8)
+            if mode == 2:
+                self.assertTrue(base["success"])
+                self.assertFalse(entry["success"])
+                self.assertFalse(stall["fired"])
+                self.assertEqual(stall["gate_stages"][0]["skip_reason"], "completed_before_delay")
+                self.assertEqual(stall["state_hashes"], base["state_hashes"])
+
+    def test_features_are_saved_for_whitelisted_stage_inferences(self):
+        self.run_trial()
+        rows = rollouts_by_key(self.root)
+        for (task, seed, arm), row in rows.items():
+            self.assertGreater(row["n_features"], 0, (seed, arm))
+            data = np.load(self.root / row["features_path"])
+            self.assertEqual(data["features"].shape[0], row["n_features"])
+            self.assertEqual(len(row["feature_meta"]), row["n_features"])
+            self.assertTrue(all(m["stage"] == "b" for m in row["feature_meta"]))
+            self.assertTrue((data["steps_in_stage"] >= 0).all())
+        switched = rows[("GateTask", 1, "stall_gated_reprompt")]
+        self.assertTrue(any(m["after_switch"] and m["reprompted"] for m in switched["feature_meta"]))
+
+    def test_analysis_reports_the_configured_primary(self):
+        self.run_trial()
+        summary, _ = gate.analyze([self.root], n_boot=200)
+        self.assertEqual(summary["primary_contrast"], ["stall_gated_reprompt", "baseline"])
+        self.assertEqual(summary["primary"]["group"], "GateTask")
+        self.assertEqual((summary["primary"]["arm_a"], summary["primary"]["arm_b"]), ("stall_gated_reprompt", "baseline"))
+        # 2 rescued stalls, 0 harmed among 6 seeds.
+        self.assertEqual((summary["primary"]["b_help"], summary["primary"]["c_harm"]), (2, 0))
+        contrasts = {(r["arm_a"], r["arm_b"]) for r in summary["contrasts"]}
+        self.assertIn(("gated_reprompt", "stall_gated_reprompt"), contrasts)
+        out = self.root / "analysis"
+        gate.write_analysis(summary, gate.analyze([self.root], n_boot=200)[1], out)
+        self.assertIn("stall_gated_reprompt minus baseline, on GateTask", (out / "summary.md").read_text())

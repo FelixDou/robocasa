@@ -1,0 +1,64 @@
+{
+  "_comment": "Second prospective stage-gated re-prompt trial for XR-1: stall-gated re-prompting (docs/stage_gate_state_signal_analysis_20261103.md). Run with GATE_CONFIG pointing here and GATE_RUN_PREFIX=xr1_stage_gate_trial2.",
+  "_design_source": "Trial 1 (docs/stage_gated_reprompt_results_20261030.md): re-prompting ArrangeTea at mug-stage entry harmed 18 baseline successes and rescued 9 failures; every harmed seed's baseline mug stage took 446-703 steps, i.e. was on the normal path. BreadSelection's jam re-prompt at entry helped 29 / harmed 4.",
+  "_delay_source": "617 = 90th percentile of the steps from mug-stage entry to mug placement in the 47 baseline successes of trial 1 (frozen before any trial-2 rollout). BreadSelection jam: 0 (re-prompt at entry), because its successful jam stages are long (median 877, 90th percentile 1,396 steps) and waiting would leave no time.",
+  "_primary_source": "Primary: stall_gated_reprompt minus baseline on ArrangeTea, two-sided exact McNemar, alpha 0.05. Secondary: the same on BreadSelection (replication of trial 1), macro over both, and gated_reprompt minus stall_gated_reprompt.",
+  "_seeds_per_task_source": "200, before any trial-2 rollout: the projected ArrangeTea effect is about +0.04 to +0.09 (stall gate rescuing ~5-9% of all seeds, harming ~1-2%); exact McNemar power at n=200 is 0.85 for 7%/1% and 0.60 for 7%/2%.",
+  "_base_seed_source": "410007-410206: unused by every previous XR-1 run (trial 1: 400007-400106, smoke 499007; ladder 300007-340007 ranges).",
+  "_features_source": "XR-1 SAFE token at inferences inside whitelisted stages (every 4th inference of the stage and the first after each switch), for an offline SAFE-based gate.",
+  "tasks": ["ArrangeTea", "BreadSelection"],
+  "arms": ["baseline", "gated_reprompt", "stall_gated_reprompt"],
+  "reprompt_whitelist": {
+    "ArrangeTea": ["mug_on_tray"],
+    "BreadSelection": ["jam_on_cutting_board"]
+  },
+  "reprompt_delay_steps": {
+    "ArrangeTea": {"mug_on_tray": 617},
+    "BreadSelection": {"jam_on_cutting_board": 0}
+  },
+  "primary_contrast": ["stall_gated_reprompt", "baseline"],
+  "primary_tasks": ["ArrangeTea"],
+  "seeds_per_task": 200,
+  "base_seed": 410007,
+  "split": "pretrain",
+  "env_interface": "gym",
+  "seed_protocol": "repeated_reset",
+  "arm_order": "counterbalanced",
+  "seed_block_size": 10,
+  "reprompt_step_cap": 1280,
+  "reprompt_level": "atomic",
+  "required_subtask_overrides": {},
+  "exclude_predicates": {},
+  "regression_ignore_stages": ["precondition", "release"],
+  "regression_ignore_predicates": {},
+  "state_hash_stride": 16,
+  "record_policy_features": true,
+  "feature_stride_inferences": 4,
+  "policy_module": "robocasa.recovery.xiaomi_robotics_1_policy:make_policy",
+  "policy_args": {
+    "replan_steps": 16,
+    "crop_ratio": 0.95,
+    "observation_history": 4,
+    "observation_interval": 2,
+    "collect_safe_features": true,
+    "policy_name": "Xiaomi-Robotics-1-RoboCasa365"
+  },
+  "max_errors": 10,
+  "alpha": 0.05,
+  "expected_success_rates": {
+    "ArrangeTea": 0.49,
+    "BreadSelection": 0.28
+  },
+  "success_step_fraction": {
+    "ArrangeTea": 0.64,
+    "BreadSelection": 0.74
+  },
+  "seconds_per_env_step": 0.0585,
+  "seconds_per_reset": 20.0,
+  "seconds_per_env_creation": 60.0,
+  "gpus_per_worker": 2,
+  "num_workers": 2,
+  "allocation_hours": 24.0,
+  "allocation_overhead_hours": 0.5,
+  "power_target_difference": 0.07
+}

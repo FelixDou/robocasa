@@ -93,13 +93,21 @@ from robocasa.recovery.subtask_eval import get_subtask_eval
 
 SCHEMA_VERSION = 1
 KIND = "stage_gated_reprompt"
-ARMS = ("baseline", "gated_reprompt", "always_reprompt")
+ARMS = ("baseline", "gated_reprompt", "always_reprompt", "stall_gated_reprompt")
+# Arms that switch only at whitelisted stages (the stall arm after a per-stage delay).
+WHITELIST_ARMS = ("gated_reprompt", "stall_gated_reprompt")
 PRIMARY_CONTRAST = ("gated_reprompt", "baseline")
-CONTRASTS = (
-    ("gated_reprompt", "baseline"),
-    ("always_reprompt", "baseline"),
-    ("gated_reprompt", "always_reprompt"),
-)
+
+
+def contrasts_for(arms):
+    """Every non-baseline arm minus baseline, then each pair of non-baseline arms in config order."""
+    others = [arm for arm in arms if arm != "baseline"]
+    pairs = [(arm, "baseline") for arm in others]
+    pairs += [(a, b) for i, a in enumerate(others) for b in others[i + 1:]]
+    return pairs
+
+
+CONTRASTS = tuple(contrasts_for(ARMS[:3]))
 
 ROLLOUTS_NAME = "rollouts.jsonl"
 PAIRS_NAME = "pairs.jsonl"
@@ -123,6 +131,17 @@ DEFAULTS = {
     "seed_block_size": 10,
     # Steps one switch may last before returning to the task instruction (scalar or {task: steps}).
     "reprompt_step_cap": 1280,
+    # stall_gated_reprompt only: {task: {stage: steps}} the stage must have run without
+    # completing before the switch (0 or absent = at stage entry, like gated_reprompt).
+    "reprompt_delay_steps": {},
+    # Primary analysis: [arm_a, arm_b] and the tasks it is tested on (None = whitelisted tasks).
+    "primary_contrast": list(PRIMARY_CONTRAST),
+    "primary_tasks": None,
+    # Policy features (XR-1 SAFE token) at inferences inside whitelisted stages, every
+    # feature_stride_inferences-th inference of the stage plus the first after each switch.
+    "record_policy_features": False,
+    "feature_stride_inferences": 4,
+    "feature_bytes_per_inference": 5 * 30 * 1024 * 2,
     "reprompt_level": "atomic",
     "required_subtask_overrides": {},
     "exclude_predicates": {},
@@ -155,6 +174,8 @@ FROZEN_PLAN_KEYS = (
     "tasks", "arms", "reprompt_whitelist", "seeds_per_task", "base_seed", "split",
     "env_interface", "seed_protocol", "arm_order", "reprompt_step_cap", "reprompt_level",
     "required_subtask_overrides", "exclude_predicates", "state_hash_stride", "policy_module",
+    "reprompt_delay_steps", "primary_contrast", "primary_tasks", "record_policy_features",
+    "feature_stride_inferences",
 )
 
 
@@ -206,6 +227,27 @@ def resolve_config(config=None, overrides=None):
     if not 0 < float(merged["alpha"]) < 1:
         raise ValueError("alpha must be in (0, 1)")
     merged["regression_ignore_stages"] = list(merged["regression_ignore_stages"] or [])
+    delays = merged["reprompt_delay_steps"] or {}
+    if not isinstance(delays, dict) or not all(isinstance(v, dict) for v in delays.values()):
+        raise ValueError("reprompt_delay_steps must map task -> {stage: steps}")
+    for task, stages in delays.items():
+        if task not in merged["reprompt_whitelist"]:
+            raise ValueError(f"reprompt_delay_steps names a task without a whitelist: {task}")
+        extra = sorted(set(stages) - set(merged["reprompt_whitelist"][task]))
+        if extra or any(int(v) < 0 for v in stages.values()):
+            raise ValueError(f"reprompt_delay_steps[{task}] must give steps >= 0 for whitelisted stages only")
+    merged["reprompt_delay_steps"] = {task: {s: int(v) for s, v in stages.items()} for task, stages in delays.items()}
+    primary = list(merged["primary_contrast"])
+    if len(primary) != 2 or not set(primary) <= set(arms) or primary[0] == primary[1]:
+        raise ValueError(f"primary_contrast must name two configured arms, got {primary}")
+    merged["primary_contrast"] = primary
+    if merged["primary_tasks"] is not None:
+        merged["primary_tasks"] = list(merged["primary_tasks"])
+        unknown = sorted(set(merged["primary_tasks"]) - set(merged["tasks"] or []))
+        if unknown or not merged["primary_tasks"]:
+            raise ValueError(f"primary_tasks must be configured tasks, got {merged['primary_tasks']}")
+    if int(merged["feature_stride_inferences"]) < 1:
+        raise ValueError("feature_stride_inferences must be positive")
     return merged
 
 
@@ -215,6 +257,12 @@ def whitelisted_tasks(config):
 
 def control_tasks(config):
     return [task for task in config["tasks"] if not config["reprompt_whitelist"].get(task)]
+
+
+def primary_tasks(config):
+    """Tasks of the primary test (all whitelisted tasks unless configured)."""
+    chosen = config.get("primary_tasks")
+    return list(chosen) if chosen else whitelisted_tasks(config)
 
 
 def task_seeds(config):
@@ -286,9 +334,14 @@ class StageGate:
     ``step_cap`` steps; then, if the tracker's current stage is eligible and
     has not fired yet, a new switch starts at the same step. Each stage fires
     at most once per rollout.
+
+    ``stall_gated_reprompt`` switches at a whitelisted stage only once that
+    stage has run ``delays[stage]`` steps (since it became the tracker's
+    current stage) without completing; a stage that completes earlier is
+    recorded as ``completed_before_delay`` and never switched.
     """
 
-    def __init__(self, *, arm, task_name, task_instruction, whitelist=(), step_cap=None, reprompt_level="atomic"):
+    def __init__(self, *, arm, task_name, task_instruction, whitelist=(), step_cap=None, reprompt_level="atomic", delays=None):
         if arm not in ARMS:
             raise ValueError(f"Unknown arm {arm!r}")
         self.arm = arm
@@ -296,16 +349,19 @@ class StageGate:
         self.task_instruction = task_instruction
         if arm == "always_reprompt":
             self.stages = None
-        elif arm == "gated_reprompt":
+        elif arm in WHITELIST_ARMS:
             self.stages = set(whitelist or [])
         else:
             self.stages = set()
+        self.delays = {stage: int(steps) for stage, steps in (delays or {}).items()} if arm == "stall_gated_reprompt" else {}
         self.step_cap = None if step_cap is None else int(step_cap)
         self.reprompt_level = reprompt_level
         self.active = None
         self.fired = []
         self.events = []
         self.records = []
+        self.stage_entry = {}
+        self.current_stage = None
 
     def eligible(self, stage):
         if stage is None:
@@ -316,16 +372,33 @@ class StageGate:
     def instruction(self):
         return self.active["instruction"] if self.active else self.task_instruction
 
+    def delay(self, stage):
+        return self.delays.get(stage, 0)
+
     def update(self, step, tracker, subtask_eval):
         step = int(step)
+        stage = tracker.current
+        if stage != self.current_stage:
+            left = self.current_stage
+            if (left is not None and self.eligible(left) and left not in self.fired and self.delay(left) > 0):
+                # The stall gate waited and the stage completed on its own.
+                self.records.append(
+                    {"stage": left, "entry_step": self.stage_entry[left], "switched": False,
+                     "skip_reason": "completed_before_delay", "delay_steps": self.delay(left),
+                     "left_step": step, "steps_in_stage": step - self.stage_entry[left]}
+                )
+                self.events.append({"step": step, "event": "skip", "stage": left, "reason": "completed_before_delay"})
+            self.current_stage = stage
+            if stage is not None:
+                self.stage_entry.setdefault(stage, step)
         if self.active is not None:
             target = self.active["target"]
             if _subtask_is_complete(subtask_eval, target) or target in tracker.completed:
                 self._end(step, "target_complete", target_completed=True)
             elif self.step_cap is not None and step - self.active["switch_step"] >= self.step_cap:
                 self._end(step, "step_cap", target_completed=False)
-        stage = tracker.current
-        if self.active is None and self.eligible(stage) and stage not in self.fired:
+        due = stage is not None and step - self.stage_entry.get(stage, step) >= self.delay(stage)
+        if self.active is None and self.eligible(stage) and stage not in self.fired and due:
             self.fired.append(stage)
             target, instruction, kind = resolve_stage_instruction(
                 subtask_eval, stage, task_instruction=self.task_instruction,
@@ -337,7 +410,9 @@ class StageGate:
                 "target": target,
                 "instruction": instruction,
                 "target_kind": kind,
-                "entry_step": step,
+                "entry_step": self.stage_entry.get(stage, step),
+                "decision_step": step,
+                "delay_steps": self.delay(stage),
             }
             if not instruction or target in (None, "task_success") or instruction == self.task_instruction:
                 record.update(switched=False, skip_reason="equivalent_to_task_prompt")
@@ -356,6 +431,13 @@ class StageGate:
         """Close an open switch at the end of the rollout."""
         if self.active is not None:
             self._end(int(step), reason, target_completed=False)
+        stage = self.current_stage
+        if stage is not None and self.eligible(stage) and stage not in self.fired and self.delay(stage) > 0:
+            self.records.append(
+                {"stage": stage, "entry_step": self.stage_entry[stage], "switched": False,
+                 "skip_reason": f"{reason}_before_delay", "delay_steps": self.delay(stage),
+                 "left_step": int(step), "steps_in_stage": int(step) - self.stage_entry[stage]}
+            )
 
     def _end(self, step, reason, *, target_completed):
         record = self.active
@@ -441,8 +523,16 @@ def run_rollout(env, policy, *, task_name, arm, env_seed, horizon, config):
     gate = StageGate(
         arm=arm, task_name=task_name, task_instruction=task_instruction, whitelist=whitelist,
         step_cap=task_value(config["reprompt_step_cap"], task_name), reprompt_level=config["reprompt_level"],
+        delays=(config.get("reprompt_delay_steps") or {}).get(task_name),
     )
     gate.update(0, tracker, reset_eval)
+    record_features = bool(config.get("record_policy_features")) and bool(whitelist)
+    feature_stride = int(config.get("feature_stride_inferences") or 1)
+    if record_features and hasattr(policy, "collect_safe_features"):
+        policy.collect_safe_features = True
+    features, feature_meta = [], []
+    stage_inferences = defaultdict(int)
+    capture_next = False
 
     stride = int(config["state_hash_stride"])
     hashes = []
@@ -472,13 +562,28 @@ def run_rollout(env, policy, *, task_name, arm, env_seed, horizon, config):
                     clear_env_instruction(env)
                 else:
                     set_env_instruction(env, instruction)
+                capture_next = True
                 last_instruction = instruction
-            if inference_boundary(policy, step, config["snapshot_stride"]):
+            is_inference = inference_boundary(policy, step, config["snapshot_stride"])
+            if is_inference:
                 inferences += 1
             action = call_policy(policy, set_observation_instruction(obs, instruction), instruction=instruction)
             pop = getattr(policy, "pop_inference_record", None)
-            if callable(pop):
-                pop()
+            record = pop() if callable(pop) else None
+            stage_now = tracker.current
+            if record_features and is_inference and stage_now in whitelist:
+                index_in_stage = stage_inferences[stage_now]
+                stage_inferences[stage_now] += 1
+                if isinstance(record, dict) and record.get("features") is not None and (
+                    index_in_stage % feature_stride == 0 or capture_next
+                ):
+                    features.append(np.asarray(record["features"], dtype=np.float16))
+                    feature_meta.append(
+                        {"step": step, "stage": stage_now, "inference_in_stage": index_in_stage,
+                         "steps_in_stage": step - gate.stage_entry.get(stage_now, step),
+                         "reprompted": instruction != task_instruction, "after_switch": capture_next}
+                    )
+                capture_next = False
             obs, reward, done, info = _step_env(env, action)
             num_steps = step + 1
             current_eval = (info or {}).get("subtask_eval") or get_subtask_eval(env)
@@ -537,6 +642,9 @@ def run_rollout(env, policy, *, task_name, arm, env_seed, horizon, config):
         "initial_state_sha": initial_hash,
         "state_hash_stride": stride,
         "state_hashes": hashes,
+        "stage_entry_steps": dict(gate.stage_entry),
+        "feature_meta": feature_meta,
+        "_features": features,
         "wall_seconds": time.time() - started,
         "created_at": utc_now(),
     }
@@ -551,6 +659,18 @@ def run_seed(get_env, *, task_name, env_seed, horizon, config, output_dir, log=p
         env, policy = get_env()
         row = run_rollout(env, policy, task_name=task_name, arm=arm, env_seed=env_seed, horizon=horizon, config=config)
         row.update(pair_uid=pair_uid, arm_position=position, arm_order=order)
+        features = row.pop("_features", None) or []
+        row["n_features"] = len(features)
+        if features:
+            feature_path = Path(output_dir) / "features" / f"{task_name}_{int(env_seed)}_{arm}_{pair_uid[:8]}.npz"
+            feature_path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(
+                feature_path,
+                features=np.stack(features),
+                steps=np.array([m["step"] for m in row["feature_meta"]], dtype=np.int64),
+                steps_in_stage=np.array([m["steps_in_stage"] for m in row["feature_meta"]], dtype=np.int64),
+            )
+            row["features_path"] = str(feature_path.relative_to(output_dir))
         append_jsonl(Path(output_dir) / ROLLOUTS_NAME, row)
         rows[arm] = row
     base = rows["baseline"]
@@ -858,6 +978,15 @@ def analyze(run_dirs, *, n_boot=2000, seed=0, alpha=0.05):
     present_arms = [arm for arm in arms if any(arm in rollouts for _, rollouts in complete)]
     whitelisted = [task for task in tasks if whitelist.get(task)]
     controls = [task for task in tasks if not whitelist.get(task)]
+    primary_contrast = tuple(config.get("primary_contrast") or PRIMARY_CONTRAST)
+    configured_primary = config.get("primary_tasks")
+    primary_task_list = [task for task in (configured_primary or whitelisted) if task in tasks]
+    if configured_primary and len(primary_task_list) == 1:
+        primary_label = primary_task_list[0]
+    elif not configured_primary or primary_task_list == whitelisted:
+        primary_label = "macro_whitelisted"
+    else:
+        primary_label = "macro_primary"
     by_task = defaultdict(list)
     for pair, rollouts in complete:
         by_task[pair["task_name"]].append((pair, rollouts))
@@ -951,7 +1080,7 @@ def analyze(run_dirs, *, n_boot=2000, seed=0, alpha=0.05):
 
     # Paired contrasts per task and macro.
     contrast_rows = []
-    for arm_a, arm_b in CONTRASTS:
+    for arm_a, arm_b in contrasts_for(present_arms):
         if arm_a not in present_arms or arm_b not in present_arms:
             continue
         diffs = {}
@@ -989,6 +1118,8 @@ def analyze(run_dirs, *, n_boot=2000, seed=0, alpha=0.05):
         boot_rmst = paired_bootstrap(rmst, n_boot=n_boot, seed=seed + 1)
         groups = [(task, [task]) for task in per_task]
         groups.append(("macro_whitelisted", [task for task in whitelisted if task in per_task]))
+        if primary_label == "macro_primary":
+            groups.append(("macro_primary", [task for task in primary_task_list if task in per_task]))
         groups.append(("macro_all", list(per_task)))
         for label, members in groups:
             if not members:
@@ -1037,14 +1168,14 @@ def analyze(run_dirs, *, n_boot=2000, seed=0, alpha=0.05):
             )
     primary_tests = [
         row for row in contrast_rows
-        if (row["arm_a"], row["arm_b"]) == PRIMARY_CONTRAST and row["group"] in whitelisted
+        if (row["arm_a"], row["arm_b"]) == primary_contrast and row["group"] in primary_task_list
     ]
     for row, adjusted in zip(primary_tests, holm([row["mcnemar_p"] for row in primary_tests])):
         row["mcnemar_p_holm"] = adjusted
     primary = next(
         (
             row for row in contrast_rows
-            if (row["arm_a"], row["arm_b"]) == PRIMARY_CONTRAST and row["group"] == "macro_whitelisted"
+            if (row["arm_a"], row["arm_b"]) == primary_contrast and row["group"] == primary_label
         ),
         None,
     )
@@ -1084,6 +1215,8 @@ def analyze(run_dirs, *, n_boot=2000, seed=0, alpha=0.05):
         "duplicate_pairs": duplicates,
         "initial_state_mismatches": int(sum(not pair["initial_state_match"] for pair, _ in complete)),
         "alpha": alpha,
+        "primary_contrast": list(primary_contrast),
+        "primary_tasks": primary_task_list,
         "primary": primary,
         "arms_by_task": arm_rows,
         "contrasts": contrast_rows,
@@ -1144,15 +1277,18 @@ def write_analysis(summary, tables, output_dir):
     primary = summary["primary"]
     lines += ["", "## Primary endpoint", ""]
     if primary:
+        arm_a, arm_b = summary.get("primary_contrast") or PRIMARY_CONTRAST
+        scope = primary["tasks"].replace(";", ", ")
+        scope = f"macro over {scope}" if ";" in primary["tasks"] else f"on {scope}"
         lines.append(
-            f"Full-task success, gated_reprompt minus baseline, macro over {primary['tasks'].replace(';', ', ')}: "
+            f"Full-task success, {arm_a} minus {arm_b}, {scope}: "
             f"**{_signed(primary['difference'])}** [{_signed(primary['ci_lo'])}, {_signed(primary['ci_hi'])}] "
             f"(paired bootstrap 95% CI, {primary['n_pairs']} pairs); exact McNemar on pooled pairs "
             f"{primary['b_help']} helped / {primary['c_harm']} harmed, p = {primary['mcnemar_p']:.4f} "
             f"(alpha {summary['alpha']})."
         )
     else:
-        lines.append("No complete gated/baseline pairs on whitelisted tasks.")
+        lines.append("No complete pairs for the primary contrast on its tasks.")
     lines += [
         "",
         "## Paired contrasts",
@@ -1296,11 +1432,12 @@ def build_plan(config, *, horizons=None, calibration=None):
         }
     alpha = float(config["alpha"])
     target = float(config["power_target_difference"])
-    n_white = len(whitelisted_tasks(config))
+    n_white = len(primary_tasks(config))
+    pooled = "pooled_primary" if config.get("primary_tasks") else "pooled_whitelisted"
     scenarios = [(target, 0.0), (target + 0.05, 0.05), (target + 0.10, 0.10), (0.10, 0.0)]
     power_rows = []
-    for label, n in (("per_task", seeds), ("pooled_whitelisted", seeds * n_white)):
-        if n < 1:
+    for label, n in (("per_task", seeds), (pooled, seeds * n_white)):
+        if n < 1 or (label == pooled and n_white < 2 and config.get("primary_tasks")):
             continue
         for p_help, p_harm in scenarios:
             power_rows.append(
@@ -1318,8 +1455,8 @@ def build_plan(config, *, horizons=None, calibration=None):
             "no_harm": minimum_detectable_difference(n, alpha),
             "harm_one_third_of_help": minimum_detectable_difference(n, alpha, harm_ratio=1 / 3),
         }
-        for label, n in (("per_task", seeds), ("pooled_whitelisted", seeds * n_white))
-        if n >= 1
+        for label, n in (("per_task", seeds), (pooled, seeds * n_white))
+        if n >= 1 and (label == "per_task" or n_white >= 2 or not config.get("primary_tasks"))
     }
     return {
         "dry_run": True,
@@ -1328,6 +1465,8 @@ def build_plan(config, *, horizons=None, calibration=None):
         "arms": arms,
         "whitelisted_tasks": whitelisted_tasks(config),
         "control_tasks": control_tasks(config),
+        "primary_contrast": config["primary_contrast"],
+        "primary_tasks": primary_tasks(config),
         "seeds_per_task": seeds,
         "seed_range": [int(config["base_seed"]), int(config["base_seed"]) + seeds - 1],
         "seconds_per_env_step": seconds_per_step,
@@ -1347,7 +1486,7 @@ def build_plan(config, *, horizons=None, calibration=None):
         "notes": [
             "upper: every rollout runs the full horizon; expected: successes end at success_step_fraction * H",
             "power depends on discordant pairs: p_help = arm succeeds and baseline fails, p_harm = the reverse",
-            "the primary test pools the whitelisted tasks' pairs (gated_reprompt vs baseline)",
+            f"the primary test is {config['primary_contrast'][0]} vs {config['primary_contrast'][1]} on {', '.join(primary_tasks(config))}",
         ],
     }
 
@@ -1367,9 +1506,14 @@ def _load_config(args):
         # A task subset (e.g. the smoke run) keeps only that subset's per-task entries;
         # a full config still fails on per-task entries for unconfigured tasks.
         selected = set(overrides["tasks"])
-        for key in ("reprompt_whitelist", "required_subtask_overrides", "exclude_predicates", "regression_ignore_predicates"):
+        for key in ("reprompt_whitelist", "required_subtask_overrides", "exclude_predicates", "regression_ignore_predicates", "reprompt_delay_steps"):
             if isinstance(config.get(key), dict):
                 overrides[key] = {task: names for task, names in config[key].items() if task in selected}
+        if config.get("primary_tasks"):
+            kept = [task for task in config["primary_tasks"] if task in selected]
+            overrides["primary_tasks"] = kept or None
+            if not kept:
+                config = {k: v for k, v in config.items() if k != "primary_tasks"}
     if getattr(args, "policy_arg", None):
         overrides["policy_args"] = {**config.get("policy_args", {}), **_parse_policy_args(args.policy_arg)}
     return resolve_config(config, overrides)
