@@ -117,6 +117,22 @@ class OracleTests(unittest.TestCase):
         P = rc.per_task_fp(te, {t: 0.5 for t in "ABCD"}, dict(lam=0.1, u=math.inf, s=0.0))
         self.assertEqual(sum(P["per_task"].values()), P["total"])
 
+    def test_successes_ending_at_the_limit_count_against_the_oracle(self):
+        # Task A has a success at its final inference, which any timer alarms. Task B gains most from
+        # an earlier cutoff. Allocating in fractions treated A's success as free and lowered B, giving
+        # 2 false alarms at a target of 1 (the R13 cluster run's H4 failure); alarm indices must not.
+        rows = rows_for("A", 40, [10, 20, 30, 40] + [40] * 4, [False] * 4 + [True] * 4)
+        rows += rows_for("B", 40, [10, 20, 21, 39] + [40] * 4, [False] * 4 + [True] * 4)
+        for t in "CD":
+            rows += rows_for(t, 40, [10, 20, 30, 39] + [40] * 4, [False] * 4 + [True] * 4)
+        te = cl.Cohort(rows, "safe")
+        for target in (1, 2, 3, 5):
+            o, _ = rc.oracle_allocation(te, target)
+            self.assertLessEqual(o["fp"], target)
+            self.assertEqual(o["fp"], o["planned_fp"])
+        o, _ = rc.oracle_allocation(te, 0)          # unreachable (A's success): reported, not hidden
+        self.assertEqual((o["fp"], o["planned_fp"]), (1, 1))
+
 
 class EndToEndTests(unittest.TestCase):
     def test_xr1_runs_and_passes_its_gates(self):

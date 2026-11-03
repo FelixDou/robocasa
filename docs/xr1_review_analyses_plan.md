@@ -991,9 +991,16 @@ CPU. Exploratory on opened cohorts. Answers the 2026-11-03 mock review (paper fo
 - **C4. Per-task false alarms and an oracle time-only allocation.**
   - Per task, test successes alarmed (of 10) for P, SAFE + P, Hide-and-Seek + P and P matched to
     each. Reported: max, 90th percentile, and the number of tasks with ≥ 3 and ≥ 4.
-  - **Oracle.** `review_analyses_b.allocate` on the *test* successes' fractions, with budget equal to
-    each fused detector's test false alarms over 380. This gives the per-task time-only cutoffs
-    with the most lead at that count, tuned on the test set.
+  - **Oracle.** Per-task alarm indices chosen on the *test* successes to maximize lead with total false
+    alarms at most each fused detector's test count (Lagrangian, as `review_analyses_b.allocate`). This
+    gives the per-task time-only cutoffs with the most lead at that count, tuned on the test set.
+    - *Amended 2026-11-03 after the first cluster run failed H4.* The first version called `allocate`
+      on fractions. `allocate` scores a cutoff just above 1 as alarm-free and caps it at 1 afterwards,
+      which misses a success that ends at its limit (every timer alarms it). That run overshot its
+      targets. The oracle now works in alarm indices with P's rule; a regression test covers it.
+    - R12's B1 timers use `allocate` on development successes, where the same cap can misstate the
+      development budget slightly. Their test false alarms were measured directly and the margin was
+      set by Proposition 1, so R12's reported numbers stand.
   - Reported: its false alarms, lead and lead gain over P. Each fused detector's lead is reported
     against it. This bounds what any per-task time-only rule could reach.
 - **C5. Success-optimal time-only reset (RLDX-1, E2's simulation).**
@@ -2701,7 +2708,7 @@ Continue only if all of these hold:
 - the count is 18;
 - `review_analyses.json`'s hash starts with `8f38f3c6bed7`;
 - `e3_hs_reset.json`'s hash starts with `cb8cc331`;
-- the tests end with `OK` (8 tests).
+- the tests end with `OK` (9 tests).
 
 When `done.txt` exists, or the driver has stopped, report the output of:
 

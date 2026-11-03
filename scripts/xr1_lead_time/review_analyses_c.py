@@ -255,14 +255,29 @@ def per_task_fp(te, rk, det):
 
 
 def oracle_allocation(te, target_fp):
+    """Per-task alarm indices j_k chosen on the test successes: maximize mean_k(1 - j_k / H_k) subject
+    to total false alarms <= target_fp (Lagrangian over rb.MU_GRID, smallest j on ties). Works in alarm
+    indices with P's rule (a success of length L is alarmed iff j <= L), so a success that ends at the
+    limit counts at every j <= H. (rb.allocate works in fractions and caps above-1 cutoffs at 1 after
+    selection, which misses such successes.) Evaluated as a timer with fraction (j - 0.5) / H."""
     S = te.take(~te.failed)
-    dev = defaultdict(list)
-    for t, L, H in zip(S.task, S.L, S.H):
-        dev[str(t)].append(float(L / H))
-    beta = target_fp / len(S.L)
-    rk, info = rb.allocate(dict(dev), beta)
+    tasks = sorted(set(S.task.tolist()))
+    cost, fp, H = {}, {}, {}
+    for t in tasks:
+        m = S.task == t
+        H[t] = int(S.H[m][0])
+        j = np.arange(1, H[t] + 1)
+        cost[t] = j / H[t]
+        fp[t] = (S.L[m][None, :] >= j[:, None]).sum(1)
+    pick = None
+    for mu in rb.MU_GRID:
+        pick = {t: int(np.argmin(cost[t] + mu * fp[t])) for t in tasks}
+        if sum(int(fp[t][pick[t]]) for t in tasks) <= target_fp:
+            break
+    rk = {t: (pick[t] + 1 - 0.5) / H[t] for t in tasks}
     e, lead = cl.evaluate_fast(te, rk, dict(lam=0.0, u=math.inf, s=0.0))
-    return dict(target_fp=int(target_fp), budget=r4(beta), fp=e["fp"], mean_lead=e["mean_lead"]), lead
+    planned = sum(int(fp[t][pick[t]]) for t in tasks)
+    return dict(target_fp=int(target_fp), planned_fp=planned, fp=e["fp"], mean_lead=e["mean_lead"]), lead
 
 
 # ---- xr1 ------------------------------------------------------------------------------------
