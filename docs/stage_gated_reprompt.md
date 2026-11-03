@@ -1,5 +1,7 @@
 # Stage-gated re-prompting: prospective end-to-end trial (XR-1)
 
+> **Results (31 October 2026):** [stage_gated_reprompt_results_20261030.md](stage_gated_reprompt_results_20261030.md).
+
 Code: `robocasa/recovery/stage_gated_reprompt.py` (collector, analysis, dry
 run), `scripts/run_stage_gated_reprompt_xr1.sh` (cluster launcher),
 `scripts/stage_gated_reprompt_xr1.json` (default config),
