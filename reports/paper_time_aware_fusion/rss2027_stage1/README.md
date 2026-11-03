@@ -879,3 +879,13 @@ The author accepted both remaining drafts as written (2026-10-29).
 - **SAFE-MLP score.** Text now says the MLP's score sums its per-inference outputs, as in SAFE. Inferred from `train_seen_tasks.py` (default `--loss-mode official` keeps the pinned SAFE cumsum); a `\verifynote` asks to confirm in the XR-1 and RLDX-1 final-refit configs.
 - **Fixes.** "Matched" defined in Sec. III; "loosened" removed (matching can tighten P); notation ρ_i → d_i, (u, s) → (a, b), T_k → N_k; "six policy scores" named; "only Hide-and-Seek carries over" and "only Hide-and-Seek exceeds G's TWA" corrected (SAFE-LSTM also does); 0.099 to 0.115; 0.11; Hide-and-Seek's LSTM named for the 0.888/0.878 AUCs; Table I caption says constant threshold; SAFE "real robots"; RESCUE "with strong policies".
 - **Trims for space.** Standalone and warning-lead subsections merged ("Results on XR-1"); SAFE and Hide-and-Seek paragraphs merged; Fig. 3 caption, FIPER, irreversibility, unseen, conclusion and limitations shortened. 6 pages (references alone on page 6), notes build and `\notesfalse` build both; no undefined references.
+
+## Update 2026-11-03 (b): R13 results (list B of the second mock review)
+
+From `claude/review-analyses` run `xr1_list_c_20261103_211633` (`list_c.json` `3b48bccd…`, `reset.json` `3dac8155…`; plan R13, all gates OK).
+- **SAFE-MLP form confirmed.** All final refits used `loss_mode: official`, so the score is SAFE's cumulative sum; `\verifynote` removed. New sentence: per-step outputs exceed 0.9 on 85% of success and 92% of failure steps, so the summed score mostly counts inferences; their running mean (time-free) adds nothing over P.
+- **Ensemble.** Averaging seeds leaves Hide-and-Seek's ROC-AUC near 0.89 but raises the share of failures it catches before the timer (21% to 57%); matched gains 0.036, 0.065, 0.056 for one to three models. Replaces "why … is open".
+- **Truncation.** At 0.8 and 0.9 of the limit Hide-and-Seek's matched gain stays positive (0.062, 0.110).
+- **Oracle timer.** Per-task cutoffs tuned on the test successes lead P by 0.16, more than either monitor; stated as "P is a realistic timer, not the best possible one".
+- **E2.** Adds a time-only reset with per-task cutoffs that maximize success on recorded rollouts (in simulation within 0.01 of P).
+- **Trims for space.** SAFE-LSTM unseen sentence (in Table II), RLDX-1 unseen numbers, FIPER selection-rule detail, elapsed-time paragraph, null means, E1 power clause, 18/444 count; conclusion merged with limitations. Still 6 pages (references alone on page 6), notes and submission builds, no undefined references.

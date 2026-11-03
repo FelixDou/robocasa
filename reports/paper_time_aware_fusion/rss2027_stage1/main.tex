@@ -148,9 +148,7 @@ alarms: the comparator timer is set to the fused detector's number of test false
 \textbf{Policy score.} At each inference we take the final-layer action-token hidden state of
 the policy's action head (1,024 dimensions). The SAFE MLP~\cite{gu2025safe} (or, as a variant, SAFE's
 LSTM head) maps the features so far to a failure score $u^{(j)}_t$ for each of three training
-seeds $j$; as in SAFE, the MLP's score sums its per-inference outputs.\verifynote{SAFE-MLP form inferred
-from train\_seen\_tasks default loss-mode official (pinned SAFE cumsum); confirm in the XR-1 and
-RLDX-1 final-refit configs} With per-task location $m^{(j)}_k$ and
+seeds $j$; as in SAFE, the MLP's score sums its per-inference outputs. With per-task location $m^{(j)}_k$ and
 scale $\sigma^{(j)}_k$ estimated on training rollouts, the policy score is
 \begin{equation}
   s_t = \frac{1}{3}\sum_{j=1}^{3} \frac{\max_{t' \le t} u^{(j)}_{t'} - m^{(j)}_k}{\sigma^{(j)}_k}.
@@ -457,11 +455,14 @@ Hide-and-Seek (0.754). On unseen tasks, Hide-and-Seek and SAFE-LSTM exceed the g
 \textbf{SAFE and Hide-and-Seek (H1, H2).} Fused with P, the SAFE and Hide-and-Seek ensembles
 warn 0.015 (95\% CI [$-0.007$, 0.041]) and 0.056 ([$-0.014$, 0.120]) of the time limit earlier
 than P at matched false alarms, and 0.030 and 0.071 at the same target, where random and
-within-task resampled scores gain at most 0.009 and 0.012 (Table~\ref{tab:h1};
-Fig.~\ref{fig:pertask}b for other targets). Hide-and-Seek's advantage over SAFE (0.041) is
+within-task resampled scores gain at most 0.009 and 0.012 (Table~\ref{tab:h1},
+Fig.~\ref{fig:pertask}b). Hide-and-Seek's advantage over SAFE (0.041) is
 uncertain. A single Hide-and-Seek
-model gains only $0.039 \pm 0.006$ (Table~\ref{tab:lead}); why averaging three nearly doubles
-this is open, and Stage~2 reports gains by ensemble size.
+model gains only $0.039 \pm 0.006$ (Table~\ref{tab:lead}): averaging seeds leaves its ROC-AUC
+near 0.89 but lets it alarm before the timer on more failures (21\% to 57\%; matched gains
+0.036, 0.065, 0.056 for one to three models). SAFE-MLP's per-inference
+outputs exceed 0.9 on 85\% of success and 92\% of failure steps, so its summed score mostly
+counts inferences; their running mean, free of elapsed time, adds nothing over P.
 
 \textbf{Where the gain comes from.} SAFE-MLP, Hide-and-Seek and the four OOD scores all gain
 more on the 10 atomic tasks (0.045
@@ -472,18 +473,19 @@ on the score, and five tasks carry 78\% of its gain. In seconds, Hide-and-Seek +
 
 \textbf{Stronger comparators and nulls.} A timer whose per-task margins maximize mean lead under
 a pooled false-alarm budget, chosen as adaptively as the fused path, does not beat P at matched
-false alarms ($-0.008$); Hide-and-Seek + P gains 0.063 over it. At matched false alarms, both
-scores beat all 100 fusions of noise and of their own scores resampled within the task (mean
-$-0.007$ to $-0.011$). With the methods' own time-varying
+false alarms ($-0.008$); Hide-and-Seek + P gains 0.063 over it. Both scores beat all 100 noise and
+within-task resampled fusions at matched false alarms. With the methods' own time-varying
 bands~\cite{gu2025safe,park2026hideseek}, fused matched gains are 0.068 (Hide-and-Seek) and
-0.006 (SAFE). Matched gains stay uncertain when calibration is also resampled.
+0.006 (SAFE). Matched gains stay uncertain when calibration is also resampled. With episodes
+truncated at 0.8 or 0.9 of the limit, Hide-and-Seek's matched gain stays positive (0.062, 0.110).
+P is a realistic timer, not the best possible one: per-task cutoffs tuned on the test successes
+themselves would lead P by 0.16, more than either monitor.
 
 \input{figures/per_task}
 
-\textbf{Is the extra warning learned elapsed time?} A recurrent detector could learn task
-durations, and the zero-input ablation separates failures as well as Hide-and-Seek (Sec.~I).
-Yet no ablation gains over P at matched false alarms (Table~\ref{tab:h1}): the warning appears to
-develop during the rollout and is neither elapsed time nor the task's typical trajectory.
+\textbf{Is the extra warning learned elapsed time?} The zero-input ablation separates failures
+as well as Hide-and-Seek (Sec.~I), yet no ablation gains over P at matched false alarms
+(Table~\ref{tab:h1}): the warning appears to develop during the rollout.
 
 \subsection{Transfer and irreversibility}
 \textbf{Unseen tasks (Tables~\ref{tab:raw} and~\ref{tab:lead}).} With no rollout of the task, as in SAFE's setting~\cite{gu2025safe},
@@ -491,20 +493,18 @@ Hide-and-Seek keeps the largest gain over G on XR-1: 0.127 as an ensemble (zero-
 ablation: 0.033), 0.11 more than SAFE. SAFE's ensemble (0.017) gains no more than random
 scores (up to 0.019), and $-0.079$ matched (Hide-and-Seek: 0.051). Once 1 to 5 successes of the new task exist, a
 per-task timer can be built, and Hide-and-Seek still adds 0.088 to 0.099 over it (SAFE about
-0.01). SAFE's LSTM head carries over better than its MLP, with half of Hide-and-Seek's gain
-(Table~\ref{tab:lead}).
+0.01).
 
 \textbf{Second policy.} On recorded RLDX-1 rollouts~\cite{kim2026rldx} (20 tasks;
 Table~\ref{tab:lead}, bottom), all failures again ran to the limit. As ensembles, SAFE-LSTM + P
 gains 0.034 and Hide-and-Seek + P 0.083 (0.052 matched), both on atomic tasks only. On unseen tasks,
-Hide-and-Seek again gains most over G ($0.196 \pm 0.013$; ablations $\le 0.038$); SAFE-LSTM and
-the OOD detectors gain 0.099 to 0.115 over this late timer (lead 0.026).
+Hide-and-Seek again gains most over G, a late timer here (lead 0.026).
 
 \textbf{FIPER's benchmark.} In FIPER's released rollouts~\cite{romer2025fiper} (five tasks, two
 on a real robot), length alone gives ROC-AUC 0.92--1.00 in four tasks. In FIPER's code (results
-reproduced), the timer has the best balanced accuracy under FIPER's selection rule (0.81 against
-0.78) at 0.09 FPR, against FIPER's 0.35; at FIPER's own FPR (0.06 to 0.56 by task), FIPER warns
-0.146 of the episode earlier: the test credits early warning wherever it occurs.
+reproduced), the timer has the best balanced accuracy (0.81 against 0.78; FPR 0.09 against
+0.35), yet at its own FPR FIPER warns 0.146 earlier: the test credits early warning wherever it
+occurs.
 
 \textbf{When do failures become irreversible?} An annotator blind to alarms marked the point of
 no return (the first state from which the task could not be completed without outside help) on
@@ -526,18 +526,16 @@ $\rho_k$ and each fused path are fixed on the existing rollouts, so only $\hat\l
 new successes and Proposition~\ref{prop:fpr} applies. A gain over P counts as early warning if
 its 97.5\% CI (Bonferroni over two detectors) is above zero at the same target and at matched
 false alarms, it beats 38 of 39 random and resampled fusions, and test false alarms stay within
-an exact binomial bound (at most 39 of 400); simulations with every path fixed give power of at
-least 0.94 and no false positives under either null.
+an exact binomial bound (at most 39 of 400); simulated power is at least 0.94.
 
 \textbf{Reset and retry (E2).} We evaluate H4 in closed loop on 1,000 RLDX-1 scenes (50 per
 task) with a shared budget of $1.25\,H_k$. Each scene runs once without reset to $1.25\,H_k$
 (the no-reset outcome); each monitor's arm branches from this run at its first alarm, restores
 the initial simulator state and retries with the same policy seed, with latency charged to the
 budget. We report the paired success-rate difference between Hide-and-Seek + P and P resets with
-a 95\% CI, plus reset against no reset and unnecessary resets. Simulations from the
-recorded rollouts put it at about $+0.01$ (half-width 0.02), so E2 estimates H4's effect rather
-than testing it; in a pilot, only 4\% of RLDX-1 failures (18 of 444) succeeded when continued to
-$1.25\,H_k$.
+a 95\% CI, plus reset against no reset, unnecessary resets, and a time-only reset with per-task
+cutoffs that maximize success on the recorded rollouts (in simulation, within 0.01 of P). Simulations from the
+recorded rollouts put it at about $+0.01$ (half-width 0.02), so E2 estimates H4 rather than tests it; in a pilot, only 4\% of RLDX-1 failures succeeded when continued to $1.25\,H_k$.
 
 \textbf{Further analyses (E3).} Action-only and multi-sample monitors, and lead from the
 point of no return.
@@ -546,11 +544,10 @@ point of no return.
 
 At matched false alarms, policy monitors add an uncertain 0.015 to 0.056 of the time limit over
 a per-task timer, so early warning (H1) is not yet established; Stage~2 tests it further.
-
 \textbf{Limitations.} Alarms were recorded in simulation (free resets), not acted on; lead
 runs to the time limit, not to irreversibility; RLDX-1 rollouts are recorded. Hide-and-Seek
 was tested on a test set already used for SAFE, and analyses beyond H1 and H2 followed scoring.
-Monitors assume a known task, a time limit and an automatic success check.
+Monitors assume a known task, a time limit and a success check.
 
 % References start on page 6 (RSS: up to 5 pages of content and 1 page of references).
 \clearpage
