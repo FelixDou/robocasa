@@ -17,7 +17,7 @@ the training data~\cite{rajaprakash2026safecast}, labels~\cite{park2026hideseek,
 or policy~\cite{soddy2026memoryvla}. FIPER notes that accumulated scores flag failures mostly
 because failed rollouts are longer~\cite{romer2025fiper}, and ActProbe feeds the normalized
 timestep to its model~\cite{huang2026actprobe}, but none reports an elapsed-time detector. SAFE identifies the duration shortcut and removes it by
-evaluating rollouts at equal length (its App.~B.5) and, on its real robot, by running every
+evaluating rollouts at equal length (its App.~B.5) and, on its real robots, by running every
 rollout to a fixed horizon~\cite{gu2025safe}. These controls suit fixed-horizon evaluation;
 under success-terminated execution, duration is a shortcut~\cite{geirhos2020shortcut} for offline
 metrics but legitimate online evidence, much as time limits make the remaining time part of the
@@ -45,6 +45,7 @@ false-positive control under exchangeability~\cite{angelopoulos2021gentle}; our 
 rule (Sec.~\ref{sec:guarantee}) is an instance of nested conformal
 prediction~\cite{gupta2022nested}, and Learn-then-Test~\cite{angelopoulos2025ltt} could choose
 its path from data with a guarantee. RESCUE~\cite{ahmedt2026rescue}
-finds that good detection scores do not guarantee lower intervention cost, and CheckVLA
+finds that, with strong policies, good detection scores do not guarantee lower intervention
+cost, and CheckVLA
 couples detection to repair; an earlier alarm matters only if acting
 on it raises success.
