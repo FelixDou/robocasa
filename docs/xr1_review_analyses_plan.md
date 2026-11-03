@@ -4047,7 +4047,18 @@ paired half-width at 1,000 scenes with branching).**
 | 0.245 | composite | −0.012 | −0.012 | −0.007 | +0.001 | 0.049 | +0.012 | +0.005 | −0.007 | 2/6 |
 | 0.17 | all | 0.029 | 0.034 | 0.036 | 0.027 | 0.062 | −0.002 (±0.017) | +0.007 (±0.017) | +0.009 (±0.019) | 7/20 |
 
-The 1.5 and 2.0 H_k budgets are in `reset.json`.
+Larger budgets (all tasks; from `reset.json`):
+
+| r | Budget | P | H&S + P | R_opt | R_oracle | R_opt − P | H&S − P | H&S − R_opt | R_opt < c_P |
+|---|---|---:|---:|---:|---:|---|---|---|---|
+| 0.245 | 1.5 | 0.083 | 0.096 | 0.095 | 0.126 | +0.012 (±0.026) | +0.013 (±0.024) | +0.001 (±0.027) | 15/20 |
+| 0.245 | 2.0 | 0.144 | 0.156 | 0.158 | 0.185 | +0.013 (±0.028) | +0.012 (±0.027) | −0.002 (±0.028) | 13/20 |
+| 0.17 | 1.5 | 0.055 | 0.064 | 0.051 | 0.090 | −0.004 (±0.022) | +0.009 (±0.021) | +0.013 (±0.023) | 8/20 |
+| 0.17 | 2.0 | 0.101 | 0.110 | 0.105 | 0.136 | +0.004 (±0.026) | +0.010 (±0.026) | +0.005 (±0.026) | 7/20 |
+
+With more budget and the higher retry rate (r = 0.245), R_opt resets earlier than P on most
+tasks and matches Hide-and-Seek + P. So the success-tuned timer is a real competitor for E2,
+not a formality.
 
 **Expectations against results.**
 - **C1: partly met.**
@@ -4108,5 +4119,5 @@ The 1.5 and 2.0 H_k budgets are in `reset.json`.
   branch) answers the reviewers. The expected Hide-and-Seek + P advantage over R_opt is about
   +0.01, with half-width 0.02.
 
-**Evidence.** The JSONs are to be copied to `evidence/xr1_list_c_20261103_211633/` and their
-hashes checked against the above.
+**Evidence (copied 2026-11-03).** `evidence/xr1_list_c_20261103_211633/list_c.json`
+(`3b48bccd…`) and `reset.json` (`3dac8155…`) match the cluster's hashes.
