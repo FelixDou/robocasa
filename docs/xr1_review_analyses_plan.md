@@ -947,6 +947,97 @@ unless stated.
 - **B5:** Hide-and-Seek's 0.071 is several seconds on average. Lead before the point of no
   return is positive on only a few decided (mostly atomic) failures.
 
+## R13. Second mock review, list B: five analyses on existing data (written 2026-11-03, before any run)
+
+`scripts/xr1_lead_time/review_analyses_c.py`, with tests in `tests/test_xr1_review_analyses_c.py`.
+CPU. Exploratory on opened cohorts. Answers the 2026-11-03 mock review (paper folder,
+`mock_review_20261103.md`, list B). Two subcommands:
+- `xr1`: C1 to C4 on the E1 cohorts, at α = 0.05 with the registered fits
+  (`review_analyses.fit_alpha`). "Matched" is `review_analyses_b.loosen_fast`.
+- `reset`: C5 on the RLDX-1 rows of R9 (`stage2_frozen_sizing.load` and `e3_inputs`).
+
+- **C1. Ensemble size.** For SAFE (`per_seed_raw_safe`, bundle normalizations) and for
+  Hide-and-Seek and its three ablations (`per_seed_raw`, Amendment 2 normalizations):
+  - every subset of the 3 training seeds (3 singles, 3 pairs, the full ensemble), scored as in
+    Eq. 1 (mean over the subset of each seed's normalized running maximum);
+  - each subset refit with `fit_alpha` and evaluated at the same target and matched;
+  - per subset: path, false alarms, same-target and matched gain, ROC-AUC of the final running
+    maximum on the test cohort, the spread (SD) of calibration successes' final scores, and the
+    share of test failures on which the score alarms before the timer;
+  - summaries per ensemble size k (mean and SD over subsets);
+  - the alternative aggregation "running maximum of the seed-averaged normalized raw score" for
+    the full ensemble.
+- **C2. SAFE-MLP score form.**
+  - **Form.** Every stored `per_seed_raw_safe` series is checked: nondecreasing, with per-inference
+    increments in [0, 1 + 1e-4]. If all are, the score is SAFE's cumulative sum of per-step
+    sigmoid outputs. Increments are summarized by outcome (mean, median, share > 0.9, share < 0.1).
+  - **Time-free variants** from the increments p_t (the per-step outputs, recovered exactly):
+    - `safe_mean`: the running mean p̄_t = C_t / t;
+    - `safe_win8`: the mean of the last 8 inferences.
+  - Each variant is seed-averaged, passed through a running maximum and standardized by one
+    global affine map. The map's location and scale come from the calibration failures' final
+    scores, which Proposition 1 allows, and makes the (u, s) grid comparable.
+  - Each variant is fused with P and reported like C1's full ensembles.
+  - The cluster step also prints the `loss_mode` / `score_output` recorded with the XR-1 and RLDX-1
+    final refits.
+- **C3. Time-limit truncation.** For τ ∈ {0.8, 0.9, 1.0}, every cohort row is truncated to the new
+  limit H′_k = ⌊τ H_k⌋ inferences:
+  - a rollout fails if it failed or L > H′_k;
+  - L′ = min(L, H′_k), and the scores are truncated to L′;
+  - P's development fractions become L/H′_k, keeping only successes with L ≤ H′_k.
+  
+  Then P and the SAFE + P and Hide-and-Seek + P fits are refit, and the gains (same target and
+  matched) and the class counts are reported. τ = 1.0 must reproduce the registered numbers (H3).
+- **C4. Per-task false alarms and an oracle time-only allocation.**
+  - Per task, test successes alarmed (of 10) for P, SAFE + P, Hide-and-Seek + P and P matched to
+    each. Reported: max, 90th percentile, and the number of tasks with ≥ 3 and ≥ 4.
+  - **Oracle.** `review_analyses_b.allocate` on the *test* successes' fractions, with budget equal to
+    each fused detector's test false alarms over 380. This gives the per-task time-only cutoffs
+    with the most lead at that count, tuned on the test set.
+  - Reported: its false alarms, lead and lead gain over P. Each fused detector's lead is reported
+    against it. This bounds what any per-task time-only rule could reach.
+- **C5. Success-optimal time-only reset (RLDX-1, E2's simulation).**
+  - **Cutoff.** For each task, a reset cutoff a_k on the grid {0.05, 0.10, …, 1.00}. It is chosen
+    on the *training* rollouts to maximize simulated success within the budget, with
+    `stage2_sizing.retry_mc` and the training successes' durations and success rate.
+  - **Arm.** R_opt resets every attempt at ⌈a_k H_k⌉. It is compared with none, P,
+    SAFE-LSTM + P and Hide-and-Seek + P on the test pools with R9's seeds and common random numbers.
+  - **Settings.** Budgets 1.25, 1.5 and 2.0 H_k; retry success r ∈ {0.245, 0.17}.
+  - **R_oracle** chooses a_k on the test pool and gives an upper bound.
+  - **Reported.** Task-macro success per arm, the differences against P and against R_opt, a_k
+    against P's c_k, and the paired CI half-width at 1,000 scenes with branching. The half-width
+    uses R9's `contrast` formula on independent retry streams.
+
+**Gates (no result without them):**
+- **H0:** the stored SAFE and Hide-and-Seek trajectories equal their normalized raw scores. Each
+  full-ensemble subset score equals the stored trajectory within 1e-9.
+- **H1:** E1 and Amendment 2 are reproduced by the full ensembles at α = 0.05: path, false alarms
+  and same-target gains (0.0298, 0.0708).
+- **H2:** the full ensembles' matched gains equal R2's (`--review-result`).
+- **H3:** truncation at τ = 1.0 reproduces H1's fits and gains exactly.
+- **H4:** the per-task false-alarm counts sum to each detector's false alarms. Each oracle
+  allocation's test false alarms are at most its target.
+- **H5:** the none, P and fused arms reproduce R9's `e3_hs_reset.json` (multi-retry success at
+  every budget, both r). R_opt with a_k set to P's c_k equals the P arm on successes and
+  failures.
+
+**Expectations (written before running).**
+- **C1:** Hide-and-Seek's gain rises with k, mostly from 1 to 2. The mechanism is a lower
+  success-score spread, which lets the path take a lower threshold; the AUC moves little. The
+  ablations stay near 0 at every k. SAFE moves less than Hide-and-Seek.
+- **C2:** the stored SAFE-MLP score is cumulative, with per-step outputs near 1 on most steps (the
+  local August copy gives 75% of success steps and 95% of failure steps above 0.9). The
+  time-free variants gain about 0 to +0.02 matched, no more than the cumulative score.
+- **C3:** at 0.8 and 0.9 H more slow successes become failures. Gains over P keep their sign;
+  Hide-and-Seek's matched gain shrinks by up to half.
+- **C4:** the fused detectors' worst task has 4 of 10 successes alarmed, P's at most 3. The test
+  oracle gains +0.02 to +0.04 over P at the fused false-alarm count. Hide-and-Seek + P's lead
+  over it is about +0.02 to +0.04 and may include 0.
+- **C5:** R_opt's cutoffs fall below P's c_k on most tasks. R_opt beats P on success by at least
+  as much as Hide-and-Seek + P does (about +0.01 at 1.25 H_k). E2 then needs R_opt as a
+  comparator.
+
+
 ## Runbook
 
 Run on TSUBAME from a pinned worktree, CPU only for R1–R4, following
@@ -2542,6 +2633,93 @@ Report:
 - the SHA-256.
 
 Then copy `list_b.json` to the local evidence folder.
+
+### 11. R13: second mock review, list B (CPU, two processes, about 30–60 minutes)
+
+`R13_SHA` is the full SHA of the pushed commit on `claude/review-analyses` that contains this
+step. Use a CPU allocation with at least 4 cores, for example
+`qrsh -g tga-shinoda -l cpu_16=1 -l h_rt=2:00:00`.
+- `xr1` (C1–C4) runs on the E1 cohorts.
+- `reset` (C5) runs on the RLDX-1 rows of R9.
+
+The driver runs them one after the other.
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export SAFE_PY=$STORAGE_BS/envs/vla_safe/bin/python
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+# E1_OUT, AMEND2_ROOT, XR1_RUNTIME_BUNDLE (Amendment 2)
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+# RLDX_CAL, RLDXHS_ROOT, RLDX_LEAD_OUT (the 15.22 run, as in R9)
+source $STORAGE_BS/robocasa_logs/eval/rldx1_hide_and_seek_20261023_000418/paths.env
+export CK=$STORAGE_BS/robocasa_checkpoints/safe
+export RV_JSON=$CK/xr1_review_analyses_20261028_155557/review_analyses.json
+export R9_E3=$CK/stage2_frozen_sizing_20261029_190042/e3_hs_reset.json
+export R13_SHA=<R13_SHA>
+export R13_REPO=$PROJECT_FS/robocasa_r13listc_${R13_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $R13_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R13_REPO $R13_SHA
+test "$(git -C $R13_REPO rev-parse HEAD)" = "$R13_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not R13_SHA"
+cd $R13_REPO
+export R13_TAG=xr1_list_c_$(date +%Y%m%d_%H%M%S)
+export R13_ROOT=$CK/$R13_TAG R13_LOG=$STORAGE_BS/robocasa_logs/eval/$R13_TAG
+mkdir -p $R13_ROOT $R13_LOG
+R13_INPUTS=($E1_OUT/calibration_predictions.jsonl $E1_OUT/test_predictions.jsonl $E1_OUT/confirm_lead.json
+            $AMEND2_ROOT/scores/lead_calibration_predictions.jsonl $AMEND2_ROOT/scores/confirmatory_test_predictions.jsonl
+            $AMEND2_ROOT/scores/normalizations.json $AMEND2_ROOT/confirm_hide_and_seek.json $XR1_RUNTIME_BUNDLE $RV_JSON
+            $RLDX_CAL/lstm_seed{0,1,2}/normalized_scores.jsonl $RLDXHS_ROOT/scores/{train,calibration,test}_predictions.jsonl
+            $RLDX_LEAD_OUT/rldx_lead_lstm.json $RLDXHS_ROOT/rldx_hide_and_seek.json $R9_E3)
+for f in "${R13_INPUTS[@]}"; do test -s $f && echo "OK $f" || echo "STOP: missing $f"; done | grep -c '^OK'
+sha256sum "${R13_INPUTS[@]}" | tee $R13_LOG/frozen_inputs.sha256 | cut -c1-12
+printf 'export %s=%q\n' R13_SHA "$R13_SHA" R13_REPO "$R13_REPO" R13_ROOT "$R13_ROOT" R13_LOG "$R13_LOG" > $R13_LOG/paths.env
+# C2: the training objective recorded with the SAFE final refits (XR-1 and RLDX-1 SAFE20).
+for root in $CK/xr1_pooled_39tasks_final_refits_20260814_231508 $CK/rldx1_safe20_natural_weighted_20260815_162530; do
+  echo "== $root"; grep -rho --include='*.json' -E '"(loss_mode|score_output)": "[a-z_]+"' $root | sort | uniq -c
+done | tee $R13_LOG/training_objective.txt
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_xr1_review_analyses_c 2>&1 | tail -n 3
+export CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4
+nohup sh -c "
+nice -n 10 $SAFE_PY -I -u scripts/xr1_lead_time/review_analyses_c.py xr1 \
+  --calibration $E1_OUT/calibration_predictions.jsonl --test $E1_OUT/test_predictions.jsonl \
+  --scores-calibration $AMEND2_ROOT/scores/lead_calibration_predictions.jsonl \
+  --scores-test $AMEND2_ROOT/scores/confirmatory_test_predictions.jsonl \
+  --normalizations $AMEND2_ROOT/scores/normalizations.json --runtime-bundle $XR1_RUNTIME_BUNDLE \
+  --e1-result $E1_OUT/confirm_lead.json --amend2-result $AMEND2_ROOT/confirm_hide_and_seek.json \
+  --review-result $RV_JSON --output $R13_ROOT/list_c.json > $R13_LOG/xr1.log 2>&1 || exit 1
+nice -n 10 $SAFE_PY -I -u scripts/xr1_lead_time/review_analyses_c.py reset \
+  --calibration-dir $RLDX_CAL --hs-scores-dir $RLDXHS_ROOT/scores \
+  --replication-json $RLDX_LEAD_OUT/rldx_lead_lstm.json --hs-result $RLDXHS_ROOT/rldx_hide_and_seek.json \
+  --reference-json $R9_E3 --output $R13_ROOT/reset.json > $R13_LOG/reset.log 2>&1 || exit 1
+echo ALL DONE > $R13_LOG/done.txt" > $R13_LOG/driver.log 2>&1 &
+echo "driver PID $! on $(hostname); R13_TAG=$R13_TAG"
+```
+
+Continue only if all of these hold:
+- `HEAD OK` prints;
+- the count is 18;
+- `review_analyses.json`'s hash starts with `8f38f3c6bed7`;
+- `e3_hs_reset.json`'s hash starts with `cb8cc331`;
+- the tests end with `OK` (8 tests).
+
+When `done.txt` exists, or the driver has stopped, report the output of:
+
+```bash
+source $(ls -d $STORAGE_BS/robocasa_logs/eval/xr1_list_c_* | tail -n 1)/paths.env
+cat $R13_LOG/driver.log; ls $R13_LOG
+cat $R13_LOG/training_objective.txt
+tail -n 45 $R13_LOG/xr1.log
+grep -h "check" $R13_LOG/reset.log; grep -h "B=1.25" $R13_LOG/reset.log; tail -n 1 $R13_LOG/reset.log
+sha256sum -c --quiet $R13_LOG/frozen_inputs.sha256 && echo INPUTS UNCHANGED
+sha256sum $R13_ROOT/*.json; basename $R13_ROOT
+```
+
+- `xr1.log` must end in `LIST C OK`.
+- `reset.log` must end in `RESET OK`, with the replication check `OK`.
+
+Copy both JSONs to `reports/safe_robocasa365_research_plan_20260823/evidence/<R13_TAG>/`.
+
 
 ## Result
 
