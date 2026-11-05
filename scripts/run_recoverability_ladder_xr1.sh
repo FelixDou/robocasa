@@ -122,9 +122,16 @@ PY
   cd "$ROBOCASA_REPO"
   # robosuite requires the EGL device id to be one of the CUDA_VISIBLE_DEVICES ids.
   export CUDA_VISIBLE_DEVICES="$gpu" MUJOCO_EGL_DEVICE_ID="$gpu"
-  "$py" -u -m "$module" collect --config "$LADDER_CONFIG" --output-dir "$out" \
-    --shard-index "$shard" --num-shards "$nshards" --host 127.0.0.1 --port "$port" \
-    --policy-arg "model_path=$LADDER_MODEL" --policy-arg "policy_checkpoint=$LADDER_MODEL" "$@"
+  if [[ "${LADDER_WORKER_KIND:-collect}" == alarm_branch ]]; then
+    # Phase A1 of docs/recovery_harvest_finetune_plan.md (scripts/run_alarm_branching_xr1.sh).
+    "$py" -u -m robocasa.recovery.alarm_branching branch --output-dir "$out" \
+      --shard-index "$shard" --num-shards "$nshards" --host 127.0.0.1 --port "$port" \
+      --policy-arg "model_path=$LADDER_MODEL" --policy-arg "policy_checkpoint=$LADDER_MODEL" "$@"
+  else
+    "$py" -u -m "$module" collect --config "$LADDER_CONFIG" --output-dir "$out" \
+      --shard-index "$shard" --num-shards "$nshards" --host 127.0.0.1 --port "$port" \
+      --policy-arg "model_path=$LADDER_MODEL" --policy-arg "policy_checkpoint=$LADDER_MODEL" "$@"
+  fi
   exit 0
 fi
 

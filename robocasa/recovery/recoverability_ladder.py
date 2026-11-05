@@ -153,6 +153,9 @@ DEFAULTS = {
     "snapshot_stride": 1,
     "save_model_xml": True,
     "record_policy_features": False,
+    # Storage dtype of recorded policy features. Detectors were trained on float32;
+    # float16 (the v1/v2 default) halves storage but perturbs their scores slightly.
+    "policy_feature_dtype": "float16",
     "horizons": None,
     "policy_module": None,
     "policy_args": {},
@@ -360,6 +363,8 @@ def resolve_config(config=None, overrides=None):
         raise ValueError("--policy-context must be reset or restore")
     if merged["seed_protocol"] not in {"repeated_reset", "fresh_env"}:
         raise ValueError("--seed-protocol must be repeated_reset or fresh_env")
+    if merged["policy_feature_dtype"] not in {"float16", "float32"}:
+        raise ValueError("policy_feature_dtype must be float16 or float32")
     for key in ("k_branches", "parents_per_task", "snapshot_stride", "stage_min_examples"):
         if int(merged[key]) < 1:
             raise ValueError(f"{key} must be positive")
@@ -805,7 +810,7 @@ def run_parent_rollout(env, policy, *, task_name, horizon, env_seed, policy_seed
         record = pop() if callable(pop) else None
         if config["record_policy_features"] and isinstance(record, dict):
             if record.get("features") is not None:
-                features.append(np.asarray(record["features"], dtype=np.float16))
+                features.append(np.asarray(record["features"], dtype=np.dtype(config["policy_feature_dtype"])))
                 feature_steps.append(step)
         obs, reward, done, info = _step_env(env, action)
         num_steps = step + 1

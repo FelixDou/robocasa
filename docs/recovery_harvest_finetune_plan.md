@@ -118,17 +118,33 @@ but the XR-1 pipeline has to be set up first:
 Hide-and-Seek + P and record, per parent, the first alarm inference `a`,
 which component fired (score or timer), and `a` against the ladder's anchors.
 
-Integrity checks, all required:
-- the retrained detector reproduces the Amendment 2 trajectories exactly on
-  the August calibration and test rollouts (largest difference 0);
+Integrity checks, all required (the export step stops on any failure):
+- the retrained detector seeds, after saving and reloading, reproduce the
+  Amendment 2 raw trajectories of the confirmatory test cohort exactly
+  (largest difference at most 1e-12), and its stored normalizations;
+- P and the fused path (u, s, lam), refitted with the registered
+  `confirm_lead.py` code on the Amendment 2 calibration cohort, equal the
+  values stored in `confirm_hide_and_seek.json`;
 - on the ladder parents, only the alarm and its timing are read. AUROC and
   FPR are reported for description, not used for any decision.
+
+**Float16 caveat.** The ladder v2 collector stored policy features in float16;
+Hide-and-Seek was trained and confirmed on float32. A0 alarms on the v2
+parents are therefore approximate. The export step measures the effect on
+the confirmatory test cohort (how many alarms move, and by how many
+inferences) and the result is reported with Gate A. New collections set
+`policy_feature_dtype: float32`.
 
 **A1 (simulator).** For every failed parent with an alarm, branch from its
 saved snapshots at `a`, `a − 8` and `a − 16` inferences (clipped at stage entry),
 K = 8 resamples each, budget = remaining horizon, policy context reset. Success
 controls with a false alarm get the same cells (harm data). Estimated cost:
 about 1,000 branches, 15–20 worker-hours.
+
+The environment is rebuilt as the ladder built it (one env per task, then
+`reset(seed)` for every attempt seed in order). A parent is branched only if
+its reset state equals its saved first snapshot (max difference ≤ 1e-6);
+mismatches are recorded and excluded from Gate A.
 
 **Gate A** (decides where Phase B harvests):
 
@@ -231,20 +247,89 @@ sampling-seed schedule, as in the re-prompt trials:
 
 ## Code to write (with simulator-free tests)
 
-1. `hs_p_alarm`: export the frozen Hide-and-Seek + P (PCA, LSTM seeds 0–2,
-   normalization, P timers, fused path) from the Amendment 2 run. It provides
-   an offline scorer for ladder and trial feature files, an online scorer for
-   the XR-1 client, and the exact-reproduction check.
-2. Ladder `branch-saved`: branch from saved parent snapshots (model XML,
-   `ep_meta`, flattened states) at anchors given in a file (`alarm`,
-   `alarm_minus_n`), against any policy server. Phase A1, B and D all use it.
+1. **Done (Phase A):** `robocasa/recovery/hs_p_alarm.py`. It exports the frozen
+   Hide-and-Seek + P (PCA, LSTM seeds 0–2, normalization, P timers, fused path)
+   with the reproduction checks, and scores ladder parents offline
+   (`score-ladder`). Still to do: the online scorer for the XR-1 client
+   (Phase E).
+2. **Done (Phase A):** `robocasa/recovery/alarm_branching.py`. It branches
+   ladder parents from saved snapshots at alarm-relative anchors (`alarm`,
+   `alarm_minus_n`) through the ladder's `run_branch`, with a scene-identity
+   check, resume and sharding, and computes Gate A (`analyze`). Phases B and
+   D reuse it. Re-prompt branches are not supported yet: the saved
+   snapshots do not record regressed predicates.
 3. Ladder `record_branch_trajectories`: per-branch observation/action files,
-   and a converter to the XR-1 training format from Step 0.
+   and a converter to the XR-1 training format from Step 0. The ladder now
+   accepts `policy_feature_dtype` (`float16` by default, `float32` for new
+   runs).
 4. Harvest dataset builder with the health checks above.
 5. XR-1 training configs for M1, M3 and M1-rp.
 6. An `alarm_switch` gate in the stage-gated trial collector.
 
-Runbook commands are added to this file with the code. Every run follows
+Tests (simulator- and PyTorch-free; the detector save/load test runs only
+where PyTorch is installed):
+
+```bash
+python -m unittest tests.test_hs_p_alarm tests.test_alarm_branching tests.test_recoverability_ladder
+```
+
+### Phase A runbook (cluster)
+
+`scripts/run_alarm_branching_xr1.sh` wraps every step. Defaults: Amendment 2
+run `xr1_amend2_hide_and_seek_20261022_214209`, E1 lead calibration
+`xr1_lead_calibration_20261020_001108/lead_analysis`, ladder v2 pilot
+`xr1_ladder_v2_pilot_20261017_164537` (shards 0 and 1), K = 8, offsets 8 and
+16, workers `0:1 2:3`, ports from 10380.
+
+```bash
+cd /gs/fs/tga-shinoda/felid/robocasa && git pull origin main
+export PYTHONPATH=$PWD
+/gs/bs/tga-shinoda/felid/envs/vla_safe/bin/python -m unittest tests.test_hs_p_alarm tests.test_alarm_branching
+```
+
+A0, step 1: export the frozen alarm. This is CPU-only and runs in the
+background; expect a few hours, comparable to the Amendment 2 scoring.
+
+```bash
+bash scripts/run_alarm_branching_xr1.sh export
+```
+
+The log must end with `EXPORT OK`. Before going on, record the `float16`
+block it prints, then set `ALARM_SPEC` to the printed directory.
+
+A0, step 2: score the ladder v2 parents (CPU, minutes).
+
+```bash
+export ALARM_SPEC=/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/hs_p_alarm_spec_<stamp>
+bash scripts/run_alarm_branching_xr1.sh score
+```
+
+Check `alarms_summary.json`:
+- `length_mismatches` and `feature_snapshot_mismatches` should be 0;
+- the per-task counts give failures with an alarm, false alarms, and where the
+  alarm falls relative to the ladder's own detection.
+
+A1: plan, then branch (GPU; one allocation with four GPUs).
+
+```bash
+bash scripts/run_alarm_branching_xr1.sh plan
+bash scripts/run_alarm_branching_xr1.sh start
+bash scripts/run_alarm_branching_xr1.sh status
+```
+
+Resume after a stop with `resume`, never with `start`. Gate A:
+
+```bash
+bash scripts/run_alarm_branching_xr1.sh analyze
+```
+
+Outputs:
+- the spec under `$STORAGE_BS/robocasa_checkpoints/safe/hs_p_alarm_spec_*`;
+- alarms, branches and `gate_a/` under
+  `$STORAGE_BS/robocasa_rollouts/recovery/xr1_alarm_phaseA_*`;
+- logs under `$STORAGE_BS/robocasa_logs/eval`.
+
+Every run follows
 [`cluster_experiment_runbook.md`](cluster_experiment_runbook.md) for storage:
 - harvested data under `$STORAGE_BS/robocasa_failure_datasets/`;
 - checkpoints under `$STORAGE_BS/robocasa_checkpoints/`;
