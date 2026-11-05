@@ -1,5 +1,9 @@
 # Stage-gated re-prompt trial 2: stall-gated re-prompting (XR-1)
 
+> **Results (5 November 2026):** [stage_gated_reprompt_trial2_results_20261105.md](stage_gated_reprompt_trial2_results_20261105.md):
+> primary not confirmed (+0.005, p = 1.00); the stall gate picks the right
+> seeds but re-prompts too late.
+
 Why: [trial 1 results](stage_gated_reprompt_results_20261030.md) and the
 [offline analysis](stage_gate_state_signal_analysis_20261103.md). Re-prompting
 ArrangeTea at mug-stage entry broke rollouts that were on the normal path;
