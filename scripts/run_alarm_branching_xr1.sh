@@ -37,7 +37,10 @@ if [[ "$action" == export ]]; then
   [[ ! -e "$ALARM_SPEC" ]] || { echo "ALARM_SPEC exists: $ALARM_SPEC"; exit 1; }
   cpu_env
   log="$log_dir/$(basename "$ALARM_SPEC")_export.log"
-  PYTHONPATH="$ROBOCASA_REPO" nohup nice -n 10 "$SAFE_PY" -u -m robocasa.recovery.hs_p_alarm export \
+  reuse=()
+  # Detectors trained by an earlier export (its detectors/ dir) skip retraining.
+  [[ -z "${ALARM_REUSE_DETECTORS:-}" ]] || reuse=(--reuse-detectors "$ALARM_REUSE_DETECTORS")
+  PYTHONPATH="$ROBOCASA_REPO" nohup nice -n 10 "$SAFE_PY" -u -m robocasa.recovery.hs_p_alarm export "${reuse[@]}" \
     --amendment-scores-dir "$AMEND2_ROOT/scores" --reference-cohort confirmatory_test \
     --e1-calibration "$E1_OUT/calibration_predictions.jsonl" \
     --hs-calibration-scores "$AMEND2_ROOT/scores/lead_calibration_predictions.jsonl" \
