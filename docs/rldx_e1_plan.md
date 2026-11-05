@@ -39,8 +39,21 @@ was then called "E2").
   - This is the revision the recorded rollouts used.
   - The current Hub revision (`c53d0bc0`) changes the processor's `image_max_area`, so the
     server loads the 587e9ecd snapshot by path, offline.
-- **RLDX-1 source:** commit `ef05cd4a` with `patches/rldx1_safe_features_ef05cd4.patch`, as for
-  the recorded rollouts.
+- **RLDX-1 source:** commit `ef05cd4a` with the cluster checkout's working-tree diff, audited on
+  2026-11-05 and stored as `patches/rldx1_e1_audited_worktree_ef05cd4.diff` (sha256
+  `1a723b1c0dba9491…`). It is not the SAFE patch alone, so the patch no longer reverse-applies
+  cleanly. It contains:
+  - `patches/rldx1_safe_features_ef05cd4.patch` (the recorded rollouts' feature capture);
+  - compatibility edits that leave computation unchanged:
+    - a dataclass `kw_only` fix;
+    - an import fallback in the official evaluator;
+    - `python -u` in its script.
+  - the `max_area is None` guard in `resize_preserve_aspect_area_then_crop`. With the 587e9ecd
+    snapshot's null `image_max_area`, it keeps the full image area; without it, that snapshot
+    cannot run. So the recorded rollouts used it too.
+  - an optional `safe_feature_mode = "action_observation_context"` (2026-08-09, after the
+    recorded collection started). It is used only when a request asks for it; E1's client never
+    does. In the default `action` mode, actions, features and metadata equal the SAFE patch's.
 
 ## Rollouts
 
@@ -179,10 +192,11 @@ test -e $E1_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $E1_REPO $
 test "$(git -C $E1_REPO rev-parse HEAD)" = "$E1_SHA" && echo "worktree OK" || echo "STOP: wrong HEAD"
 mkdir -p $E1_REPO/robocasa/models/assets
 cp -aln $PROJECT_FS/robocasa/robocasa/models/assets/. $E1_REPO/robocasa/models/assets/
-cd $E1_REPO && CUDA_VISIBLE_DEVICES="" $SAFE_PY -W ignore -m unittest tests.test_rldx_e1_plan tests.test_rldx_e1_analysis tests.test_e2_frozen_rule tests.test_xr1_fixed_path tests.test_rldx_continuation_pilot tests.test_safe_atomic_collection 2>&1 | tail -1
+cd $E1_REPO && CUDA_VISIBLE_DEVICES="" $SAFE_PY -W ignore -m unittest tests.test_rldx_e1_plan tests.test_rldx_e1_analysis tests.test_e2_frozen_rule tests.test_xr1_fixed_path tests.test_rldx_continuation_pilot tests.test_safe_atomic_collection 2>&1 | grep -E "^(Ran|OK|FAILED)"
 ```
 
-Continue only with `OK`.
+Continue only with `OK`. One test module prints a JSON object, so read the `Ran` and `OK` lines, not
+the last line.
 
 ### 2. Frozen inputs (record, then check)
 
@@ -193,13 +207,20 @@ test -d $RLDX_SNAPSHOT && echo "policy snapshot 587e9ecd OK" || echo "STOP: snap
 git -C $RLDX_REPO rev-parse HEAD | tee $E1_LOG/rldx_repo_head.txt      # must be ef05cd4a...
 git -C $RLDX_REPO status --short > $E1_LOG/rldx_repo_status.txt
 git -C $RLDX_REPO diff > $E1_LOG/rldx_repo_diff.patch
-git -C $RLDX_REPO apply --reverse --check $E1_REPO/patches/rldx1_safe_features_ef05cd4.patch \
-  && echo "SAFE feature patch applied" || echo "STOP: SAFE feature patch not applied"
+cmp $E1_LOG/rldx_repo_diff.patch $E1_REPO/patches/rldx1_e1_audited_worktree_ef05cd4.diff \
+  && echo "RLDX diff = audited diff" || echo "STOP: RLDX working tree differs from the audited diff"
+CUDA_VISIBLE_DEVICES="" $SAFE_PY -I -c "import sys; sys.path.insert(0, 'scripts/xr1_lead_time'); import e2_freeze_manifest as m; print(m.tree_hash(sys.argv[1])['digest'])" $RLDX_SNAPSHOT \
+  | tee $E1_LOG/snapshot_digest.txt   # must print f1a6048dfce7c138dc20337ac93ce112e055b4184bae7347d67b65698b6c3eb6
 cat $E1_LOG/rldx_repo_status.txt
 ```
 
-Paste the output back. Continue only if the freeze hash, snapshot, RLDX commit and patch all
-check out, and the RLDX status lists only the patch's files.
+Paste the output back. Continue only if all of these hold:
+- the freeze hash is `917c06e6ab701f9f`;
+- the RLDX commit is `ef05cd4a…`;
+- `RLDX diff = audited diff` prints;
+- the snapshot digest is `f1a6048d…` (reading 13.8 GB takes a few minutes).
+
+The status may also list the untracked `external_dependencies/robocasa365`.
 
 ### 3. Plan (reads the recorded collection; no monitor is scored)
 
