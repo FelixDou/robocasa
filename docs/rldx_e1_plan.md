@@ -9,9 +9,10 @@
 - **If the Extension Charter asks for changes,** these rollouts stay valid new data, and the
   changes are added on top.
 
-This document covers the collection. Scoring and the analysis come in a later commit, under
-one condition: no monitor is scored on an E1 rollout before that code exists and has reproduced
-the frozen monitors' recorded results exactly.
+This document covers the collection, the scoring and the analysis. The code for all three was
+committed before any E1 rollout existed (scoring and analysis on 2026-11-05, in the commit after
+the collection plan). No monitor is scored on an E1 rollout unless it first reproduces its
+recorded scores exactly (steps 9–10).
 
 ## Question
 
@@ -82,7 +83,7 @@ was then called "E2").
    If a task misses its quota at the cap, preserve the shard and resume it with a larger
    `--num-rollouts`. Never lower a quota or delete evidence.
 
-## Analysis (fixed now; code to come)
+## Analysis (fixed before collection; `scripts/rldx_e1/analyze_e1.py`)
 
 - **Per detector,** on the new sets:
   - $\hat\lambda$ is set on the new calibration successes by Proposition 1 at $\alpha = 0.05$,
@@ -101,10 +102,18 @@ was then called "E2").
   detectors.
 - **Simulated on the recorded rollouts (R10):** type I error 0 of 2,000 under both nulls;
   power 1.00 for SAFE-LSTM and 0.94 for Hide-and-Seek (nested) at 20 + 20 per task.
+- **Gate R** comes before any E1 number is computed. On the recorded rollouts, the frozen paths
+  certified on the recorded calibration successes must give the manifest's margins (0.0421,
+  0.068) and replication gains (0.0342, 0.0834). The manifest's $H_k$ and $\rho_k$ must equal
+  those recomputed from the recorded rows.
+- **Random draws** are fixed by seed 20261105: stream 1 for the bootstrap, stream 2 for the
+  null fusions.
 - **Reported alongside, not decisive:**
   - the per-type split;
-  - Hide-and-Seek's zero-input and first-step ablations, scored with their recorded models;
-  - seconds.
+  - seconds (0.4 s per RLDX-1 inference);
+  - whether every failure ran to its limit.
+- **Not part of E1:** Hide-and-Seek's input ablations were not frozen with models. If wanted,
+  they are an exploratory addition after E1.
 
 ## Code
 
@@ -116,7 +125,14 @@ was then called "E2").
   It reuses `scripts/rldx_continuation_pilot/plan_pilot.py` to read and check the recorded
   collection.
 - `scripts/rldx_e1/check_e1_collection.py` holds gates 1 and 2.
-- `tests/test_rldx_e1_plan.py` is simulator-free.
+- `scripts/rldx_e1/score_e1.py` scores the new sets with the frozen monitors:
+  - `hs` reloads the three Hide-and-Seek models. It writes nothing until they reproduce the
+    freeze run's scores exactly on every recorded calibration and test rollout.
+  - `safe` assembles SAFE-LSTM scores from `score_seen_checkpoint_external` outputs. It writes
+    nothing until the final runs' digests match the manifest, their per-task normalization
+    equals the recorded one, and the re-scored recorded export equals its recorded raw scores.
+- `scripts/rldx_e1/analyze_e1.py` holds gate R and rule (a)–(d).
+- `tests/test_rldx_e1_plan.py` and `tests/test_rldx_e1_analysis.py` are simulator-free.
 - The collector is `robocasa.recovery.safe.collect_atomic_rollouts`, unchanged.
 
 ## Runbook
@@ -163,7 +179,7 @@ test -e $E1_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $E1_REPO $
 test "$(git -C $E1_REPO rev-parse HEAD)" = "$E1_SHA" && echo "worktree OK" || echo "STOP: wrong HEAD"
 mkdir -p $E1_REPO/robocasa/models/assets
 cp -aln $PROJECT_FS/robocasa/robocasa/models/assets/. $E1_REPO/robocasa/models/assets/
-cd $E1_REPO && CUDA_VISIBLE_DEVICES="" $SAFE_PY -W ignore -m unittest tests.test_rldx_e1_plan tests.test_rldx_continuation_pilot tests.test_safe_atomic_collection 2>&1 | tail -1
+cd $E1_REPO && CUDA_VISIBLE_DEVICES="" $SAFE_PY -W ignore -m unittest tests.test_rldx_e1_plan tests.test_rldx_e1_analysis tests.test_e2_frozen_rule tests.test_xr1_fixed_path tests.test_rldx_continuation_pilot tests.test_safe_atomic_collection 2>&1 | tail -1
 ```
 
 Continue only with `OK`.
@@ -265,4 +281,73 @@ $CLIENT_PY -I scripts/rldx_e1/check_e1_collection.py --plan $E1_ROOT/plan.json \
   $(for d in $E1_ROOT/collection/*/shard*; do echo "$(basename $(dirname $d))=$d"; done) 2>&1 | tee $E1_LOG/check.log
 ```
 
-Paste `check.log` back. Scoring and the analysis follow in their own commit and runbook.
+Paste `check.log` back. Continue to scoring only with `CHECK OK` and every shard `VALID`.
+
+### 8. SAFE exports (CPU)
+
+Merge each set's shards, validate the result, and export it to SAFE's loader layout. This is the
+format the recorded rollouts were scored from.
+
+```bash
+cd $E1_REPO
+for set in calibration test; do
+  $CLIENT_PY -m robocasa.recovery.safe.merge_atomic_datasets --source-dirs $E1_ROOT/collection/$set/shard* \
+    --output-dir $E1_ROOT/merged/$set 2>&1 | tail -n 2
+  $CLIENT_PY -m robocasa.recovery.safe.validate_atomic_dataset --dataset-dir $E1_ROOT/merged/$set | tail -n 1
+  $CLIENT_PY -m robocasa.recovery.safe.export_to_official_safe --dataset-dir $E1_ROOT/merged/$set \
+    --output-dir $E1_ROOT/safe_export/$set --summary-only 2>&1 | tail -n 3
+done
+```
+
+Continue only if both merged sets are `VALID` and each export holds 800 rollouts.
+
+### 9. Scores with the frozen monitors (one GPU for SAFE; Hide-and-Seek on CPU)
+
+SAFE-LSTM: every frozen final run scores the recorded export (its reproduction check) and both
+E1 exports. Nothing is fitted.
+
+```bash
+cd $E1_REPO
+export SAFE_REPO=$PROJECT_FS/SAFE
+export RLDX_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530
+export RLDX_CAL=$RLDX_ROOT/calibration/lstm
+export FREEZE_SCORES=$(dirname $E1_FREEZE)/scores_run2
+for s in 0 1 2; do
+  for x in recorded:$RLDX_EXPORT calibration:$E1_ROOT/safe_export/calibration test:$E1_ROOT/safe_export/test; do
+    CUDA_VISIBLE_DEVICES=0 $SAFE_PY -u -m robocasa.recovery.safe.score_seen_checkpoint_external \
+      --export-dir ${x#*:} --safe-repo $SAFE_REPO --training-run-dir $RLDX_ROOT/final/lstm_seed$s \
+      --output-dir $E1_ROOT/safe_scores/${x%%:*}/seed$s --group all --device cuda 2>&1 | tail -n 1
+  done
+done | tee $E1_LOG/safe_external.log
+```
+
+Then assemble both monitors' E1 scores. Each command prints its reproduction checks and
+`SCORING OK`, or stops before writing anything.
+
+```bash
+cd $E1_REPO
+$SAFE_PY -I scripts/rldx_e1/score_e1.py safe --freeze-manifest $E1_FREEZE --calibration-dir $RLDX_CAL \
+  $(for s in 0 1 2; do echo --recorded-scores $s $E1_ROOT/safe_scores/recorded/seed$s; done) \
+  $(for set in calibration test; do for s in 0 1 2; do echo --e1-scores $set $s $E1_ROOT/safe_scores/$set/seed$s; done; done) \
+  --output-dir $E1_ROOT/scores 2>&1 | tee $E1_LOG/score_safe.log
+unset OPENBLAS_NUM_THREADS
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 PYTHONPATH=$E1_REPO $SAFE_PY -I scripts/rldx_e1/score_e1.py hs \
+  --freeze-manifest $E1_FREEZE --freeze-scores-dir $FREEZE_SCORES --recorded-dataset $RLDX_RAW --output-dir $E1_ROOT/scores \
+  $(for d in $E1_ROOT/collection/*/shard*; do echo "$(basename $(dirname $d))=$d"; done) 2>&1 | tee $E1_LOG/score_hs.log
+```
+
+Hide-and-Seek uses the freeze run's thread settings (8 OpenMP/MKL threads, CPU). If a
+reproduction check fails by about 1e-7, paste the log; do not loosen the check yourself.
+
+### 10. Analysis (CPU, minutes)
+
+```bash
+cd $E1_REPO
+CUDA_VISIBLE_DEVICES="" $SAFE_PY -I scripts/rldx_e1/analyze_e1.py --freeze-manifest $E1_FREEZE \
+  --calibration-dir $RLDX_CAL --hs-scores-dir $FREEZE_SCORES --e1-scores-dir $E1_ROOT/scores \
+  --plan $E1_ROOT/plan.json --output $E1_ROOT/e1_result.json 2>&1 | tee $E1_LOG/analyze.log
+```
+
+It prints gate R first (both lines `OK`), then one line per detector: false alarms against the
+bound, the gain and matched gain with their 97.5% CIs, the null p-values, conditions (a)–(d), and
+whether H3 holds. Paste `analyze.log` back and copy `e1_result.json` to the Mac.
