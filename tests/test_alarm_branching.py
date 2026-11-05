@@ -86,7 +86,7 @@ class AlarmBranchingTest(unittest.TestCase):
         self.assertEqual(anchors["alarm_minus_4"], 4)
         self.assertEqual(anchors["detection"], 5)
 
-    def test_branches_start_at_the_alarm_with_the_remaining_horizon(self):
+    def test_branches_start_at_the_alarm_with_a_fixed_budget(self):
         status = self.branch()
         self.assertEqual(status["errors"], 0)
         out = self.root / "branches"
@@ -101,7 +101,11 @@ class AlarmBranchingTest(unittest.TestCase):
             self.assertEqual(branch["rung"], "resample_continue")
             self.assertIn(branch["anchor"], ("alarm", "alarm_minus_2", "alarm_minus_4"))
             self.assertIn(branch["source_index"], (5, 2, 3, 4))
-            self.assertEqual(branch["budget_steps"], 40 - branch["budget_start_step"])
+            # Default: ceil(0.5 * H) = 20 steps whatever the clock.
+            self.assertEqual(branch["budget_steps"], 20)
+            self.assertEqual(branch["remaining_steps"], 40 - branch["budget_start_step"])
+            self.assertEqual(branch["success_within_remaining"],
+                             branch["success"] and branch["steps_used"] <= branch["remaining_steps"])
             self.assertEqual(branch["policy_context"], "reset")
             self.assertEqual(branch["source_restore_residual"], 0.0)
             self.assertIn(branch["outcome"], ("failure", "false_alarm_success"))
@@ -110,6 +114,16 @@ class AlarmBranchingTest(unittest.TestCase):
         self.assertTrue(all(b["anchor_step"] == 20 for b in alarm))
         seeds = {(b["parent_id"], b["anchor"], b["k"]): b["branch_seed"] for b in branches}
         self.assertEqual(len(set(seeds.values())), len(seeds))
+
+    def test_remaining_horizon_budget_is_still_available(self):
+        self.branch(budget_mode="remaining_horizon")
+        branches = ladder.read_jsonl(self.root / "branches" / ab.BRANCHES_NAME)
+        self.assertTrue(branches)
+        for branch in branches:
+            self.assertEqual(branch["budget_steps"], 40 - branch["budget_start_step"])
+            self.assertEqual(branch["success_within_remaining"], branch["success"])
+        plan = json.loads((self.root / "branches" / ab.PLAN_NAME).read_text())
+        self.assertEqual(plan["budget_mode"], "remaining_horizon")
 
     def test_resume_runs_nothing_twice(self):
         self.branch()
@@ -121,6 +135,8 @@ class AlarmBranchingTest(unittest.TestCase):
             self.branch()
         with self.assertRaises(ValueError):
             self.branch(resume=True, k_branches=3)
+        with self.assertRaises(ValueError):
+            self.branch(resume=True, budget_fraction=0.25)
 
     def test_scene_mismatch_is_recorded_and_skipped(self):
         self.branch(runtime=MockRuntime(env_class=ShiftedEnv))
@@ -162,12 +178,13 @@ class AlarmBranchingTest(unittest.TestCase):
     def test_gate_a_thresholds(self):
         def fake(outcomes):
             rows = {f"p{i}": {"parent_id": f"p{i}", "attempt_uid": "u", "task_name": "T", "outcome": "failure",
+                              "horizon_steps": 100,
                               "cells": [{"anchor": a, "canonical": ["resample_continue", a], "run": True}
                                         for a in outcomes]}
                     for i in range(10)}
             return rows
 
-        def run(shares):
+        def run(shares, late=0):
             out = self.root / f"fake_{len(list(self.root.iterdir()))}"
             out.mkdir()
             rows = fake(shares)
@@ -180,15 +197,25 @@ class AlarmBranchingTest(unittest.TestCase):
             with (out / ab.BRANCHES_NAME).open("w") as stream:
                 for anchor, share in shares.items():
                     for i, pid in enumerate(rows):
+                        # The first `late` successes finish after the natural rollout's time limit.
                         stream.write(json.dumps({"parent_id": pid, "attempt_uid": "u", "anchor": anchor,
-                                                 "k": 0, "success": i < share * 10}) + "\n")
-            return ab.gate_a([out], k_branches=1, n_boot=20)["decision"]
+                                                 "k": 0, "success": i < share * 10, "budget_start_step": 90,
+                                                 "steps_used": 50 if i < late else 5}) + "\n")
+            result = ab.gate_a([out], k_branches=1, n_boot=20)
+            self.last = result
+            return result["decision"]
 
         self.assertEqual(run({"alarm": 0.3, "alarm_minus_8": 0.1, "alarm_minus_16": 0.0}),
                          "harvest_at_alarm_and_earlier")
         self.assertEqual(run({"alarm": 0.1, "alarm_minus_8": 0.2, "alarm_minus_16": 0.4}),
                          "harvest_at_alarm_minus_16_only")
         self.assertEqual(run({"alarm": 0.1, "alarm_minus_8": 0.2, "alarm_minus_16": 0.2}), "redesign_expert_data")
+        # The gate reads the fixed budget; late successes count there but not within the remaining time.
+        self.assertEqual(run({"alarm": 0.4, "alarm_minus_8": 0.0, "alarm_minus_16": 0.0}, late=3),
+                         "harvest_at_alarm_and_earlier")
+        cell = self.last["cells"]["failure/alarm"]
+        self.assertEqual(cell["share_with_any_success"], 0.4)
+        self.assertEqual(cell["share_with_any_success_within_remaining"], 0.1)
 
     def test_plan_counts_without_a_simulator(self):
         plan = ab.plan_summary([self.source], self.alarms, k_branches=2, offsets=(2, 4))

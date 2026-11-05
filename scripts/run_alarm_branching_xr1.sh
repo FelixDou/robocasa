@@ -19,6 +19,9 @@ export E1_OUT=${E1_OUT:-$STORAGE_BS/robocasa_rollouts/safe/xr1_lead_calibration_
 export ALARM_SOURCE_ROOT=${ALARM_SOURCE_ROOT:-$STORAGE_BS/robocasa_rollouts/recovery/xr1_ladder_v2_pilot_20261017_164537}
 export ALARM_K=${ALARM_K:-8}
 export ALARM_OFFSETS=${ALARM_OFFSETS:-"8 16"}
+# Fixed branch budget (fraction of the time limit), independent of the alarm's clock.
+export ALARM_BUDGET_MODE=${ALARM_BUDGET_MODE:-fixed_fraction}
+export ALARM_BUDGET_FRACTION=${ALARM_BUDGET_FRACTION:-0.5}
 export LADDER_GPU_PAIRS=${LADDER_GPU_PAIRS:-"0:1 2:3"}
 export LADDER_PORT_BASE=${LADDER_PORT_BASE:-10380}
 latest="$STORAGE_BS/robocasa_rollouts/recovery/xr1_alarm_phaseA_latest.env"
@@ -58,7 +61,7 @@ if [[ "$action" == score ]]; then
   PYTHONPATH="$ROBOCASA_REPO" nice -n 10 "$SAFE_PY" -u -m robocasa.recovery.hs_p_alarm score-ladder \
     --spec-dir "$ALARM_SPEC" --run-dir "${sources[@]}" --output "$ALARM_ROOT/alarms.jsonl" \
     2>&1 | tee "$log_dir/$(basename "$ALARM_ROOT")_score.log"
-  for name in STORAGE_BS ROBOCASA_REPO ALARM_SPEC ALARM_ROOT ALARM_SOURCE_ROOT ALARM_K ALARM_OFFSETS LADDER_GPU_PAIRS LADDER_PORT_BASE; do
+  for name in STORAGE_BS ROBOCASA_REPO ALARM_SPEC ALARM_ROOT ALARM_SOURCE_ROOT ALARM_K ALARM_OFFSETS ALARM_BUDGET_MODE ALARM_BUDGET_FRACTION LADDER_GPU_PAIRS LADDER_PORT_BASE; do
     printf 'export %s=%q\n' "$name" "${!name}"
   done > "$ALARM_ROOT/run.env"
   printf 'export ALARM_SOURCE_RUNS=%q\n' "${sources[*]}" >> "$ALARM_ROOT/run.env"
@@ -77,7 +80,8 @@ py="$XR1_CLIENT_ENV/bin/python"
 
 if [[ "$action" == plan ]]; then
   exec "$py" -m "$module" plan --source-run "${sources[@]}" --alarms "$alarms" \
-    --k-branches "$ALARM_K" --offsets "${offsets[@]}"
+    --k-branches "$ALARM_K" --offsets "${offsets[@]}" \
+    --budget-mode "$ALARM_BUDGET_MODE" --budget-fraction "$ALARM_BUDGET_FRACTION"
 fi
 if [[ "$action" == status ]]; then
   echo "ALARM_ROOT=$ALARM_ROOT"
@@ -96,7 +100,8 @@ fi
 
 # start | resume: one ladder worker per GPU pair, writing to $branch_root/shard<i>.
 test -f "$alarms" || { echo "Missing $alarms (run score first)"; exit 1; }
-extra=(--source-run "${sources[@]}" --alarms "$alarms" --k-branches "$ALARM_K" --offsets "${offsets[@]}")
+extra=(--source-run "${sources[@]}" --alarms "$alarms" --k-branches "$ALARM_K" --offsets "${offsets[@]}"
+       --budget-mode "$ALARM_BUDGET_MODE" --budget-fraction "$ALARM_BUDGET_FRACTION")
 if [[ "$action" == start ]]; then
   [[ ! -e "$branch_root" ]] || { echo "$branch_root exists; use resume"; exit 1; }
 else

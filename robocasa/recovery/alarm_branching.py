@@ -8,9 +8,17 @@ For every parent whose alarm fired (failures; successful parents with a false
 alarm are kept as harm data), resample branches start from the saved snapshot at
 the alarm (anchor ``alarm``) and ``n`` inferences before it (``alarm_minus_<n>``,
 clipped at the stage entry before the alarm). They run under the task
-instruction with K fresh sampling seeds, a reset policy context and the
-remaining-horizon budget, through the ladder's own ``run_branch``. Cells that
-start from the same snapshot alias and run once.
+instruction with K fresh sampling seeds and a reset policy context, through the
+ladder's own ``run_branch``. Cells that start from the same snapshot alias and
+run once.
+
+Budget. By default every branch gets ``ceil(budget_fraction * H)`` steps
+(``fixed_fraction``, 0.5 H, with the source run's per-task caps), independent of
+the clock: the Hide-and-Seek + P alarm often fires near the time limit, and
+harvesting recovery data does not depend on the benchmark clock. Each record
+also says whether it succeeded within the steps the natural rollout had left
+(``success_within_remaining``), which is the deployment view.
+``remaining_horizon`` reproduces the ladder's clock-bound budget instead.
 
 Scene identity. The environment is rebuilt as the ladder built it: one env per
 task, then ``reset(seed)`` for every attempt seed in order (as a ladder resume
@@ -41,6 +49,8 @@ RUNG = "resample_continue"
 ALARM = "alarm"
 ALARM_MINUS = "alarm_minus_"
 DEFAULT_OFFSETS = (8, 16)
+DEFAULT_BUDGET_MODE = "fixed_fraction"
+DEFAULT_BUDGET_FRACTION = 0.5
 GATE_SHARE = 0.30
 PLAN_NAME = "plan.json"
 PARENTS_NAME = "parents.jsonl"
@@ -116,9 +126,12 @@ def parent_anchors(parent, alarm_index, offsets):
     return anchors, steps
 
 
-def branch_config(source_config, *, k_branches, policy_args=None):
-    overrides = {"budget_mode": "remaining_horizon", "k_branches": int(k_branches),
-                 "policy_context": "reset", "parents_only": False}
+def branch_config(source_config, *, k_branches, policy_args=None, budget_mode=DEFAULT_BUDGET_MODE,
+                  budget_fraction=DEFAULT_BUDGET_FRACTION):
+    if budget_mode not in ladder.BUDGET_MODES:
+        raise ValueError(f"budget_mode must be one of {ladder.BUDGET_MODES}")
+    overrides = {"budget_mode": budget_mode, "budget_fraction": float(budget_fraction),
+                 "k_branches": int(k_branches), "policy_context": "reset", "parents_only": False}
     if policy_args:
         overrides["policy_args"] = {**(source_config.get("policy_args") or {}), **policy_args}
     return ladder.resolve_config(source_config, overrides)
@@ -147,6 +160,7 @@ def build_plan_rows(targets, config, offsets):
             "attempt_uid": parent["attempt_uid"],
             "task_name": parent["task_name"],
             "environment_seed": int(parent["environment_seed"]),
+            "horizon_steps": int(parent["horizon"]),
             "parent_success": bool(parent["success"]),
             "outcome": "false_alarm_success" if parent["success"] else "failure",
             "source_run": str(target["run_dir"]),
@@ -214,10 +228,12 @@ def _write_status(output_dir, state, rows, branches, scenes, errors):
 def run_branching(source_runs, alarms_path, output_dir, *, k_branches=8, offsets=DEFAULT_OFFSETS,
                   include_false_alarms=True, tasks=None, scene_tolerance=1e-6, policy_args=None,
                   runtime=None, host=None, port=None, shard_index=0, num_shards=1, resume=False,
-                  max_errors=10, log=print):
+                  max_errors=10, budget_mode=DEFAULT_BUDGET_MODE, budget_fraction=DEFAULT_BUDGET_FRACTION,
+                  log=print):
     output_dir = Path(output_dir)
     source_config, parents = load_sources(source_runs)
-    config = branch_config(source_config, k_branches=k_branches, policy_args=policy_args)
+    config = branch_config(source_config, k_branches=k_branches, policy_args=policy_args,
+                           budget_mode=budget_mode, budget_fraction=budget_fraction)
     alarms = ladder.read_jsonl(alarms_path)
     targets = select_targets(alarms, parents, include_false_alarms=include_false_alarms, tasks=tasks)
     runtime = runtime or ladder.Runtime(config, host=host, port=port)
@@ -234,6 +250,8 @@ def run_branching(source_runs, alarms_path, output_dir, *, k_branches=8, offsets
         "offsets": [int(n) for n in offsets],
         "include_false_alarms": bool(include_false_alarms),
         "scene_tolerance": float(scene_tolerance),
+        "budget_mode": config["budget_mode"],
+        "budget_fraction": float(config["budget_fraction"]),
         "rung": RUNG,
         "shard_index": int(shard_index),
         "num_shards": int(num_shards),
@@ -247,7 +265,7 @@ def run_branching(source_runs, alarms_path, output_dir, *, k_branches=8, offsets
     }
     plan_path = output_dir / PLAN_NAME
     frozen = ("source_runs", "alarms", "k_branches", "offsets", "include_false_alarms", "scene_tolerance",
-              "shard_index", "num_shards", "parents")
+              "budget_mode", "budget_fraction", "shard_index", "num_shards", "parents")
     if plan_path.exists():
         if not resume:
             raise FileExistsError(f"{plan_path} exists; pass --resume or choose a new output dir")
@@ -337,6 +355,9 @@ def run_branching(source_runs, alarms_path, output_dir, *, k_branches=8, offsets
                             "alarm_component": row["alarm_component"],
                             "inferences_before_alarm": cell["inferences_before_alarm"],
                             "scene_residual": residual,
+                            "horizon_steps": row["horizon_steps"],
+                            "remaining_steps": row["horizon_steps"] - int(record["budget_start_step"]),
+                            "success_within_remaining": within_remaining(record, row["horizon_steps"]),
                         })
                         ladder.append_jsonl(output_dir / BRANCHES_NAME, record)
                         branches.append(record)
@@ -364,13 +385,16 @@ def run_branching(source_runs, alarms_path, output_dir, *, k_branches=8, offsets
 # ---- plan (no simulator) ----------------------------------------------------------------------
 
 def plan_summary(source_runs, alarms_path, *, k_branches=8, offsets=DEFAULT_OFFSETS, include_false_alarms=True,
-                 tasks=None, seconds_per_env_step=0.055, seconds_per_reset=20.0):
+                 tasks=None, seconds_per_env_step=0.055, seconds_per_reset=20.0,
+                 budget_mode=DEFAULT_BUDGET_MODE, budget_fraction=DEFAULT_BUDGET_FRACTION):
     source_config, parents = load_sources(source_runs)
-    config = branch_config(source_config, k_branches=k_branches)
+    config = branch_config(source_config, k_branches=k_branches, budget_mode=budget_mode,
+                           budget_fraction=budget_fraction)
     targets = select_targets(ladder.read_jsonl(alarms_path), parents,
                              include_false_alarms=include_false_alarms, tasks=tasks)
     rows = build_plan_rows(targets, config, offsets)
-    out = {"k_branches": int(k_branches), "offsets": [int(n) for n in offsets], "by_task": {}}
+    out = {"k_branches": int(k_branches), "offsets": [int(n) for n in offsets],
+           "budget_mode": config["budget_mode"], "budget_fraction": float(config["budget_fraction"]), "by_task": {}}
     total_steps = total_branches = resets = 0
     for task in sorted({r["task_name"] for r in rows}):
         task_rows = [r for r in rows if r["task_name"] == task]
@@ -403,8 +427,14 @@ def _bootstrap(values, n_boot=2000, seed=0):
     return [round(float(np.percentile(draws, 2.5)), 4), round(float(np.percentile(draws, 97.5)), 4)]
 
 
+def within_remaining(branch, horizon_steps):
+    """Did the branch succeed within the steps the natural rollout had left at its clock?"""
+    remaining = int(horizon_steps) - int(branch["budget_start_step"])
+    return bool(branch["success"]) and int(branch["steps_used"]) <= remaining
+
+
 def cell_outcomes(run_dirs):
-    """{(parent_id, anchor): [success, ...]} with aliased anchors resolved, plus parent rows."""
+    """{(parent_id, anchor): [(success, success_within_remaining), ...]}, aliases resolved, plus rows."""
     rows, branches, scenes = {}, [], {}
     for run_dir in run_dirs:
         run_dir = Path(run_dir)
@@ -417,7 +447,8 @@ def cell_outcomes(run_dirs):
     for branch in branches:
         row = rows.get(branch["parent_id"])
         if row is not None and row["attempt_uid"] == branch["attempt_uid"]:
-            by_cell[(branch["parent_id"], branch["anchor"])].append(bool(branch["success"]))
+            by_cell[(branch["parent_id"], branch["anchor"])].append(
+                (bool(branch["success"]), within_remaining(branch, row["horizon_steps"])))
     outcomes = {}
     for pid, row in rows.items():
         if not scenes.get(pid, {}).get("ok"):
@@ -432,6 +463,9 @@ def cell_outcomes(run_dirs):
 
 def gate_a(run_dirs, *, k_branches=None, n_boot=2000, seed=0):
     rows, outcomes, scenes = cell_outcomes(run_dirs)
+    budgets = sorted({(plan.get("budget_mode"), plan.get("budget_fraction"))
+                      for plan in (json.loads((Path(d) / PLAN_NAME).read_text()) for d in run_dirs
+                                   if (Path(d) / PLAN_NAME).exists())}, key=str)
     anchors = sorted({anchor for _, anchor in outcomes}, key=lambda a: (a != ALARM, a))
     table = {}
     for outcome in ("failure", "false_alarm_success"):
@@ -441,19 +475,24 @@ def gate_a(run_dirs, *, k_branches=None, n_boot=2000, seed=0):
                 incomplete = [pid for pid in pids if len(outcomes[(pid, anchor)]) < int(k_branches)]
                 if incomplete:
                     raise ValueError(f"{len(incomplete)} parents have fewer than {k_branches} branches at {anchor}")
-            any_success = [float(any(outcomes[(pid, anchor)])) for pid in pids]
-            mean_success = [float(np.mean(outcomes[(pid, anchor)])) for pid in pids]
-            by_task = defaultdict(list)
-            for pid, value in zip(pids, any_success):
-                by_task[rows[pid]["task_name"]].append(value)
-            table[f"{outcome}/{anchor}"] = {
-                "parents": len(pids),
-                "share_with_any_success": round(float(np.mean(any_success)), 4) if pids else None,
-                "share_ci95": _bootstrap(any_success, n_boot, seed),
-                "mean_success": round(float(np.mean(mean_success)), 4) if pids else None,
-                "mean_success_ci95": _bootstrap(mean_success, n_boot, seed),
-                "by_task_share_with_any_success": {t: round(float(np.mean(v)), 4) for t, v in sorted(by_task.items())},
-            }
+            cell = {"parents": len(pids)}
+            for label, column in (("", 0), ("_within_remaining", 1)):
+                values = [[pair[column] for pair in outcomes[(pid, anchor)]] for pid in pids]
+                any_success = [float(any(v)) for v in values]
+                mean_success = [float(np.mean(v)) for v in values]
+                by_task = defaultdict(list)
+                for pid, value in zip(pids, any_success):
+                    by_task[rows[pid]["task_name"]].append(value)
+                mean = lambda v: round(float(np.mean(v)), 4) if v else None
+                cell.update({
+                    f"share_with_any_success{label}": mean(any_success),
+                    f"share{label}_ci95": _bootstrap(any_success, n_boot, seed),
+                    f"mean_success{label}": mean(mean_success),
+                    f"mean_success{label}_ci95": _bootstrap(mean_success, n_boot, seed),
+                    f"by_task_share_with_any_success{label}": {
+                        t: round(float(np.mean(v)), 4) for t, v in sorted(by_task.items())},
+                })
+            table[f"{outcome}/{anchor}"] = cell
     share = lambda anchor: (table.get(f"failure/{anchor}") or {}).get("share_with_any_success")
     early = [a for a in (ALARM, f"{ALARM_MINUS}8") if share(a) is not None]
     if any(share(a) >= GATE_SHARE for a in early):
@@ -464,7 +503,9 @@ def gate_a(run_dirs, *, k_branches=None, n_boot=2000, seed=0):
         decision = "redesign_expert_data"
     return {
         "gate": "A",
-        "rule": f"share of alarmed failure states with >= 1 success; threshold {GATE_SHARE}",
+        "budget": [{"budget_mode": mode, "budget_fraction": fraction} for mode, fraction in budgets],
+        "rule": (f"share of alarmed failure states with >= 1 success within the branch budget; "
+                 f"threshold {GATE_SHARE}"),
         "decision": decision,
         "scene_checks": dict(Counter("ok" if s["ok"] else "mismatch" for s in scenes.values())),
         "parents_by_outcome": dict(Counter(row["outcome"] for row in rows.values())),
@@ -482,15 +523,21 @@ def write_gate_a(result, output_dir):
         f"Decision: **{result['decision']}** ({result['rule']}).",
         f"Scene checks: {result['scene_checks']}. Parents: {result['parents_by_outcome']}.",
         "",
-        "| Parents | Anchor | n | Share with any success [95% CI] | Mean success [95% CI] |",
-        "|---|---|---:|---|---|",
+        f"Budget: {result.get('budget')}. 'Within remaining' counts only successes that finish within",
+        "the steps the natural rollout had left at the branch's start (the deployment view).",
+        "",
+        "| Parents | Anchor | n | Share with any success [95% CI] | Mean success [95% CI] "
+        "| Share within remaining [95% CI] | Mean within remaining [95% CI] |",
+        "|---|---|---:|---|---|---|---|",
     ]
     for key, cell in result["cells"].items():
         outcome, anchor = key.split("/")
         fmt = lambda v, ci: "—" if v is None else f"{v:.3f} [{ci[0]:.3f}, {ci[1]:.3f}]"
         lines.append(f"| {outcome} | {anchor} | {cell['parents']} | "
                      f"{fmt(cell['share_with_any_success'], cell['share_ci95'])} | "
-                     f"{fmt(cell['mean_success'], cell['mean_success_ci95'])} |")
+                     f"{fmt(cell['mean_success'], cell['mean_success_ci95'])} | "
+                     f"{fmt(cell['share_with_any_success_within_remaining'], cell['share_within_remaining_ci95'])} | "
+                     f"{fmt(cell['mean_success_within_remaining'], cell['mean_success_within_remaining_ci95'])} |")
     path = output_dir / "gate_a.md"
     path.write_text("\n".join(lines) + "\n")
     return path
@@ -523,6 +570,9 @@ def build_parser():
     branch.add_argument("--num-shards", type=int, default=1)
     branch.add_argument("--resume", action="store_true")
     branch.add_argument("--max-errors", type=int, default=10)
+    for p in (plan, branch):
+        p.add_argument("--budget-mode", choices=ladder.BUDGET_MODES, default=DEFAULT_BUDGET_MODE)
+        p.add_argument("--budget-fraction", type=float, default=DEFAULT_BUDGET_FRACTION)
     analysis = sub.add_parser("analyze", help="Gate A table and decision")
     analysis.add_argument("--run-dirs", nargs="+", type=Path, required=True)
     analysis.add_argument("--output-dir", type=Path, required=True)
@@ -535,7 +585,8 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     if args.command == "plan":
         out = plan_summary(args.source_run, args.alarms, k_branches=args.k_branches, offsets=args.offsets,
-                           include_false_alarms=not args.no_false_alarms, tasks=args.tasks)
+                           include_false_alarms=not args.no_false_alarms, tasks=args.tasks,
+                           budget_mode=args.budget_mode, budget_fraction=args.budget_fraction)
         print(json.dumps(out, indent=2))
         return out
     if args.command == "branch":
@@ -544,7 +595,8 @@ def main(argv=None):
             include_false_alarms=not args.no_false_alarms, tasks=args.tasks,
             scene_tolerance=args.scene_tolerance, policy_args=ladder._parse_policy_args(args.policy_arg),
             host=args.host, port=args.port, shard_index=args.shard_index, num_shards=args.num_shards,
-            resume=args.resume, max_errors=args.max_errors, log=lambda message: print(message, flush=True),
+            resume=args.resume, max_errors=args.max_errors, budget_mode=args.budget_mode,
+            budget_fraction=args.budget_fraction, log=lambda message: print(message, flush=True),
         )
     result = gate_a(args.run_dirs, k_branches=args.k_branches, n_boot=args.n_boot)
     path = write_gate_a(result, args.output_dir)

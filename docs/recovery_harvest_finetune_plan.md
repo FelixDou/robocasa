@@ -135,18 +135,50 @@ Integrity checks, all required (the export step stops on any failure):
 - on the ladder parents, only the alarm and its timing are read. AUROC and
   FPR are reported for description, not used for any decision.
 
-**Float16 caveat.** The ladder v2 collector stored policy features in float16;
-Hide-and-Seek was trained and confirmed on float32. A0 alarms on the v2
-parents are therefore approximate. The export step measures the effect on
-the confirmatory test cohort (how many alarms move, and by how many
-inferences) and the result is reported with Gate A. New collections set
+**Float16 caveat (resolved).** The ladder v2 collector stored policy features
+in float16, while Hide-and-Seek was trained and confirmed on float32. On the
+1,526 confirmatory test rollouts, float16 rounding changed no alarm, so the A0
+alarms on the v2 parents stand. New collections still set
 `policy_feature_dtype: float32`.
+
+**A0 result (5 November 2026).** Export `hs_p_alarm_spec_20261105_165327`:
+- reproduction within float32 rounding (raw 5.8e-10, normalizations 3.0e-9)
+  and 0 of 1,526 reference alarms changed;
+- on all retained reference rollouts, 605/605 failures and 88/921 successes
+  got an alarm.
+
+Ladder v2 parents (`xr1_alarm_phaseA_20261105_170817/alarms.jsonl`):
+- every one of the 40 failures got an alarm, and 1 of 36 successes did
+  (GarnishPancake). The ladder's stage-overdue rule had 12 of 36;
+- median alarm time on failures, as a fraction of the time limit, and the
+  component that fired:
+
+| Task | Median alarm time | Component | Alarm vs ladder detection |
+|---|---:|---|---|
+| ArrangeBreadBasket | 0.62 | score (8/8) | later in 8/8 (median +102 inferences) |
+| ArrangeTea | 0.84 | score 5, timer 3 | later in 8/8 (+78) |
+| BreadSelection | 0.99 | timer (8/8) | later in 8/8 (+108) |
+| CuttingToolSelection | 0.99 | timer (8/8) | later in 8/8 (+4) |
+| GarnishPancake | 0.51 | score (8/8) | earlier in 3, later in 5 (+9.5) |
+
+On these tasks, Hide-and-Seek + P buys its precision with lateness. On
+BreadSelection and CuttingToolSelection the alarm is effectively the timeout.
 
 **A1 (simulator).** For every failed parent with an alarm, branch from its
 saved snapshots at `a`, `a − 8` and `a − 16` inferences (clipped at stage entry),
-K = 8 resamples each, budget = remaining horizon, policy context reset. Success
-controls with a false alarm get the same cells (harm data). Estimated cost:
-about 1,000 branches, 15–20 worker-hours.
+K = 8 resamples each, policy context reset. Success controls with a false
+alarm get the same cells (harm data). Estimated cost: about 1,000 branches,
+15–20 worker-hours.
+
+*Amended 5 November 2026, after A0 and before any branch:* the budget is a
+fixed 0.5 × the time limit from the branch start (with the source run's
+2,200-step cap on ArrangeBreadBasket), not the remaining horizon. With alarms
+at 0.84–0.99 of the limit on three tasks, a remaining-horizon budget would
+leave about 1–16% of the episode. Gate A would then measure the clock rather
+than whether the state can be recovered from, and harvesting recovery data does
+not depend on the benchmark clock. Each branch also records whether it
+succeeded within the time the natural rollout had left; `analyze` reports
+that deployment view next to Gate A.
 
 The environment is rebuilt as the ladder built it (one env per task, then
 `reset(seed)` for every attempt seed in order). A parent is branched only if
@@ -155,7 +187,7 @@ mismatches are recorded and excluded from Gate A.
 
 **Gate A** (decides where Phase B harvests):
 
-| Share of alarmed failure states with ≥ 1 success in 8 resamples | Decision |
+| Share of alarmed failure states with ≥ 1 success in 8 resamples (fixed budget) | Decision |
 |---|---|
 | ≥ 0.30 at `a` or `a − 8` | harvest at `a`, `a − 8`, `a − 16` |
 | ≥ 0.30 only at `a − 16` | harvest at `a − 16` only; the recovery mode must then generalize to later states |
@@ -286,7 +318,8 @@ python -m unittest tests.test_hs_p_alarm tests.test_alarm_branching tests.test_r
 run `xr1_amend2_hide_and_seek_20261022_214209`, E1 lead calibration
 `xr1_lead_calibration_20261020_001108/lead_analysis`, ladder v2 pilot
 `xr1_ladder_v2_pilot_20261017_164537` (shards 0 and 1), K = 8, offsets 8 and
-16, workers `0:1 2:3`, ports from 10380.
+16, fixed budget 0.5 H (`ALARM_BUDGET_MODE`, `ALARM_BUDGET_FRACTION`), workers
+`0:1 2:3`, ports from 10380.
 
 ```bash
 cd /gs/fs/tga-shinoda/felid/robocasa && git pull origin main
