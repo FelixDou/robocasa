@@ -25,7 +25,8 @@ from robocasa.recovery.safe.schema import (
 )
 
 HAS_TORCH = importlib.util.find_spec("torch") is not None
-TORCH_DETECTORS = {"actprobe", "rnd"} | {name for name in DETECTOR_REGISTRY if name.startswith("hide_and_seek")}
+TORCH_DETECTORS = {"actprobe", "actprobe_t", "rnd"} | {name for name in DETECTOR_REGISTRY if name.startswith("hide_and_seek")}
+TASK_HORIZONS = {"TaskA": 10, "TaskB": 10}   # actprobe_t's time limits (failures run 10 inferences)
 HORIZON = 6
 REPLAN = 2
 FLOW = 2
@@ -110,6 +111,24 @@ class SignalTests(unittest.TestCase):
         np.testing.assert_allclose(signals[:, 0], np.linalg.norm(chunks, axis=-1).mean(axis=-1))
 
 
+class ActProbeTimeTests(unittest.TestCase):
+    def test_timestep_column_is_t_over_limit_minus_one(self):
+        rng = np.random.default_rng(3)
+        rollout = {"rollout_id": "r", "task_name": "TaskA", "failed": True,
+                   "actions": rng.normal(size=(7, HORIZON, 3)), "replan_steps": REPLAN}
+        plain = build_detector("actprobe", seed=0, tasks=["TaskA", "TaskB"])
+        timed = build_detector("actprobe_t", seed=0, tasks=["TaskA", "TaskB"], horizons={"TaskA": 11, "TaskB": 5})
+        a, b = plain._inputs(rollout), timed._inputs(rollout)
+        self.assertEqual(b.shape, (7, a.shape[1] + 1))
+        np.testing.assert_array_equal(b[:, :-1], a)
+        np.testing.assert_allclose(b[:, -1], np.arange(7) / 10.0)
+        with self.assertRaises(ValueError):
+            build_detector("actprobe_t", seed=0, tasks=["TaskA"])
+        with self.assertRaises(ValueError):
+            timed._inputs(dict(rollout, task_name="TaskC"))
+        self.assertEqual(timed.config()["timestep_input"], "t / (H_k - 1)")
+
+
 class DetectorTests(unittest.TestCase):
     def setUp(self):
         rng = np.random.default_rng(1)
@@ -129,8 +148,10 @@ class DetectorTests(unittest.TestCase):
     def test_every_detector_ranks_failures_above_chance(self):
         train, test = self.rollouts[:16], self.rollouts[16:]
         for name in sorted(DETECTOR_REGISTRY):
-            torch_model = name in {"actprobe", "rnd"} or name.startswith("hide_and_seek")
+            torch_model = name in {"actprobe", "actprobe_t", "rnd"} or name.startswith("hide_and_seek")
             kwargs = {"epochs": 30} if torch_model else {}
+            if name == "actprobe_t":
+                kwargs["horizons"] = TASK_HORIZONS
             if name in {"mahalanobis", "pca_kmeans", "rnd"} or name.startswith("hide_and_seek"):
                 kwargs["pca_components"] = 4
             if name == "pca_kmeans":
@@ -241,6 +262,8 @@ class LoaderTests(unittest.TestCase):
                 self.assertEqual({copied[i]["failed"] for i in split}, {False, True})
             for name in names:
                 kwargs = {"epochs": 5} if name in TORCH_DETECTORS else {}
+                if name == "actprobe_t":
+                    kwargs["horizons"] = {r["task_name"]: 10 for r in copied}
                 if name in {"mahalanobis", "pca_kmeans", "rnd"} or name.startswith("hide_and_seek"):
                     kwargs["pca_components"] = 4
                 if name == "pca_kmeans":

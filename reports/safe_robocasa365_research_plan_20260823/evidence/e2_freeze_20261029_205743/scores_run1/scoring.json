@@ -1,0 +1,118 @@
+{
+  "code_commit": "e6abadec915533efcc203646e67714af7f5f56bd",
+  "counts": {
+    "calibration": 60,
+    "test": 200,
+    "train": 740
+  },
+  "dataset_dirs": [
+    "/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/rldx1_original_safe35_natural50_20260808_203158/filtered_supported20_natural50"
+  ],
+  "detectors": {
+    "hide_and_seek": {
+      "configs": {
+        "0": {
+          "batch_size": 32,
+          "epochs": 200,
+          "hidden_dim": 128,
+          "intra_weight": 1.0,
+          "learning_rate": 0.001,
+          "margin": 0.2,
+          "name": "hide_and_seek",
+          "pca_components": 128,
+          "seed": 0,
+          "weight_decay": 0.0001
+        },
+        "1": {
+          "batch_size": 32,
+          "epochs": 200,
+          "hidden_dim": 128,
+          "intra_weight": 1.0,
+          "learning_rate": 0.001,
+          "margin": 0.2,
+          "name": "hide_and_seek",
+          "pca_components": 128,
+          "seed": 1,
+          "weight_decay": 0.0001
+        },
+        "2": {
+          "batch_size": 32,
+          "epochs": 200,
+          "hidden_dim": 128,
+          "intra_weight": 1.0,
+          "learning_rate": 0.001,
+          "margin": 0.2,
+          "name": "hide_and_seek",
+          "pca_components": 128,
+          "seed": 2,
+          "weight_decay": 0.0001
+        }
+      },
+      "models": {
+        "0": {
+          "content_sha256": "c19a2bdd2326048a00fccb3e64fcf11115532fab74f6c3b7d41579ded51548cf",
+          "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/e2_freeze_20261029_205743/models/hide_and_seek_seed0.npz",
+          "reload_identical": true,
+          "sha256": "6035b6094aef87be7ffc0f042516867d75fc4998f935d2b93cef746abb984631"
+        },
+        "1": {
+          "content_sha256": "c3297fc04c8d021097c2302ed7d1593563e4d1df7a54aa4190e16079923b0ec6",
+          "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/e2_freeze_20261029_205743/models/hide_and_seek_seed1.npz",
+          "reload_identical": true,
+          "sha256": "0af016a0b4188d66e703ae7bc2b4a37293d99b10c91de488ef9b6640903f12a9"
+        },
+        "2": {
+          "content_sha256": "e371852e46c8fb7061f9e73a6061cdd8629898918072251570dee7116a082651",
+          "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/e2_freeze_20261029_205743/models/hide_and_seek_seed2.npz",
+          "reload_identical": true,
+          "sha256": "e7798f9798f62b40f50011cda8162daad78596293f903541cb4941ee95bde79f"
+        }
+      }
+    }
+  },
+  "elapsed_seconds": 710.8198177814484,
+  "epochs": 200,
+  "feature_aggregation": "last",
+  "inputs": {
+    "cohort_calibration": {
+      "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/inputs/calibration_ids.json",
+      "sha256": "d8b5ac546264916f29014d820d6bd796c6c8f3444627e7197f53e519d4201577"
+    },
+    "cohort_test": {
+      "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/inputs/test_ids.json",
+      "sha256": "802adbe916dcb787c137328388e68f25f1f0c23364bfaa58f6b4ec2967860513"
+    },
+    "runtime_bundle": {
+      "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/inputs/rldx_bundle.json",
+      "sha256": "21714e2d008918a40db45167ad1c923df24e27c6ccf84c22f0669da2b5a63b4c"
+    },
+    "train_ids": {
+      "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/inputs/train_ids.json",
+      "sha256": "b5a29501931c9f07f61f27541826663bba45c7d3169f6832ee4e4be5761ccd99"
+    }
+  },
+  "protocol": "score_only_no_metrics",
+  "reference_checks": {
+    "calibration/hide_and_seek": {
+      "max_abs_diff": 1.4433096719522456,
+      "ok": false,
+      "reference": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/scores/calibration_predictions.jsonl",
+      "rollouts_compared": 60,
+      "rollouts_scored": 60
+    },
+    "test/hide_and_seek": {
+      "max_abs_diff": 1.890813314452985,
+      "ok": false,
+      "reference": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_hide_and_seek_20261023_000418/scores/test_predictions.jsonl",
+      "rollouts_compared": 200,
+      "rollouts_scored": 200
+    }
+  },
+  "score_train": false,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "skipped": {}
+}

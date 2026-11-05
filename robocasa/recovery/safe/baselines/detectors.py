@@ -406,6 +406,37 @@ class ActProbeDetector(_SequenceDetector):
         }
 
 
+class ActProbeTimeDetector(ActProbeDetector):
+    """ActProbe with its published elapsed-time input (R11 of docs/xr1_review_analyses_plan.md).
+
+    Huang et al. append the normalized timestep t / (T - 1) to the per-step inputs, with T the
+    episode timeout. Here T is the task's time limit H_k in policy inferences (the runtime
+    bundle's task_horizons) and t = 0, 1, ... the inference index. ``actprobe`` omits this input;
+    everything else (signals, task code, loss, training) is unchanged. Like every input here, the
+    timestep is standardized with the training mean and scale.
+    """
+
+    name = "actprobe_t"
+
+    def __init__(self, seed=0, action_dims=None, tasks=None, horizons=None, **kwargs):
+        super().__init__(seed, action_dims=action_dims, tasks=tasks, **kwargs)
+        if not horizons:
+            raise ValueError("actprobe_t needs the task time limits H_k (horizons)")
+        self.horizons = {str(task): int(value) for task, value in horizons.items()}
+
+    def _inputs(self, rollout):
+        base = super()._inputs(rollout)
+        task = str(rollout["task_name"])
+        if task not in self.horizons:
+            raise ValueError(f"actprobe_t: no time limit for task {task}")
+        timeout = self.horizons[task]
+        step = np.arange(len(base), dtype=np.float64) / max(timeout - 1, 1)
+        return np.concatenate([base, step[:, None]], axis=1)
+
+    def config(self):
+        return {**super().config(), "timestep_input": "t / (H_k - 1)", "horizons": self.horizons}
+
+
 class HideAndSeekDetector(_SequenceDetector):
     """Trajectory-label LSTM with peak-margin and proxy-onset losses."""
 
@@ -641,6 +672,7 @@ DETECTOR_REGISTRY = {
     for detector in (
         ActionConsistencyDetector,
         ActProbeDetector,
+        ActProbeTimeDetector,
         MahalanobisDetector,
         CosineKNNDetector,
         PCAKMeansDetector,
@@ -657,3 +689,74 @@ def build_detector(name, **kwargs):
     if name not in DETECTOR_REGISTRY:
         raise ValueError(f"Unknown baseline {name!r}; choose from {sorted(DETECTOR_REGISTRY)}")
     return DETECTOR_REGISTRY[name](**kwargs)
+
+
+# ---- frozen models: named arrays in an .npz, no pickle -----------------------------------------
+
+SAVABLE = ("hide_and_seek",)
+_KWARGS = ("seed", "epochs", "learning_rate", "weight_decay", "hidden_dim", "batch_size",
+           "margin", "intra_weight", "pca_components")
+
+
+def _model_arrays(detector):
+    """The fitted state of a Hide-and-Seek detector: PCA, input standardization, LSTM weights."""
+    if type(detector) is not HideAndSeekDetector:
+        raise ValueError(f"Saving is implemented for {SAVABLE} only, not {detector.name}")
+    items = {"input_mean": np.asarray(detector.mean_), "input_std": np.asarray(detector.std_)}
+    for key, value in detector.model_.state_dict().items():
+        items[f"state.{key}"] = value.detach().cpu().numpy()
+    if detector.pca_ is not None:
+        for key, value in vars(detector.pca_).items():
+            if key.endswith("_") and not key.startswith("_"):
+                items[f"pca.{key}"] = np.asarray(value)
+    return items
+
+
+def content_hash(items):
+    """SHA-256 over sorted array names, dtypes, shapes and bytes (independent of zip metadata)."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    for name in sorted(items):
+        array = np.ascontiguousarray(items[name])
+        for part in (name, array.dtype.str, str(array.shape)):
+            digest.update(part.encode("utf-8") + b"\0")
+        digest.update(array.tobytes())
+    return digest.hexdigest()
+
+
+def save_detector(detector, path):
+    """Write a fitted Hide-and-Seek detector to ``path`` (.npz); returns its content hash."""
+    import json
+
+    items = _model_arrays(detector)
+    meta = {"name": detector.name, "config": detector.config(),
+            "pca_params": None if detector.pca_ is None else detector.pca_.get_params()}
+    np.savez(path, meta_json=np.array(json.dumps(meta, sort_keys=True)), **items)
+    return content_hash(items)
+
+
+def load_detector(path):
+    """Rebuild a detector written by ``save_detector``; returns (detector, content hash)."""
+    import json
+
+    with np.load(path, allow_pickle=False) as data:
+        meta = json.loads(str(data["meta_json"]))
+        items = {key: data[key] for key in data.files if key != "meta_json"}
+    config = meta["config"]
+    detector = build_detector(meta["name"], **{key: config[key] for key in _KWARGS})
+    detector.mean_, detector.std_ = items["input_mean"], items["input_std"]
+    detector.pca_ = None
+    if meta["pca_params"] is not None:
+        from sklearn.decomposition import PCA
+
+        detector.pca_ = PCA(**meta["pca_params"])
+        for key, value in items.items():
+            if key.startswith("pca."):
+                setattr(detector.pca_, key[4:], value.item() if value.ndim == 0 else value)
+    torch = _torch()
+    state = {key[6:]: torch.from_numpy(np.array(value)) for key, value in items.items() if key.startswith("state.")}
+    detector.model_ = _lstm_scorer(torch, state["lstm.weight_ih_l0"].shape[1], detector.hidden_dim).to(detector.device)
+    detector.model_.load_state_dict(state)
+    detector.model_.eval()
+    return detector, content_hash(items)

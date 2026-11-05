@@ -47,7 +47,7 @@ from ..prospective_matched_fpr import (
 from .detectors import DETECTOR_REGISTRY, build_detector
 
 
-TORCH_DETECTORS = {"actprobe", "hide_and_seek", "hide_and_seek_zero", "hide_and_seek_task_shuffle",
+TORCH_DETECTORS = {"actprobe", "actprobe_t", "hide_and_seek", "hide_and_seek_zero", "hide_and_seek_task_shuffle",
                    "hide_and_seek_first", "rnd"}
 
 
@@ -173,14 +173,16 @@ def build_records(rollouts, scores_by_seed, normalizations, horizons, time_curve
     return records
 
 
-def detector_kwargs(name, args, tasks):
+def detector_kwargs(name, args, tasks, horizons=None):
     kwargs = {}
     if name in TORCH_DETECTORS:
         kwargs.update(device=args.device, epochs=args.epochs)
-    if name in {"action_consistency", "actprobe"} and args.action_dims is not None:
+    if name in {"action_consistency", "actprobe", "actprobe_t"} and args.action_dims is not None:
         kwargs["action_dims"] = args.action_dims
-    if name == "actprobe":
+    if name in {"actprobe", "actprobe_t"}:
         kwargs["tasks"] = tasks
+    if name == "actprobe_t":
+        kwargs["horizons"] = horizons
     return kwargs
 
 
@@ -261,7 +263,7 @@ def run(args):
                   "evaluation": defaultdict(dict)}
         configs = {}
         for seed in args.seeds:
-            detector = build_detector(name, seed=seed, **detector_kwargs(name, args, tasks))
+            detector = build_detector(name, seed=seed, **detector_kwargs(name, args, tasks, horizons))
             detector.fit(train)
             configs[str(seed)] = detector.config()
             for split, rollouts in (("train", train), ("calibration", calibration),

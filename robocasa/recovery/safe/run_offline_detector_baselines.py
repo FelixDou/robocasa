@@ -9,7 +9,9 @@ its runtime bundle, thresholds, or reported numbers.  Phases are ordered:
 2. ``develop`` fits success-only baselines on development outer-training
    rollouts, selects hyperparameters on a development meta-validation split,
    fits task normalization there, and freezes the baseline bundle without
-   reading calibration or prospective outcomes;
+   reading calibration or prospective outcomes.  With ``--fixed-selection``
+   it skips the search and refits the configurations and aggregations of an
+   earlier bundle, so a new ``--model-seed`` changes only training randomness;
 3. ``calibrate`` reproduces the frozen SAFE/time thresholds exactly, then
    selects every baseline threshold on the same primary calibration cohort
    under the same event-level FPR cap and tie-breaking;
@@ -46,6 +48,7 @@ from .offline_detector_baselines import (
     event_task_macro_auc,
     landmark_auc_rows,
     normalize_trajectory,
+    pooled_variant,
     selection_key,
     stratified_meta_split,
     validate_aggregations,
@@ -349,6 +352,147 @@ def _resolve_split_manifest(runtime, override):
     return path, _verify_sha(path, artifact["sha256"], "Frozen split manifest")
 
 
+def _load_fixed_selection(path, args, baselines, runtime_path, split_sha, cache):
+    """Earlier bundle whose selected configurations are refit with ``args.model_seed``.
+
+    Everything except the model seed must match the earlier development run, so
+    that a new seed changes only training randomness (row subsample, PCA,
+    k-means initialization, RND initialization).
+    """
+    path = Path(path).resolve()
+    source = json.loads(path.read_text())
+    checks = {
+        "runtime_bundle_sha256": (source.get("runtime_bundle_sha256"), _sha256(runtime_path)),
+        "split_manifest_sha256": (source.get("split_manifest_sha256"), split_sha),
+        "development_cache_provenance": (
+            source.get("development_cache_provenance"),
+            json.loads(json.dumps(_json_value(cache.provenance))),
+        ),
+        "validation_fraction": (source.get("validation_fraction"), float(args.validation_fraction)),
+        "meta_split_seed": (source.get("meta_split_seed"), int(args.meta_split_seed)),
+        "max_fit_rows": (source.get("max_fit_rows"), int(args.max_fit_rows)),
+        "selection_landmarks": (
+            [float(value) for value in source.get("selection_landmarks", [])],
+            [float(value) for value in args.selection_landmarks],
+        ),
+    }
+    drift = [name for name, (before, now) in checks.items() if before != now]
+    if drift:
+        raise ValueError(f"--fixed-selection bundle differs from this run in: {drift}")
+    missing = [name for name in baselines if name not in source["selected"]]
+    unexplained = [name for name in missing if name not in source.get("skipped", {})]
+    if unexplained:
+        raise ValueError(f"--fixed-selection bundle has no selection for: {unexplained}")
+    return {
+        "path": path,
+        "sha256": _sha256(path),
+        "bundle": source,
+        "validation_scores": path.parent / "validation_scores.jsonl",
+    }
+
+
+def _max_relative_diff(now, before):
+    """Largest |now - before| / max(|before|, 1e-12) over matching nested numbers."""
+    if isinstance(before, dict):
+        if not isinstance(now, dict) or set(now) != set(before):
+            return math.inf
+        return max([_max_relative_diff(now[key], before[key]) for key in before] or [0.0])
+    if isinstance(before, list):
+        if not isinstance(now, list) or len(now) != len(before):
+            return math.inf
+        return max([_max_relative_diff(a, b) for a, b in zip(now, before)] or [0.0])
+    if before is None or now is None or isinstance(before, (str, bool)):
+        return 0.0 if now == before else math.inf
+    return abs(float(now) - float(before)) / max(abs(float(before)), 1e-12)
+
+
+def _check_fixed_reproduction(fixed, selected, validation_scores, tolerance=0.0):
+    """With the source model seed, the refit must reproduce the source run.
+
+    ``tolerance`` bounds the absolute difference of the normalized validation scores and the
+    relative difference of the task normalization and selection score; 0 demands bit-exact
+    equality. Multithreaded k-means and BLAS can differ in the last float digits when the
+    thread count differs from the source run.
+    """
+    source_scores = {}
+    for line in fixed["validation_scores"].read_text().splitlines():
+        if line.strip():
+            row = json.loads(line)
+            source_scores[row["rollout_id"]] = row["baseline_scores"]
+    if set(source_scores) != set(validation_scores):
+        raise ValueError("Fixed-selection reproduction: validation rollouts differ")
+    report = {}
+    for name, value in selected.items():
+        before = fixed["bundle"]["selected"][name]
+        normalization = json.loads(json.dumps(_json_value(value["normalization"])))
+        max_diff = 0.0
+        for rollout_id, scores in validation_scores.items():
+            now = np.asarray(scores[name], dtype=np.float64)
+            old = np.asarray(source_scores[rollout_id][name], dtype=np.float64)
+            if now.shape != old.shape:
+                raise ValueError(f"Fixed-selection reproduction: {name} length differs on {rollout_id}")
+            if len(now):
+                max_diff = max(max_diff, float(np.max(np.abs(now - old))))
+        report[name] = {
+            "max_validation_score_diff": max_diff,
+            "normalization_equal": normalization == before["normalization"],
+            "normalization_max_relative_diff": _max_relative_diff(
+                normalization, before["normalization"]
+            ),
+            "selection_score_equal": value["selection_score"] == before["selection_score"],
+            "selection_score_relative_diff": _max_relative_diff(
+                value["selection_score"], before["selection_score"]
+            ),
+            "tolerance": float(tolerance),
+        }
+        worst = max(
+            max_diff,
+            report[name]["normalization_max_relative_diff"],
+            report[name]["selection_score_relative_diff"],
+        )
+        if not worst <= float(tolerance):
+            raise ValueError(f"Fixed-selection reproduction failed for {name}: {report[name]}")
+        print(
+            f"fixed selection {name}: validation scores max diff {max_diff:.3g}, "
+            f"normalization max rel diff {report[name]['normalization_max_relative_diff']:.3g}, "
+            f"selection score rel diff {report[name]['selection_score_relative_diff']:.3g} "
+            f"(tolerance {float(tolerance):g}) -> OK",
+            flush=True,
+        )
+    return report
+
+
+def pooled_normalization(records, horizons):
+    """fit_safe_normalization's robust location and scale over all records' maxima at once.
+
+    The same formula as baselines.score_cross_task.pooled_normalization, so that every unseen-task
+    score in the cross-task analyses is normalized the same way.
+    """
+    maxima = [
+        float(np.max(np.asarray(record["scores"], dtype=np.float64)[: horizons[record["task_name"]]]))
+        for record in records
+    ]
+    if not maxima:
+        raise ValueError("No scores to normalize")
+    array = np.asarray(maxima, dtype=np.float64)
+    location = float(np.median(array))
+    mad_scale = float(1.4826 * np.median(np.abs(array - location)))
+    scale = max(mad_scale, float(np.std(array)), 1e-6)
+    return {"location": location, "scale": scale, "fit_rollouts": len(array)}
+
+
+def fold_held_out_tasks(folds_path, fold, tasks):
+    """Held-out tasks of one fold of scripts/xr1_lead_time/cross_task_folds.json."""
+    spec = json.loads(Path(folds_path).read_text())
+    listed = [task for entry in spec["folds"] for task in entry["held_out"]]
+    if sorted(listed) != sorted(tasks) or len(listed) != len(set(listed)):
+        raise ValueError("The fold file does not hold out every frozen task exactly once")
+    match = [entry for entry in spec["folds"] if str(entry["fold"]) == str(fold)]
+    if not match:
+        raise ValueError(f"Fold {fold} is not in the fold file")
+    return set(match[0]["held_out"])
+
+
 def develop(args):
     output = _prepare_output(args.output_dir)
     baselines = validate_baselines(args.baselines)
@@ -357,6 +501,18 @@ def develop(args):
     grids = SMOKE_GRIDS if args.grid == "smoke" else DEFAULT_GRIDS
     runtime_path, runtime = _load_runtime_bundle(args.runtime_bundle)
     horizons = {str(task): int(value) for task, value in runtime["task_horizons"].items()}
+    # Fold mode: refit the frozen configuration on the seen tasks of one cross-task fold, with
+    # every task-specific reference pooled, so that the held-out tasks can be scored.
+    fold = getattr(args, "fold", None)
+    held = set()
+    if fold is not None:
+        if not getattr(args, "fixed_selection", None):
+            raise ValueError("--fold refits a frozen configuration and needs --fixed-selection")
+        if not getattr(args, "folds", None):
+            raise ValueError("--fold needs --folds")
+        held = fold_held_out_tasks(args.folds, fold, horizons)
+        if "action_inconsistency" in baselines:
+            raise ValueError("action_inconsistency has no fold mode")
     split_path, split_sha = _resolve_split_manifest(runtime, args.split_manifest)
     split = load_outer_split_ids(split_path)
     cache = FeatureCache(args.development_cache, expected_group="development")
@@ -370,9 +526,27 @@ def develop(args):
     frozen_development = set(runtime.get("development_rollout_ids", []))
     if frozen_development and not split["train"] <= frozen_development:
         raise ValueError("Outer-training IDs are not frozen development rollouts")
+    fixed = None
+    if getattr(args, "fixed_selection", None):
+        fixed = _load_fixed_selection(
+            args.fixed_selection, args, baselines, runtime_path, split_sha, cache
+        )
     meta = stratified_meta_split(rows, args.validation_fraction, args.meta_split_seed)
-    fit_rows = [row for row in rows if row["rollout_id"] in meta["fit"]]
-    validation_rows = [row for row in rows if row["rollout_id"] in meta["validation"]]
+    if fixed is not None and (
+        sorted(meta["fit"]) != fixed["bundle"]["fit_rollout_ids"]
+        or sorted(meta["validation"]) != fixed["bundle"]["validation_rollout_ids"]
+    ):
+        raise ValueError("--fixed-selection bundle used different fit/validation partitions")
+    # In fold mode the partitions are the frozen ones restricted to the seen tasks.
+    fit_rows = [
+        row for row in rows if row["rollout_id"] in meta["fit"] and row["task_name"] not in held
+    ]
+    validation_rows = [
+        row
+        for row in rows
+        if row["rollout_id"] in meta["validation"] and row["task_name"] not in held
+    ]
+    seen_horizons = {task: value for task, value in horizons.items() if task not in held}
 
     success_features = defaultdict(list)
     for row in fit_rows:
@@ -399,8 +573,13 @@ def develop(args):
                 f"{exec_horizon}; consecutive chunks do not overlap"
             )
             continue
+        configs, baseline_aggregations = grids[baseline], aggregations
+        if fixed is not None:
+            source = fixed["bundle"]["selected"][baseline]
+            params = pooled_variant(baseline, source["params"]) if fold is not None else source["params"]
+            configs, baseline_aggregations = [params], (source["aggregation"],)
         best = None
-        for config_index, params in enumerate(grids[baseline]):
+        for config_index, params in enumerate(configs):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 model = BaselineScorer(baseline, params, seed=args.model_seed).fit(
@@ -412,7 +591,7 @@ def develop(args):
                 row["rollout_id"]: model.score(row["task_name"], features, actions)
                 for row, features, actions in validation_inputs
             }
-            for aggregation_index, aggregation in enumerate(aggregations):
+            for aggregation_index, aggregation in enumerate(baseline_aggregations):
                 trajectories = [
                     {
                         "task_name": row["task_name"],
@@ -431,7 +610,7 @@ def develop(args):
                 ]
                 candidate = {
                     "baseline": baseline,
-                    "candidate_index": config_index * len(aggregations) + aggregation_index,
+                    "candidate_index": config_index * len(baseline_aggregations) + aggregation_index,
                     "params": json.dumps(params, sort_keys=True),
                     "aggregation": aggregation,
                     "selection_score": float(np.mean(macro)) if macro else None,
@@ -447,13 +626,10 @@ def develop(args):
                 if best is None or selection_key(candidate) > selection_key(best[0]):
                     best = (candidate, model, params, aggregation, trajectories)
         candidate, model, params, aggregation, trajectories = best
-        normalization = fit_safe_normalization(
-            [
-                {"task_name": row["task_name"], "scores": row["trajectory"]}
-                for row in trajectories
-            ],
-            horizons,
-        )
+        normalization_records = [
+            {"task_name": row["task_name"], "scores": row["trajectory"]} for row in trajectories
+        ]
+        normalization = fit_safe_normalization(normalization_records, seen_horizons)
         for row, trajectory in zip(validation_rows, trajectories):
             validation_scores[row["rollout_id"]][baseline] = normalize_trajectory(
                 trajectory["trajectory"], normalization[row["task_name"]]
@@ -473,8 +649,33 @@ def develop(args):
             "model_sha256": _sha256(model_path),
             "fit_summary": model.fit_summary,
         }
+        if fold is not None:
+            selected[baseline]["pooled_normalization"] = pooled_normalization(
+                normalization_records, horizons
+            )
     if not selected:
         raise ValueError("No baseline could be developed")
+    fixed_record = None
+    if fixed is not None:
+        source_seed = int(fixed["bundle"]["model_seed"])
+        fixed_record = {
+            "bundle": str(fixed["path"]),
+            "bundle_sha256": fixed["sha256"],
+            "source_model_seed": source_seed,
+            "source_candidate_index": {
+                name: fixed["bundle"]["selected"][name]["candidate_index"] for name in selected
+            },
+            "reproduction": (
+                _check_fixed_reproduction(
+                    fixed,
+                    selected,
+                    validation_scores,
+                    getattr(args, "reproduction_tolerance", 0.0),
+                )
+                if int(args.model_seed) == source_seed and fold is None
+                else None
+            ),
+        }
     _write_csv(output / "selection_audit.csv", audit)
     _write_jsonl(
         output / "validation_scores.jsonl",
@@ -499,8 +700,16 @@ def develop(args):
         "split_manifest_sha256": split_sha,
         "development_cache": str(cache.root),
         "development_cache_provenance": cache.provenance,
-        "grid": args.grid,
-        "grids": {name: grids[name] for name in baselines},
+        "grid": "fixed" if fixed is not None else args.grid,
+        "grids": {
+            name: (
+                [selected[name]["params"]]
+                if fixed is not None
+                else grids[name]
+            )
+            for name in (selected if fixed is not None else baselines)
+        },
+        "fixed_selection": fixed_record,
         "aggregations": list(aggregations),
         "selection_landmarks": list(landmarks),
         "selection_rule": (
@@ -523,6 +732,18 @@ def develop(args):
         "selected": selected,
         "skipped": skipped,
     }
+    if fold is not None:
+        bundle.update(
+            fold=str(fold),
+            held_out_tasks=sorted(held),
+            folds=str(Path(args.folds).resolve()),
+            folds_sha256=_sha256(args.folds),
+            variant="pooled",
+            fit_success_rollouts_by_task={
+                task: sum(row["task_name"] == task and not bool(row["failed"]) for row in fit_rows)
+                for task in sorted(seen_horizons)
+            },
+        )
     bundle_path = output / "baseline_bundle.json"
     _write_json(bundle_path, bundle)
     status = {
@@ -2065,6 +2286,148 @@ def score_baselines(args):
     return summary
 
 
+def score_fold(args):
+    """Score cohorts with one fold's pooled refits, in the cross-task fold-directory format.
+
+    Writes <cohort>_predictions.jsonl (one row per baseline and rollout, ``per_seed_raw`` =
+    the aggregated, unnormalized trajectory of each model seed), normalizations.json
+    (baseline -> seed -> {pooled, per_task}) and scoring.json, as
+    baselines.score_cross_task does, so that the cross-task analyses can read them. No
+    threshold or metric is computed.
+    """
+    output = _prepare_output(args.output_dir)
+    bundles = {}
+    for item in args.bundle:
+        seed, _, path = item.partition("=")
+        if not path or str(int(seed)) in bundles:
+            raise ValueError(f"--bundle needs distinct SEED=PATH values, got {item!r}")
+        path = Path(path).resolve()
+        bundles[str(int(seed))] = (path, json.loads(path.read_text()))
+    seeds = sorted(bundles, key=int)
+    first = bundles[seeds[0]][1]
+    if first.get("variant") != "pooled" or first.get("fold") is None:
+        raise ValueError("score-fold needs bundles written by develop --fold")
+    held = set(first["held_out_tasks"])
+    tasks = set(first["task_horizons"])
+    if fold_held_out_tasks(args.folds, first["fold"], tasks) != held:
+        raise ValueError("The fold file holds out other tasks than the bundles")
+    if _sha256(args.folds) != first["folds_sha256"]:
+        raise ValueError("The bundles were developed with a different fold file")
+    same = (
+        "fold",
+        "held_out_tasks",
+        "folds_sha256",
+        "runtime_bundle_sha256",
+        "split_manifest_sha256",
+        "fit_rollout_ids",
+        "validation_rollout_ids",
+        "task_horizons",
+    )
+    for seed, (path, bundle) in bundles.items():
+        if int(bundle["model_seed"]) != int(seed):
+            raise ValueError(f"{path} was developed with model seed {bundle['model_seed']}, not {seed}")
+        drift = [key for key in same if bundle.get(key) != first.get(key)]
+        if drift or sorted(bundle["selected"]) != sorted(first["selected"]):
+            raise ValueError(f"{path} differs from the other seeds in {drift or ['selected']}")
+        for name, selection in bundle["selected"].items():
+            if selection["params"] != first["selected"][name]["params"] or (
+                selection["aggregation"] != first["selected"][name]["aggregation"]
+            ):
+                raise ValueError(f"{path}: {name} configuration differs between seeds")
+    names = sorted(first["selected"])
+    models = {seed: _load_baseline_models(bundle) for seed, (_, bundle) in bundles.items()}
+    for seed in seeds:
+        for name, model in models[seed].items():
+            if not model.task_agnostic:
+                raise ValueError(f"Seed {seed} {name} model is task-specific; it cannot score unseen tasks")
+    counts = {}
+    inputs = {}
+    for cohort_name, predictions, cache_path, group in args.cohort:
+        if cohort_name in counts:
+            raise ValueError(f"Cohort {cohort_name} is given twice")
+        records = _load_prediction_records(predictions)
+        cache = FeatureCache(cache_path, expected_group=group)
+        ids = [str(record["rollout_id"]) for record in records]
+        if len(ids) != len(set(ids)) or set(cache.by_id) != set(ids):
+            raise ValueError(f"{cohort_name}: feature cache and predictions cover different rollouts")
+        with (output / f"{cohort_name}_predictions.jsonl").open("w") as stream:
+            for record in records:
+                row = cache.by_id[str(record["rollout_id"])]
+                if (
+                    int(row["length"]) != int(record["source_inferences"])
+                    or row["task_name"] != record["task_name"]
+                    or bool(row["failed"]) != bool(record["failed"])
+                ):
+                    raise ValueError(f"Cache and predictions disagree for {record['rollout_id']}")
+                features, actions = cache.features_for(row), cache.actions_for(row)
+                for name in names:
+                    per_seed = {}
+                    for seed in seeds:
+                        selection = bundles[seed][1]["selected"][name]
+                        raw = models[seed][name].score(record["task_name"], features, actions)
+                        per_seed[seed] = aggregate_scores(raw, selection["aggregation"])
+                    stream.write(
+                        json.dumps(
+                            _json_value(
+                                {
+                                    "detector": name,
+                                    "rollout_id": str(record["rollout_id"]),
+                                    "task_name": record["task_name"],
+                                    "failed": bool(record["failed"]),
+                                    "fold": first["fold"],
+                                    "held_out": record["task_name"] in held,
+                                    "source_inferences": int(row["length"]),
+                                    "per_seed_raw": per_seed,
+                                }
+                            ),
+                            allow_nan=False,
+                        )
+                        + "\n"
+                    )
+        counts[cohort_name] = len(records)
+        inputs[f"cohort_{cohort_name}"] = {
+            "predictions": str(Path(predictions).resolve()),
+            "predictions_sha256": _sha256(predictions),
+            "cache": str(cache.root),
+            "cache_group": group,
+        }
+        print(f"fold {first['fold']}: scored {cohort_name} ({len(records)} rollouts)", flush=True)
+    normalizations = {
+        name: {
+            seed: {
+                "pooled": bundles[seed][1]["selected"][name]["pooled_normalization"],
+                "per_task": bundles[seed][1]["selected"][name]["normalization"],
+            }
+            for seed in seeds
+        }
+        for name in names
+    }
+    _write_json(output / "normalizations.json", normalizations)
+    meta = {
+        "protocol": "cross_task_score_only_no_metrics",
+        "source": "run_offline_detector_baselines score-fold (Section 15.10 baselines, pooled variant)",
+        "code_commit": _running_code_commit(),
+        "fold": first["fold"],
+        "held_out_tasks": sorted(held),
+        "training_rollouts_by_task": first["fit_success_rollouts_by_task"],
+        "training_rollouts_note": "success-only fit rollouts of each seen task",
+        "folds_sha256": first["folds_sha256"],
+        "seeds": [int(seed) for seed in seeds],
+        "detectors": names,
+        "variant": "pooled",
+        "detector_configs": {
+            name: {"params": first["selected"][name]["params"], "aggregation": first["selected"][name]["aggregation"]}
+            for name in names
+        },
+        "bundles": {seed: {"path": str(path), "sha256": _sha256(path)} for seed, (path, _) in bundles.items()},
+        "fixed_selection": first.get("fixed_selection"),
+        "inputs": inputs,
+        "counts": counts,
+    }
+    _write_json(output / "scoring.json", meta)
+    return {"status": "fold_scored", "fold": first["fold"], "counts": counts, "detectors": names}
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -2101,6 +2464,37 @@ def build_parser():
     development.add_argument("--meta-split-seed", type=int, default=0)
     development.add_argument("--model-seed", type=int, default=0)
     development.add_argument("--max-fit-rows", type=int, default=50000)
+    development.add_argument(
+        "--fixed-selection",
+        help=(
+            "Earlier baseline_bundle.json: refit its selected configurations and "
+            "aggregations with --model-seed instead of searching the grid. With the "
+            "source model seed the refit must reproduce the source run exactly."
+        ),
+    )
+    development.add_argument(
+        "--reproduction-tolerance",
+        type=float,
+        default=0.0,
+        help=(
+            "With --fixed-selection and the source model seed: largest allowed absolute "
+            "difference of normalized validation scores and relative difference of the "
+            "normalization and selection score (default 0: bit-exact)."
+        ),
+    )
+    development.add_argument(
+        "--folds",
+        help="cross_task_folds.json; with --fold, refit on that fold's seen tasks only",
+    )
+    development.add_argument(
+        "--fold",
+        help=(
+            "Cross-task fold to hold out (needs --fixed-selection and --folds). The frozen "
+            "configuration is refit on the frozen fit partition of the seen tasks, with every "
+            "task-specific reference pooled (pooled_variant), and the bundle stores a pooled "
+            "normalization for tasks it has not seen."
+        ),
+    )
 
     calibration = subparsers.add_parser("calibrate")
     calibration.add_argument("--baseline-bundle", required=True)
@@ -2164,6 +2558,24 @@ def build_parser():
     scoring.add_argument("--cache-group", choices=CACHE_GROUPS, required=True)
     scoring.add_argument("--output", required=True)
 
+    fold_scoring = subparsers.add_parser("score-fold")
+    fold_scoring.add_argument(
+        "--bundle",
+        action="append",
+        required=True,
+        metavar="SEED=BASELINE_BUNDLE",
+        help="develop --fold output of one model seed; repeat for every seed",
+    )
+    fold_scoring.add_argument("--folds", required=True)
+    fold_scoring.add_argument(
+        "--cohort",
+        nargs=4,
+        action="append",
+        required=True,
+        metavar=("NAME", "PREDICTIONS", "CACHE", "CACHE_GROUP"),
+    )
+    fold_scoring.add_argument("--output-dir", required=True)
+
     smoke = subparsers.add_parser("synthetic-smoke")
     smoke.add_argument("--output-dir", required=True)
     smoke.add_argument("--seed", type=int, default=0)
@@ -2179,6 +2591,7 @@ PHASES = {
     "preregister": preregister,
     "confirm": confirm,
     "score-baselines": score_baselines,
+    "score-fold": score_fold,
     "synthetic-smoke": synthetic_smoke,
 }
 

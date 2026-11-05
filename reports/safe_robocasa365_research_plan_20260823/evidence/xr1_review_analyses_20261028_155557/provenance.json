@@ -1,0 +1,17 @@
+{
+  "analysis": "scripts/xr1_lead_time/review_analyses.py run",
+  "cluster_file": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_review_analyses_20261028_155557/review_analyses.json",
+  "cluster_log_directory": "/gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_review_analyses_20261028_155557",
+  "cluster_run_directory": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_review_analyses_20261028_155557",
+  "export_sha256": {
+    "review_analyses.json": "8f38f3c6bed72cc4099746499627465e0638779d0cb3d05752dc9cc285f73dd8"
+  },
+  "frozen_inputs_unchanged": true,
+  "implementation_commit": "4a558327eb8dfc939699c80193470ca3693886b8",
+  "pinned_worktree_commit": "22f42dbc9dd30c79333b8d2bceaff444dbbb28ed",
+  "json_note": "Written by Python's json module: fused paths whose score is never used have u = Infinity (29 occurrences). Python's json reads them; strict JSON parsers do not.",
+  "plan": "docs/xr1_review_analyses_plan.md (Result section)",
+  "received_date": "2026-10-28",
+  "source": "Copied byte for byte from the cluster with rsync by the user; not edited",
+  "status": "exploratory, pre-specified (opened cohorts)"
+}

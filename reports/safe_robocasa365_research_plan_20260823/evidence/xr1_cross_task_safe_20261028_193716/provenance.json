@@ -1,0 +1,25 @@
+{
+  "analysis": "scripts/xr1_lead_time/cross_task_safe.py run",
+  "cluster_file": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_safe_20261028_193716/cross_task_safe.json",
+  "cluster_log_directory": "/gs/bs/tga-shinoda/felid/robocasa_logs/eval/xr1_cross_task_safe_20261028_193716",
+  "cluster_run_directory": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_safe_20261028_193716",
+  "export_sha256": {
+    "cross_task_safe.json": "113864b44e9651428a05ec8d031aa8c3c6224feb06007ef13b5425dc69d23338"
+  },
+  "cluster_sha256_matches": true,
+  "implementation_commit": "9d0353bef5ac4af7e63129a9a2cbd819e80300d4",
+  "pinned_worktree_commit": "9d0353bef5ac4af7e63129a9a2cbd819e80300d4",
+  "frozen_inputs_unchanged": true,
+  "pre_analysis_checks": {
+    "B2_B3_exit_codes": "42 ok (12 trainings, 30 scorings)",
+    "B4_cutoff_check": "IDENTICAL, 1526 rollouts, max abs diff 0.0",
+    "B5_reference_lead_calibration": "1522 rollouts, max diff 0.0 -> OK",
+    "B5_reference_confirmatory_test": "1526 rollouts, max diff 0.0 -> OK",
+    "B5_bundle_normalization": "max diff 0.0 -> OK",
+    "B5_assembly": "ASSEMBLY OK for folds all, 0, 1, 2, 3"
+  },
+  "plan": "docs/xr1_review_analyses_plan.md (Result section, R5 Stage B)",
+  "received_date": "2026-10-28",
+  "source": "Copied from the cluster by the user; not edited. SHA-256 equal to the cluster file's.",
+  "status": "exploratory, pre-specified (opened cohorts)"
+}

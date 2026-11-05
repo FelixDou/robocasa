@@ -108,6 +108,36 @@ class ScoreCrossTaskTests(unittest.TestCase):
                        for r in rows if r["held_out"]]
             self.assertTrue(any(differs))
 
+    def test_score_train_writes_in_sample_training_trajectories(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            split, ids = fixture(root)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(score_cohorts([*common(root), "--detectors", "cosine_knn", "--score-train",
+                                                "--output-dir", str(root / "sc")]), 0)
+                status = score_cross_task(cross(root, "all", "fa", ["cosine_knn"], "--score-train",
+                                                "--reference-raw", "train", str(root / "sc" / "train_predictions.jsonl"),
+                                                "--reference-raw", "calib", str(root / "sc" / "calib_predictions.jsonl")))
+                self.assertEqual(score_cross_task(cross(root, "0", "f0", ["cosine_knn"], "--score-train")), 0)
+                self.assertEqual(score_cross_task(cross(root, "1", "f1", ["cosine_knn"])), 0)
+            self.assertEqual(status, 0)
+            meta = json.loads((root / "fa" / "scoring.json").read_text())
+            self.assertTrue(meta["score_train"])
+            check = meta["reference_checks"]["train/cosine_knn"]
+            self.assertEqual((check["ok"], check["max_abs_diff"], check["rollouts_scored"]),
+                             (True, 0.0, len(split["train"])))
+            rows = rows_of(root / "f0" / "train_predictions.jsonl")
+            seen = [r for r in split["train"] if ids[r][0] in ("TaskB", "TaskD")]
+            self.assertEqual(sorted(r["rollout_id"] for r in rows), sorted(seen))
+            self.assertFalse(any(r["held_out"] for r in rows))
+            self.assertEqual(sorted(r["task_name"] for r in rows), sorted(ids[r][0] for r in seen))
+            self.assertFalse((root / "f1" / "train_predictions.jsonl").exists())
+            self.assertFalse(json.loads((root / "f1" / "scoring.json").read_text())["score_train"])
+            with self.assertRaises(ValueError):
+                score_cross_task([*common(root), "--cohort", "train", str(root / "evaluation.json"),
+                                  "--folds", str(root / "folds.json"), "--fold", "0", "--detectors", "cosine_knn",
+                                  "--score-train", "--output-dir", str(root / "bad")])
+
     def test_pooled_normalization_is_the_robust_formula_over_all_tasks(self):
         rng = np.random.default_rng(0)
         records = [{"task_name": t, "scores": rng.normal(size=12)} for t in ("a", "b") for _ in range(6)]

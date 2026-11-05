@@ -1,0 +1,15 @@
+{
+ "analysis": "seen_unseen_tables.py run (R11, XR-1) and rldx_unseen.py run (R11d, RLDX-1)",
+ "cluster_run_directory": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_r11_rows_20261030_220636",
+ "export_sha256": {
+  "seen_unseen_tables_r11.json": "2dd19df0213a5471b2fd5af3b84ed28a1097701fc452e6760d772bd7fee45488",
+  "rldx_unseen_r11.json": "761e1ded54267b0cc364f970393d82aeb1c45f4c113d2cc76896df44bc7e82e1"
+ },
+ "pinned_worktree_commits": {"tables_and_training": "59f0863461db1e68eb503ddadb81c587289b073b",
+                             "rldx_table": "840d16a7bfde7b0b8d56497a2d6aab9ca0738de7"},
+ "frozen_inputs_unchanged": true,
+ "plan": "docs/xr1_review_analyses_plan.md (R11, Result)",
+ "received_date": "2026-10-31",
+ "source": "Copied byte for byte from the cluster with rsync by the user; not edited",
+ "status": "exploratory (opened cohorts)"
+}
