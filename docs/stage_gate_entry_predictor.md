@@ -106,3 +106,41 @@ python3 -m robocasa.recovery.stage_gate_entry_predictor analyze \
   --features outputs/xr1_stage_gate_trial2_20261104_104336/entry_predictor/entry_features.npz \
   --output-dir outputs/xr1_stage_gate_trial2_20261104_104336/entry_predictor
 ```
+
+## Results (5 November 2026)
+
+Run as pre-specified: 173 entered seeds (58 stalled), 1,564 unswitched
+captures, all scored by the frozen SAFE ensemble. Output:
+`outputs/xr1_stage_gate_trial2_20261104_104336/entry_predictor/entry_predictor.json`.
+
+| Gate | Δ vs baseline at inference 0 [95% CI] | Permutation p | Holm p | Gated (of entered) | AUROC (stall) |
+|---|---|---:|---:|---:|---:|
+| `safe` | −0.018 [−0.057, +0.019] | 0.71 | 1.00 | 0.31 | 0.61 |
+| `entry_step` | −0.011 [−0.042, +0.021] | 0.64 | 1.00 | 0.20 | 0.64 |
+| `probe` | −0.009 [−0.049, +0.031] | 0.31 | 0.93 | 0.32 | 0.61 |
+| `probe_plus_time` | −0.000 [−0.036, +0.038] | 0.23 | 0.92 | 0.32 | 0.62 |
+
+At inference 4 (estimate only), all gates are between −0.011 and +0.019,
+with no Holm p below 0.15.
+
+**No gate passes the decision rule, so there is no third trial.**
+
+Why entry-time gating cannot work at this stage:
+
+- **Harm outweighs rescue.** The seeds that re-prompting harms outnumber
+  those it rescues (115 on-time seeds, net −30; 58 stalled seeds, net +18).
+  A gate therefore needs a very accurate stall predictor before it gains
+  anything. Under a binormal ROC, the best achievable Δ is about +0.001 at
+  AUROC 0.60, +0.020 at 0.75 and +0.038 at 0.85. Reaching +0.04 needs an
+  AUROC of about 0.87.
+- **The observed signals are near chance.** Stall AUROCs are 0.60–0.64.
+  Without any fitting, SAFE and entry step separate helped from harmed seeds
+  at AUROC 0.57 and 0.57 (32 helped / 44 harmed). The frozen SAFE score at
+  entry predicts baseline failure at AUROC 0.53.
+
+Conclusion: at ArrangeTea's mug stage, neither the entry state (frozen SAFE,
+a probe on the XR-1 token, entry time) nor time in stage gives a usable
+re-prompt gate. The stage's intervention value is real but not identifiable
+in time. This complements the replicated positive at BreadSelection, where
+re-prompting helps most rollouts that reach the stage, so no state signal is
+needed.

@@ -154,3 +154,7 @@ That supports an exact cross-validated offline evaluation:
    value is clearly above zero, freeze the predictor and threshold and run a
    third prospective trial (`baseline` vs `predicted_stall_entry_gate` on
    ArrangeTea, fresh seeds).
+   **Done (5 November):** no entry-time gate passed; best Δ −0.000, stall
+   AUROC ≤ 0.64, while about 0.87 would be needed
+   ([stage_gate_entry_predictor.md](stage_gate_entry_predictor.md#results-5-november-2026)).
+   No third trial.
