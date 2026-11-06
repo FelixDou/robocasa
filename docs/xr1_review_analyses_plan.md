@@ -1045,6 +1045,102 @@ CPU. Exploratory on opened cohorts. Answers the 2026-11-03 mock review (paper fo
   comparator.
 
 
+## R14. Timers that do not use the time limit H_k (written 2026-11-06, before any run)
+
+**Why.** Shinoda sensei (2026-11-06): H_k is a heuristic and cannot be used for unknown tasks;
+can it be estimated from the instruction with an LLM?
+- **XR-1:** H_k is RoboCasa's hand-set per-task limit (`robocasa/utils/dataset_registry.py`:
+  300, 450, 750, 900 control steps).
+- **RLDX-1:** H_k is the longest training failure (`rldx_unseen.py`).
+- **Seen tasks:** our setting matches SAFE, FIPER and Hide-and-Seek. H_k defines failure (the rollout
+  ran out of time) and the unit of ℓ, as FIPER's normalized detection time does.
+- **Unseen tasks:** our setting differs. G alarms at c·H_k, so it is given each held-out task's limit.
+  SAFE and Hide-and-Seek calibrate their thresholds per raw timestep on seen tasks and give the
+  monitor no timing of the new task. The "unseen tasks: no gain over G" result therefore uses a
+  timer that knows more than theirs.
+- **P:** uses H_k only through its margin. Its cutoff is c_k H_k = min(H_k, ρ_k H_k + δ H_k), and
+  ρ_k H_k is a duration measured on the task's own successes.
+
+R14 keeps H_k where it defines the problem: failure is a timeout at H_k, and ℓ = (L − T)/H_k. It
+removes H_k from the monitors. CPU, except D2's LLM call (one GPU, minutes). Exploratory on opened
+cohorts, like R6–R13.
+
+**Timers.** Each is a monotone score thresholded with Proposition 1's margin, fitted like G with
+`confirm_lead.fit_fast` on the fold's seen-task calibration successes. Each is fused with every score
+of Tables I–II exactly as G is. They differ only in the time unit D that replaces H_k in the timer,
+alarming at t ≥ min(λ D, H_k); the cap only says that the rollout has ended.
+- **G (H_k)** — the current timer, D = H_k. It must reproduce R6/R7 (gate K1).
+- **G_abs** — D = 1 inference: one elapsed-time cutoff for all tasks, set on seen tasks. It uses the
+  same information as SAFE's and Hide-and-Seek's raw-time thresholds. **Primary H_k-free timer.**
+- **G_LLM** — D = D̂, an LLM's estimate of a successful rollout's duration from the instruction text.
+  - **D1 (zero-shot):** the instruction only.
+  - **D2 (few-shot, primary LLM variant):** the instruction, plus each of the fold's seen tasks
+    with one example instruction and its median training-success duration.
+  - Two rules hold for both: the held-out task's own durations are never shown, and the prompt never
+    names RoboCasa.
+  - The estimate is per rollout, from that rollout's instruction (`ep_meta` lang), since the
+    monitor has it at run time.
+- **Seen-task check (descriptive):** G_abs and G_LLM on seen tasks (fold all), to show how much of
+  P's advantage over G is task timing.
+
+**LLM protocol (fixed before any call).**
+- **Model:** one open-weights instruction model with a pinned HF revision (default Qwen3-8B; the
+  author may choose another before the run). Temperature 0, one call per distinct instruction.
+- **Files:** prompt templates in `scripts/xr1_lead_time/hk_free_prompts/`. Their SHA-256 is
+  recorded in the result. Raw outputs are stored verbatim.
+- **Answer:** a single number of seconds. A non-number is re-asked once with a format reminder,
+  then set to the median of the seen tasks' durations, and counted.
+- **Accuracy:** reported per task against the observed 95th percentile of training successes,
+  ρ_k H_k: Spearman ρ, median |log ratio|, and the worst task.
+
+**P without H_k (descriptive sensitivity, seen tasks).**
+- **P_mult:** c_k = ρ_k H_k (1 + δ), a multiplicative margin with δ set by Proposition 1. The H_k
+  term is gone; the min(·, H_k) cap stays, since it only marks the rollout's end.
+- **Reported:** P_mult's FPR, lead and false alarms, and SAFE-LSTM + P_mult and Hide-and-Seek + P_mult
+  gains, beside the published P rows.
+- **Decision rule (fixed now):** if every gain moves by ≤ 0.01 of the limit, the paper keeps P and
+  says in one sentence that the H_k-free margin gives the same result. Otherwise P_mult goes in the
+  appendix and the author decides.
+
+**Scope.**
+- **Cohorts:** XR-1 (R6's folds and score families) and RLDX-1 (R7's).
+- **Rows:** every detector with an unseen column in Tables I–II.
+- **Reported:** per timer — the timer alone (FPR, false alarms, mean lead, TWA); each score fused
+  with it (same-target gain over that timer, gain matched to its false alarms, TWA); seed-averaged,
+  with per-seed SD as in R6.
+- **Not in scope:** new rollouts, and E1/E2. E1 and E2 use P on seen tasks only; P_mult covers them.
+
+**Gates (no result without them):**
+- **K1:** G (H_k) reproduces R6's `seen_unseen_tables_b1ids.json` and R7's `rldx_unseen.json` unseen
+  rows exactly (FPR, lead, gain).
+- **K2:** with D set to H_k, the generalized timer code equals `fit_fast`/`alarm_vec` on every fold.
+  With D = 1 on a synthetic cohort, it matches a direct elapsed-time conformal threshold.
+- **K3:** every timer's seen-task calibration FPR is ≤ 0.05. Its held-out-task test false alarms are
+  reported (no guarantee there, as for G).
+- **K4:** the prompt SHA-256 matches the committed files, and every instruction has a recorded raw
+  output. The failure-to-parse count is ≤ 5% of instructions, or D2 is reported as failed.
+- **K5:** with δ = 0, P_mult and P give the same alarms (both cut at ρ_k H_k), a check of the code
+  path.
+
+**Expectations (written before running).**
+- **G_abs** is much weaker than G on unseen tasks: task lengths span 29–272 inferences on XR-1, so one
+  cutoff alarms early on short tasks or late on long ones. Expected lead 0.03–0.08 below G at its FPR,
+  and FPR on held-out tasks well above 0.05 for short tasks.
+- **Learned scores + G_abs** gain clearly over G_abs on unseen tasks (expected +0.03 or more for
+  SAFE-LSTM and Hide-and-Seek), unlike their ≈ 0 gain over G. This is the result the paper would
+  report: once the timer is not given the new task's limit, the policy's state carries warning.
+- **D2** ranks tasks well (Spearman ≥ 0.6) and lands between G_abs and G. D1 is worse than D2.
+- **P_mult** changes gains by < 0.01 (H_k enters P only through δ, which is small).
+
+**Paper use (decided after the result, by the author).**
+- **Stage 1:**
+  - in the problem setup, one sentence saying that H_k is the benchmark's hand-set limit and that
+    it defines failure;
+  - in the unseen-task table, G_abs (and, if it works, G_LLM) beside G;
+  - the abstract or conclusion changes only if the unseen-task finding changes.
+- **Stage 2:** the same rows in the appendix, and G_LLM framed as an answer to how a new task's
+  time scale can be obtained.
+
 ## Runbook
 
 Run on TSUBAME from a pinned worktree, CPU only for R1–R4, following
