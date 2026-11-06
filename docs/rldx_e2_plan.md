@@ -35,9 +35,10 @@ It does not test it: the reset simulation predicts about +0.006 (CI half-width a
   budget left.
 - **Single reset.** A retry is not reset again. The reset simulation allowed repeated resets; with 1.25 H
   a second retry rarely has time to succeed.
-- **No resume.** An error stops the shard (`--no-continue-on-error`), and `--resume` is refused: a
-  replayed reset sequence would not rebuild the same scenes. The stopped shard's unfinished tasks are
-  collected again from scratch with the next reserved seed; their partial attempts are not used.
+- **No resume.** Each task is one collector run in its own directory. An error stops it
+  (`--no-continue-on-error`), and `--resume` is refused: a replayed reset sequence would not rebuild
+  the same scenes. An interrupted task is collected again from scratch with the next reserved seed;
+  its partial attempts are not used.
 
 ## Reset rules (fixed by `plan_e2.py`)
 
@@ -220,29 +221,69 @@ $CLIENT_PY -I -c "import json,sys; m={r['rollout_id']: r['valid_sequence_length'
 
 Continue only with `LENGTHS OK`. If the export or scoring refuses the 4-rollout set, paste the error.
 
-### 6. Collect (about a day on four GPUs)
+### 6. Collect (about 12–16 h on four GPUs; may span several sessions)
+
+Each GPU runs its shard's tasks one at a time, each task in its own directory
+(`collection/<task>`), so the end of a session loses only the tasks in progress. A task whose
+earlier directory was interrupted is collected again with the next reserved seed (1411, 1421, …).
+Its partial directory is kept under `collection_incomplete/` and never used.
+
+Create the queue script once:
 
 ```bash
-cd $E2_REPO
+cat > $E2_ROOT/run_tasks.sh <<'SH'
+#!/bin/bash
+# One E2 collector per task, in order, on one GPU (docs/rldx_e2_plan.md, step 6). Usage: run_tasks.sh SHARD GPU PORT
+set -u
+source $E2_ROOT/session.env
+shard=$1 gpu=$2 port=$3
 mapfile -t FLAGS < $E2_ROOT/collector_flags_e2.txt
+cd $E2_REPO
+while read -r task; do
+  [ -z "$task" ] && continue
+  d=$E2_ROOT/collection/$task
+  if [ -e "$d" ]; then echo "$(date +%F_%T) $task: directory exists, skipped"; continue; fi
+  tries=$(ls -d $E2_ROOT/collection_incomplete/${task}_try* 2>/dev/null | wc -l)
+  seed=$((1401 + 10 * tries))
+  echo "$(date +%F_%T) $task: start, seed $seed"
+  CUDA_VISIBLE_DEVICES=$gpu MUJOCO_EGL_DEVICE_ID=$gpu $CLIENT_PY -u scripts/rldx_e2/collect_e2.py \
+    --output-dir $d --tasks $task "${FLAGS[@]}" --seed $seed --host 127.0.0.1 --port $port \
+    > $E2_LOG/collection_$task.log 2>&1 < /dev/null
+  echo "$(date +%F_%T) $task: exit $?"
+done < $E2_ROOT/tasks_e2_shard$shard.txt
+SH
+chmod +x $E2_ROOT/run_tasks.sh
+```
+
+**Start (or continue) the queues.** In a new session, first re-run steps 0 (with `source
+<E2_ROOT>/session.env`) and 4 (servers), then move interrupted directories aside:
+
+```bash
+mkdir -p $E2_ROOT/collection $E2_ROOT/collection_incomplete
+for d in $E2_ROOT/collection/*/; do
+  [ -d "$d" ] || continue; t=$(basename $d); n=$(cat $d/manifest.jsonl 2>/dev/null | wc -l)
+  if ! grep -q '"partial": false' $d/summary.json 2>/dev/null || [ "$n" -ne 100 ]; then
+    k=$(ls -d $E2_ROOT/collection_incomplete/${t}_try* 2>/dev/null | wc -l)
+    mv $d $E2_ROOT/collection_incomplete/${t}_try$((k + 1)); echo "moved aside: $t ($n rollouts)"
+  fi
+done
 while IFS=$'\t' read -r set shard gpu port; do
-  mapfile -t tasks < $E2_ROOT/tasks_e2_shard$shard.txt
-  CUDA_VISIBLE_DEVICES=$gpu MUJOCO_EGL_DEVICE_ID=$gpu nohup $CLIENT_PY -u scripts/rldx_e2/collect_e2.py \
-    --output-dir $E2_ROOT/collection/shard$shard --tasks "${tasks[@]}" "${FLAGS[@]}" \
-    --host 127.0.0.1 --port $port > $E2_LOG/collection_shard$shard.log 2>&1 < /dev/null &
-  echo "shard$shard GPU $gpu PID $!"
+  E2_ROOT=$E2_ROOT setsid nohup bash $E2_ROOT/run_tasks.sh $shard $gpu $port \
+    >> $E2_LOG/queue_shard$shard.log 2>&1 < /dev/null &
+  echo "queue shard$shard GPU $gpu started"
 done < $E2_ROOT/shards.tsv
 ```
 
-**Progress.** Rollouts per task and shard; first attempts and retries alternate:
+**Progress** (finished tasks have 100 rollouts):
 
 ```bash
-for d in $E2_ROOT/collection/shard*; do echo "$d: $(wc -l < $d/manifest.jsonl 2>/dev/null) rollouts, $(wc -l < $d/errors.jsonl 2>/dev/null) errors"; done
-tail -n 2 $E2_LOG/collection_shard*.log
+for d in $E2_ROOT/collection/*/; do echo "$(basename $d): $(cat $d/manifest.jsonl 2>/dev/null | wc -l)/100"; done
+tail -n 2 $E2_LOG/queue_shard*.log
 ```
 
-**If a shard stops with an error.** Do not resume. Paste its log. Its unfinished tasks are re-run into
-`collection/shard<k>_rerun1` with seed 1411 (then 1421, …).
+**If a task exits with a nonzero code** (an error, not the session ending), paste its
+`collection_<task>.log`. The queue moves on to the next task; the failed one is moved aside by the
+sweep above and collected again in the next round.
 
 ### 7. Gate 2, when every collector has exited
 
@@ -250,7 +291,7 @@ tail -n 2 $E2_LOG/collection_shard*.log
 pkill -f "run_rldx_server.py.*--port 2015[0-3]"
 cd $E2_REPO
 $CLIENT_PY -I scripts/rldx_e2/check_e2.py --plan $E2_ROOT/plan.json --output $E2_ROOT/pairs.json \
-  $(for d in $E2_ROOT/collection/shard*; do echo "e2=$d"; done) 2>&1 | tee $E2_LOG/check.log
+  $(for d in $E2_ROOT/collection/*/; do echo "e2=${d%/}"; done) 2>&1 | tee $E2_LOG/check.log
 ```
 
 Paste `check.log` back. Continue only with `CHECK OK`.
@@ -263,7 +304,7 @@ export SAFE_REPO=$PROJECT_FS/SAFE
 export RLDX_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/rldx1_safe20_natural_weighted_20260815_162530
 export RLDX_CAL=$RLDX_ROOT/calibration/lstm
 export FREEZE_SCORES=$(dirname $E1_FREEZE)/scores_run2
-$CLIENT_PY -m robocasa.recovery.safe.merge_atomic_datasets --source-dirs $E2_ROOT/collection/shard* \
+$CLIENT_PY -m robocasa.recovery.safe.merge_atomic_datasets --source-dirs $E2_ROOT/collection/*/ \
   --output-dir $E2_ROOT/merged/e2 2>&1 | tail -n 2
 $CLIENT_PY -m robocasa.recovery.safe.validate_atomic_dataset --dataset-dir $E2_ROOT/merged/e2 | tail -n 1
 $CLIENT_PY -m robocasa.recovery.safe.export_to_official_safe --dataset-dir $E2_ROOT/merged/e2 \
@@ -282,7 +323,7 @@ $SAFE_PY -I scripts/rldx_e1/score_e1.py safe --set-names e2 --freeze-manifest $E
 unset OPENBLAS_NUM_THREADS
 CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 PYTHONPATH=$E2_REPO $SAFE_PY -I scripts/rldx_e1/score_e1.py hs \
   --set-names e2 --freeze-manifest $E1_FREEZE --freeze-scores-dir $FREEZE_SCORES --recorded-dataset $RLDX_RAW \
-  --output-dir $E2_ROOT/scores $(for d in $E2_ROOT/collection/shard*; do echo "e2=$d"; done) 2>&1 | tee $E2_LOG/score_hs.log
+  --output-dir $E2_ROOT/scores $(for d in $E2_ROOT/collection/*/; do echo "e2=${d%/}"; done) 2>&1 | tee $E2_LOG/score_hs.log
 ```
 
 Each scoring command prints its reproduction checks and `SCORING OK`, or stops before writing

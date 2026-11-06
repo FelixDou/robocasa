@@ -4,9 +4,9 @@ For every collector output directory:
   1. settings and feature contract: E1's checks (check_e1_collection.check) with E2's base seed and the
      1.25 H rollout horizon;
   2. completeness: a task counts only where all 2 x scenes rollouts exist, with reset indices 0 .. 2S-1 once
-     each and no collection error for that task in that directory. Each directory has its own base seed (E2's,
-     or one of the plan's rerun seeds for the tasks of a stopped shard), so IDs never repeat; every task must
-     be complete in exactly one directory, and a partial task elsewhere is not used;
+     each and no collection error for that task in that directory. Directories use E2's base seed, or a
+     reserved rerun seed for a task whose earlier attempt was interrupted; no rollout ID may appear in two
+     directories. Every task must be complete in exactly one directory; a partial task elsewhere is not used;
   3. pairs: pairs.jsonl has one line per reset, alternating first / retry; the retry restored the state its
      first attempt began from (same state hash), with restore residual <= RESIDUAL_TOL, the same instruction,
      every observation key present, images within IMAGE_TOL and other observations within STATE_TOL of the
@@ -81,17 +81,20 @@ def pair_problem(first, retry):
 def check(plan, dirs, recorded_rows, smoke=False, tensor_fn=ce1.tensor_info):
     problems = []
     allowed = [plan["smoke_seed"]] if smoke else [plan["seed"]] + list(plan.get("rerun_seeds", []))
-    used_seeds = Counter()
+    ids = Counter()
     for name, root in dirs:
         seed = dir_seed(root)
         if seed not in allowed:
             problems.append(f"{root}: base seed {seed} is not one of the plan's {allowed}")
             continue
-        used_seeds[seed] += 1
+        ids.update(r["rollout_id"] for r in read_jsonl(Path(root) / "manifest.jsonl"))
         p, _ = ce1.check(e1_view(plan, name, seed), [(name, root)], recorded_rows, plan["source"], smoke=True,
                          tensor_fn=tensor_fn)
         problems += p
-    problems += [f"base seed {s} used by {c} directories" for s, c in used_seeds.items() if c > 1]
+    dup = [rid for rid, c in ids.items() if c > 1]
+    if dup:
+        problems.append(f"{len(dup)} rollout IDs appear in more than one directory, e.g. {dup[:3]} "
+                        "(a task re-run with the same seed: move its partial directory aside or use a rerun seed)")
     n = plan["rollouts_per_task"] if not smoke else None
     complete = defaultdict(list)
     pairs, excluded = [], []

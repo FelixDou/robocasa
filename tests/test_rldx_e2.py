@@ -255,8 +255,11 @@ class CheckTest(unittest.TestCase):
             self._dir(d / "s2", 1411, "B", 4)                                     # rerun with a reserved seed
             dirs = [("e2", str(d / x)) for x in ("s0", "s1", "s2")]
             problems, out = ck.check(plan, dirs, rec, tensor_fn=tensor)
-            self.assertIn("base seed 1401 used by 2 directories", problems)
+            self.assertEqual(problems, [])                                        # one task per directory, same seed
             self.assertEqual(out["tasks"], {"A": str(d / "s0"), "B": str(d / "s2")})
+            self._dir(d / "s4", 1401, "A", 2)                                     # A re-run with the same seed
+            problems, _ = ck.check(plan, dirs + [("e2", str(d / "s4"))], rec, tensor_fn=tensor)
+            self.assertTrue(any("more than one directory" in x for x in problems))
             self.assertEqual(len(out["pairs"]), 4)
             import shutil
             shutil.rmtree(d / "s1")
