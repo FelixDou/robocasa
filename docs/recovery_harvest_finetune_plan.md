@@ -195,6 +195,95 @@ mismatches are recorded and excluded from Gate A.
 
 For reference, ladder v2 at its own detection anchor: 0.20 with K = 4.
 
+**Gate A result (6 November 2026): fail, redesign around expert data.**
+Run `xr1_alarm_phaseA_20261105_170817`, commit `8c9a5304`, fixed budget
+0.5 H, K = 8. 41 parents branched (40 alarmed failures, 1 false-alarm
+success), 952 branches, 0 errors, 41/41 scene checks matched, restore
+residual 0.
+
+| Anchor | Share with ≥ 1 success [95% CI] | Mean success | Share within remaining time |
+|---|---|---|---|
+| `a` | 0.200 [0.075, 0.325] | 0.106 | 0.075 |
+| `a − 8` | 0.200 [0.075, 0.325] | 0.100 | 0.125 |
+| `a − 16` | 0.200 [0.075, 0.325] | 0.091 | 0.125 |
+
+What the result shows:
+
+- **Branching earlier does not help.** The share is 0.20 at every anchor, as
+  in ladder v2 at its own anchor with K = 4. Doubling K did not raise it.
+- **Recoverability belongs to the episode, not the moment.** 11 of 40 failed
+  parents have a success at some anchor. Five of them recover often (4–8 of
+  8 at an anchor); the other six have 1–2 scattered successes. 29 parents
+  never recover.
+- **By task, any anchor:** ArrangeBreadBasket 2/8, ArrangeTea 0/8,
+  BreadSelection 4/8, CuttingToolSelection 3/8, GarnishPancake 2/8. ArrangeTea
+  branches all run to the budget; 85–100% make no further subtask progress.
+  Per-task shares were not preregistered and are not used for decisions.
+- **Consequence.** Own-branch harvesting would draw most recovery data from
+  five episodes and nothing from the 29 states the policy never leaves.
+  Fine-tuning on it would mostly teach recoveries the policy already makes by
+  resampling.
+
+## Redesign after Gate A: expert recoveries at the alarm states
+
+Written 6 November 2026, after Gate A and before any of the steps below. The
+question stays the same; only the source of recovery data changes. The
+alarm, the tasks, the fixed branch budget and Phases C–E are unchanged,
+except that Phase C trains on the data generated here.
+
+**R0: failure audit (CPU, from the saved snapshots).** For each of the 40
+alarmed failure states, read from the simulator state at `a`: the current
+stage, whether the target object is inside the robot's reachable workspace
+and on a support surface, whether it is grasped, and whether any completed
+subtask has been undone. Classify each state as
+
+1. recovered by resampling (the 11 above);
+2. physically recoverable but never recovered (target reachable and
+   resting, nothing irreversible);
+3. not recoverable within the episode (object fallen, out of reach, or an
+   irreversible event such as a dropped garnish).
+
+Class 2 is the headroom expert data can address. **Gate R0:** if class 2
+holds fewer than 10 of the 29 never-recovered states, expert data cannot
+change the picture either; stop and report detection plus resampling (or
+reset) as the recovery result.
+
+**R1: source of expert actions (cluster check, no simulation).** Check in
+this order and use the first that works for all five tasks:
+
+1. *Segment replay (IntervenGen/MimicGen-style).* The RoboCasa v1.0
+   composite human demos for the five tasks carry subtask boundaries
+   (`annotation.human.subtask_idx`). This needs replayable simulator states
+   or object poses per frame to make the segments object-relative. The
+   RoboCasa MimicGen fork covers 64 of 65 atomic tasks but no composite
+   task, so the subtask-to-object mapping is written here.
+2. *Privileged scripted expert.* Per stuck subtask (pick, place, open, close),
+   a motion script on privileged object poses through the existing IK stack.
+   Only the subtasks that class-2 states are stuck on need scripts.
+
+**R2: generation at the alarm states.** From each class-2 state at `a`:
+an optional release-and-retreat prefix (open the gripper, lift, return to a
+pre-grasp height) when the target is mis-grasped; the expert segment for the
+current subtask only; then XR-1 under the task instruction for the remaining
+subtasks. Success is full-task success within the fixed 0.5 H budget.
+N = 10 attempts per state (different source segments or script seeds).
+
+**Gate R** (thresholds frozen with the R2 code, before it runs): the share of
+class-2 states with at least one generated success. Below 0.5, the generator
+is the problem; fix it before generating training data.
+
+**What changes downstream.**
+
+- Phase B keeps its parent collection (fresh seeds until 30 alarmed failed
+  parents per task). Training data at those states comes from R2. Own-branch
+  successes stay as a tagged secondary source.
+- Phase C trains M1 on generated recoveries plus own-branch successes, and M3
+  adds the failed own resamples from the same states as "bad". Recorded
+  observations are rendered as the policy receives them; the actions are the
+  executed ones.
+- Gate B compares against resampling at the alarm, the deployable baseline
+  measured here: share within remaining time 0.075 at `a`.
+
 ## Phase B: harvest
 
 - **Parents:** fresh seeds (new base seed), natural XR-1 rollouts with
@@ -389,8 +478,8 @@ Runs go from a pinned worktree if other recovery runs share the checkout.
   ([xr1_safe_best_of_k_recovery.md](xr1_safe_best_of_k_recovery.md)) and
   little headroom at failure states.
 - World-state failures that the policy never recovers from by itself
-  (GarnishPancake's strawberry stage). These need expert data and are only
-  reached if Gate A fails or as a follow-up.
+  (GarnishPancake's strawberry stage). Gate A failed, so these are now in
+  scope through the redesign (R0 class 2); class 3 stays out.
 - A learned stage estimator. It is not needed: neither the alarm nor the
   recovery mode reads simulator predicates.
 
@@ -401,4 +490,7 @@ Runs go from a pinned worktree if other recovery runs share the checkout.
 - Exact recovery-prompt text and the replay mixing ratio, frozen with the
   training code.
 - Whether ladder v2 snapshots on `/gs/bs` are complete for all 76 parents
-  (A1 needs them).
+  (A1 needs them). Answered: all 41 branched parents had complete snapshots.
+- R1 answers: whether the composite human demos for the five tasks include
+  replayable states or object poses, and which subtasks the class-2 states
+  are stuck on.
