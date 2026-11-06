@@ -4,8 +4,9 @@ import math
 import sys
 from pathlib import Path
 
+import unittest
+
 import numpy as np
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xr1_lead_time"))
 import confirm_lead as cl  # noqa: E402
@@ -171,5 +172,18 @@ def test_accuracy_ranks_and_ratios():
     held = {"0": {"A"}, "1": {"B", "C"}}
     dur = dict(zero={"A": 10.0, "B": 20.0, "C": 40.0}, few={"0": {"A": 5.0}, "1": {"B": 20.0, "C": 80.0}})
     a = hk.accuracy(dur, ["A", "B", "C"], held, ["0", "1"], {"A": 10.0, "B": 20.0, "C": 40.0})
-    assert a["zero"]["spearman"] == pytest.approx(1.0) and a["zero"]["median_abs_log_ratio"] == 0.0
+    assert abs(a["zero"]["spearman"] - 1.0) < 1e-12 and a["zero"]["median_abs_log_ratio"] == 0.0
     assert a["few_held_out"]["worst"]["task"] in ("A", "C")
+
+
+class HkFreeTests(unittest.TestCase):
+    """Runs every test above under unittest (the cluster's SAFE environment has no pytest)."""
+
+
+for _name, _fn in list(globals().items()):
+    if _name.startswith("test_") and callable(_fn):
+        setattr(HkFreeTests, _name, lambda self, _fn=_fn: _fn())
+del _name, _fn
+
+if __name__ == "__main__":
+    unittest.main()

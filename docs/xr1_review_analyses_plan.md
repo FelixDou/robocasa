@@ -2873,14 +2873,15 @@ echo "2dd19df0  R11 XR-1 tables:" $(sha256sum $R11_ROOT/seen_unseen_tables_r11.j
 echo "761e1ded  R11 RLDX-1 table:" $(sha256sum $R11_ROOT/rldx_unseen_r11.json | cut -c1-8)
 CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_xr1_hk_free tests.test_xr1_seen_unseen_tables \
   tests.test_xr1_rldx_unseen 2>&1 | tail -n 3
-"$SAFE_PY" -c "import torch, transformers; print('torch', torch.__version__, 'transformers', transformers.__version__, 'cuda', torch.cuda.is_available())"
+"$CLIENT_PY" -c "import torch, transformers; print('torch', torch.__version__, 'transformers', transformers.__version__, 'cuda', torch.cuda.is_available())"
 ```
 
 Continue only if all of these hold:
 - `HEAD OK` and `XR-1 FOLDS SAME AS R11` print;
 - the two hashes match their prefixes;
 - the tests end with `OK`;
-- the last line shows transformers ≥ 4.51 and `cuda True`. If it doesn't, report it before going on.
+- the last line shows transformers ≥ 4.51 and `cuda True` (`robocasa_openpi` runs step 12.3; `vla_safe` has no
+  transformers). If it doesn't, report it before going on.
 
 **12.1 One instruction per task (CPU, RoboCasa).** This uses the first reset at seed 0 for each task.
 
@@ -2912,12 +2913,12 @@ PY
 have no internet), then pin the snapshot that was fetched:
 
 ```bash
-"$SAFE_PY" -c "from huggingface_hub import snapshot_download; print(snapshot_download('Qwen/Qwen3-8B'))" | tail -n 1 \
+"$CLIENT_PY" -c "from huggingface_hub import snapshot_download; print(snapshot_download('Qwen/Qwen3-8B'))" | tail -n 1 \
   | tee $R14_LOG/model_snapshot.txt
 export LLM_DIR=$(cat $R14_LOG/model_snapshot.txt); echo "export LLM_DIR=$LLM_DIR" >> $R14_LOG/paths.env
 cd $R14_REPO
 for c in xr1 rldx; do
-  HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 "$SAFE_PY" -u scripts/xr1_lead_time/hk_free.py llm \
+  HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 "$CLIENT_PY" -u scripts/xr1_lead_time/hk_free.py llm \
     --prompts $R14_ROOT/prompts_$c.json --model $LLM_DIR --output $R14_ROOT/durations_$c.json 2>&1 \
     | grep -v -i warn | tee $R14_LOG/llm_$c.log | tail -n 45
 done
