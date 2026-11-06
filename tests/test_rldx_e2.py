@@ -1,0 +1,273 @@
+"""Tests for E2's paired reset, plan, collection check and analysis (docs/rldx_e2_plan.md)."""
+import importlib.util
+import json
+import math
+import tempfile
+import unittest
+from pathlib import Path
+
+import numpy as np
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+def _load(name, rel):
+    spec = importlib.util.spec_from_file_location(name, REPO / rel)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+ce = _load("_t_collect_e2", "scripts/rldx_e2/collect_e2.py")
+pe = _load("_t_plan_e2", "scripts/rldx_e2/plan_e2.py")
+ck = _load("_t_check_e2", "scripts/rldx_e2/check_e2.py")
+an = _load("_t_analyze_e2", "scripts/rldx_e2/analyze_e2.py")
+
+
+class FakeGymEnv:
+    """A scene is a state vector; reset builds a new one, step moves it."""
+
+    def __init__(self):
+        self.n_resets = 0
+        self.x = None
+
+    def reset(self, **kwargs):
+        self.n_resets += 1
+        self.x = np.full(3, float(self.n_resets))
+        return self._obs(), {"success": False}
+
+    def _obs(self):
+        return {"image": np.full((4, 4, 3), int(self.x[0]) % 256, np.uint8), "state": self.x.copy(),
+                "annotation.human.task_description": "do it"}
+
+    def step(self, action):
+        self.x = self.x + 1.0
+        return self._obs(), 0.0, False, False, {"success": False}
+
+    def get_state(self):
+        return {"states": self.x.copy(), "model": f"<xml scene={int(self.x[0])}/>", "ep_meta": "{}"}
+
+    def reset_to(self, state):
+        self.x = np.asarray(state["states"], float).copy()
+        return self._obs()
+
+
+class Outer:
+    """A gymnasium-like wrapper that does not forward reset_to."""
+
+    def __init__(self, env):
+        self.env = env
+
+    def reset(self, **kwargs):
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        return self.env.step(action)
+
+
+class PairedResetTest(unittest.TestCase):
+    def test_alternates_and_restores(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = ce.install(Outer(FakeGymEnv()), "T", Path(d) / "pairs.jsonl")
+            o0, _ = env.reset()
+            env.step(None); env.step(None)
+            o1, info = env.reset()
+            np.testing.assert_array_equal(o0["state"], o1["state"])
+            self.assertFalse(info["success"])
+            o2, _ = env.reset()
+            self.assertFalse(np.array_equal(o2["state"], o0["state"]))
+            env.step(None)
+            env.reset()
+            log = [json.loads(x) for x in (Path(d) / "pairs.jsonl").read_text().splitlines()]
+            self.assertEqual([x["role"] for x in log], ["first", "retry", "first", "retry"])
+            self.assertEqual(log[1]["restored_sha"], log[0]["state_sha"])
+            self.assertEqual(log[1]["restore_residual"], 0.0)
+            self.assertEqual(log[1]["first_obs_distance"]["image_max"], 0.0)
+            self.assertTrue(log[1]["first_obs_distance"]["text_equal"])
+            self.assertIsNone(ck.pair_problem(log[0], log[1]))
+            self.assertIsNone(ck.pair_problem(log[2], log[3]))
+            self.assertIsNotNone(ck.pair_problem(log[0], log[3]))      # restored another scene's state
+
+    def test_pair_problem_tolerances(self):
+        first = dict(role="first", state_sha="a", model_sha="m")
+        good = dict(role="retry", restored_sha="a", model_sha="m", restore_residual=0.0,
+                    first_obs_distance=dict(missing=[], text_equal=True, image_max=0.5, state_max=0.0))
+        self.assertIsNone(ck.pair_problem(first, good))
+        for change in (dict(restore_residual=1e-3), dict(model_sha="x"),
+                       dict(first_obs_distance=dict(missing=[], text_equal=True, image_max=9.0, state_max=0.0)),
+                       dict(first_obs_distance=dict(missing=[], text_equal=False, image_max=0.0, state_max=0.0))):
+            self.assertIsNotNone(ck.pair_problem(first, {**good, **change}), change)
+
+    def test_main_refuses_resume_and_quotas(self):
+        base = ["--output-dir", "/nonexistent/x", "--tasks", "T", "--seed-protocol", "official_rldx",
+                "--num-rollouts", "4", "--no-continue-on-error", "--record-safe-features", "--policy-name", "p",
+                "--checkpoint", "c"]
+        for extra, why in ((["--resume"], "--resume"), (["--continue-on-error"], "--continue-on-error"),
+                           (["--success-quota", "2"], "quotas")):
+            with self.assertRaises(SystemExit) as cm:
+                ce.main(base + extra)
+            self.assertIn(why, str(cm.exception))
+        with self.assertRaises(SystemExit) as cm:
+            ce.main([x if x != "4" else "3" for x in base])
+        self.assertIn("even", str(cm.exception))
+
+
+def e1_inputs(tasks=("A", "B")):
+    settings = dict(seed=20, seed_protocol="official_rldx", split="target", replan_steps=8, policy_module=None,
+                    model_family="rldx1", policy_name="rldx1", checkpoint="ck", policy_config={},
+                    record_actions=False, video_frame_stride=2)
+    e1_plan = dict(source="/rec", settings=settings, seeds=dict(calibration=1201, test=1301),
+                   tasks={t: dict(type="atomic" if t == "A" else "composite", H=400, H_inferences=50, p=0.5,
+                                  mean_success_length=200.0) for t in tasks})
+    e1_result = dict(P=dict(path=dict(lam=0.0739, u=math.inf, s=0.0)), counts=dict(test=dict(successes=400)),
+                     detectors=dict(safe=dict(path=dict(lam=0.0739, u=7.9314, s=0.0), H3=True),
+                                    hide_and_seek=dict(path=dict(lam=0.0956, u=-0.17, s=20.0), H3=False)))
+    freeze = dict(tasks={t: dict(H_k=50, rho_k=0.6) for t in tasks},
+                  detectors=dict(safe_plus_P=dict(path=dict(u=7.9314, s=0.0)),
+                                 hide_and_seek_plus_P=dict(path=dict(u=-0.17, s=20.0))))
+    reset_sim = dict(runs={"0.245": dict(per_task={t: dict(budgets={"1.25": dict(a_opt=0.4)}) for t in tasks})})
+    return e1_plan, e1_result, freeze, reset_sim
+
+
+class PlanTest(unittest.TestCase):
+    def test_build(self):
+        plan, flags = pe.build(*e1_inputs(), seed=1401, used={20: ["x"], 7: ["y"]}, shards=2)
+        self.assertEqual(plan["tasks"]["A"]["budget_steps"], 500)
+        self.assertEqual(plan["conditions"]["P"]["lam"], 0.0739)
+        self.assertEqual(plan["conditions"]["safe_lstm_plus_P"]["latency_steps"], pe.LATENCY_STEPS)
+        self.assertEqual(plan["conditions"]["R_opt"]["cutoffs"], {"A": 0.4, "B": 0.4})
+        self.assertEqual(plan["primary"], ["safe_lstm_plus_P", "P"])
+        self.assertIn("--no-continue-on-error", flags)
+        self.assertEqual(flags[flags.index("--horizon-scale") + 1], "1.25")
+        self.assertEqual(flags[flags.index("--num-rollouts") + 1], "100")
+        self.assertEqual(plan["rerun_seeds"][:2], [1411, 1421])
+        self.assertEqual(len(plan["shards"]), 2)
+
+    def test_stops(self):
+        e1_plan, e1_result, freeze, reset_sim = e1_inputs()
+        for kwargs in (dict(seed=1301), dict(seed=1201), dict(seed=1291), dict(seed=1401, used={1431: ["z"]}),
+                       dict(seed=1401, smoke_seed=1101)):
+            used = kwargs.pop("used", {})
+            with self.assertRaises(SystemExit, msg=str(kwargs)):
+                pe.build(e1_plan, e1_result, freeze, reset_sim, used=used, **kwargs)
+        bad = json.loads(json.dumps(freeze))
+        bad["detectors"]["safe_plus_P"]["path"]["u"] = 1.0
+        with self.assertRaises(SystemExit):
+            pe.build(e1_plan, e1_result, bad, reset_sim, seed=1401, used={})
+        e1_bad = json.loads(json.dumps(e1_result).replace("Infinity", "1e308"))
+        e1_bad["detectors"]["safe"]["H3"] = False
+        with self.assertRaises(SystemExit):
+            pe.build(e1_plan, e1_bad, freeze, reset_sim, seed=1401, used={})
+
+
+def scene(t="A", s0=False, n0=500, s1=False, n1=500, scores=None, n_inf=None, B=500):
+    n_inf = n_inf if n_inf is not None else math.ceil(n0 / 8)
+    return dict(task_name=t, type="atomic", scene=0, first_id="a", retry_id="r", s0=s0, n0=n0, s1=s1, n1=n1,
+                inf_steps=[8 * i for i in range(n_inf)], B=B, H=50, rho=0.6,
+                safe=np.asarray(scores if scores is not None else np.zeros(n_inf), float))
+
+
+class OutcomeTest(unittest.TestCase):
+    P = dict(kind="fused", lam=0.1, u=math.inf, s=0.0, latency_steps=0)        # alarms at ceil(0.7 x 50) = 35
+    S = dict(kind="fused", detector="safe", lam=0.1, u=1.0, s=0.0, latency_steps=1)
+
+    def test_failure_reset_and_retry(self):
+        # P resets at inference 35, control step 272; the retry has 500 - 272 = 228 steps left.
+        sc = [scene(s1=True, n1=228), scene(s1=True, n1=229)]
+        won, reset, unnec, lost = an.outcomes(sc, self.P)
+        self.assertEqual(won.tolist(), [True, False])
+        self.assertEqual(reset.tolist(), [True, True])
+        self.assertEqual(unnec.tolist(), [False, False])
+
+    def test_earlier_score_alarm_and_latency(self):
+        scores = np.zeros(63); scores[9] = 2.0                                   # alarm at inference 10, step 72
+        sc = [scene(s1=True, n1=427, scores=scores)]
+        self.assertTrue(an.outcomes(sc, self.S)[0][0])                           # 72 + 1 + 427 = 500
+        self.assertFalse(an.outcomes(sc, self.S, latency=2)[0][0])
+        self.assertFalse(an.outcomes(sc, self.P)[0][0])                          # P: 272 + 427 > 500
+
+    def test_success_before_and_after_alarm(self):
+        before = scene(s0=True, n0=272, n_inf=34)                                 # 34 inferences < alarm 35
+        after = scene(s0=True, n0=273, n_inf=35, s1=False)                        # alarm at its 35th inference
+        won, reset, unnec, lost = an.outcomes([before, after], self.P)
+        self.assertEqual(won.tolist(), [True, False])
+        self.assertEqual(unnec.tolist(), [False, True])
+        self.assertEqual(lost.tolist(), [False, True])
+        none = an.outcomes([before, after], dict(kind="none"))[0]
+        self.assertEqual(none.tolist(), [True, True])
+
+    def test_time_rule(self):
+        sc = [scene(s1=True, n1=340)]                                             # cutoff 0.4: inference 20, step 152
+        self.assertTrue(an.outcomes(sc, dict(kind="time", cutoffs={"A": 0.4}))[0][0])
+        self.assertFalse(an.outcomes(sc, dict(kind="time", cutoffs={"A": 0.4}, latency_steps=9))[0][0])
+
+    def test_analyze_and_bootstrap(self):
+        rng = np.random.default_rng(0)
+        sc = []
+        for t in ("A", "B"):
+            for j in range(20):
+                s0 = bool(rng.random() < 0.5)
+                sc.append(dict(scene(t=t, s0=s0, n0=200 if s0 else 500, n_inf=25 if s0 else 63,
+                                     s1=bool(rng.random() < 0.3), n1=100), type="atomic" if t == "A" else "composite"))
+        plan, _ = pe.build(*e1_inputs(), seed=1401, used={}, shards=2)
+        plan["conditions"]["P"]["lam"] = 0.1
+        plan["bootstrap"] = 200
+        out = an.analyze(plan, sc, has_hs=False)
+        self.assertEqual(out["scenes"], 40)
+        c = out["contrasts"]["safe_lstm_plus_P_minus_P"]
+        self.assertTrue(c["primary"])
+        self.assertLessEqual(c["ci"][0], c["delta"])
+        self.assertLessEqual(c["delta"], c["ci"][1])
+        self.assertNotIn("hide_and_seek_plus_P_minus_P", out["contrasts"])
+        self.assertEqual(set(out["by_type"]), {"atomic", "composite"})
+
+
+class CheckTest(unittest.TestCase):
+    def _dir(self, root, seed, task, n, pairs_ok=True, error=False):
+        root.mkdir(parents=True)
+        (root / "summary.json").write_text(json.dumps(dict(config=dict(base_environment_seed=seed))))
+        rows, log = [], []
+        for k in range(n):
+            rows.append(dict(rollout_id=f"{seed}-{task}-{k}", task_name=task, environment_seed=seed,
+                             environment_reset_index=k, rollout_horizon=500, failed=bool(k % 3), seed_protocol="official_rldx",
+                             environment_split="target", replan_steps=8, policy_id="rldx1", checkpoint="ck",
+                             policy_config={}, model_family="rldx1", video_frame_stride=2, feature_layer="L",
+                             tensor_path="x.npz"))
+            if k % 2 == 0:
+                log.append(dict(task_name=task, reset_index=k, role="first", state_sha=f"s{k}", model_sha="m"))
+            else:
+                log.append(dict(task_name=task, reset_index=k, role="retry", restored_sha=f"s{k - 1}" if pairs_ok else "zz",
+                                model_sha="m", restore_residual=0.0,
+                                first_obs_distance=dict(missing=[], text_equal=True, image_max=0.0, state_max=0.0)))
+        (root / "manifest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        (root / "pairs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in log))
+        if error:
+            (root / "errors.jsonl").write_text(json.dumps(dict(task_name=task)) + "\n")
+
+    def test_complete_partial_and_seeds(self):
+        plan, _ = pe.build(*e1_inputs(), seed=1401, used={}, shards=2, scenes=2)
+        rec = [dict(rollout_id="rec", task_name=t, feature_layer="L", tensor_path="r.npz") for t in ("A", "B")]
+        tensor = lambda root, row: dict(shape=[3, 2, 4], dtype="float32", finite=True, nonzero=True, steps=[0, 8, 16])
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self._dir(d / "s0", 1401, "A", 4)
+            self._dir(d / "s1", 1401, "B", 3, error=True)                         # stopped: B partial
+            self._dir(d / "s2", 1411, "B", 4)                                     # rerun with a reserved seed
+            dirs = [("e2", str(d / x)) for x in ("s0", "s1", "s2")]
+            problems, out = ck.check(plan, dirs, rec, tensor_fn=tensor)
+            self.assertIn("base seed 1401 used by 2 directories", problems)
+            self.assertEqual(out["tasks"], {"A": str(d / "s0"), "B": str(d / "s2")})
+            self.assertEqual(len(out["pairs"]), 4)
+            import shutil
+            shutil.rmtree(d / "s1")
+            self._dir(d / "s1", 1421, "B", 3, error=True)                         # stopped run with its own seed
+            problems, out = ck.check(plan, dirs, rec, tensor_fn=tensor)
+            self.assertEqual(problems, [])
+            self._dir(d / "s3", 1431, "A", 4, pairs_ok=False)                     # A complete twice, bad pairs
+            problems, out = ck.check(plan, dirs + [("e2", str(d / "s3"))], rec, tensor_fn=tensor)
+            self.assertTrue(any("complete in 2 directories" in x for x in problems))
+            self.assertTrue(any("fail the restore checks" in x for x in problems))
+
+
+if __name__ == "__main__":
+    unittest.main()

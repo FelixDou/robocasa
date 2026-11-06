@@ -71,7 +71,12 @@ def _default(x):
     raise TypeError(type(x))
 
 
-def parse_sets(items):
+def set_names(a):
+    """The expected set names: E1's two sets by default; E2 scores its one set (--set-names e2)."""
+    return sorted(x for x in (getattr(a, "set_names", None) or "calibration,test").split(",") if x)
+
+
+def parse_sets(items, names=("calibration", "test")):
     """['calibration=/a', 'test=/b', ...] -> {'calibration': ['/a'], 'test': ['/b']}."""
     out = defaultdict(list)
     for s in items:
@@ -79,8 +84,8 @@ def parse_sets(items):
             raise SystemExit(f"error: {s!r} is not <set>=<dir>")
         name, d = s.split("=", 1)
         out[name].append(d)
-    if sorted(out) != ["calibration", "test"]:
-        raise SystemExit(f"error: give shards of exactly the calibration and test sets, got {sorted(out)}")
+    if sorted(out) != sorted(names):
+        raise SystemExit(f"error: give shards of exactly the sets {sorted(names)}, got {sorted(out)}")
     return dict(out)
 
 
@@ -130,7 +135,7 @@ def run_hs(a):
     out = Path(a.output_dir)
     if (out / f"{HS}_scoring.json").exists():
         raise SystemExit(f"error: {out} already has Hide-and-Seek scores")
-    sets = parse_sets(a.shards)
+    sets = parse_sets(a.shards, set_names(a))
     man = json.loads(Path(a.freeze_manifest).read_text())
     problems = []
     files = man["files"]
@@ -277,9 +282,9 @@ def run_safe(a):
     e1_dirs = defaultdict(dict)
     for name, s, d in a.e1_scores:
         e1_dirs[name][str(s)] = d
-    if sorted(rec_dirs) != list(SEEDS) or sorted(e1_dirs) != ["calibration", "test"] or \
+    if sorted(rec_dirs) != list(SEEDS) or sorted(e1_dirs) != set_names(a) or \
             any(sorted(v) != list(SEEDS) for v in e1_dirs.values()):
-        raise SystemExit("error: give --recorded-scores for seeds 0-2 and --e1-scores for both sets and seeds 0-2")
+        raise SystemExit(f"error: give --recorded-scores for seeds 0-2 and --e1-scores for sets {set_names(a)} and seeds 0-2")
     rescored = {s: scores_dir(rec_dirs[s], s)[0] for s in SEEDS}
     e1 = {name: {s: scores_dir(v[s], s) for s in SEEDS} for name, v in e1_dirs.items()}
     if problems:
@@ -335,12 +340,14 @@ def main(argv=None):
     h.add_argument("--freeze-scores-dir", required=True)
     h.add_argument("--recorded-dataset", required=True)
     h.add_argument("--output-dir", required=True)
+    h.add_argument("--set-names", default="calibration,test", help="sets to score (E2: e2)")
     h.add_argument("shards", nargs="+", help="<set>=<E1 collector shard dir>")
     s = sub.add_parser("safe")
     s.add_argument("--freeze-manifest", required=True)
     s.add_argument("--calibration-dir", required=True, help="recorded <SAFE20>/calibration/lstm")
     s.add_argument("--recorded-scores", nargs=2, action="append", required=True, metavar=("SEED", "DIR"))
     s.add_argument("--e1-scores", nargs=3, action="append", required=True, metavar=("SET", "SEED", "DIR"))
+    s.add_argument("--set-names", default="calibration,test", help="sets to score (E2: e2)")
     s.add_argument("--tolerance", type=float, default=EXACT,
                    help="largest |re-scored - recorded| raw SAFE score accepted (default exact, 1e-12)")
     s.add_argument("--output-dir", required=True)
