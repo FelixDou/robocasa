@@ -263,6 +263,60 @@ class RldxUnseenTest(unittest.TestCase):
         for d in self.ru.DETECTORS:          # the published rows are unchanged by the extra family
             self.assertEqual(out["table2"][d], base["table2"][d])
 
+    def test_r14_timers_without_hk_reproduce_G_and_P(self):
+        """R14: with a duration file, G and P are reproduced (K1, K5) and every timer is reported."""
+        hk, ctl = load("hk_free"), load("cross_task_lead")
+        _, held = ctl.fold_sets(self.spec)
+        ins = {t: f"Do the {t} job." for t in TASKS}
+        med = {t: 10.0 + 3 * i for i, t in enumerate(TASKS)}
+        prompts = hk.build_prompts(ins, held, med)
+        prompts["example_median_seconds"] = med
+
+        def gen(msgs):
+            for i, t in enumerate(TASKS):
+                if f"Do the {t} job.\"\n\nHow many" in msgs[1]["content"]:
+                    return str(8 + 5 * i)
+            return "nonsense"
+        zero, few, raw, fails = hk.answer_all(prompts, gen)
+        dur = dict(prompt_sha256=hk.prompts_sha256(),
+                   folds_sha256=hashlib.sha256((self.root / "folds.json").read_bytes()).hexdigest(),
+                   zero=zero, few=few, answers=len(raw), parse_failures=fails)
+        (self.root / "dur.json").write_text(json.dumps(dur))
+        base_status, _, base = self.run_unseen("u_r14_base.json")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            status = self.ru.main(["run", "--safe-dir", str(self.root / "safe"), "--inputs-dir", str(self.root / "inputs"),
+                                   "--folds", str(self.root / "folds.json"),
+                                   "--fold-dirs", *[str(self.dirs[F]) for F in ("0", "1", "2", "3", "all")],
+                                   "--reference-per-seed", str(self.root / "per_seed.json"),
+                                   "--r14-durations", str(self.root / "dur.json"), "--output", str(self.root / "u_r14.json")])
+        self.assertEqual((base_status, status), (0, 0), buf.getvalue())
+        self.assertIn("R14 OK", buf.getvalue())
+        out = json.loads((self.root / "u_r14.json").read_text())
+        self.assertEqual(out["r14_failures"], [])
+        self.assertEqual(out["table2"], base["table2"])          # R14 changes no published row
+        r = out["r14"]
+        for d in self.ru.DETECTORS:
+            self.assertEqual(set(r["unseen"][d]), set(hk.TIMERS))
+            self.assertEqual(set(r["seen"][d]), set(hk.SEEN_TIMERS))
+            g = r["unseen"][d]["G"]["seed_average"]
+            self.assertAlmostEqual(g["gain"], base["table2"][d]["unseen"]["seed_average"]["gain"], places=12)
+            self.assertTrue(r["checks"]["K5_P_reproduces_seen_plus_P"][d])
+        for t in hk.TIMERS:                                     # the timer does not read the score
+            v = {json.dumps(r["unseen"][d][t]["seed_average"]["timer"], sort_keys=True) for d in self.ru.DETECTORS}
+            self.assertEqual(len(v), 1)
+        self.assertEqual(r["llm_accuracy"]["zero"]["tasks"], len(TASKS))
+        # A duration file built from other prompt templates is refused (K4).
+        dur["prompt_sha256"] = dict(dur["prompt_sha256"], **{"system.txt": "0" * 64})
+        (self.root / "dur_bad.json").write_text(json.dumps(dur))
+        with contextlib.redirect_stdout(io.StringIO()):
+            status = self.ru.main(["run", "--safe-dir", str(self.root / "safe"), "--inputs-dir", str(self.root / "inputs"),
+                                   "--folds", str(self.root / "folds.json"),
+                                   "--fold-dirs", *[str(self.dirs[F]) for F in ("0", "1", "2", "3", "all")],
+                                   "--reference-per-seed", str(self.root / "per_seed.json"),
+                                   "--r14-durations", str(self.root / "dur_bad.json"), "--output", str(self.root / "u_bad.json")])
+        self.assertEqual(status, 1)
+
     def test_folds_are_stratified_and_written_once(self):
         self.assertEqual((self.spec["seed"], self.spec["k"]), (self.ru.FOLD_SEED, 4))
         self.assertEqual(sorted(t for f in self.spec["folds"] for t in f["held_out"]), list(TASKS))

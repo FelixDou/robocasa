@@ -204,6 +204,104 @@ def fused_unseen(D, det, seeds):
     return out
 
 
+# ---- R14: timers without H_k (hk_free.py) ------------------------------------------------------
+
+def seen_cohort(traj, rows, seed):
+    """per_seed_detection.run_fused's cohort: one score per row, seed None = seed average."""
+    seeds = sorted(next(iter(traj.values())))
+    out = []
+    for r in rows:
+        per = traj[str(r["rollout_id"])]
+        score = np.mean([per[s] for s in seeds], axis=0) if seed is None else np.asarray(per[seed], float)
+        out.append(dict(task_name=r["task_name"], failed=bool(r["failed"]), horizon=r["horizon"], L=len(score),
+                        score=score))
+    return cl.Cohort(out, key="score")
+
+
+def r14_xr1(path, D, cal, te, held, folds, tasks, unseen_names, seen, seen_fused, unseen_fused, bundle, rkP, folds_sha):
+    """R14 on XR-1: every unseen row against G, G_abs, G_llm_zero, G_llm_few; seen rows also against P, P_mult.
+    Returns (result, problems). K1: G reproduces unseen + G; K5: P reproduces seen + P."""
+    import hk_free as hk
+    dur = json.loads(Path(path).read_text())
+    problems, parse_ok = hk.check_durations(dur, tasks, held, folds_sha)
+    if problems:
+        return None, problems
+    labels = ["seed_average"] + [f"seed_{s}" for s in SEEDS]
+    tag = lambda lab: "" if lab == "seed_average" else "#" + lab.split("_", 1)[1]
+    unseen, seen_r, k1, k5 = {}, {}, {}, {}
+    for name in unseen_names:
+        def pairs_of(lab, name=name):
+            out = {}
+            for F in folds:
+                c, e = D.C[f"{name}{tag(lab)}@{F}"]
+                out[F] = (c.take(D.cal_idx[F]), e.take(D.te_idx[F]))
+            return out
+        unseen[name] = hk.block(pairs_of, labels, hk.TIMERS, dur, rkP)
+        k1[name] = max(abs(unseen[name]["G"][lab][k] - unseen_fused[name][lab][k])
+                       for lab in labels for k in ("fpr", "mean_lead", "gain"))
+    for name, traj in seen.items():
+        if name not in seen_fused:
+            continue
+        seeds = sorted(next(iter(traj.values())))
+        labs = ["seed_average"] + [f"seed_{s}" for s in seeds]
+
+        def pairs_of(lab, traj=traj):
+            seed = None if lab == "seed_average" else lab.split("_", 1)[1]
+            return {ALL: (seen_cohort(traj, cal, seed), seen_cohort(traj, te, seed))}
+        seen_r[name] = hk.block(pairs_of, labs, hk.SEEN_TIMERS, dur, rkP)
+        ref = seen_fused[name]
+        tol = TOL if name not in OOD else 1e-4          # the OOD seen rows are stored at 4 decimals
+        diffs = [abs(seen_r[name]["P"][lab][k] - ref[lab][k]) for lab in labs if lab in ref
+                 for k in ("fpr", "mean_lead", "gain")]
+        k5[name] = dict(max_abs_diff=max(diffs) if diffs else None, tol=tol)
+    for name, v in k1.items():
+        if not v <= TOL:
+            problems.append(f"K1: {name}: G here differs from unseen + G by {v}")
+    for name, v in k5.items():
+        if v["max_abs_diff"] is None or not v["max_abs_diff"] <= v["tol"]:
+            problems.append(f"K5: {name}: P here differs from seen + P by {v['max_abs_diff']}")
+    H = bundle["task_horizons"]
+    ref_s = {t: rkP[t] * H[t] * hk.SECONDS_PER_INFERENCE["xr1"] for t in tasks}
+    first = next(iter(unseen.values()))
+    first_seen = next(iter(seen_r.values()))
+    result = dict(
+        plan="docs/xr1_review_analyses_plan.md (R14)",
+        durations=dict(path=str(Path(path).resolve()), sha256=sha256(path), model=dur.get("model"),
+                       parse_failures=dur.get("parse_failures"), parse_ok=parse_ok),
+        llm_accuracy=hk.accuracy(dur, tasks, held, folds, ref_s),
+        checks=dict(K1_G_reproduces_unseen_plus_G=k1, K5_P_reproduces_seen_plus_P=k5),
+        timers_alone=dict(unseen={t: first[t]["seed_average"]["timer"] for t in hk.TIMERS},
+                          seen={t: first_seen[t]["seed_average"]["timer"] for t in hk.SEEN_TIMERS}),
+        unseen=unseen, seen=seen_r)
+    return result, problems
+
+
+def print_r14(r):
+    import hk_free as hk
+    print("R14 timers alone (FPR, FP, lead, TWA): unseen | seen")
+    for t in hk.SEEN_TIMERS:
+        u, s = r["timers_alone"]["unseen"].get(t), r["timers_alone"]["seen"][t]
+        cu = f"{u['fpr']:.3f} {u['fp']:3d} {u['mean_lead']:.3f} {u['twa']:.3f}" if u else "   --"
+        print(f"  {t:11s} {cu} | {s['fpr']:.3f} {s['fp']:3d} {s['mean_lead']:.3f} {s['twa']:.3f}")
+    a = r["llm_accuracy"]
+    for k in ("zero", "few_held_out"):
+        print(f"  LLM {k}: Spearman {a[k]['spearman']:.2f}, median |log ratio| {a[k]['median_abs_log_ratio']:.2f}, "
+              f"median ratio {a[k]['median_ratio']:.2f}, worst {a[k]['worst']}")
+    print("R14 unseen, gain over each timer (seed average; matched in brackets):")
+    print("  " + " " * 28 + "".join(f"{t:>20s}" for t in hk.TIMERS))
+    for name, by in r["unseen"].items():
+        cells = []
+        for t in hk.TIMERS:
+            v = by[t]["seed_average"]
+            m = v["matched"]["gain"] if v["matched"] else float("nan")
+            cells.append(f"{v['gain']:+.3f} [{m:+.3f}] {v['fp']:3d}")
+        print(f"  {name:28s}" + "".join(f"{c:>20s}" for c in cells))
+    print("R14 seen, gain over each timer (seed average):")
+    print("  " + " " * 28 + "".join(f"{t:>11s}" for t in hk.SEEN_TIMERS))
+    for name, by in r["seen"].items():
+        print(f"  {name:28s}" + "".join(f"{by[t]['seed_average']['gain']:+11.3f}" for t in hk.SEEN_TIMERS))
+
+
 # ---- loading ----------------------------------------------------------------------------------
 
 def check_fold_meta(label, F, meta, tasks, held, folds_sha, detectors):
@@ -530,10 +628,18 @@ def run(args):
             print(f"REPRODUCTION FAILED:\n  T6: R6 rows changed ({t6})")
             return 1
 
+    r14, r14_failures = None, []
+    if args.r14_durations:
+        r14, r14_failures = r14_xr1(args.r14_durations, D, cal, te, held, folds, tasks,
+                                    OOD + (SAFE, ACTPROBE) + HS_FAMILY + tuple(extra), seen, seen_fused,
+                                    unseen_fused, bundle, rkP, folds_sha)
     out = dict(base, checks=checks, reproduction_failures=[], table1=table1, table2=table2,
                notes=dict(std="ddof 1 over training seeds 0-2; timers are deterministic",
                           unseen_normalization="pooled over the fold's seen tasks",
                           seen_normalization="per task"))
+    if args.r14_durations:
+        out["r14"] = r14
+        out["r14_failures"] = r14_failures
     out_path.write_text(json.dumps(out, indent=1, default=float) + "\n")
 
     def cell(d, k):
@@ -556,6 +662,12 @@ def run(args):
     gt = table2["global_timer"]["unseen"]
     print(f"  global timer, unseen: FPR {gt['fpr']:.3f} lead {gt['mean_lead']:.3f} TWA {gt['twa']:.3f}")
     print("SEEN/UNSEEN TABLES OK")
+    if args.r14_durations:
+        if r14_failures:
+            print("R14 FAILED (no R14 result is used):\n  " + "\n  ".join(r14_failures))
+            return 1
+        print_r14(r14)
+        print("R14 OK")
     return 0
 
 
@@ -582,6 +694,7 @@ def main(argv=None):
     r.add_argument("--actprobe-reference-normalizations")
     r.add_argument("--safe-lstm-fold-dirs", nargs="+", help="R11: SAFE-LSTM fold directories 0-3 and all")
     r.add_argument("--actprobe-t-fold-dirs", nargs="+", help="R11: ActProbe-with-timestep fold directories 0-3 and all")
+    r.add_argument("--r14-durations", help="R14: hk_free.py llm output for the XR-1 folds")
     r.add_argument("--r6-result", help="R11 gate T6: R6's seen_unseen_tables JSON, reproduced exactly")
     r.add_argument("--output", required=True)
     args = ap.parse_args(argv)

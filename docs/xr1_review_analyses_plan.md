@@ -1078,8 +1078,12 @@ alarming at t ≥ min(λ D, H_k); the cap only says that the rollout has ended.
     with one example instruction and its median training-success duration.
   - Two rules hold for both: the held-out task's own durations are never shown, and the prompt never
     names RoboCasa.
-  - The estimate is per rollout, from that rollout's instruction (`ep_meta` lang), since the
-    monitor has it at run time.
+  - *Amended 2026-11-06, before any call.* The estimate is per task, from one instruction:
+    the first reset at seed 0 (`ep_meta` lang). The stored rollouts do not record their
+    instructions. A per-task estimate is also the same kind of quantity as H_k.
+  - On calibration (seen) tasks, the D2 estimate of a task comes from a prompt that leaves that
+    task out of the examples. So λ is calibrated on estimates made the way a held-out task's are.
+  - The answer's unit does not matter: λ absorbs any constant factor. Seconds are used as given.
 - **Seen-task check (descriptive):** G_abs and G_LLM on seen tasks (fold all), to show how much of
   P's advantage over G is task timing.
 
@@ -2823,6 +2827,154 @@ sha256sum $R13_ROOT/*.json; basename $R13_ROOT
 
 Copy both JSONs to `reports/safe_robocasa365_research_plan_20260823/evidence/<R13_TAG>/`.
 
+
+### 12. R14: timers without H_k (CPU, plus one GPU for minutes)
+
+Code: `scripts/xr1_lead_time/hk_free.py`, with prompt templates in
+`scripts/xr1_lead_time/hk_free_prompts/`. `seen_unseen_tables.py` and `rldx_unseen.py` take
+`--r14-durations`. Tests: `tests/test_xr1_hk_free.py`, plus one R14 test each in
+`test_xr1_seen_unseen_tables` and `test_xr1_rldx_unseen`.
+
+`R14_SHA` is the full SHA of the pushed commit on `claude/review-analyses` that contains this
+step.
+- **Steps 12.0–12.2 and 12.4:** CPU, about 30 minutes with the export loads.
+- **Step 12.3:** one GPU.
+- **Allocation:** the simplest is one GPU allocation for everything, for example
+  `qrsh -g tga-shinoda -l gpu_1=1 -l h_rt=3:00:00`.
+
+**12.0 Environment, pinned code, inputs, unit tests.**
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0 HF_HOME=$STORAGE_BS/hf_home
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+source $STORAGE_BS/robocasa_logs/eval/xr1_r11_rows_20261030_220636/paths.env   # XT_ROOT RS_ROOT R6_ROOT PSEED_ROOT OOD_ROOT R11_ROOT ...
+source $STORAGE_BS/robocasa_logs/eval/rldx1_unseen_20261029_135501/paths.env    # R7_ROOT, FOLDS (RLDX-1), RLDX_ROOT, RLDXHS_ROOT, ...
+export RLDX_FOLDS=$FOLDS R7S=$R7_ROOT/safe
+export SAFE_PY=$STORAGE_BS/envs/vla_safe/bin/python CLIENT_PY=$STORAGE_BS/envs/robocasa_openpi/bin/python
+export R14_SHA=<R14_SHA>
+export R14_REPO=$PROJECT_FS/robocasa_r14hk_${R14_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $R14_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R14_REPO $R14_SHA
+test "$(git -C $R14_REPO rev-parse HEAD)" = "$R14_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not R14_SHA"
+cd $R14_REPO
+export XR1_FOLDS=$R14_REPO/scripts/xr1_lead_time/cross_task_folds.json
+export R14_TAG=xr1_r14_hk_free_$(date +%Y%m%d_%H%M%S)
+export R14_ROOT=$CK/$R14_TAG R14_LOG=$STORAGE_BS/robocasa_logs/eval/$R14_TAG
+mkdir -p $R14_ROOT $R14_LOG
+printf 'export %s=%q\n' R14_SHA "$R14_SHA" R14_REPO "$R14_REPO" R14_TAG "$R14_TAG" R14_ROOT "$R14_ROOT" \
+  R14_LOG "$R14_LOG" XR1_FOLDS "$XR1_FOLDS" RLDX_FOLDS "$RLDX_FOLDS" R7S "$R7S" SAFE_PY "$SAFE_PY" \
+  CLIENT_PY "$CLIENT_PY" > $R14_LOG/paths.env
+echo "R14_TAG=$R14_TAG"
+cmp $XR1_FOLDS $R11_REPO/scripts/xr1_lead_time/cross_task_folds.json && echo "XR-1 FOLDS SAME AS R11"
+echo "2dd19df0  R11 XR-1 tables:" $(sha256sum $R11_ROOT/seen_unseen_tables_r11.json | cut -c1-8)
+echo "761e1ded  R11 RLDX-1 table:" $(sha256sum $R11_ROOT/rldx_unseen_r11.json | cut -c1-8)
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_xr1_hk_free tests.test_xr1_seen_unseen_tables \
+  tests.test_xr1_rldx_unseen 2>&1 | tail -n 3
+"$SAFE_PY" -c "import torch, transformers; print('torch', torch.__version__, 'transformers', transformers.__version__, 'cuda', torch.cuda.is_available())"
+```
+
+Continue only if all of these hold:
+- `HEAD OK` and `XR-1 FOLDS SAME AS R11` print;
+- the two hashes match their prefixes;
+- the tests end with `OK`;
+- the last line shows transformers ≥ 4.51 and `cuda True`. If it doesn't, report it before going on.
+
+**12.1 One instruction per task (CPU, RoboCasa).** This uses the first reset at seed 0 for each task.
+
+```bash
+cd $R14_REPO
+MUJOCO_GL=egl PYTHONPATH=$R14_REPO "$CLIENT_PY" -u scripts/xr1_lead_time/hk_free.py instructions \
+  --folds $XR1_FOLDS $RLDX_FOLDS --seed 0 --output $R14_ROOT/instructions.json 2>&1 | grep -v Warning | tee $R14_LOG/instructions.log | tail -n 45
+```
+
+It must end with `wrote ... (N tasks)`, with every XR-1 and RLDX-1 task listed.
+
+**12.2 Prompts (CPU).**
+
+```bash
+cd $R14_REPO
+"$SAFE_PY" -I scripts/xr1_lead_time/hk_free.py prompts --cohort xr1 --instructions $R14_ROOT/instructions.json \
+  --folds $XR1_FOLDS --runtime-bundle $XR1_RUNTIME_BUNDLE --output $R14_ROOT/prompts_xr1.json
+"$SAFE_PY" -I scripts/xr1_lead_time/hk_free.py prompts --cohort rldx --instructions $R14_ROOT/instructions.json \
+  --folds $RLDX_FOLDS --safe-dir $RLDX_ROOT/calibration/lstm --output $R14_ROOT/prompts_rldx.json
+"$SAFE_PY" -I - $R14_ROOT/prompts_xr1.json <<'PY'
+import json, sys
+p = json.load(open(sys.argv[1]))
+t = sorted(p["zero"])[0]
+print("SYSTEM:", p["system"]); print("ZERO:", p["zero"][t]); print("FEW (fold 0):", p["few"]["0"][t])
+PY
+```
+
+**12.3 The model, then the answers (one GPU).** Download once (from a login node if compute nodes
+have no internet), then pin the snapshot that was fetched:
+
+```bash
+"$SAFE_PY" -c "from huggingface_hub import snapshot_download; print(snapshot_download('Qwen/Qwen3-8B'))" | tail -n 1 \
+  | tee $R14_LOG/model_snapshot.txt
+export LLM_DIR=$(cat $R14_LOG/model_snapshot.txt); echo "export LLM_DIR=$LLM_DIR" >> $R14_LOG/paths.env
+cd $R14_REPO
+for c in xr1 rldx; do
+  HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 "$SAFE_PY" -u scripts/xr1_lead_time/hk_free.py llm \
+    --prompts $R14_ROOT/prompts_$c.json --model $LLM_DIR --output $R14_ROOT/durations_$c.json 2>&1 \
+    | grep -v -i warn | tee $R14_LOG/llm_$c.log | tail -n 45
+done
+```
+
+Each log starts with the two parse counts. More than 5% of either kind unparsed means that
+LLM timer is reported as failed (gate K4).
+
+**12.4 The tables with R14 (CPU, minutes).** These are the R11 commands (9.5 and 9.6) plus
+`--r14-durations`, writing to `$R14_ROOT`.
+
+```bash
+cd $R14_REPO
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/seen_unseen_tables.py run \
+  --calibration $E1_OUT/calibration_predictions.jsonl --test $E1_OUT/test_predictions.jsonl \
+  --runtime-bundle $XR1_RUNTIME_BUNDLE --folds $XR1_FOLDS \
+  --safe-fold-dirs $RS_ROOT/folds/fold_{0,1,2,3} --xt-fold-dirs $XT_ROOT/fold_{0,1,2,3} \
+  --actprobe-fold-dirs $R6_ROOT/actprobe/fold_{0,1,2,3} $R6_ROOT/actprobe/fold_all_b1ids \
+  --ood-fold-dirs $R6_ROOT/ood/fold_{0,1,2,3} \
+  --ood-source-bundle $XR1_BASELINE_ROOT/develop/baseline_bundle.json \
+  --amend2-scores $AMEND2_ROOT/scores/lead_calibration_predictions.jsonl $AMEND2_ROOT/scores/confirmatory_test_predictions.jsonl \
+  --amend2-normalizations $AMEND2_ROOT/scores/normalizations.json \
+  --ood-seen 0 $OOD_ROOT/seed0/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed0/heldout/test_with_baselines.jsonl \
+  --ood-seen 1 $OOD_ROOT/seed1/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed1/heldout/test_with_baselines.jsonl \
+  --ood-seen 2 $OOD_ROOT/seed2/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed2/heldout/test_with_baselines.jsonl \
+  --run-c $PSEED_ROOT/per_seed_fused_heldout.json --ood-fused $OOD_ROOT/ood_per_seed_fused_heldout.json \
+  --cross-task-result $XT_ROOT/cross_task_lead.json --cross-task-safe-result $RS_ROOT/cross_task_safe.json \
+  --actprobe-reference-normalizations $PSEED_ROOT/actprobe_scores/normalizations.json \
+  --actprobe-t-fold-dirs $R11_ROOT/actprobe_t/fold_{0,1,2,3,all} \
+  --safe-lstm-fold-dirs $R11_ROOT/safe_lstm/fold_{0,1,2,3,all} \
+  --r6-result $R6_ROOT/seen_unseen_tables_b1ids.json \
+  --r14-durations $R14_ROOT/durations_xr1.json \
+  --output $R14_ROOT/seen_unseen_tables_r14.json 2>&1 | tee $R14_LOG/tables_xr1.log | tail -n 60
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/rldx_unseen.py run \
+  --safe-dir $RLDX_ROOT/calibration/lstm --inputs-dir $RLDXHS_ROOT/inputs --folds $RLDX_FOLDS \
+  --fold-dirs $R7_ROOT/folds/fold_{0,1,2,3,all} \
+  --fold-dirs $R7S/folds/lstm/fold_0_f32 $R7S/folds/lstm/fold_{1,2,3,all} \
+  --fold-dirs $R7S/folds/indep/fold_{0,1,2,3,all} \
+  --fold-dirs $R11_ROOT/rldx_actprobe/fold_{0,1,2,3,all} --unreferenced actprobe actprobe_t \
+  --reference-per-seed $RLDXPS_ROOT/rldx_per_seed.json \
+  --r14-durations $R14_ROOT/durations_rldx.json \
+  --output $R14_ROOT/rldx_unseen_r14.json 2>&1 | tee $R14_LOG/tables_rldx.log | tail -n 45
+"$SAFE_PY" -I - $R11_ROOT $R14_ROOT <<'PY'
+import json, sys
+a, b = sys.argv[1], sys.argv[2]
+for old, new in (("seen_unseen_tables_r11.json", "seen_unseen_tables_r14.json"), ("rldx_unseen_r11.json", "rldx_unseen_r14.json")):
+    x, y = json.load(open(f"{a}/{old}")), json.load(open(f"{b}/{new}"))
+    same = all(x[k] == y[k] for k in ("table1", "table2") if k in x)
+    print(new, "PUBLISHED ROWS UNCHANGED" if same else "STOP: published rows changed")
+PY
+sha256sum $R14_ROOT/*.json
+```
+
+Report:
+- `instructions.log`, the 12.2 printout and both `llm_*.log`;
+- `tables_xr1.log` and `tables_rldx.log`, which end in `R14 OK`;
+- the two `PUBLISHED ROWS UNCHANGED` lines and the hashes.
 
 ## Result
 
