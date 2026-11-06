@@ -231,11 +231,12 @@ question stays the same; only the source of recovery data changes. The
 alarm, the tasks, the fixed branch budget and Phases C–E are unchanged,
 except that Phase C trains on the data generated here.
 
-**R0: failure audit (CPU, from the saved snapshots).** For each of the 40
-alarmed failure states, read from the simulator state at `a`: the current
-stage, whether the target object is inside the robot's reachable workspace
-and on a support surface, whether it is grasped, and whether any completed
-subtask has been undone. Classify each state as
+**R0: failure audit (simulator restore of the saved snapshots, no policy).**
+For each of the 40 alarmed failure states, read from the simulator state at
+`a`: the current stage, where each task object is (on a support surface, on
+the floor, outside the scene), whether it is tipped or grasped, and whether
+any completed subtask has been undone. Camera images at the alarm and at the
+end go with each state for a manual check. Classify each state as
 
 1. recovered by resampling (the 11 above);
 2. physically recoverable but never recovered (target reachable and
@@ -393,12 +394,22 @@ sampling-seed schedule, as in the re-prompt trials:
 4. Harvest dataset builder with the health checks above.
 5. XR-1 training configs for M1, M3 and M1-rp.
 6. An `alarm_switch` gate in the stage-gated trial collector.
+7. **Done (R0):** `robocasa/recovery/failure_audit.py`. `audit` rebuilds each
+   alarmed failure's scene (simulator only), restores its first, alarm and
+   terminal snapshots, and records per task object the position,
+   uprightness, grasp, counter contact and floor or out-of-scene status; at
+   the alarm it also records live predicates, undone subtasks and the
+   policy's camera images. Provisional class: 1 if an A1 branch succeeded, 3
+   if a task object is on the floor (z < 0.3 m) or outside the scene, else
+   2. Tipped objects, grasps and undone subtasks are flags only. `decide`
+   applies the hand-filled `manual_class` column of `review.csv` (class 1
+   cannot be changed) and computes Gate R0.
 
 Tests (simulator- and PyTorch-free; the detector save/load test runs only
 where PyTorch is installed):
 
 ```bash
-python -m unittest tests.test_hs_p_alarm tests.test_alarm_branching tests.test_recoverability_ladder
+python -m unittest tests.test_hs_p_alarm tests.test_alarm_branching tests.test_failure_audit tests.test_recoverability_ladder
 ```
 
 ### Phase A runbook (cluster)
@@ -452,6 +463,21 @@ Resume after a stop with `resume`, never with `start`. Gate A:
 
 ```bash
 bash scripts/run_alarm_branching_xr1.sh analyze
+```
+
+R0 failure audit (one GPU for rendering, no policy server; about one
+minute per state):
+
+```bash
+bash scripts/run_alarm_branching_xr1.sh audit
+```
+
+Then open `$ALARM_ROOT/r0_audit/review.md` and its images, fill
+`manual_class` (1, 2 or 3) in `review.csv` only where the images contradict
+the provisional class, and run:
+
+```bash
+ALARM_REVIEW=$ALARM_ROOT/r0_audit/review.csv bash scripts/run_alarm_branching_xr1.sh decide
 ```
 
 Outputs:

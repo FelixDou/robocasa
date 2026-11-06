@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Phase A of docs/recovery_harvest_finetune_plan.md: recoverability at the Hide-and-Seek + P alarm.
-#   export | score | plan | start | resume | status | analyze
+#   export | score | plan | start | resume | status | analyze | audit | decide
+# audit/decide are step R0 of the redesign (failure audit; simulator only, no policy server).
 # export and score are CPU-only (SAFE env). start/resume reuse the ladder worker
 # (one XR-1 server GPU + one simulator GPU + one port per worker).
 set -euo pipefail
 action=${1:-status}
-case "$action" in export|score|plan|start|resume|status|analyze) ;; *)
-  echo "Usage: $0 {export|score|plan|start|resume|status|analyze}"; exit 1 ;; esac
+case "$action" in export|score|plan|start|resume|status|analyze|audit|decide) ;; *)
+  echo "Usage: $0 {export|score|plan|start|resume|status|analyze|audit|decide}"; exit 1 ;; esac
 
 export STORAGE_BS=${STORAGE_BS:-/gs/bs/tga-shinoda/felid}
 export ROBOCASA_REPO=${ROBOCASA_REPO:-/gs/fs/tga-shinoda/felid/robocasa}
@@ -96,6 +97,25 @@ fi
 if [[ "$action" == analyze ]]; then
   exec "$py" -m "$module" analyze --run-dirs "$branch_root"/shard* --output-dir "$ALARM_ROOT/gate_a" \
     --k-branches "$ALARM_K"
+fi
+
+audit_dir="$ALARM_ROOT/r0_audit"
+if [[ "$action" == audit ]]; then
+  # One simulator GPU (rendering for the camera images); no policy server.
+  gpu=${ALARM_AUDIT_GPU:-0}
+  resume=()
+  [[ ! -e "$audit_dir/audit.json" ]] || resume=(--resume)
+  log="$log_dir/$(basename "$ALARM_ROOT")_r0_audit_$(date +%Y%m%d_%H%M%S).log"
+  CUDA_VISIBLE_DEVICES="$gpu" MUJOCO_EGL_DEVICE_ID="$gpu" nohup "$py" -u -m robocasa.recovery.failure_audit audit \
+    --source-run "${sources[@]}" --alarms "$alarms" --branch-runs "$branch_root"/shard* \
+    --output-dir "$audit_dir" "${resume[@]}" > "$log" 2>&1 &
+  echo "audit pid=$! gpu=$gpu log=$log out=$audit_dir"
+  exit 0
+fi
+if [[ "$action" == decide ]]; then
+  review=()
+  [[ -z "${ALARM_REVIEW:-}" ]] || review=(--review "$ALARM_REVIEW")
+  exec "$py" -m robocasa.recovery.failure_audit decide --audit-dir "$audit_dir" "${review[@]}"
 fi
 
 # start | resume: one ladder worker per GPU pair, writing to $branch_root/shard<i>.
