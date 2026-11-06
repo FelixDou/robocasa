@@ -4393,8 +4393,9 @@ snapshot `b968826d`, greedy decoding without thinking.
   - `seen_unseen_tables_r14.json` `1578f312…`, `rldx_unseen_r14.json` `e785586c…`;
   - `durations_xr1.json` `80e18905…`, `durations_rldx.json` `65d8ddfd…`, `instructions.json` `1024ca79…`;
   - `prompts_xr1.json` `9486de9a…`, `prompts_rldx.json` `e784226a…`.
-- **Evidence.** Copied 2026-11-06 to `evidence/xr1_r14_hk_free_20261106_191531/`, with the run's logs
-  in `logs/`. The hashes match the cluster.
+- **Evidence.** Copied 2026-11-06 to `evidence/xr1_r14_hk_free_20261106_191531/`. The hashes match
+  the cluster. `logs/` holds `model_snapshot.txt` and `paths.env`. The run's `.log` files are in the
+  local copy only, since the repository ignores `*.log`.
 
 **Timers alone (Proposition 1 on seen-task calibration; test on held-out tasks, pooled over folds).**
 
