@@ -2884,8 +2884,12 @@ Continue only if all of these hold:
   transformers). If it doesn't, report it before going on.
 
 **12.1 One instruction per task (CPU, RoboCasa).** This uses the first reset at seed 0 for each task.
+The pinned worktree has no RoboCasa assets (they are not in git). They are hard-linked from the
+shared checkout, as in E2's step 1.
 
 ```bash
+mkdir -p $R14_REPO/robocasa/models/assets
+cp -aln $PROJECT_FS/robocasa/robocasa/models/assets/. $R14_REPO/robocasa/models/assets/
 cd $R14_REPO
 MUJOCO_GL=egl PYTHONPATH=$R14_REPO "$CLIENT_PY" -u scripts/xr1_lead_time/hk_free.py instructions \
   --folds $XR1_FOLDS $RLDX_FOLDS --seed 0 --output $R14_ROOT/instructions.json 2>&1 | grep -v Warning | tee $R14_LOG/instructions.log | tail -n 45
