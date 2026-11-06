@@ -1,0 +1,2336 @@
+{
+ "plan": "docs/xr1_review_analyses_plan.md (R14)",
+ "cohort": "xr1",
+ "model": {
+  "path": "/gs/bs/tga-shinoda/felid/hf/hub/models--Qwen--Qwen3-8B/snapshots/b968826d9c46dd6066d109eabc6255188de91218",
+  "files_sha256": {
+   "config.json": "f7c4eadfbbf522470667b797a3c89be2524832d2d599797248dc304fff447c30",
+   "generation_config.json": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2"
+  },
+  "snapshot": "b968826d9c46dd6066d109eabc6255188de91218"
+ },
+ "generation": {
+  "do_sample": false,
+  "max_new_tokens": 16,
+  "thinking": false
+ },
+ "prompts_file": {
+  "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_r14_hk_free_20261106_191531/prompts_xr1.json",
+  "sha256": "9486de9a092d0b455e89958b69f063c3f6cd5d59e7d6cc5ae9c07165344d286d"
+ },
+ "prompt_sha256": {
+  "system.txt": "7190182f622301868890f4d610e5cf27f78cdfec6c3b0f4a6e0c6a448713ca6e",
+  "zero_shot.txt": "f8e893deea7862e06065651f5a9db7a85574895c517f15a7d74194b29f5ca666",
+  "few_shot.txt": "a450b10699c977602c411d2c90db564d2510dfe64bd17ea2e7ee695f9a238bcf",
+  "retry.txt": "5baa15a25893bf76d09ccb6c9ede0fb1af33a699c4970781c26a8654bb8e8007"
+ },
+ "folds_sha256": "f526a602fb3b1a7f8b99c167426c41609c670eef0bf30ebb4c00a5357d2c7c0b",
+ "seconds_per_inference": 0.8,
+ "answers": 228,
+ "parse_failures": {
+  "zero": {
+   "prompts": 38,
+   "failed": 0
+  },
+  "few": {
+   "prompts": 190,
+   "failed": 0
+  }
+ },
+ "zero": {
+  "ArrangeBreadBasket": 45.0,
+  "ArrangeTea": 45.0,
+  "BreadSelection": 45.0,
+  "CategorizeCondiments": 45.0,
+  "CloseBlenderLid": 15.0,
+  "CloseToasterOvenDoor": 5.0,
+  "CoffeeSetupMug": 120.0,
+  "CuttingToolSelection": 120.0,
+  "DeliverStraw": 45.0,
+  "GarnishPancake": 45.0,
+  "GetToastedBread": 30.0,
+  "KettleBoiling": 45.0,
+  "LoadDishwasher": 120.0,
+  "MakeIceLemonade": 120.0,
+  "OpenCabinet": 15.0,
+  "PackIdenticalLunches": 120.0,
+  "PickPlaceCounterToCabinet": 45.0,
+  "PickPlaceCounterToStove": 45.0,
+  "PortionHotDogs": 45.0,
+  "PreSoakPan": 30.0,
+  "PrepareCoffee": 45.0,
+  "RecycleBottlesByType": 120.0,
+  "RinseSinkBasin": 30.0,
+  "ScrubCuttingBoard": 45.0,
+  "SearingMeat": 120.0,
+  "SetUpCuttingStation": 45.0,
+  "SlideDishwasherRack": 15.0,
+  "StackBowlsCabinet": 45.0,
+  "SteamInMicrowave": 120.0,
+  "StirVegetables": 45.0,
+  "StoreLeftoversInBowl": 120.0,
+  "TurnOffStove": 120.0,
+  "TurnOnMicrowave": 5.0,
+  "TurnOnSinkFaucet": 15.0,
+  "WaffleReheat": 120.0,
+  "WashFruitColander": 120.0,
+  "WashLettuce": 30.0,
+  "WeighIngredients": 45.0
+ },
+ "few": {
+  "0": {
+   "ArrangeBreadBasket": 45.0,
+   "ArrangeTea": 45.0,
+   "BreadSelection": 45.0,
+   "CategorizeCondiments": 45.0,
+   "CloseBlenderLid": 12.0,
+   "CloseToasterOvenDoor": 12.0,
+   "CoffeeSetupMug": 14.0,
+   "CuttingToolSelection": 45.0,
+   "DeliverStraw": 45.0,
+   "GarnishPancake": 45.0,
+   "GetToastedBread": 45.0,
+   "KettleBoiling": 70.0,
+   "LoadDishwasher": 45.0,
+   "MakeIceLemonade": 45.0,
+   "OpenCabinet": 5.0,
+   "PackIdenticalLunches": 65.0,
+   "PickPlaceCounterToCabinet": 45.0,
+   "PickPlaceCounterToStove": 26.0,
+   "PortionHotDogs": 45.0,
+   "PreSoakPan": 30.0,
+   "PrepareCoffee": 18.0,
+   "RecycleBottlesByType": 45.0,
+   "RinseSinkBasin": 12.0,
+   "ScrubCuttingBoard": 15.0,
+   "SearingMeat": 45.0,
+   "SetUpCuttingStation": 45.0,
+   "SlideDishwasherRack": 18.0,
+   "StackBowlsCabinet": 45.0,
+   "SteamInMicrowave": 42.0,
+   "StirVegetables": 101.0,
+   "StoreLeftoversInBowl": 42.0,
+   "TurnOffStove": 12.0,
+   "TurnOnMicrowave": 10.0,
+   "TurnOnSinkFaucet": 6.0,
+   "WaffleReheat": 46.0,
+   "WashFruitColander": 65.0,
+   "WashLettuce": 25.0,
+   "WeighIngredients": 45.0
+  },
+  "1": {
+   "ArrangeBreadBasket": 45.0,
+   "ArrangeTea": 37.0,
+   "BreadSelection": 45.0,
+   "CategorizeCondiments": 45.0,
+   "CloseBlenderLid": 12.0,
+   "CloseToasterOvenDoor": 12.0,
+   "CoffeeSetupMug": 44.0,
+   "CuttingToolSelection": 45.0,
+   "DeliverStraw": 45.0,
+   "GarnishPancake": 45.0,
+   "GetToastedBread": 45.0,
+   "KettleBoiling": 44.0,
+   "LoadDishwasher": 45.0,
+   "MakeIceLemonade": 45.0,
+   "OpenCabinet": 9.0,
+   "PackIdenticalLunches": 65.0,
+   "PickPlaceCounterToCabinet": 45.0,
+   "PickPlaceCounterToStove": 45.0,
+   "PortionHotDogs": 45.0,
+   "PreSoakPan": 45.0,
+   "PrepareCoffee": 45.0,
+   "RecycleBottlesByType": 45.0,
+   "RinseSinkBasin": 120.0,
+   "ScrubCuttingBoard": 45.0,
+   "SearingMeat": 45.0,
+   "SetUpCuttingStation": 45.0,
+   "SlideDishwasherRack": 15.0,
+   "StackBowlsCabinet": 45.0,
+   "SteamInMicrowave": 45.0,
+   "StirVegetables": 55.0,
+   "StoreLeftoversInBowl": 106.0,
+   "TurnOffStove": 12.0,
+   "TurnOnMicrowave": 14.0,
+   "TurnOnSinkFaucet": 12.0,
+   "WaffleReheat": 45.0,
+   "WashFruitColander": 45.0,
+   "WashLettuce": 35.0,
+   "WeighIngredients": 45.0
+  },
+  "2": {
+   "ArrangeBreadBasket": 45.0,
+   "ArrangeTea": 37.0,
+   "BreadSelection": 45.0,
+   "CategorizeCondiments": 45.0,
+   "CloseBlenderLid": 15.0,
+   "CloseToasterOvenDoor": 12.0,
+   "CoffeeSetupMug": 26.0,
+   "CuttingToolSelection": 26.0,
+   "DeliverStraw": 35.0,
+   "GarnishPancake": 45.0,
+   "GetToastedBread": 35.0,
+   "KettleBoiling": 70.0,
+   "LoadDishwasher": 45.0,
+   "MakeIceLemonade": 45.0,
+   "OpenCabinet": 9.0,
+   "PackIdenticalLunches": 105.0,
+   "PickPlaceCounterToCabinet": 45.0,
+   "PickPlaceCounterToStove": 46.0,
+   "PortionHotDogs": 65.0,
+   "PreSoakPan": 30.0,
+   "PrepareCoffee": 10.0,
+   "RecycleBottlesByType": 45.0,
+   "RinseSinkBasin": 45.0,
+   "ScrubCuttingBoard": 25.0,
+   "SearingMeat": 45.0,
+   "SetUpCuttingStation": 45.0,
+   "SlideDishwasherRack": 25.0,
+   "StackBowlsCabinet": 45.0,
+   "SteamInMicrowave": 45.0,
+   "StirVegetables": 45.0,
+   "StoreLeftoversInBowl": 106.0,
+   "TurnOffStove": 12.0,
+   "TurnOnMicrowave": 10.0,
+   "TurnOnSinkFaucet": 12.0,
+   "WaffleReheat": 44.0,
+   "WashFruitColander": 45.0,
+   "WashLettuce": 30.0,
+   "WeighIngredients": 45.0
+  },
+  "3": {
+   "ArrangeBreadBasket": 45.0,
+   "ArrangeTea": 37.0,
+   "BreadSelection": 55.0,
+   "CategorizeCondiments": 45.0,
+   "CloseBlenderLid": 12.0,
+   "CloseToasterOvenDoor": 12.0,
+   "CoffeeSetupMug": 37.0,
+   "CuttingToolSelection": 45.0,
+   "DeliverStraw": 45.0,
+   "GarnishPancake": 45.0,
+   "GetToastedBread": 45.0,
+   "KettleBoiling": 10.0,
+   "LoadDishwasher": 45.0,
+   "MakeIceLemonade": 45.0,
+   "OpenCabinet": 9.0,
+   "PackIdenticalLunches": 68.0,
+   "PickPlaceCounterToCabinet": 42.0,
+   "PickPlaceCounterToStove": 44.0,
+   "PortionHotDogs": 45.0,
+   "PreSoakPan": 45.0,
+   "PrepareCoffee": 10.0,
+   "RecycleBottlesByType": 45.0,
+   "RinseSinkBasin": 35.0,
+   "ScrubCuttingBoard": 15.0,
+   "SearingMeat": 45.0,
+   "SetUpCuttingStation": 45.0,
+   "SlideDishwasherRack": 32.0,
+   "StackBowlsCabinet": 45.0,
+   "SteamInMicrowave": 45.0,
+   "StirVegetables": 45.0,
+   "StoreLeftoversInBowl": 68.0,
+   "TurnOffStove": 10.0,
+   "TurnOnMicrowave": 10.0,
+   "TurnOnSinkFaucet": 6.0,
+   "WaffleReheat": 46.0,
+   "WashFruitColander": 65.0,
+   "WashLettuce": 35.0,
+   "WeighIngredients": 45.0
+  },
+  "all": {
+   "ArrangeBreadBasket": 45.0,
+   "ArrangeTea": 37.0,
+   "BreadSelection": 65.0,
+   "CategorizeCondiments": 45.0,
+   "CloseBlenderLid": 12.0,
+   "CloseToasterOvenDoor": 12.0,
+   "CoffeeSetupMug": 37.0,
+   "CuttingToolSelection": 44.0,
+   "DeliverStraw": 35.0,
+   "GarnishPancake": 45.0,
+   "GetToastedBread": 45.0,
+   "KettleBoiling": 70.0,
+   "LoadDishwasher": 45.0,
+   "MakeIceLemonade": 45.0,
+   "OpenCabinet": 9.0,
+   "PackIdenticalLunches": 65.0,
+   "PickPlaceCounterToCabinet": 45.0,
+   "PickPlaceCounterToStove": 44.0,
+   "PortionHotDogs": 45.0,
+   "PreSoakPan": 33.0,
+   "PrepareCoffee": 42.0,
+   "RecycleBottlesByType": 45.0,
+   "RinseSinkBasin": 45.0,
+   "ScrubCuttingBoard": 25.0,
+   "SearingMeat": 44.0,
+   "SetUpCuttingStation": 45.0,
+   "SlideDishwasherRack": 18.0,
+   "StackBowlsCabinet": 45.0,
+   "SteamInMicrowave": 45.0,
+   "StirVegetables": 45.0,
+   "StoreLeftoversInBowl": 106.0,
+   "TurnOffStove": 12.0,
+   "TurnOnMicrowave": 10.0,
+   "TurnOnSinkFaucet": 6.0,
+   "WaffleReheat": 44.0,
+   "WashFruitColander": 65.0,
+   "WashLettuce": 26.0,
+   "WeighIngredients": 45.0
+  }
+ },
+ "raw": [
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "ArrangeBreadBasket",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "ArrangeTea",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "BreadSelection",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "CategorizeCondiments",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "CloseBlenderLid",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "CloseToasterOvenDoor",
+   "answer": "5",
+   "retry_answer": null,
+   "parsed": 5.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "CoffeeSetupMug",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "CuttingToolSelection",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "DeliverStraw",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "GarnishPancake",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "GetToastedBread",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "KettleBoiling",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "LoadDishwasher",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "MakeIceLemonade",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "OpenCabinet",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "PackIdenticalLunches",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "PickPlaceCounterToCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "PickPlaceCounterToStove",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "PortionHotDogs",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "PreSoakPan",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "PrepareCoffee",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "RecycleBottlesByType",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "RinseSinkBasin",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "ScrubCuttingBoard",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "SearingMeat",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "SetUpCuttingStation",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "SlideDishwasherRack",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "StackBowlsCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "SteamInMicrowave",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "StirVegetables",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "StoreLeftoversInBowl",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "TurnOffStove",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "TurnOnMicrowave",
+   "answer": "5",
+   "retry_answer": null,
+   "parsed": 5.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "TurnOnSinkFaucet",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "WaffleReheat",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "WashFruitColander",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "WashLettuce",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "WeighIngredients",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "ArrangeBreadBasket",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "ArrangeTea",
+   "answer": "The instruction involves three main actions: picking the kettle from the counter, picking the",
+   "retry_answer": "45",
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "BreadSelection",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "CategorizeCondiments",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "CloseBlenderLid",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "CloseToasterOvenDoor",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "CoffeeSetupMug",
+   "answer": "14",
+   "retry_answer": null,
+   "parsed": 14.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "CuttingToolSelection",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "DeliverStraw",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "GarnishPancake",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "GetToastedBread",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "KettleBoiling",
+   "answer": "70",
+   "retry_answer": null,
+   "parsed": 70.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "LoadDishwasher",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "MakeIceLemonade",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "OpenCabinet",
+   "answer": "5",
+   "retry_answer": null,
+   "parsed": 5.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "PackIdenticalLunches",
+   "answer": "65",
+   "retry_answer": null,
+   "parsed": 65.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "PickPlaceCounterToCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "PickPlaceCounterToStove",
+   "answer": "26",
+   "retry_answer": null,
+   "parsed": 26.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "PortionHotDogs",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "PreSoakPan",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "PrepareCoffee",
+   "answer": "The instruction involves picking up a mug from the cabinet (which took 18",
+   "retry_answer": null,
+   "parsed": 18.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "RecycleBottlesByType",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "RinseSinkBasin",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "ScrubCuttingBoard",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "SearingMeat",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "SetUpCuttingStation",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "SlideDishwasherRack",
+   "answer": "18",
+   "retry_answer": null,
+   "parsed": 18.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "StackBowlsCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "SteamInMicrowave",
+   "answer": "The instruction involves three main actions: picking the garlic from the sink, placing the",
+   "retry_answer": "42",
+   "parsed": 42.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "StirVegetables",
+   "answer": "101",
+   "retry_answer": null,
+   "parsed": 101.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "StoreLeftoversInBowl",
+   "answer": "The instruction \"Pick the chicken drumstick and bell pepper from their plates and place",
+   "retry_answer": "42",
+   "parsed": 42.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "TurnOffStove",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "TurnOnMicrowave",
+   "answer": "10",
+   "retry_answer": null,
+   "parsed": 10.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "TurnOnSinkFaucet",
+   "answer": "6",
+   "retry_answer": null,
+   "parsed": 6.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "WaffleReheat",
+   "answer": "46",
+   "retry_answer": null,
+   "parsed": 46.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "WashFruitColander",
+   "answer": "65",
+   "retry_answer": null,
+   "parsed": 65.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "WashLettuce",
+   "answer": "25",
+   "retry_answer": null,
+   "parsed": 25.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "WeighIngredients",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "ArrangeBreadBasket",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "ArrangeTea",
+   "answer": "37",
+   "retry_answer": null,
+   "parsed": 37.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "BreadSelection",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "CategorizeCondiments",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "CloseBlenderLid",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "CloseToasterOvenDoor",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "CoffeeSetupMug",
+   "answer": "44",
+   "retry_answer": null,
+   "parsed": 44.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "CuttingToolSelection",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "DeliverStraw",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "GarnishPancake",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "GetToastedBread",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "KettleBoiling",
+   "answer": "44",
+   "retry_answer": null,
+   "parsed": 44.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "LoadDishwasher",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "MakeIceLemonade",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "OpenCabinet",
+   "answer": "9",
+   "retry_answer": null,
+   "parsed": 9.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "PackIdenticalLunches",
+   "answer": "65",
+   "retry_answer": null,
+   "parsed": 65.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "PickPlaceCounterToCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "PickPlaceCounterToStove",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "PortionHotDogs",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "PreSoakPan",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "PrepareCoffee",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "RecycleBottlesByType",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "RinseSinkBasin",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "ScrubCuttingBoard",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "SearingMeat",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "SetUpCuttingStation",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "SlideDishwasherRack",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "StackBowlsCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "SteamInMicrowave",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "StirVegetables",
+   "answer": "55",
+   "retry_answer": null,
+   "parsed": 55.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "StoreLeftoversInBowl",
+   "answer": "106",
+   "retry_answer": null,
+   "parsed": 106.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "TurnOffStove",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "TurnOnMicrowave",
+   "answer": "14",
+   "retry_answer": null,
+   "parsed": 14.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "TurnOnSinkFaucet",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "WaffleReheat",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "WashFruitColander",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "WashLettuce",
+   "answer": "35",
+   "retry_answer": null,
+   "parsed": 35.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "WeighIngredients",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "ArrangeBreadBasket",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "ArrangeTea",
+   "answer": "37",
+   "retry_answer": null,
+   "parsed": 37.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "BreadSelection",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "CategorizeCondiments",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "CloseBlenderLid",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "CloseToasterOvenDoor",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "CoffeeSetupMug",
+   "answer": "26",
+   "retry_answer": null,
+   "parsed": 26.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "CuttingToolSelection",
+   "answer": "26",
+   "retry_answer": null,
+   "parsed": 26.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "DeliverStraw",
+   "answer": "35",
+   "retry_answer": null,
+   "parsed": 35.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "GarnishPancake",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "GetToastedBread",
+   "answer": "35",
+   "retry_answer": null,
+   "parsed": 35.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "KettleBoiling",
+   "answer": "70",
+   "retry_answer": null,
+   "parsed": 70.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "LoadDishwasher",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "MakeIceLemonade",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "OpenCabinet",
+   "answer": "9",
+   "retry_answer": null,
+   "parsed": 9.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "PackIdenticalLunches",
+   "answer": "105",
+   "retry_answer": null,
+   "parsed": 105.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "PickPlaceCounterToCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "PickPlaceCounterToStove",
+   "answer": "46",
+   "retry_answer": null,
+   "parsed": 46.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "PortionHotDogs",
+   "answer": "65",
+   "retry_answer": null,
+   "parsed": 65.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "PreSoakPan",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "PrepareCoffee",
+   "answer": "10",
+   "retry_answer": null,
+   "parsed": 10.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "RecycleBottlesByType",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "RinseSinkBasin",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "ScrubCuttingBoard",
+   "answer": "25",
+   "retry_answer": null,
+   "parsed": 25.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "SearingMeat",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "SetUpCuttingStation",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "SlideDishwasherRack",
+   "answer": "25",
+   "retry_answer": null,
+   "parsed": 25.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "StackBowlsCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "SteamInMicrowave",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "StirVegetables",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "StoreLeftoversInBowl",
+   "answer": "106",
+   "retry_answer": null,
+   "parsed": 106.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "TurnOffStove",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "TurnOnMicrowave",
+   "answer": "10",
+   "retry_answer": null,
+   "parsed": 10.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "TurnOnSinkFaucet",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "WaffleReheat",
+   "answer": "44",
+   "retry_answer": null,
+   "parsed": 44.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "WashFruitColander",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "WashLettuce",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "WeighIngredients",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "ArrangeBreadBasket",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "ArrangeTea",
+   "answer": "37",
+   "retry_answer": null,
+   "parsed": 37.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "BreadSelection",
+   "answer": "55",
+   "retry_answer": null,
+   "parsed": 55.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "CategorizeCondiments",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "CloseBlenderLid",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "CloseToasterOvenDoor",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "CoffeeSetupMug",
+   "answer": "37",
+   "retry_answer": null,
+   "parsed": 37.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "CuttingToolSelection",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "DeliverStraw",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "GarnishPancake",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "GetToastedBread",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "KettleBoiling",
+   "answer": "10",
+   "retry_answer": null,
+   "parsed": 10.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "LoadDishwasher",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "MakeIceLemonade",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "OpenCabinet",
+   "answer": "9",
+   "retry_answer": null,
+   "parsed": 9.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "PackIdenticalLunches",
+   "answer": "68",
+   "retry_answer": null,
+   "parsed": 68.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "PickPlaceCounterToCabinet",
+   "answer": "42",
+   "retry_answer": null,
+   "parsed": 42.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "PickPlaceCounterToStove",
+   "answer": "44",
+   "retry_answer": null,
+   "parsed": 44.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "PortionHotDogs",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "PreSoakPan",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "PrepareCoffee",
+   "answer": "10",
+   "retry_answer": null,
+   "parsed": 10.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "RecycleBottlesByType",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "RinseSinkBasin",
+   "answer": "35",
+   "retry_answer": null,
+   "parsed": 35.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "ScrubCuttingBoard",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "SearingMeat",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "SetUpCuttingStation",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "SlideDishwasherRack",
+   "answer": "32",
+   "retry_answer": null,
+   "parsed": 32.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "StackBowlsCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "SteamInMicrowave",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "StirVegetables",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "StoreLeftoversInBowl",
+   "answer": "68",
+   "retry_answer": null,
+   "parsed": 68.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "TurnOffStove",
+   "answer": "10",
+   "retry_answer": null,
+   "parsed": 10.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "TurnOnMicrowave",
+   "answer": "10",
+   "retry_answer": null,
+   "parsed": 10.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "TurnOnSinkFaucet",
+   "answer": "6",
+   "retry_answer": null,
+   "parsed": 6.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "WaffleReheat",
+   "answer": "46",
+   "retry_answer": null,
+   "parsed": 46.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "WashFruitColander",
+   "answer": "65",
+   "retry_answer": null,
+   "parsed": 65.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "WashLettuce",
+   "answer": "35",
+   "retry_answer": null,
+   "parsed": 35.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "WeighIngredients",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "ArrangeBreadBasket",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "ArrangeTea",
+   "answer": "37",
+   "retry_answer": null,
+   "parsed": 37.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "BreadSelection",
+   "answer": "65",
+   "retry_answer": null,
+   "parsed": 65.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "CategorizeCondiments",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "CloseBlenderLid",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "CloseToasterOvenDoor",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "CoffeeSetupMug",
+   "answer": "37",
+   "retry_answer": null,
+   "parsed": 37.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "CuttingToolSelection",
+   "answer": "44",
+   "retry_answer": null,
+   "parsed": 44.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "DeliverStraw",
+   "answer": "35",
+   "retry_answer": null,
+   "parsed": 35.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "GarnishPancake",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "GetToastedBread",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "KettleBoiling",
+   "answer": "70",
+   "retry_answer": null,
+   "parsed": 70.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "LoadDishwasher",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "MakeIceLemonade",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "OpenCabinet",
+   "answer": "9",
+   "retry_answer": null,
+   "parsed": 9.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "PackIdenticalLunches",
+   "answer": "65",
+   "retry_answer": null,
+   "parsed": 65.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "PickPlaceCounterToCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "PickPlaceCounterToStove",
+   "answer": "44",
+   "retry_answer": null,
+   "parsed": 44.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "PortionHotDogs",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "PreSoakPan",
+   "answer": "33",
+   "retry_answer": null,
+   "parsed": 33.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "PrepareCoffee",
+   "answer": "The instruction involves picking a mug from a cabinet, placing it under a coffee machine",
+   "retry_answer": "42",
+   "parsed": 42.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "RecycleBottlesByType",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "RinseSinkBasin",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "ScrubCuttingBoard",
+   "answer": "25",
+   "retry_answer": null,
+   "parsed": 25.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "SearingMeat",
+   "answer": "44",
+   "retry_answer": null,
+   "parsed": 44.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "SetUpCuttingStation",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "SlideDishwasherRack",
+   "answer": "18",
+   "retry_answer": null,
+   "parsed": 18.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "StackBowlsCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "SteamInMicrowave",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "StirVegetables",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "StoreLeftoversInBowl",
+   "answer": "106",
+   "retry_answer": null,
+   "parsed": 106.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "TurnOffStove",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "TurnOnMicrowave",
+   "answer": "10",
+   "retry_answer": null,
+   "parsed": 10.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "TurnOnSinkFaucet",
+   "answer": "6",
+   "retry_answer": null,
+   "parsed": 6.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "WaffleReheat",
+   "answer": "44",
+   "retry_answer": null,
+   "parsed": 44.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "WashFruitColander",
+   "answer": "65",
+   "retry_answer": null,
+   "parsed": 65.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "WashLettuce",
+   "answer": "26",
+   "retry_answer": null,
+   "parsed": 26.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "WeighIngredients",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  }
+ ]
+}

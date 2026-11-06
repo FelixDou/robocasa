@@ -4374,3 +4374,112 @@ not a formality.
 
 **Evidence (copied 2026-11-03).** `evidence/xr1_list_c_20261103_211633/list_c.json`
 (`3b48bccd…`) and `reset.json` (`3dac8155…`) match the cluster's hashes.
+
+### R14
+
+Run `xr1_r14_hk_free_20261106_191531`, code `575f3dd6`, one GPU on r10n2. The LLM is Qwen3-8B,
+snapshot `b968826d`, greedy decoding without thinking.
+- **Gates.** All passed, and both tables end in `R14 OK`.
+  - K1: G here equals the published unseen + G rows, max difference 0.0 on both policies.
+  - K5: P here equals the published seen + P rows.
+  - K4: every prompt matches the committed templates, and every answer parsed: XR-1 38 zero-shot and
+    190 few-shot, RLDX-1 20 and 100.
+  - The published rows (`table1`, `table2`) are identical to R11's on both policies.
+- **Earlier attempts.** `xr1_r14_hk_free_20261106_190353` (code `69f5b083`) stopped at its unit tests:
+  the test file needed pytest, which the SAFE environment lacks. That folder is empty. At `575f3dd6`,
+  step 12.1 first failed because the worktree lacked RoboCasa assets; they were then hard-linked in
+  (runbook amended, `4fd03356`).
+- **Hashes.**
+  - `seen_unseen_tables_r14.json` `1578f312…`, `rldx_unseen_r14.json` `e785586c…`;
+  - `durations_xr1.json` `80e18905…`, `durations_rldx.json` `65d8ddfd…`, `instructions.json` `1024ca79…`;
+  - `prompts_xr1.json` `9486de9a…`, `prompts_rldx.json` `e784226a…`.
+- **Evidence.** Copied 2026-11-06 to `evidence/xr1_r14_hk_free_20261106_191531/`, with the run's logs
+  in `logs/`. The hashes match the cluster.
+
+**Timers alone (Proposition 1 on seen-task calibration; test on held-out tasks, pooled over folds).**
+
+| Timer | XR-1 unseen FP / lead / TWA | XR-1 seen FP / lead | RLDX-1 unseen FP / lead | RLDX-1 seen FP / lead |
+|---|---|---|---|---|
+| G (H_k) | 9 / 0.126 / 0.551 | 8 / 0.123 | 0 / 0.026 | 1 / 0.027 |
+| G_abs (elapsed time) | 19 / 0.122 / 0.536 | 20 / 0.130 | 7 / 0.066 | 5 / 0.057 |
+| G_llm_zero | 22 / 0.131 / 0.537 | 21 / 0.119 | 4 / 0.043 | 3 / 0.041 |
+| G_llm_few | 10 / 0.076 / 0.525 | 14 / 0.154 | 0 / 0.039 | 0 / 0.070 |
+| P | | 21 / 0.225 | | 3 / 0.271 |
+| P_mult | | 20 / 0.217 | | 3 / 0.264 |
+
+XR-1 has 380 test successes; RLDX-1 has 100.
+- **Without H_k the timer needs about twice the false alarms for the same lead.** On XR-1 at about 17
+  false alarms, G's lead is about 0.19. G_abs and G_llm_few are about 0.15–0.16, inferred from the
+  fused leads and their matched gains below.
+
+**LLM duration estimates against the observed ρ_k H_k (seconds).**
+
+| Cohort | Variant | Spearman | Median abs. log ratio | Median ratio | Worst task (estimate / observed) |
+|---|---|---:|---:|---:|---|
+| XR-1 | zero-shot | 0.43 | 0.54 | 0.68 | CoffeeSetupMug (120 / 18 s) |
+| XR-1 | few-shot, held out | 0.63 | 0.63 | 0.56 | PrepareCoffee (18 / 78 s) |
+| RLDX-1 | zero-shot | 0.33 | 0.66 | 0.84 | CoffeeSetupMug (120 / 11 s) |
+| RLDX-1 | few-shot, held out | 0.31 | 0.75 | 0.81 | SlideDishwasherRack (45 / 12 s) |
+
+The typical estimate is off by a factor of 1.7–2.1, and it is too short on XR-1.
+
+**Unseen tasks, score fused with each timer: gain over that timer, matched gain in brackets.**
+- Seed-average ensemble (one fit on the averaged score):
+
+| Detector | G | G_abs | G_llm_zero | G_llm_few |
+|---|---|---|---|---|
+| XR-1 Hide-and-Seek | +0.127 [+0.048] | +0.126 [+0.097] | +0.127 [+0.129] | +0.169 [+0.073] |
+| XR-1 SAFE-LSTM | +0.061 [−0.003] | +0.045 [+0.013] | +0.073 [+0.068] | +0.088 [+0.009] |
+| XR-1 SAFE-MLP | +0.017 [−0.085] | +0.002 [−0.004] | +0.017 [−0.005] | +0.036 [−0.040] |
+| XR-1 Mahalanobis / k-NN / PCA-KMeans / RND | +0.045 to +0.053 [−0.068 to −0.085] | +0.009 to +0.023 [−0.015 to +0.004] | +0.041 to +0.059 [−0.008 to +0.010] | +0.048 to +0.062 [−0.034 to −0.043] |
+| XR-1 Hide-and-Seek zero-input / first-step | +0.033 / +0.000 | +0.000 / +0.000 | +0.037 / +0.000 | +0.032 / +0.000 |
+| RLDX-1 Hide-and-Seek | +0.191 [+0.084] | +0.162 [+0.122] | +0.180 [+0.140] | +0.180 [+0.058] |
+| RLDX-1 SAFE-LSTM | +0.104 [−0.068] | +0.073 [+0.033] | +0.091 [+0.047] | +0.093 [−0.052] |
+
+- Single training seeds (mean ± SD over seeds 0–2):
+
+| Detector | G | G_abs | G_llm_zero | G_llm_few |
+|---|---|---|---|---|
+| XR-1 Hide-and-Seek | +0.122 ± 0.005 [+0.012 ± 0.009] | +0.112 ± 0.007 [+0.087 ± 0.015] | +0.127 ± 0.004 [+0.102 ± 0.021] | +0.157 ± 0.009 [+0.055 ± 0.009] |
+| XR-1 SAFE-LSTM | +0.058 ± 0.020 [−0.001 ± 0.019] | +0.056 ± 0.011 [+0.026 ± 0.017] | +0.052 ± 0.014 [+0.063 ± 0.039] | +0.084 ± 0.012 [+0.001 ± 0.017] |
+| XR-1 SAFE-MLP | +0.028 ± 0.009 [−0.074 ± 0.009] | +0.002 ± 0.000 [−0.004 ± 0.000] | +0.027 ± 0.008 [+0.027 ± 0.005] | +0.031 ± 0.002 [−0.045 ± 0.002] |
+| RLDX-1 Hide-and-Seek | +0.196 ± 0.013 [+0.083 ± 0.071] | +0.168 ± 0.011 [+0.136 ± 0.023] | +0.186 ± 0.018 [+0.158 ± 0.041] | +0.181 ± 0.017 [+0.058 ± 0.046] |
+| RLDX-1 SAFE-LSTM | +0.101 ± 0.006 [−0.011 ± 0.002] | +0.076 ± 0.004 [+0.053 ± 0.012] | +0.091 ± 0.002 [+0.047 ± 0.002] | +0.092 ± 0.005 [−0.041 ± 0.005] |
+
+- **Matched** here means one timer margin over all held-out tasks, set on the test successes to the
+  fused monitor's false-alarm count. It is test-tuned and descriptive, with no CI. With G it is close
+  to R6's matched values: SAFE −0.085 here against −0.079 there, Hide-and-Seek +0.048 against +0.051.
+- **Hide-and-Seek** gains over every timer on both policies, and its matched gain is larger when the
+  timer is not given H_k.
+- **SAFE-MLP and the OOD scores** lose 0.07–0.09 to G at matched false alarms, and are about even with
+  G_abs. Their same-target gains over G come from extra false alarms.
+- **SAFE-LSTM** is about even with G at matched false alarms and slightly ahead of G_abs.
+
+**P without H_k (seen tasks).** P_mult against P, gain of each score fused with it:
+- **XR-1:** every gain moves by at most 0.009. Hide-and-Seek +0.071 → +0.080, SAFE-MLP +0.030 →
+  +0.031, SAFE-LSTM +0.033 → +0.034; the others move by −0.001 to +0.006.
+- **RLDX-1:** ActProbe +0.047 → +0.064 (+0.017), Hide-and-Seek zero-input +0.018 → +0.006 (−0.012),
+  Hide-and-Seek +0.083 → +0.078, SAFE-LSTM +0.034 → +0.035; the others move by at most 0.006.
+- By the rule fixed in the plan, two RLDX-1 rows move by more than 0.01, so P_mult goes in the
+  appendix and the author decides. The main rows (Hide-and-Seek, SAFE) move by at most 0.009 on
+  both policies.
+
+**Expectations against results.**
+- *G_abs much weaker than G at its own FPR, with held-out FPR well above 0.05:* **no.** It reaches
+  nearly G's lead (0.122 vs 0.126) at twice the false alarms (FPR 0.050). It is weaker at equal false
+  alarms (about 0.15–0.16 vs 0.19).
+- *Learned scores gain ≥ +0.03 over G_abs:*
+  - Hide-and-Seek: **yes** (+0.126, matched +0.097);
+  - SAFE-LSTM: **yes** at the same target (+0.045), but only +0.013 matched;
+  - SAFE-MLP and the OOD scores: **no** (about 0).
+- *D2 Spearman ≥ 0.6, landing between G_abs and G:* XR-1 0.63, RLDX-1 0.31. G_llm_few is about
+  G_abs's level at equal false alarms, **not** between.
+- *P_mult changes gains by < 0.01:* **yes** on XR-1; **no** for two secondary RLDX-1 rows.
+
+**What this changes.**
+- **H_k as timing information.** On unseen tasks, G uses the task's hand-set limit, which carries
+  timing information a new task would not have. An LLM reading the instruction does not recover it.
+- **Comparing with the literature.** For a comparison like SAFE's and Hide-and-Seek's, where the
+  monitor gets no timing of the new task, the H_k-free timers are the fair comparator.
+- **Hide-and-Seek's unseen-task result** holds against all of them.
+- **No new rollouts.** None of this needs new rollouts; E1 and E2 (seen tasks, P) are unaffected.
