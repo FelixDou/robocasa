@@ -52,6 +52,44 @@ class FakeGymEnv:
         return self._obs()
 
 
+class DrawerGymEnv(FakeGymEnv):
+    """Like OpenDrawer under robocasa's gym wrapper: the instruction's side is drawn again whenever
+    the model is (re)loaded, reset_to included; the wrapper can override the instruction."""
+
+    def __init__(self, sides):
+        super().__init__()
+        self.sides, self.draws, self.override = list(sides), 0, None
+
+    def _draw(self):
+        self.side = self.sides[self.draws % len(self.sides)]
+        self.draws += 1
+
+    def reset(self, **kwargs):
+        self.override = None                      # clear_task_description, as the wrapper's reset does
+        self._draw()
+        return super().reset(**kwargs)
+
+    def _obs(self):
+        obs = super()._obs()
+        obs["annotation.human.task_description"] = self.override or f"Open the {self.side} drawer."
+        return obs
+
+    def get_state(self):
+        st = super().get_state()
+        st["ep_meta"] = json.dumps({"lang": f"Open the {self.side} drawer."})
+        return st
+
+    def reset_to(self, state):
+        self._draw()                              # the model reload places the robot again
+        return super().reset_to(state)
+
+    def set_task_description(self, text):
+        self.override = text
+
+    def get_current_observation(self):
+        return self._obs()
+
+
 class Outer:
     """A gymnasium-like wrapper that does not forward reset_to."""
 
@@ -87,6 +125,49 @@ class PairedResetTest(unittest.TestCase):
             self.assertIsNone(ck.pair_problem(log[0], log[1]))
             self.assertIsNone(ck.pair_problem(log[2], log[3]))
             self.assertIsNotNone(ck.pair_problem(log[0], log[3]))      # restored another scene's state
+
+    def test_retry_keeps_the_first_attempts_instruction(self):
+        """OpenDrawer on the cluster: reset_to drew the other side, so the retry's instruction differed."""
+        with tempfile.TemporaryDirectory() as d:
+            env = ce.install(Outer(DrawerGymEnv(["left", "right", "right", "left"])), "OpenDrawer",
+                             Path(d) / "pairs.jsonl")
+            o0, _ = env.reset()
+            self.assertEqual(o0["annotation.human.task_description"], "Open the left drawer.")
+            o1, _ = env.reset()                    # reset_to draws "right"; the override restores "left"
+            self.assertEqual(o1["annotation.human.task_description"], "Open the left drawer.")
+            o, *_ = env.step(None)
+            self.assertEqual(o["annotation.human.task_description"], "Open the left drawer.")   # every step
+            o2, _ = env.reset()                    # a new scene: the override is cleared
+            self.assertEqual(o2["annotation.human.task_description"], "Open the right drawer.")
+            log = [json.loads(x) for x in (Path(d) / "pairs.jsonl").read_text().splitlines()]
+            self.assertTrue(log[1]["instruction_restored"])
+            self.assertIsNone(ck.pair_problem(log[0], log[1]))
+
+    def test_without_the_override_the_check_catches_it(self):
+        class NoOverride(DrawerGymEnv):
+            set_task_description = None
+        with tempfile.TemporaryDirectory() as d:
+            env = ce.install(Outer(NoOverride(["left", "right"])), "OpenDrawer", Path(d) / "pairs.jsonl")
+            env.reset(); env.reset()
+            log = [json.loads(x) for x in (Path(d) / "pairs.jsonl").read_text().splitlines()]
+            self.assertFalse(log[1]["instruction_restored"])
+            self.assertEqual(ck.pair_problem(log[0], log[1]), "instruction differs")
+
+    def test_breakdown_marks_instruction_reruns(self):
+        with tempfile.TemporaryDirectory() as d:
+            a, b = Path(d) / "OpenDrawer", Path(d) / "OpenCabinet"
+            a.mkdir(); b.mkdir()
+            first = dict(role="first", task_name="OpenDrawer", state_sha="s", model_sha="m")
+            good = dict(role="retry", task_name="OpenDrawer", restored_sha="s", model_sha="m", restore_residual=0.0,
+                        first_obs_distance=dict(missing=[], text_equal=True, image_max=0.0, state_max=0.0))
+            bad = json.loads(json.dumps(good)); bad["first_obs_distance"]["text_equal"] = False
+            (a / "pairs.jsonl").write_text("\n".join(json.dumps(x) for x in (first, good, first, bad)) + "\n")
+            f2, g2 = dict(first, task_name="OpenCabinet"), dict(good, task_name="OpenCabinet")
+            (b / "pairs.jsonl").write_text("\n".join(json.dumps(x) for x in (f2, g2)) + "\n")
+            lines, rerun = ck.breakdown([("e2", a), ("e2", b)])
+            self.assertEqual(rerun, ["OpenDrawer"])
+            self.assertIn("RERUN OpenDrawer", lines)
+            self.assertIn("total excluded: 1 of 3 pairs", lines)
 
     def test_pair_problem_tolerances(self):
         first = dict(role="first", state_sha="a", model_sha="m")

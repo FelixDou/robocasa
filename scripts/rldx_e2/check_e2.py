@@ -142,10 +142,31 @@ def check(plan, dirs, recorded_rows, smoke=False, tensor_fn=ce1.tensor_info):
                           excluded=excluded)
 
 
+def breakdown(dirs):
+    """Excluded pairs by task and reason, from pairs.jsonl only (no outcome is read). A task with any
+    'instruction differs' pair is marked RERUN (docs/rldx_e2_plan.md, step 7a)."""
+    bad, n, lines = Counter(), Counter(), []
+    for _, root in dirs:
+        log = read_jsonl(Path(root) / "pairs.jsonl")
+        for j in range(0, len(log) - 1, 2):
+            t = log[j]["task_name"]
+            n[t] += 1
+            why = pair_problem(log[j], log[j + 1])
+            if why:
+                bad[(t, why.split(" by ")[0])] += 1
+    for (t, why), k in sorted(bad.items()):
+        lines.append(f"{t:28s} {k:3d}/{n[t]}  {why}")
+    rerun = sorted({t for (t, why) in bad if why == "instruction differs"})
+    lines.append(f"total excluded: {sum(bad.values())} of {sum(n.values())} pairs")
+    lines += [f"RERUN {t}" for t in rerun]
+    return lines, rerun
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--plan", required=True)
     p.add_argument("--smoke", action="store_true")
+    p.add_argument("--breakdown", action="store_true", help="excluded pairs by task and reason; RERUN lines (step 7a)")
     p.add_argument("--output", help="pairs.json (required for the full check)")
     p.add_argument("dirs", nargs="+", help="e2=<collector output dir> (smoke=<dir> with --smoke)")
     a = p.parse_args()
@@ -156,6 +177,9 @@ def main():
         if not root or name != ("smoke" if a.smoke else "e2"):
             raise SystemExit(f"error: {s!r}: give {'smoke' if a.smoke else 'e2'}=<dir>")
         dirs.append((name, root))
+    if a.breakdown:
+        print("\n".join(breakdown(dirs)[0]))
+        return
     if not a.smoke and not a.output:
         raise SystemExit("error: --output is required for the full check")
     if a.output and Path(a.output).exists():

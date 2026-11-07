@@ -296,6 +296,80 @@ $CLIENT_PY -I scripts/rldx_e2/check_e2.py --plan $E2_ROOT/plan.json --output $E2
 
 Paste `check.log` back. Continue only with `CHECK OK`.
 
+### 7a. Instruction fix and rerun (deviation, decided 2026-11-07 before any outcome was read)
+
+**What gate 2 found.** On the first full collection (`rldx1_e2_20261106_143309`, code `0810b17f`),
+30 of 1,000 pairs were excluded for "instruction differs", more than 2%, so E2 stopped. The printed
+examples were all OpenDrawer.
+- **Restore:** the restore itself was exact: residual 0, largest first-image difference 0.022.
+- **Cause:** OpenDrawer's instruction is "Open the {side} drawer.", with the side drawn when the robot
+  is placed. The gym wrapper's `reset_to` reloads the model, which places the robot again and draws
+  the side again.
+- **Effect:** the robot pose and the target drawer come back from the saved state, so they are exact.
+  Only the instruction word changed, so on those retries the policy was told to open the wrong drawer.
+
+**Fix (`collect_e2.py`).** After `reset_to`, the retry is given the first attempt's own instruction
+(`ep_meta["lang"]` saved with its state) through the wrapper's `set_task_description`.
+- The override lasts the whole retry, and the next ordinary reset clears it.
+- Each retry row records `instruction_restored`.
+- Tests: `test_retry_keeps_the_first_attempts_instruction` and
+  `test_without_the_override_the_check_catches_it`.
+
+**Rerun rule (fixed before any E2 outcome or score was read).** Every task with at least one
+"instruction differs" pair is collected again, whole, with the fix and the first reserved rerun seed
+1411.
+- **Kept, never used:** its first directory goes to `collection_excluded/<task>_instruction`.
+- **Unchanged:** the other tasks, gate 2, the analysis and every threshold.
+- **Not taken:** dropping the affected pairs would select scenes (a mismatch can only happen where
+  the robot can start on either side), and would break the 2% rule.
+
+**Commands.** `E2F_SHA` is the commit containing this step.
+
+```bash
+# 0. Environment as in step 0 (source session.env), then the fixed worktree.
+export E2F_SHA=<E2F_SHA>
+export E2_REPO=$PROJECT_FS/robocasa_rldx_e2_${E2F_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/rldx-e1
+test -e $E2_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $E2_REPO $E2F_SHA
+test "$(git -C $E2_REPO rev-parse HEAD)" = "$E2F_SHA" && echo "HEAD OK" || echo "STOP: wrong HEAD"
+mkdir -p $E2_REPO/robocasa/models/assets
+cp -aln $PROJECT_FS/robocasa/robocasa/models/assets/. $E2_REPO/robocasa/models/assets/
+echo "export E2_REPO=$E2_REPO E2F_SHA=$E2F_SHA" > $E2_ROOT/session_fix.env
+cd $E2_REPO && CUDA_VISIBLE_DEVICES="" $SAFE_PY -W ignore -m unittest tests.test_rldx_e2 2>&1 | grep -E "^(Ran|OK|FAILED)"
+
+# 1. Exclusions by task and reason (reads only pairs.jsonl: no outcome).
+$CLIENT_PY -I scripts/rldx_e2/check_e2.py --plan $E2_ROOT/plan.json --breakdown \
+  $(for d in $E2_ROOT/collection/*/; do echo "e2=${d%/}"; done) | tee $E2_LOG/breakdown_before_fix.log
+grep '^RERUN' $E2_LOG/breakdown_before_fix.log | cut -d' ' -f2 > $E2_ROOT/rerun_tasks.txt; cat $E2_ROOT/rerun_tasks.txt
+
+# 2. Move each such task aside (kept, never used).
+mkdir -p $E2_ROOT/collection_excluded
+while read -r t; do mv $E2_ROOT/collection/$t $E2_ROOT/collection_excluded/${t}_instruction && echo "moved $t"; done < $E2_ROOT/rerun_tasks.txt
+
+# 3. Servers (step 4), then one collector per task, round-robin over the four GPUs.
+cd $RLDX_REPO
+while IFS=$'\t' read -r set shard gpu port; do
+  CUDA_VISIBLE_DEVICES=$gpu HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 nohup uv run python -u rldx/eval/run_rldx_server.py \
+    --model-path $RLDX_SNAPSHOT --embodiment-tag GENERAL_EMBODIMENT \
+    --host 127.0.0.1 --port $port --use-sim-policy-wrapper > $E2_LOG/server_rerun_$port.log 2>&1 < /dev/null &
+done < $E2_ROOT/shards.tsv
+until [ "$(ss -ltn | grep -cE ':2015[0-3]\b')" -ge 4 ]; do sleep 10; done; echo "servers up"
+cd $E2_REPO
+mapfile -t FLAGS < $E2_ROOT/collector_flags_e2.txt
+i=0
+while read -r t; do
+  gpu=$((i % 4)); port=$((20150 + i % 4)); i=$((i + 1))
+  CUDA_VISIBLE_DEVICES=$gpu MUJOCO_EGL_DEVICE_ID=$gpu setsid nohup $CLIENT_PY -u scripts/rldx_e2/collect_e2.py \
+    --output-dir $E2_ROOT/collection/$t --tasks $t "${FLAGS[@]}" --seed 1411 --host 127.0.0.1 --port $port \
+    > $E2_LOG/collection_${t}_rerun.log 2>&1 < /dev/null &
+  echo "$t on GPU $gpu, seed 1411"
+done < $E2_ROOT/rerun_tasks.txt
+```
+
+The script assigns more than one task to a GPU only when more than four tasks need a rerun.
+When every rerun directory shows 100 rollouts, run step 7 from `$E2_REPO` (this worktree), then
+steps 8–9 unchanged.
+
 ### 8. Export and scores (SAFE-LSTM on one GPU; Hide-and-Seek on CPU)
 
 ```bash

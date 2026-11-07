@@ -85,6 +85,18 @@ def obs_distance(first, other):
     return out
 
 
+def first_instruction(saved):
+    """The instruction stored with the first attempt's state (ep_meta["lang"]), or None."""
+    meta = saved.get("ep_meta")
+    if not meta:
+        return None
+    try:
+        lang = json.loads(meta).get("lang") if isinstance(meta, str) else dict(meta).get("lang")
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return lang or None
+
+
 def _flat_state(env):
     get_state = env_method(env, "get_state")
     state = get_state()
@@ -124,9 +136,21 @@ class PairedReset:
             if self.saved is None:
                 raise RuntimeError("E2: a retry reset came before any first-attempt reset")
             obs = env_method(self.env, "reset_to")(dict(self.saved))
-            if not isinstance(obs, dict):
-                getter = env_method(self.env, "get_current_observation")
-                obs = getter() if getter is not None else obs
+            # reset_to reloads the model, and some tasks draw their instruction again while doing so
+            # (OpenDrawer: "Open the {side} drawer.", the side drawn when the robot is placed). The
+            # robot pose and the target come back from the saved state, so the first attempt's own
+            # instruction is the right one: give it to the retry for its whole length. The wrapper's
+            # next ordinary reset clears the override.
+            lang = first_instruction(self.saved)
+            setter = env_method(self.env, "set_task_description")
+            if lang and setter is not None:
+                setter(lang)
+                row["instruction_restored"] = True
+            else:
+                row["instruction_restored"] = False
+            getter = env_method(self.env, "get_current_observation")
+            if getter is not None and (row["instruction_restored"] or not isinstance(obs, dict)):
+                obs = getter()
             _, flat = _flat_state(self.env)
             residual = (float(np.max(np.abs(flat - self.saved["states"])))
                         if flat.shape == self.saved["states"].shape else float("inf"))
