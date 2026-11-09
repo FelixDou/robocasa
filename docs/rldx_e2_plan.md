@@ -412,3 +412,74 @@ $CLIENT_PY -I scripts/rldx_e2/analyze_e2.py --plan $E2_ROOT/plan.json --pairs $E
 ```
 
 Paste `analyze.log` back and copy `e2_result.json` to the Mac.
+
+## Result (2026-11-09)
+
+**Run.**
+- Root `rldx1_e2_20261106_143309`, collected with code `0810b17f`.
+- OpenDrawer recollected with code `6a3a40f3` and seed 1411 (step 7a). Its first directory is in
+  `collection_excluded/OpenDrawer_instruction`. No other task was rerun.
+- Steps 7–9 ran from `6a3a40f3`.
+
+**Gates.**
+- **Before the fix:** the breakdown showed OpenDrawer with 30 of 50 pairs "instruction differs", and no
+  other exclusion.
+- **After it:** `CHECK OK`, with 1,000 of 1,000 pairs usable, restore residual 0 and the largest
+  first-image difference 0.022. All 50 OpenDrawer retries record `instruction_restored`.
+- **Scoring:** both steps end in `SCORING OK`. SAFE-LSTM reproduces its normalization and the
+  recorded scores with difference 0. Hide-and-Seek reproduces the recorded calibration (60) and test
+  (200) scores with difference 0. 2,000 rollouts were scored.
+
+**Hashes.** `e2_result.json` `0df32ba9…`, `pairs.json` `2ecf49a1…`, `plan.json` `0121ce9e…`. The
+copies, with the logs, are in the paper worktree:
+`reports/paper_time_aware_fusion/rss2027_stage2/evidence/e2/`.
+
+**Success within 1.25 H_k** (1,000 scenes; 95% CIs from scenes resampled within task):
+
+| Rule | Success | Resets | Unnecessary | Lost a success |
+|---|---|---:|---:|---:|
+| No reset | 0.508 [0.481, 0.533] | 0 | 0 | 0 |
+| P | 0.500 [0.475, 0.525] | 540 | 48 | 45 |
+| SAFE-LSTM + P (primary) | 0.496 [0.471, 0.521] | 547 | 55 | 49 |
+| Hide-and-Seek + P (descriptive) | 0.504 [0.478, 0.529] | 539 | 47 | 42 |
+| Success-tuned timer (R_opt) | 0.496 [0.471, 0.521] | 541 | 49 | 42 |
+
+**Paired differences** ("only" = scenes won by one rule and lost by the other):
+
+| Contrast | Δ | 95% CI | Only first / only second |
+|---|---:|---|---|
+| **SAFE-LSTM + P − P (primary)** | **−0.004** | **[−0.008, −0.001]** | 0 / 4 |
+| P − none | −0.008 | [−0.026, +0.010] | 37 / 45 |
+| SAFE-LSTM + P − none | −0.012 | [−0.030, +0.006] | 37 / 49 |
+| R_opt − P | −0.004 | [−0.012, +0.004] | 8 / 12 |
+| SAFE-LSTM + P − R_opt | 0.000 | [−0.009, +0.008] | 12 / 12 |
+| Hide-and-Seek + P − P (descriptive) | +0.004 | [−0.001, +0.010] | 6 / 2 |
+
+- **Main comparison.** SAFE-LSTM + P and P give the same outcome on 996 scenes. On the other 4,
+  SAFE-LSTM's earlier reset lost a success.
+- **Latency.** Charging a full inference (8 steps) per learned-monitor reset changes nothing
+  (SAFE-LSTM + P −0.004, Hide-and-Seek + P +0.004).
+- **By type.**
+  - Atomic (700 scenes): none 0.510, P 0.521, SAFE-LSTM + P 0.516, Hide-and-Seek + P 0.526, R_opt 0.519.
+  - Composite (300 scenes): none 0.503, P 0.450, SAFE-LSTM + P 0.450, Hide-and-Seek + P 0.453, R_opt 0.443.
+- **Restore check.**
+  - First attempts succeed in 0.508 of scenes.
+  - The full-budget retry succeeds in 0.628 of scenes whose first attempt succeeded, and in 0.148 of
+    those whose first attempt failed.
+
+**Against the plan.**
+- *SAFE − P ≈ +0.006 (half-width about 0.02):* observed −0.004. That is inside the predicted range,
+  with the opposite sign.
+  - The CI is narrower than sized because the rules share the retry and differ on only 4 scenes.
+- *Retry success r = 0.245 (XR-1 pilot):* observed 0.148 after a failure, about 40% lower. This is
+  why resets do not pay.
+  - On composite tasks, resetting at P loses 0.053 against not resetting.
+- *R_opt matches the fused monitors at 1.25 H_k:* yes. SAFE-LSTM + P − R_opt = 0.000.
+
+**Conclusion.** On this policy and budget, acting on an alarm by resetting and retrying does not
+raise success.
+- The timer's resets already cost as many successes as they recover (37 won, 45 lost against no
+  reset).
+- SAFE-LSTM's extra warning changes the outcome of 4 scenes in 1,000, all for the worse.
+- The limiting factor is the retry's success after a failure (15%), not the time left when the
+  alarm comes.
