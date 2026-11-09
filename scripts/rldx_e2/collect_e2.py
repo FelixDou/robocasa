@@ -5,9 +5,14 @@ official_rldx protocol (one environment per task, repeated resets) and 2 x scene
 the environment's reset() is replaced, per task environment:
   - reset 2j (first attempt of scene j): a normal reset; the full simulator state, model XML and episode
     metadata right after it are kept in memory;
-  - reset 2j+1 (retry of scene j): instead of building a new scene, the kept state is restored through the
-    environment's reset_to (the RoboCasa playback path: soft reset, reload the scene's XML, set the state),
-    and its observation is returned. The policy is reset by the collector as for any rollout.
+  - reset 2j+1 (retry of scene j), mode "rebuild" (default since 2026-11-10): the random generators the
+    scene is built from (the environment's rng, numpy's global state and Python's random) are wound back
+    to their state before reset 2j, and the scene is built again by the same normal reset. Every task choice,
+    target and controller value is then the same as the first attempt's, and the state hash and model XML
+    must match exactly (check_e2). Mode "restore" (E2's first collection) restored the kept state through
+    reset_to, which reloads the model: the restore check showed that this redraws task attributes (OpenDrawer's
+    side, NavigateKitchen's target_pos) and leaves the arm controllers' goals at their default pose.
+    The policy is reset by the collector as for any rollout.
 Both attempts run to ceil(1.25 H) control steps (--horizon-scale 1.25) with SAFE features recorded, so every
 reset rule of the analysis can be applied afterwards: under rule c, scene j succeeds if the first attempt
 succeeds before c's alarm, or, once c alarms, if the retry succeeds within the budget left. The retry is the
@@ -24,8 +29,10 @@ Usage: the collector's own arguments, e.g.
   python -u scripts/rldx_e2/collect_e2.py --output-dir DIR --tasks T1 T2 $(cat collector_flags_e2.txt) \\
       --host 127.0.0.1 --port 20150
 """
+import copy
 import hashlib
 import json
+import random
 import sys
 import time
 from pathlib import Path
@@ -37,6 +44,37 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 PAIRS_NAME = "pairs.jsonl"
+DEFAULT_MODE = "rebuild"
+MODES = ("rebuild", "restore")
+
+
+def env_rng(env):
+    """The numpy Generator the scene is built from (RoboCasa's Kitchen.rng), searched down the wrapper chain."""
+    seen, node = set(), env
+    while node is not None and id(node) not in seen:
+        seen.add(id(node))
+        rng = vars(node).get("rng") if hasattr(node, "__dict__") else None
+        if isinstance(rng, np.random.Generator):
+            return node, rng
+        node = vars(node).get("env") if hasattr(node, "__dict__") else None
+    return None, None
+
+
+def capture_rng(env):
+    owner, rng = env_rng(env)
+    if rng is None:
+        raise RuntimeError("E2 rebuild mode: no numpy Generator 'rng' under the environment wrappers")
+    return dict(owner=owner, env=copy.deepcopy(rng.bit_generator.state), numpy=np.random.get_state(),
+                python=random.getstate())
+
+
+def restore_rng(saved):
+    """Wind every generator back. The env's rng object is replaced only if the env made a new one."""
+    owner = saved["owner"]
+    rng = vars(owner).get("rng")
+    rng.bit_generator.state = copy.deepcopy(saved["env"])
+    np.random.set_state(saved["numpy"])
+    random.setstate(saved["python"])
 
 
 def _sha(data):
@@ -106,14 +144,19 @@ def _flat_state(env):
 class PairedReset:
     """Replaces env.reset: even resets build a scene and keep its state, odd resets restore it."""
 
-    def __init__(self, env, task_name, log_path, clock=time.time):
-        self.env, self.task, self.log_path, self.clock = env, task_name, Path(log_path), clock
+    def __init__(self, env, task_name, log_path, clock=time.time, mode=DEFAULT_MODE):
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}")
+        self.env, self.task, self.log_path, self.clock, self.mode = env, task_name, Path(log_path), clock, mode
         self.base_reset = env.reset
         self.k = 0
         self.saved = None
         self.first_obs = None
-        if env_method(env, "reset_to") is None or env_method(env, "get_state") is None:
-            raise RuntimeError("E2 needs an environment with get_state() and reset_to()")
+        self.rng_states = None
+        if env_method(env, "get_state") is None or (mode == "restore" and env_method(env, "reset_to") is None):
+            raise RuntimeError("E2 needs an environment with get_state() (and reset_to() in restore mode)")
+        if mode == "rebuild":
+            env_rng(env)[1] or capture_rng(env)          # fail at install, not at the first retry
 
     def _log(self, row):
         with self.log_path.open("a") as fh:
@@ -121,8 +164,10 @@ class PairedReset:
 
     def __call__(self, *args, **kwargs):
         k = self.k
-        row = dict(task_name=self.task, reset_index=k, scene=k // 2, created_at=self.clock())
+        row = dict(task_name=self.task, reset_index=k, scene=k // 2, created_at=self.clock(), mode=self.mode)
         if k % 2 == 0:
+            if self.mode == "rebuild":
+                self.rng_states = capture_rng(self.env)
             result = self.base_reset(*args, **kwargs)
             obs = result[0] if isinstance(result, tuple) else result
             state, flat = _flat_state(self.env)
@@ -132,6 +177,20 @@ class PairedReset:
                               for key, v in obs.items()} if isinstance(obs, dict) else None
             row.update(role="first", state_sha=_sha(flat), model_sha=_sha(state.get("model", "")),
                        ep_meta_sha=_sha(state.get("ep_meta", "") or ""))
+        elif self.mode == "rebuild":
+            if self.saved is None or self.rng_states is None:
+                raise RuntimeError("E2: a retry reset came before any first-attempt reset")
+            restore_rng(self.rng_states)
+            result = self.base_reset(*args, **kwargs)
+            obs = result[0] if isinstance(result, tuple) else result
+            state, flat = _flat_state(self.env)
+            residual = (float(np.max(np.abs(flat - self.saved["states"])))
+                        if flat.shape == self.saved["states"].shape else float("inf"))
+            dist = obs_distance(self.first_obs, obs) if isinstance(obs, dict) and self.first_obs else None
+            # restored_sha = the state this retry was meant to reproduce; state_sha / model_sha = what it is.
+            row.update(role="retry", restored_sha=_sha(self.saved["states"]), state_sha=_sha(flat),
+                       model_sha=_sha(state.get("model", "")), restore_residual=residual, first_obs_distance=dist,
+                       instruction_restored=False)
         else:
             if self.saved is None:
                 raise RuntimeError("E2: a retry reset came before any first-attempt reset")
@@ -173,8 +232,8 @@ class PairedReset:
         return result
 
 
-def install(env, task_name, log_path):
-    env.reset = PairedReset(env, task_name, log_path)
+def install(env, task_name, log_path, mode=DEFAULT_MODE):
+    env.reset = PairedReset(env, task_name, log_path, mode=mode)
     return env
 
 

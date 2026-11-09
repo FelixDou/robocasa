@@ -201,10 +201,10 @@ def compare(first, retry, retry2=None):
                 check_steps=[sum(x is True for x in first["check"]), sum(x is True for x in retry["check"])])
 
 
-def check_task(env, task, scenes, steps, log_dir):
-    """env: a fresh environment for `task`; PairedReset is installed here."""
+def check_task(env, task, scenes, steps, log_dir, mode=ce.DEFAULT_MODE):
+    """env: a fresh environment for `task`; PairedReset (in `mode`) is installed here."""
     raw = raw_env(env)
-    env = ce.install(env, task, Path(log_dir) / f"{task}_pairs.jsonl")
+    env = ce.install(env, task, Path(log_dir) / f"{task}_pairs.jsonl", mode=mode)
     acts = actions_for(env, steps)
     paired = env.reset
     out = []
@@ -212,7 +212,10 @@ def check_task(env, task, scenes, steps, log_dir):
         first = run_attempt(env, raw, acts)
         retry = run_attempt(env, raw, acts)
 
-        def restore_again():                        # the same restore once more, outside the pair count
+        def restore_again():                        # the same retry once more, outside the pair count
+            if paired.mode == "rebuild":
+                ce.restore_rng(paired.rng_states)
+                return paired.base_reset()
             obs = ce.env_method(env, "reset_to")(dict(paired.saved))
             lang = ce.first_instruction(paired.saved)
             setter = ce.env_method(env, "set_task_description")
@@ -235,6 +238,8 @@ def main(argv=None):
     p.add_argument("--steps", type=int, default=60)
     p.add_argument("--seed", type=int, help="environment seed (default: the plan's E2 seed)")
     p.add_argument("--render", action="store_true", help="build with rendering, as E2 did (needs EGL)")
+    p.add_argument("--mode", choices=ce.MODES, default=ce.DEFAULT_MODE,
+                   help="retry mode to check: rebuild (default) or restore (E2's first collection)")
     a = p.parse_args(argv)
     if Path(a.output).exists():
         raise SystemExit(f"error: {a.output} exists")
@@ -248,7 +253,7 @@ def main(argv=None):
         for t in tasks:
             env = make_env(t, "gym", split, seed, bool(a.render))
             try:
-                rows = check_task(env, t, a.scenes, a.steps, log_dir)
+                rows = check_task(env, t, a.scenes, a.steps, log_dir, mode=a.mode)
             except Exception as exc:
                 rows = [dict(error=f"{type(exc).__name__}: {exc}")]
             finally:
@@ -278,7 +283,7 @@ def main(argv=None):
                         print(f"      {label} {k}: {str(x)[:60]} -> {str(y)[:60]}")
                     if len(items) > n:
                         print(f"      {label}: {len(items) - n} more")
-    out = dict(plan=PLAN, split=split, seed=seed, scenes=a.scenes, steps=a.steps, render=bool(a.render),
+    out = dict(plan=PLAN, mode=a.mode, split=split, seed=seed, scenes=a.scenes, steps=a.steps, render=bool(a.render),
                action_scale=ACTION_SCALE, action_seed=ACTION_SEED, state_tol=STATE_TOL, tasks=results)
     Path(a.output).write_text(json.dumps(out, indent=1, default=str) + "\n")
     print(f"{n_same} of {len(tasks)} tasks SAME; wrote {a.output}")

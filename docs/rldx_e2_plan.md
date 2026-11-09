@@ -607,3 +607,42 @@ The output decides the next step:
   - adds a control that restores the same state a second time. If the two restores agree with each
     other but not with the first attempt, the restore differs. If they disagree with each other, the
     simulation itself is not repeatable.
+
+### Restore check, version 2 (2026-11-10, `c9c94183`; StackBowlsCabinet, NavigateKitchen, RinseSinkBasin, TurnOnMicrowave)
+
+- **The simulation is repeatable.** Restoring the same state twice gives identical trajectories and
+  identical controllers in every scene.
+- **The arm and torso controllers' goals are not restored.** After `reset_to`, `goal_ori`, `goal_pos`
+  and the torso goal are the same constant in every task and scene: the default pose that the
+  rebuild inside `reset_to` set before the state was loaded. A fresh build sets them to the actual
+  pose. So under the same actions the retry moves differently from the first step (about 0.066).
+- **Task attributes are drawn again.** NavigateKitchen's `target_pos` (what `_check_success`
+  measures against) changed by up to 2 m with the same target fixture and instruction, so its
+  retries could not succeed. That matches 0 of 22.
+- **StackBowlsCabinet** showed no attribute difference beyond the controllers. Its success check
+  uses fixture interior sites; the rebuild below makes the question moot.
+
+**Conclusion.** `reset_to` reloads the model through a fresh reset, so every Python-side choice made
+while building (targets, sides, base anchors, controller goals) can differ from the restored scene.
+The E2 retries are not valid second attempts. **E2's first collection (`rldx1_e2_20261106_143309`)
+is kept as a record but not used.**
+
+## Retry by rebuilding (2026-11-10)
+
+`collect_e2.PairedReset` now defaults to mode `rebuild`.
+- **How it works.** Before each first attempt it saves the state of every random generator the scene
+  is built from: the environment's `rng`, numpy's global state and Python's `random`. For the retry
+  it winds them back and calls the same normal reset. The scene, task attributes and controllers are
+  then the first attempt's by construction.
+- **How it is verified.** check_e2 requires the rebuilt state and model XML to match the first
+  attempt's exactly (residual 0).
+- **Old mode.** Mode `restore` remains for the record.
+- **Tests:** `RebuildModeTest`, plus the restore check in both modes.
+
+**Next, in order.**
+1. **The restore check in rebuild mode, on all 20 tasks** (`--mode rebuild`, the default). Every
+   task must be SAME.
+2. **A new E2 collection** into a new root, with everything else unchanged: the same plan, rules,
+   tasks, 50 scenes per task, budget and analysis. The seed must be unused, so 1501 rather than
+   1401: the first collection's scenes have been seen.
+3. **Steps 7–9 and the follow-up** on that collection.

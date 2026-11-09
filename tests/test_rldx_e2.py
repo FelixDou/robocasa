@@ -1,6 +1,7 @@
 """Tests for E2's paired reset, plan, collection check and analysis (docs/rldx_e2_plan.md)."""
 import importlib.util
 import json
+import random
 import math
 import tempfile
 import unittest
@@ -108,7 +109,7 @@ class Outer:
 class PairedResetTest(unittest.TestCase):
     def test_alternates_and_restores(self):
         with tempfile.TemporaryDirectory() as d:
-            env = ce.install(Outer(FakeGymEnv()), "T", Path(d) / "pairs.jsonl")
+            env = ce.install(Outer(FakeGymEnv()), "T", Path(d) / "pairs.jsonl", mode="restore")
             o0, _ = env.reset()
             env.step(None); env.step(None)
             o1, info = env.reset()
@@ -132,7 +133,7 @@ class PairedResetTest(unittest.TestCase):
         """OpenDrawer on the cluster: reset_to drew the other side, so the retry's instruction differed."""
         with tempfile.TemporaryDirectory() as d:
             env = ce.install(Outer(DrawerGymEnv(["left", "right", "right", "left"])), "OpenDrawer",
-                             Path(d) / "pairs.jsonl")
+                             Path(d) / "pairs.jsonl", mode="restore")
             o0, _ = env.reset()
             self.assertEqual(o0["annotation.human.task_description"], "Open the left drawer.")
             o1, _ = env.reset()                    # reset_to draws "right"; the override restores "left"
@@ -149,7 +150,7 @@ class PairedResetTest(unittest.TestCase):
         class NoOverride(DrawerGymEnv):
             set_task_description = None
         with tempfile.TemporaryDirectory() as d:
-            env = ce.install(Outer(NoOverride(["left", "right"])), "OpenDrawer", Path(d) / "pairs.jsonl")
+            env = ce.install(Outer(NoOverride(["left", "right"])), "OpenDrawer", Path(d) / "pairs.jsonl", mode="restore")
             env.reset(); env.reset()
             log = [json.loads(x) for x in (Path(d) / "pairs.jsonl").read_text().splitlines()]
             self.assertFalse(log[1]["instruction_restored"])
@@ -498,9 +499,9 @@ class _Gym:
 
 
 class RestoreCheckTest(unittest.TestCase):
-    def run_check(self, env):
+    def run_check(self, env, mode="restore"):
         with tempfile.TemporaryDirectory() as d:
-            return rc.check_task(env, "T", scenes=2, steps=20, log_dir=d)
+            return rc.check_task(env, "T", scenes=2, steps=20, log_dir=d, mode=mode)
 
     def test_faithful_restore_is_same(self):
         rows = self.run_check(_Gym())
@@ -593,3 +594,51 @@ class RestoreCheckTest(unittest.TestCase):
         self.assertIsNone(rc.summarize(object()))
         self.assertEqual(rc.diff({"a": 1, "d": {"x": 1}}, {"a": 1, "d": {"x": 2}}), {"d.x": [1, 2]})
         self.assertEqual(rc.diff({"c": [{"n": "a", "p": 1}]}, {"c": [{"n": "a", "p": 2}]}), {"c[0].p": [1, 2]})
+
+
+class _RngGym(_Gym):
+    """A scene drawn from the env's rng (and numpy's and Python's global ones), like RoboCasa's Kitchen:
+    the cabinet, target, start state and a controller goal all come from the draws; reset_to redraws."""
+
+    def __init__(self, seed=0):
+        super().__init__(redraw=True)
+        self.env.rng = np.random.default_rng(seed)
+        self.env.robots = []
+
+    def reset(self, **kwargs):
+        self.override = None
+        r = self.env.rng
+        self.env.x = r.uniform(-1, 1, 3) + 0.001 * np.random.random() + 0.001 * random.random()
+        self.env.cabinet, self.env.target = f"cab{int(r.integers(100))}", float(r.uniform(0.1, 0.3))
+        return self._obs(), {}
+
+
+class RebuildModeTest(unittest.TestCase):
+    def test_rebuild_reproduces_the_scene_exactly(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = ce.install(_RngGym(), "T", Path(d) / "pairs.jsonl")
+            o0, _ = env.reset()
+            for _ in range(5):
+                env.step(np.ones(3))
+            o1, _ = env.reset()
+            np.testing.assert_array_equal(o0["state"], o1["state"])
+            o2, _ = env.reset()                                    # the next scene is a new one
+            self.assertFalse(np.array_equal(o2["state"], o0["state"]))
+            log = [json.loads(x) for x in (Path(d) / "pairs.jsonl").read_text().splitlines()]
+            self.assertEqual([x["mode"] for x in log], ["rebuild"] * 3)
+            self.assertEqual(log[1]["restore_residual"], 0.0)
+            self.assertEqual(log[1]["state_sha"], log[0]["state_sha"])
+            self.assertIsNone(ck.pair_problem(log[0], log[1]))
+
+    def test_rebuild_passes_the_restore_check_where_restore_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            same = rc.check_task(_RngGym(), "T", scenes=2, steps=20, log_dir=d, mode="rebuild")
+            diff = rc.check_task(_RngGym(), "T", scenes=2, steps=20, log_dir=d, mode="restore")
+        self.assertTrue(all(r["same"] for r in same), same)
+        self.assertFalse(diff[0]["same"])
+        self.assertIn("cabinet", diff[0]["attribute_diffs"])
+
+    def test_rebuild_needs_an_rng(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(RuntimeError):
+                ce.install(Outer(FakeGymEnv()), "T", Path(d) / "pairs.jsonl")
