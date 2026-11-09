@@ -521,6 +521,31 @@ class RestoreCheckTest(unittest.TestCase):
         self.assertTrue(all(np.array_equal(x, y) for x, y in zip(a1, a2)))
         self.assertLessEqual(max(float(np.max(np.abs(x))) for x in a1), rc.ACTION_SCALE)
 
+    def test_dict_action_space(self):
+        class Box:
+            def __init__(self, n):
+                self.shape, self.low, self.high = (n,), -np.ones(n), np.ones(n)
+
+        class Discrete:
+            n = 2
+
+        class Dict:
+            spaces = {"action.gripper_close": Box(1), "action.base_motion": Box(4), "action.mode": Discrete()}
+
+        class G(_Gym):
+            action_space = Dict()
+
+            def step(self, a):
+                self.last = a
+                a = np.concatenate([a["action.gripper_close"], a["action.base_motion"][:2]])
+                return super().step(a)
+        acts = rc.actions_for(G(), 3)
+        self.assertEqual(sorted(acts[0]), ["action.base_motion", "action.gripper_close", "action.mode"])
+        self.assertEqual(acts[0]["action.mode"], 0)
+        self.assertLessEqual(float(np.max(np.abs(acts[0]["action.base_motion"]))), rc.ACTION_SCALE)
+        rows = self.run_check(G())
+        self.assertTrue(all(r["same"] for r in rows), rows)
+
     def test_summarize_and_diff(self):
         class Fx:
             name = "counter_1"

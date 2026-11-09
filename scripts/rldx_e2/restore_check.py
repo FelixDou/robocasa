@@ -107,13 +107,29 @@ def instruction(obs):
     return obs.get("annotation.human.task_description") if isinstance(obs, dict) else None
 
 
+def sample(space, rng):
+    """One action: Box parts uniform within ACTION_SCALE of their range, Discrete parts 0, Dict parts by key
+    (RoboCasa's gym wrapper uses a Dict of gripper, end-effector, base-motion and control-mode parts)."""
+    parts = getattr(space, "spaces", None)
+    if isinstance(parts, dict):
+        return {k: sample(v, rng) for k, v in sorted(parts.items())}
+    if hasattr(space, "low") and hasattr(space, "high"):
+        low = np.where(np.isfinite(space.low), space.low, -1.0)
+        high = np.where(np.isfinite(space.high), space.high, 1.0)
+        mid, half = (low + high) / 2, (high - low) / 2
+        return (mid + ACTION_SCALE * half * rng.uniform(-1, 1, size=space.shape)).astype(np.float32)
+    if hasattr(space, "n"):
+        return 0
+    raise ValueError(f"unsupported action space {type(space).__name__}")
+
+
+def copy_action(a):
+    return {k: copy_action(v) for k, v in a.items()} if isinstance(a, dict) else (a.copy() if isinstance(a, np.ndarray) else a)
+
+
 def actions_for(env, steps, seed=ACTION_SEED):
-    space = env.action_space
-    low = np.where(np.isfinite(space.low), space.low, -1.0)
-    high = np.where(np.isfinite(space.high), space.high, 1.0)
-    mid, half = (low + high) / 2, (high - low) / 2
     rng = np.random.default_rng(seed)
-    return [mid + ACTION_SCALE * half * rng.uniform(-1, 1, size=space.shape) for _ in range(steps)]
+    return [sample(env.action_space, rng) for _ in range(steps)]
 
 
 def run_attempt(env, raw, actions):
@@ -122,7 +138,7 @@ def run_attempt(env, raw, actions):
     snap = dict(instruction=instruction(obs), attributes=attributes(raw), ep_meta=ep_meta(env, raw),
                 states=[np.asarray(raw.sim.get_state().flatten(), float)], success=[], check=[])
     for a in actions:
-        step = env.step(a)
+        step = env.step(copy_action(a))
         info = step[-1] if isinstance(step, tuple) and isinstance(step[-1], dict) else {}
         snap["states"].append(np.asarray(raw.sim.get_state().flatten(), float))
         snap["success"].append(bool(info.get("success", False)))
