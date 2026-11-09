@@ -532,3 +532,63 @@ $CLIENT_PY -I scripts/rldx_e2/followup_e2.py --plan $E2_ROOT/plan.json --pairs $
   2>&1 | tee $E2_LOG/followup.log
 sha256sum $E2_ROOT/e2_followup.json
 ```
+
+### Follow-up result (2026-11-09) and a concern about the retry
+
+Run from `5cc80fad`; `e2_followup.json` `223c8f4a…`. F0 OK.
+- **F1.**
+  - oracle@P 0.545: +0.037 [0.026, 0.049] over no reset, +0.045 [0.033, 0.058] over P.
+  - oracle@SAFE is identical to oracle@P.
+  - oracle@0 0.581: +0.073 [0.058, 0.089] over no reset.
+- **F2.** Mantel–Haenszel OR 4.25 [3.05, 6.01]. Retry success after a failure is 0.148; independence
+  within the task predicts 0.232.
+- **F3.**
+  - P saves 23.0 s per failed attempt (43% of its length) and stops 48 successes.
+  - SAFE-LSTM + P saves 0.41 s more per scene [0.33, 0.49] and stops 0.007 more successes per scene
+    [0.002, 0.013].
+  - Hide-and-Seek + P saves 0.23 s more [0.10, 0.37] and stops −0.001 [−0.006, 0.004].
+
+**Concern.** The full-budget retry starts from the restored first-attempt state with the same policy
+and budget, so its success should match the first attempt's. Instead it is 0.392 against 0.508
+(composite 0.273 against 0.503). On five tasks, no retry succeeds after a successful first attempt:
+
+| Task | Retries succeeding after a successful first attempt |
+|---|---|
+| StackBowlsCabinet | 0 of 33 |
+| NavigateKitchen | 0 of 22 |
+| LoadDishwasher | 0 of 17 |
+| PreSoakPan | 0 of 10 |
+| OpenCabinet | 0 of 8 |
+
+The likely cause is the OpenDrawer mechanism with an unchanged instruction. `reset_to` reloads the
+model, which can draw some of the task's Python-side choices again (targets, fixture references, the
+robot's base anchor), so the success check or the controller no longer matches the restored scene.
+**Until the restore check below passes, the E2 result and the follow-up are provisional.**
+
+## Restore check (written 2026-11-09, before running)
+
+`scripts/rldx_e2/restore_check.py`, with tests in `tests/test_rldx_e2.py::RestoreCheckTest`. No
+policy is involved.
+- **Setup.** Each task's environment is built exactly as E2's collector built it: `make_env` with the
+  plan's split and seed, `reset()` without a seed, and `collect_e2`'s PairedReset installed.
+- **Per scene.** The first attempt and the retry each record the task's Python-side attributes and
+  ep_meta, then apply the same 60 random actions (seeded, 0.3 of the action range). They record the
+  simulator state, the success flag and `_check_success()` at every step.
+- **Verdict.** A task is SAME only if no attribute or ep_meta entry differs, the instructions match,
+  the states never diverge (1e-6), and the success checks agree at every step.
+- **Expectations.**
+  - The five tasks above are DIFFERENT, with a redrawn target or fixture reference among the
+    attribute differences, or a state divergence that points to the controller.
+  - Tasks whose retries matched their first attempts (e.g. RinseSinkBasin, TurnOnMicrowave) are SAME.
+
+```bash
+cd $E2_REPO     # a worktree at the commit containing this section, assets hard-linked
+MUJOCO_GL=egl PYTHONPATH=$E2_REPO $CLIENT_PY -u scripts/rldx_e2/restore_check.py --plan $E2_ROOT/plan.json \
+  --output $E2_ROOT/restore_check.json --render 2>&1 | grep -v -i warn | tee $E2_LOG/restore_check.log
+```
+
+The output decides the next step:
+- **Tasks found DIFFERENT:** a targeted restore fix with a test, then the affected tasks are
+  recollected (as in step 7a). The analysis is redone only after the check passes on every task.
+- **Every task SAME:** the cause lies outside the environment (policy server, timing), and that is
+  examined next.

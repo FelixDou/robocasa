@@ -23,6 +23,7 @@ pe = _load("_t_plan_e2", "scripts/rldx_e2/plan_e2.py")
 ck = _load("_t_check_e2", "scripts/rldx_e2/check_e2.py")
 an = _load("_t_analyze_e2", "scripts/rldx_e2/analyze_e2.py")
 fu = _load("_t_followup_e2", "scripts/rldx_e2/followup_e2.py")
+rc = _load("_t_restore_check", "scripts/rldx_e2/restore_check.py")
 
 
 class FakeGymEnv:
@@ -423,3 +424,106 @@ class FollowupTest(unittest.TestCase):
         self.assertEqual(fu.reproduce(plan, sc, result, has_hs=False), [])
         result["rates"]["P"]["success"] += 0.01
         self.assertTrue(fu.reproduce(plan, sc, result, has_hs=False))
+
+
+class _Sim:
+    def __init__(self, raw):
+        self.raw = raw
+
+    def get_state(self):
+        return self
+
+    def flatten(self):
+        return self.raw.x.copy()
+
+
+class _Raw:
+    """A robosuite-like task: a state vector, a target chosen at build time, success when x[0] > target."""
+
+    def __init__(self):
+        self.sim, self.x, self.target, self.cabinet = _Sim(self), np.zeros(3), 0.5, None
+
+    def get_ep_meta(self):
+        return {"lang": "Put it away.", "fixture_refs": {"cab": self.cabinet}}
+
+    def _check_success(self):
+        return bool(self.x[0] > self.target)
+
+
+class _Space:
+    shape, low, high = (3,), -np.ones(3), np.ones(3)
+
+
+class _Gym:
+    """Gym-wrapper-like: reset builds a scene; reset_to restores the state and, if `redraw`, picks the
+    cabinet (and the success target) again, as a model reload can."""
+
+    action_space = _Space()
+
+    def __init__(self, redraw=False, drift=False):
+        self.env, self.redraw, self.drift, self.n = _Raw(), redraw, drift, 0
+        self.override = None
+
+    def _obs(self):
+        return {"state": self.env.x.copy(), "annotation.human.task_description": self.override or "Put it away."}
+
+    def reset(self, **kwargs):
+        self.n += 1
+        self.override = None
+        self.env.x = np.full(3, 0.1 * self.n)
+        self.env.cabinet, self.env.target = f"cab{self.n}", 0.2
+        return self._obs(), {}
+
+    def step(self, a):
+        self.env.x = self.env.x + 0.01 * np.asarray(a) + (1e-3 if self.drift else 0.0)
+        return self._obs(), 0.0, False, False, {"success": self.env._check_success()}
+
+    def get_state(self):
+        return {"states": self.env.x.copy(), "model": "<xml/>", "ep_meta": json.dumps(self.env.get_ep_meta())}
+
+    def reset_to(self, state):
+        self.env.x = np.asarray(state["states"], float).copy()
+        if self.redraw:
+            self.env.cabinet, self.env.target = "cab_other", 9.0
+        return self._obs()
+
+    def set_task_description(self, t):
+        self.override = t
+
+    def get_current_observation(self):
+        return self._obs()
+
+    def close(self):
+        pass
+
+
+class RestoreCheckTest(unittest.TestCase):
+    def run_check(self, env):
+        with tempfile.TemporaryDirectory() as d:
+            return rc.check_task(env, "T", scenes=2, steps=20, log_dir=d)
+
+    def test_faithful_restore_is_same(self):
+        rows = self.run_check(_Gym())
+        self.assertTrue(all(r["same"] for r in rows), rows)
+        self.assertIsNone(rows[0]["state_diverges_at_step"])
+
+    def test_redrawn_target_is_caught(self):
+        rows = self.run_check(_Gym(redraw=True))
+        r = rows[0]
+        self.assertFalse(r["same"])
+        self.assertEqual(r["attribute_diffs"]["cabinet"], ["cab1", "cab_other"])
+        self.assertEqual(r["attribute_diffs"]["target"], [0.2, 9.0])
+        self.assertIn("fixture_refs.cab", r["ep_meta_diffs"])
+        self.assertTrue(r["check_differs_at"] or r["check_steps"][0] == r["check_steps"][1])
+
+    def test_actions_are_fixed_and_bounded(self):
+        a1, a2 = rc.actions_for(_Gym(), 5), rc.actions_for(_Gym(), 5)
+        self.assertTrue(all(np.array_equal(x, y) for x, y in zip(a1, a2)))
+        self.assertLessEqual(max(float(np.max(np.abs(x))) for x in a1), rc.ACTION_SCALE)
+
+    def test_summarize_and_diff(self):
+        class Fx:
+            name = "counter_1"
+        self.assertEqual(rc.summarize(Fx()), "<Fx counter_1>")
+        self.assertIsNone(rc.summarize(object()))
+        self.assertEqual(rc.diff({"a": 1, "d": {"x": 1}}, {"a": 1, "d": {"x": 2}}), {"d.x": [1, 2]})
