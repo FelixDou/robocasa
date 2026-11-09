@@ -7,7 +7,9 @@ the environment's reset() is replaced, per task environment:
     metadata right after it are kept in memory;
   - reset 2j+1 (retry of scene j), mode "rebuild" (default since 2026-11-10): the random generators the
     scene is built from (the environment's rng, numpy's global state and Python's random) are wound back
-    to their state before reset 2j, and the scene is built again by the same normal reset. Every task choice,
+    to their state before reset 2j, and the scene is built again by the same normal reset. Unseeded
+    np.random.default_rng() calls during a build (RoboCasa's fallbacks) are seeded from the scene's own
+    generator state (seeded_fallbacks), so they too repeat. Every task choice,
     target and controller value is then the same as the first attempt's, and the state hash and model XML
     must match exactly (check_e2). Mode "restore" (E2's first collection) restored the kept state through
     reset_to, which reloads the model: the restore check showed that this redraws task attributes (OpenDrawer's
@@ -29,6 +31,7 @@ Usage: the collector's own arguments, e.g.
   python -u scripts/rldx_e2/collect_e2.py --output-dir DIR --tasks T1 T2 $(cat collector_flags_e2.txt) \\
       --host 127.0.0.1 --port 20150
 """
+import contextlib
 import copy
 import hashlib
 import json
@@ -64,8 +67,28 @@ def capture_rng(env):
     owner, rng = env_rng(env)
     if rng is None:
         raise RuntimeError("E2 rebuild mode: no numpy Generator 'rng' under the environment wrappers")
-    return dict(owner=owner, env=copy.deepcopy(rng.bit_generator.state), numpy=np.random.get_state(),
-                python=random.getstate())
+    state = copy.deepcopy(rng.bit_generator.state)
+    entropy = int.from_bytes(hashlib.sha256(json.dumps(state, sort_keys=True, default=str).encode()).digest()[:16], "big")
+    return dict(owner=owner, env=state, numpy=np.random.get_state(), python=random.getstate(), fallback=entropy)
+
+
+@contextlib.contextmanager
+def seeded_fallbacks(entropy):
+    """While a scene is built, an unseeded np.random.default_rng() (RoboCasa's fallback when no rng is passed:
+    fixtures, object sampling, placement samplers) is seeded from a sequence derived from the scene's own
+    generator state, so the first build and its rebuild draw the same values and different scenes differ."""
+    original = np.random.default_rng
+    seq = np.random.SeedSequence(entropy)
+
+    def default_rng(seed=None):
+        if seed is None:
+            return original(seq.spawn(1)[0])
+        return original(seed)
+    np.random.default_rng = default_rng
+    try:
+        yield
+    finally:
+        np.random.default_rng = original
 
 
 def restore_rng(saved):
@@ -158,6 +181,12 @@ class PairedReset:
         if mode == "rebuild":
             env_rng(env)[1] or capture_rng(env)          # fail at install, not at the first retry
 
+    def rebuild(self, *args, **kwargs):
+        """The first attempt's scene, built again from the wound-back generators."""
+        restore_rng(self.rng_states)
+        with seeded_fallbacks(self.rng_states["fallback"]):
+            return self.base_reset(*args, **kwargs)
+
     def _log(self, row):
         with self.log_path.open("a") as fh:
             fh.write(json.dumps(row, sort_keys=True) + "\n")
@@ -168,7 +197,10 @@ class PairedReset:
         if k % 2 == 0:
             if self.mode == "rebuild":
                 self.rng_states = capture_rng(self.env)
-            result = self.base_reset(*args, **kwargs)
+                with seeded_fallbacks(self.rng_states["fallback"]):
+                    result = self.base_reset(*args, **kwargs)
+            else:
+                result = self.base_reset(*args, **kwargs)
             obs = result[0] if isinstance(result, tuple) else result
             state, flat = _flat_state(self.env)
             self.saved = {key: state[key] for key in ("states", "model", "ep_meta") if key in state}
@@ -180,8 +212,7 @@ class PairedReset:
         elif self.mode == "rebuild":
             if self.saved is None or self.rng_states is None:
                 raise RuntimeError("E2: a retry reset came before any first-attempt reset")
-            restore_rng(self.rng_states)
-            result = self.base_reset(*args, **kwargs)
+            result = self.rebuild(*args, **kwargs)
             obs = result[0] if isinstance(result, tuple) else result
             state, flat = _flat_state(self.env)
             residual = (float(np.max(np.abs(flat - self.saved["states"])))

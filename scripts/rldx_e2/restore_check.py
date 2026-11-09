@@ -154,8 +154,10 @@ def actions_for(env, steps, seed=ACTION_SEED):
 def run_attempt(env, raw, actions, reset=None):
     out = (reset or env.reset)()
     obs = out[0] if isinstance(out, tuple) else out
+    getter = ce.env_method(env, "get_state")
+    model = (getter() or {}).get("model", "") if getter is not None else ""
     snap = dict(instruction=instruction(obs), attributes=attributes(raw), ep_meta=ep_meta(env, raw),
-                controllers=controllers(raw),
+                controllers=controllers(raw), model_sha=ce._sha(model or ""),
                 states=[np.asarray(raw.sim.get_state().flatten(), float)], success=[], check=[])
     for a in actions:
         step = env.step(copy_action(a))
@@ -187,7 +189,7 @@ def compare(first, retry, retry2=None):
     succ = [i for i, (x, y) in enumerate(zip(first["success"], retry["success"])) if x != y]
     check = [i for i, (x, y) in enumerate(zip(first["check"], retry["check"])) if x != y]
     same = not attr and not meta and not ctrl and diverge is None and not succ and not check and \
-        first["instruction"] == retry["instruction"]
+        first["instruction"] == retry["instruction"] and first["model_sha"] == retry["model_sha"]
     control = None
     if retry2 is not None:
         d2, w2 = divergence(retry["states"], retry2["states"])
@@ -195,6 +197,7 @@ def compare(first, retry, retry2=None):
                        controller_diffs=diff(retry["controllers"], retry2["controllers"]))
     return dict(same=same, instruction=[first["instruction"], retry["instruction"]], attribute_diffs=attr,
                 ep_meta_diffs=meta, controller_diffs=ctrl, determinism_control=control,
+                model_same=first["model_sha"] == retry["model_sha"],
                 state_diverges_at_step=diverge, max_state_diff=worst,
                 success_differs_at=succ[:10], check_differs_at=check[:10],
                 success_steps=[sum(first["success"]), sum(retry["success"])],
@@ -214,8 +217,7 @@ def check_task(env, task, scenes, steps, log_dir, mode=ce.DEFAULT_MODE):
 
         def restore_again():                        # the same retry once more, outside the pair count
             if paired.mode == "rebuild":
-                ce.restore_rng(paired.rng_states)
-                return paired.base_reset()
+                return paired.rebuild()
             obs = ce.env_method(env, "reset_to")(dict(paired.saved))
             lang = ce.first_instruction(paired.saved)
             setter = ce.env_method(env, "set_task_description")
@@ -271,6 +273,8 @@ def main(argv=None):
                 print(f"    scene {r['scene']}: state diverges at step {r['state_diverges_at_step']} "
                       f"(max {r['max_state_diff']:.3g}); success steps {r['success_steps']}, "
                       f"_check_success steps {r['check_steps']}")
+                if not r["model_same"]:
+                    print("      the scene model XML differs")
                 if r["instruction"][0] != r["instruction"][1]:
                     print(f"      instruction: {r['instruction']}")
                 c = r["determinism_control"] or {}

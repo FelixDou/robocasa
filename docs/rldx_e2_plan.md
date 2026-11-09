@@ -646,3 +646,21 @@ is kept as a record but not used.**
    tasks, 50 scenes per task, budget and analysis. The seed must be unused, so 1501 rather than
    1401: the first collection's scenes have been seen.
 3. **Steps 7–9 and the follow-up** on that collection.
+
+### Restore check in rebuild mode (2026-11-10, `84f8b291`, all 20 tasks)
+
+18 of 20 tasks SAME.
+- **RinseSinkBasin, scene 0:** a sink reset-region side flipped. Two rebuilds also differed from
+  each other, so the build draws randomness that was not wound back.
+- **TurnOnElectricKettle, scene 1:** the kettle, which anchors the robot's start, was placed 2 m
+  elsewhere. The two rebuilds agreed with each other by chance.
+- **Common cause.** RoboCasa falls back to an unseeded `np.random.default_rng()` where no generator
+  is passed: `Fixture`, `fixture_stack`, `others`, `windows`, object sampling and placement samplers.
+  These fallbacks draw from the operating system.
+
+**Fix (`seeded_fallbacks`).** During each build, and its rebuild, an unseeded `default_rng()` is
+seeded from a sequence derived from the scene's own generator state, and numpy's function is put
+back afterwards.
+- The first build and the rebuild draw the same values, and different scenes still differ.
+- The check now also compares the scene model XML.
+- Tests: `FallbackTest`. The check is to be run again on all 20 tasks; all must be SAME.

@@ -642,3 +642,34 @@ class RebuildModeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(RuntimeError):
                 ce.install(Outer(FakeGymEnv()), "T", Path(d) / "pairs.jsonl")
+
+
+class _FallbackGym(_RngGym):
+    """Part of the scene comes from an unseeded np.random.default_rng(), as RoboCasa's fixture fallbacks do."""
+
+    def reset(self, **kwargs):
+        out = super().reset(**kwargs)
+        side = float(np.random.default_rng().choice([-1.0, 1.0]))
+        self.env.x[0] = side
+        self.env.side = side
+        return self._obs(), {}
+
+
+class FallbackTest(unittest.TestCase):
+    def test_unseeded_fallbacks_repeat_in_a_rebuild(self):
+        with tempfile.TemporaryDirectory() as d:
+            rows = rc.check_task(_FallbackGym(), "T", scenes=6, steps=5, log_dir=d, mode="rebuild")
+        self.assertTrue(all(r["same"] for r in rows), [r for r in rows if not r["same"]][:1])
+        self.assertTrue(all(r["determinism_control"]["retry_vs_retry2_diverges_at_step"] is None for r in rows))
+
+    def test_scenes_still_differ_and_default_rng_is_restored(self):
+        original = np.random.default_rng
+        with tempfile.TemporaryDirectory() as d:
+            env = ce.install(_FallbackGym(), "T", Path(d) / "pairs.jsonl")
+            sides = []
+            for _ in range(12):
+                env.reset(); sides.append(env.env.side); env.reset()
+        self.assertEqual(set(sides), {-1.0, 1.0})
+        self.assertIs(np.random.default_rng, original)
+        seeded = np.random.default_rng(3).random()
+        self.assertEqual(seeded, np.random.default_rng(3).random())
