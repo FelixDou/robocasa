@@ -483,3 +483,52 @@ raise success.
 - SAFE-LSTM's extra warning changes the outcome of 4 scenes in 1,000, all for the worse.
 - The limiting factor is the retry's success after a failure (15%), not the time left when the
   alarm comes.
+
+## Follow-up (written 2026-11-09, after the result; descriptive)
+
+`scripts/rldx_e2/followup_e2.py`, with tests in `tests/test_rldx_e2.py::FollowupTest`. CPU, minutes.
+- **Inputs.** E2's own files. No rollout is new.
+- **Alarms.** Every rule's alarm comes from `analyze_e2.alarms`, so its timing is exactly the one
+  behind the result.
+- **Gate F0.** The script first recomputes E2's published success rates and stops if any differs.
+
+- **F1. Ceiling of reset-and-retry.** A perfect detector resets exactly the first attempts that would
+  fail, and never a success. It does so at P's alarm (oracle@P), at SAFE-LSTM + P's (oracle@SAFE,
+  with its one step of latency), or at the first inference (oracle@0, where the retry gets the whole
+  budget). Each is reported against no reset and against P, with 95% CIs.
+  - This bounds what any detector could gain from this recovery action at each timing.
+- **F2. Is failure a property of the scene?**
+  - Per task and type: first-attempt success, and full-budget retry success after a failed and
+    after a successful first attempt.
+  - The retry success after a failure that independence within the task would predict.
+  - The Mantel–Haenszel odds ratio (strata = tasks) of retry success given first-attempt success,
+    with a bootstrap CI. OR ≫ 1 means some scenes are hard for this policy.
+- **F3. Stopping at the alarm instead of restarting** (handing over, say). For P, SAFE-LSTM + P and
+  Hide-and-Seek + P:
+  - robot time saved on failed first attempts, (B − t_a) control steps at 20 Hz;
+  - successes stopped, meaning those whose alarm came before the success;
+  - differences against P per scene, with 95% CIs.
+
+**Expectations (written before running).**
+- **F1.**
+  - oracle@0 is about 0.508 + 0.492 × 0.148 ≈ 0.58, i.e. +0.07 over no reset.
+  - oracle@P gains less, about +0.02 to +0.04, because its retry has only the budget left after the
+    timer's alarm.
+  - oracle@SAFE is within 0.01 of oracle@P.
+  - So even a perfect detector at the timer's timing gains a few points at most.
+- **F2.** OR well above 1, likely 5–15, with retry success after a failure (0.148) well below the
+  independence prediction. Composite tasks are more dependent than atomic ones.
+- **F3.**
+  - P saves roughly a third of each failed attempt's length.
+  - SAFE-LSTM + P saves about 1 s more per failure (E1: +1.4 s) and stops about 7 more successes,
+    from 55 against 48 unnecessary resets in E2.
+
+**Command** (from the step 7a worktree, after step 9):
+
+```bash
+cd $E2_REPO
+$CLIENT_PY -I scripts/rldx_e2/followup_e2.py --plan $E2_ROOT/plan.json --pairs $E2_ROOT/pairs.json \
+  --scores-dir $E2_ROOT/scores --result $E2_ROOT/e2_result.json --output $E2_ROOT/e2_followup.json \
+  2>&1 | tee $E2_LOG/followup.log
+sha256sum $E2_ROOT/e2_followup.json
+```

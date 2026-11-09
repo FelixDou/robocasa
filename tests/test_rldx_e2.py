@@ -22,6 +22,7 @@ ce = _load("_t_collect_e2", "scripts/rldx_e2/collect_e2.py")
 pe = _load("_t_plan_e2", "scripts/rldx_e2/plan_e2.py")
 ck = _load("_t_check_e2", "scripts/rldx_e2/check_e2.py")
 an = _load("_t_analyze_e2", "scripts/rldx_e2/analyze_e2.py")
+fu = _load("_t_followup_e2", "scripts/rldx_e2/followup_e2.py")
 
 
 class FakeGymEnv:
@@ -355,3 +356,70 @@ class CheckTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FollowupTest(unittest.TestCase):
+    """followup_e2.py: the reset ceiling, scene dependence and stopping at the alarm."""
+
+    def plan(self):
+        plan, _ = pe.build(*e1_inputs(), seed=1401, used={}, shards=2)
+        plan["conditions"]["P"]["lam"] = 0.1                                    # P alarms at inference 35, step 272
+        plan["conditions"]["safe_lstm_plus_P"]["lam"] = 0.1
+        plan["bootstrap"] = 200
+        return plan
+
+    def scenes(self, n=20, dependent=False, seed=0):
+        rng = np.random.default_rng(seed)
+        sc = []
+        for t in ("A", "B"):
+            for j in range(n):
+                s0 = bool(rng.random() < 0.5)
+                s1 = s0 if dependent else bool(rng.random() < 0.5)
+                sc.append(dict(scene(t=t, s0=s0, n0=200 if s0 else 500, n_inf=25 if s0 else 63, s1=s1, n1=100),
+                               type="atomic" if t == "A" else "composite"))
+        return sc
+
+    def test_oracle_resets_only_failures(self):
+        plan = self.plan()
+        sc = [scene(s0=True, n0=200, n_inf=25),                    # success: never reset by the oracle
+              scene(s1=True, n1=228),                              # failure, retry fits after P's alarm (272)
+              scene(s1=True, n1=300),                              # fits only if reset at once
+              scene(s1=False)]
+        self.assertEqual(fu.oracle(sc, plan["conditions"]["P"]).tolist(), [True, True, False, False])
+        self.assertEqual(fu.oracle(sc).tolist(), [True, True, True, False])
+        out = fu.f1(plan, self.scenes())
+        for k in ("oracle@P", "oracle@SAFE", "oracle@0"):
+            self.assertGreaterEqual(out[f"{k}_minus_none"]["delta"], 0.0)
+            self.assertGreaterEqual(out[f"{k}_minus_P"]["delta"], 0.0)
+        self.assertGreaterEqual(out["success"]["oracle@0"]["rate"], out["success"]["oracle@P"]["rate"])
+
+    def test_odds_ratio_separates_hard_scenes(self):
+        plan = self.plan()
+        indep = fu.f2(plan, self.scenes(n=200, dependent=False, seed=1))
+        dep = fu.f2(plan, self.scenes(n=200, dependent=True, seed=1))
+        self.assertLess(abs(math.log(indep["odds_ratio"])), 0.5)
+        self.assertGreater(dep["odds_ratio"], 50)
+        self.assertEqual(dep["all"]["retry_after_failure"], 0.0)
+        self.assertLessEqual(indep["odds_ratio_ci"][0], indep["odds_ratio"])
+        self.assertEqual(set(dep["by_type"]), {"atomic", "composite"})
+
+    def test_stopping_saves_time_on_failures_and_stops_late_successes(self):
+        plan = self.plan()
+        before = scene(s0=True, n0=272, n_inf=34)                  # succeeds before P's alarm
+        after = scene(s0=True, n0=273, n_inf=35)                   # P alarms at its 35th inference: stopped
+        fail = scene()                                             # alarmed at step 272 of 500
+        saved, stopped = fu.stop_values([before, after, fail], plan["conditions"]["P"])
+        self.assertEqual(stopped.tolist(), [False, True, False])
+        self.assertAlmostEqual(saved[2], (500 - 272) / 20.0)
+        out = fu.f3(plan, self.scenes())
+        self.assertIn("minus_P", out["rules"]["safe_lstm_plus_P"])
+        m = out["rules"]["safe_lstm_plus_P"]["minus_P"]
+        self.assertLessEqual(m["seconds_saved_per_scene_ci"][0], m["seconds_saved_per_scene"] + 1e-9)
+
+    def test_f0_reproduces_published_rates(self):
+        plan = self.plan()
+        sc = self.scenes()
+        result = an.analyze(plan, sc, has_hs=False)
+        self.assertEqual(fu.reproduce(plan, sc, result, has_hs=False), [])
+        result["rates"]["P"]["success"] += 0.01
+        self.assertTrue(fu.reproduce(plan, sc, result, has_hs=False))
