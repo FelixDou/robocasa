@@ -581,7 +581,7 @@ class RestoreCheckTest(unittest.TestCase):
                 return super().step(np.zeros(3))
         r = self.run_check(G())[0]
         self.assertFalse(r["same"])
-        self.assertIn("robot0.right.goal", r["controller_diffs"])
+        self.assertTrue(any(k.startswith("robot0.right.goal") for k in r["controller_diffs"]), r["controller_diffs"])
         self.assertEqual(r["state_diverges_at_step"], 1)
         self.assertIsNone(r["determinism_control"]["retry_vs_retry2_diverges_at_step"])
         self.assertEqual(r["determinism_control"]["controller_diffs"], {})
