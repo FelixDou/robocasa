@@ -39,14 +39,18 @@ VOLATILE = {"timestep", "cur_time", "done", "_obs_cache", "rng", "np_random"}
 
 
 def raw_env(env):
-    """The robosuite environment under the gym wrappers (the object with sim and get_ep_meta)."""
-    seen, node = set(), env
+    """The innermost environment with a simulator: the RoboCasa task itself, not a wrapper that forwards
+    sim or get_ep_meta (the first version of this check read the gym wrapper)."""
+    seen, node, found = set(), env, None
     while node is not None and id(node) not in seen:
         seen.add(id(node))
-        if hasattr(node, "sim") and hasattr(node, "get_ep_meta"):
-            return node
-        node = getattr(node, "env", None)
-    raise RuntimeError("no robosuite environment under the wrappers")
+        if "sim" in vars(node) or hasattr(type(node), "sim") or hasattr(node, "_check_success"):
+            if hasattr(node, "sim"):
+                found = node
+        node = vars(node).get("env") if hasattr(node, "__dict__") else None
+    if found is None:
+        raise RuntimeError("no robosuite environment under the wrappers")
+    return found
 
 
 def summarize(v, depth=0):
@@ -81,18 +85,33 @@ def attributes(raw):
     return out
 
 
-def diff(a, b, prefix=""):
-    """Keys whose summarized values differ (one level into dicts)."""
+def diff(a, b, path="", out=None, limit=200):
+    """Every leaf that differs, by path (dicts by key, equal-length lists by index)."""
+    out = {} if out is None else out
+    if len(out) >= limit:
+        return out
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in sorted(set(a) | set(b), key=str):
+            diff(a.get(k, "<missing>"), b.get(k, "<missing>"), f"{path}.{k}" if path else str(k), out, limit)
+    elif isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+        for i, (x, y) in enumerate(zip(a, b)):
+            diff(x, y, f"{path}[{i}]", out, limit)
+    elif a != b:
+        out[path] = [a, b]
+    return out
+
+
+def controllers(raw):
+    """Summaries of each robot's composite controller and part controllers (goals, references)."""
     out = {}
-    for k in sorted(set(a) | set(b)):
-        x, y = a.get(k, "<missing>"), b.get(k, "<missing>")
-        if x == y:
+    for i, robot in enumerate(getattr(raw, "robots", []) or []):
+        out[f"robot{i}"] = {k: s for k, v in vars(robot).items() if (s := summarize(v)) is not None}
+        cc = getattr(robot, "composite_controller", None)
+        if cc is None:
             continue
-        if isinstance(x, dict) and isinstance(y, dict) and not prefix:
-            for kk, vv in diff(x, y, prefix=k).items():
-                out[f"{k}.{kk}"] = vv
-        else:
-            out[k] = [x, y]
+        out[f"robot{i}.composite"] = {k: s for k, v in vars(cc).items() if (s := summarize(v)) is not None}
+        for name, c in (getattr(cc, "part_controllers", None) or {}).items():
+            out[f"robot{i}.{name}"] = {k: s for k, v in vars(c).items() if (s := summarize(v)) is not None}
     return out
 
 
@@ -132,10 +151,11 @@ def actions_for(env, steps, seed=ACTION_SEED):
     return [sample(env.action_space, rng) for _ in range(steps)]
 
 
-def run_attempt(env, raw, actions):
-    out = env.reset()
+def run_attempt(env, raw, actions, reset=None):
+    out = (reset or env.reset)()
     obs = out[0] if isinstance(out, tuple) else out
     snap = dict(instruction=instruction(obs), attributes=attributes(raw), ep_meta=ep_meta(env, raw),
+                controllers=controllers(raw),
                 states=[np.asarray(raw.sim.get_state().flatten(), float)], success=[], check=[])
     for a in actions:
         step = env.step(copy_action(a))
@@ -149,22 +169,33 @@ def run_attempt(env, raw, actions):
     return snap
 
 
-def compare(first, retry):
-    states_a, states_b = first["states"], retry["states"]
+def divergence(states_a, states_b):
     diverge, worst = None, 0.0
     for i, (a, b) in enumerate(zip(states_a, states_b)):
         d = float(np.max(np.abs(a - b))) if a.shape == b.shape else math.inf
         worst = max(worst, d)
         if diverge is None and d > STATE_TOL:
             diverge = i
+    return diverge, worst
+
+
+def compare(first, retry, retry2=None):
+    diverge, worst = divergence(first["states"], retry["states"])
+    ctrl = diff(first["controllers"], retry["controllers"])
     attr = diff(first["attributes"], retry["attributes"])
     meta = diff(first["ep_meta"], retry["ep_meta"])
     succ = [i for i, (x, y) in enumerate(zip(first["success"], retry["success"])) if x != y]
     check = [i for i, (x, y) in enumerate(zip(first["check"], retry["check"])) if x != y]
-    same = not attr and not meta and diverge is None and not succ and not check and \
+    same = not attr and not meta and not ctrl and diverge is None and not succ and not check and \
         first["instruction"] == retry["instruction"]
+    control = None
+    if retry2 is not None:
+        d2, w2 = divergence(retry["states"], retry2["states"])
+        control = dict(retry_vs_retry2_diverges_at_step=d2, max_state_diff=w2,
+                       controller_diffs=diff(retry["controllers"], retry2["controllers"]))
     return dict(same=same, instruction=[first["instruction"], retry["instruction"]], attribute_diffs=attr,
-                ep_meta_diffs=meta, state_diverges_at_step=diverge, max_state_diff=worst,
+                ep_meta_diffs=meta, controller_diffs=ctrl, determinism_control=control,
+                state_diverges_at_step=diverge, max_state_diff=worst,
                 success_differs_at=succ[:10], check_differs_at=check[:10],
                 success_steps=[sum(first["success"]), sum(retry["success"])],
                 check_steps=[sum(x is True for x in first["check"]), sum(x is True for x in retry["check"])])
@@ -175,11 +206,23 @@ def check_task(env, task, scenes, steps, log_dir):
     raw = raw_env(env)
     env = ce.install(env, task, Path(log_dir) / f"{task}_pairs.jsonl")
     acts = actions_for(env, steps)
+    paired = env.reset
     out = []
     for j in range(scenes):
         first = run_attempt(env, raw, acts)
         retry = run_attempt(env, raw, acts)
-        out.append(dict(scene=j, **compare(first, retry)))
+
+        def restore_again():                        # the same restore once more, outside the pair count
+            obs = ce.env_method(env, "reset_to")(dict(paired.saved))
+            lang = ce.first_instruction(paired.saved)
+            setter = ce.env_method(env, "set_task_description")
+            if lang and setter is not None:
+                setter(lang)
+                getter = ce.env_method(env, "get_current_observation")
+                obs = getter() if getter is not None else obs
+            return obs
+        retry2 = run_attempt(env, raw, acts, reset=restore_again)
+        out.append(dict(scene=j, **compare(first, retry, retry2)))
     return out
 
 
@@ -225,10 +268,16 @@ def main(argv=None):
                       f"_check_success steps {r['check_steps']}")
                 if r["instruction"][0] != r["instruction"][1]:
                     print(f"      instruction: {r['instruction']}")
-                for k, (x, y) in list(r["attribute_diffs"].items())[:12]:
-                    print(f"      attr {k}: {str(x)[:70]} -> {str(y)[:70]}")
-                for k, (x, y) in list(r["ep_meta_diffs"].items())[:8]:
-                    print(f"      ep_meta {k}: {str(x)[:70]} -> {str(y)[:70]}")
+                c = r["determinism_control"] or {}
+                print(f"      control (restore vs restore): diverges at step {c.get('retry_vs_retry2_diverges_at_step')} "
+                      f"(max {c.get('max_state_diff', float('nan')):.3g}); controller diffs {len(c.get('controller_diffs') or {})}")
+                for label, key, n in (("ctrl", "controller_diffs", 14), ("attr", "attribute_diffs", 14),
+                                      ("ep_meta", "ep_meta_diffs", 10)):
+                    items = list(r[key].items())
+                    for k, (x, y) in items[:n]:
+                        print(f"      {label} {k}: {str(x)[:60]} -> {str(y)[:60]}")
+                    if len(items) > n:
+                        print(f"      {label}: {len(items) - n} more")
     out = dict(plan=PLAN, split=split, seed=seed, scenes=a.scenes, steps=a.steps, render=bool(a.render),
                action_scale=ACTION_SCALE, action_seed=ACTION_SEED, state_tol=STATE_TOL, tasks=results)
     Path(a.output).write_text(json.dumps(out, indent=1, default=str) + "\n")

@@ -546,9 +546,50 @@ class RestoreCheckTest(unittest.TestCase):
         rows = self.run_check(G())
         self.assertTrue(all(r["same"] for r in rows), rows)
 
+    def test_stale_controller_goal_is_caught_and_control_is_clean(self):
+        """A controller goal left from the rebuilt scene: the controller differs and the states diverge,
+        while two restores of the same state agree with each other."""
+        class Ctrl:
+            def __init__(self):
+                self.goal = np.zeros(3)
+
+        class Robot:
+            def __init__(self):
+                self.composite_controller = type("CC", (), {})()
+                self.composite_controller.part_controllers = {"right": Ctrl()}
+
+        class G(_Gym):
+            def __init__(self):
+                super().__init__()
+                self.env.robots = [Robot()]
+
+            def _ctrl(self):
+                return self.env.robots[0].composite_controller.part_controllers["right"]
+
+            def reset(self, **kw):
+                out = super().reset(**kw)
+                self._ctrl().goal = self.env.x.copy()
+                return out
+
+            def reset_to(self, state):
+                obs = super().reset_to(state)
+                self._ctrl().goal = np.full(3, 7.0)          # not restored: left from a rebuild
+                return obs
+
+            def step(self, a):
+                self.env.x = self.env.x + 0.01 * (self._ctrl().goal - self.env.x)
+                return super().step(np.zeros(3))
+        r = self.run_check(G())[0]
+        self.assertFalse(r["same"])
+        self.assertIn("robot0.right.goal", r["controller_diffs"])
+        self.assertEqual(r["state_diverges_at_step"], 1)
+        self.assertIsNone(r["determinism_control"]["retry_vs_retry2_diverges_at_step"])
+        self.assertEqual(r["determinism_control"]["controller_diffs"], {})
+
     def test_summarize_and_diff(self):
         class Fx:
             name = "counter_1"
         self.assertEqual(rc.summarize(Fx()), "<Fx counter_1>")
         self.assertIsNone(rc.summarize(object()))
         self.assertEqual(rc.diff({"a": 1, "d": {"x": 1}}, {"a": 1, "d": {"x": 2}}), {"d.x": [1, 2]})
+        self.assertEqual(rc.diff({"c": [{"n": "a", "p": 1}]}, {"c": [{"n": "a", "p": 2}]}), {"c[0].p": [1, 2]})

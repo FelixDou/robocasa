@@ -592,3 +592,18 @@ The output decides the next step:
   recollected (as in step 7a). The analysis is redone only after the check passes on every task.
 - **Every task SAME:** the cause lies outside the environment (policy server, timing), and that is
   examined next.
+
+### Restore check, first runs (2026-11-10)
+
+- **`b247038d`:** after an action-space fix (the first run errored on RoboCasa's Dict action space),
+  every task was DIFFERENT.
+  - The restored state equals the first attempt's at step 0, but under the same actions the two
+    diverge from step 1 in all 20 tasks (about 0.066 on the calm tasks, up to 4.3).
+  - ep_meta `object_cfgs` differ in 13 tasks; the printout was truncated.
+  - The attribute snapshot read the gym wrapper, so it showed only the instruction override.
+- **Version 2:**
+  - reads the RoboCasa task itself;
+  - diffs every leaf of ep_meta and of each robot's composite and part controllers;
+  - adds a control that restores the same state a second time. If the two restores agree with each
+    other but not with the first attempt, the restore differs. If they disagree with each other, the
+    simulation itself is not repeatable.
