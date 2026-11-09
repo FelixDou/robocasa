@@ -11,7 +11,8 @@ the environment's reset() is replaced, per task environment:
     np.random.default_rng() calls during a build (RoboCasa's fallbacks) are seeded from the scene's own
     generator state (seeded_fallbacks), so they too repeat. Every task choice,
     target and controller value is then the same as the first attempt's, and the state hash and model XML
-    must match exactly (check_e2). Mode "restore" (E2's first collection) restored the kept state through
+    must match exactly (check_e2). Every other numpy generator reachable from the environment or held at
+    module level in RoboCasa / robosuite / gym is wound back too (find_generators). Mode "restore" (E2's first collection) restored the kept state through
     reset_to, which reloads the model: the restore check showed that this redraws task attributes (OpenDrawer's
     side, NavigateKitchen's target_pos) and leaves the arm controllers' goals at their default pose.
     The policy is reset by the collector as for any rollout.
@@ -63,13 +64,59 @@ def env_rng(env):
     return None, None
 
 
+GEN_TYPES = (np.random.Generator, np.random.RandomState)
+SCAN_LIMIT = 300000
+SCAN_MODULES = ("robocasa", "robosuite", "gymnasium", "gym")
+
+
+def find_generators(roots, limit=SCAN_LIMIT):
+    """Every numpy Generator / RandomState reachable from `roots` through attributes, dicts, lists and
+    tuples (arrays, strings and simulator handles are not entered), plus module-level ones in RoboCasa,
+    robosuite and gym modules. Returns {id: object}."""
+    found, seen, stack, n = {}, set(), list(roots), 0
+    for name, mod in list(sys.modules.items()):
+        if mod is not None and name.split(".")[0] in SCAN_MODULES:
+            for v in list(vars(mod).values()):
+                if isinstance(v, GEN_TYPES):
+                    found[id(v)] = v
+    while stack and n < limit:
+        obj = stack.pop()
+        if id(obj) in seen:
+            continue
+        seen.add(id(obj))
+        n += 1
+        if isinstance(obj, GEN_TYPES):
+            found[id(obj)] = obj
+            continue
+        if obj is None or isinstance(obj, (str, bytes, int, float, bool, np.ndarray, np.generic, type)):
+            continue
+        if type(obj).__module__.split(".")[0] in ("mujoco", "ctypes"):
+            continue
+        if isinstance(obj, dict):
+            stack.extend(obj.values())
+        elif isinstance(obj, (list, tuple, set, frozenset)):
+            stack.extend(obj)
+        elif hasattr(obj, "__dict__"):
+            try:
+                stack.extend(vars(obj).values())
+            except TypeError:
+                pass
+    return found
+
+
+def _gen_state(g):
+    return copy.deepcopy(g.bit_generator.state) if isinstance(g, np.random.Generator) else g.get_state()
+
+
 def capture_rng(env):
     owner, rng = env_rng(env)
     if rng is None:
         raise RuntimeError("E2 rebuild mode: no numpy Generator 'rng' under the environment wrappers")
     state = copy.deepcopy(rng.bit_generator.state)
     entropy = int.from_bytes(hashlib.sha256(json.dumps(state, sort_keys=True, default=str).encode()).digest()[:16], "big")
-    return dict(owner=owner, env=state, numpy=np.random.get_state(), python=random.getstate(), fallback=entropy)
+    gens = find_generators([env])
+    return dict(owner=owner, env=state, numpy=np.random.get_state(), python=random.getstate(), fallback=entropy,
+                generators=[(g, _gen_state(g)) for g in gens.values() if g is not rng])
 
 
 @contextlib.contextmanager
@@ -98,6 +145,11 @@ def restore_rng(saved):
     rng.bit_generator.state = copy.deepcopy(saved["env"])
     np.random.set_state(saved["numpy"])
     random.setstate(saved["python"])
+    for g, st in saved.get("generators", []):          # every other generator that existed before the build
+        if isinstance(g, np.random.Generator):
+            g.bit_generator.state = copy.deepcopy(st)
+        else:
+            g.set_state(st)
 
 
 def _sha(data):

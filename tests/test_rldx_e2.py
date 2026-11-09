@@ -673,3 +673,33 @@ class FallbackTest(unittest.TestCase):
         self.assertIs(np.random.default_rng, original)
         seeded = np.random.default_rng(3).random()
         self.assertEqual(seeded, np.random.default_rng(3).random())
+
+
+class _PersistentGenGym(_RngGym):
+    """A sampler made once at start-up keeps its own generator across scenes (and a module-level one)."""
+
+    def __init__(self, seed=0):
+        super().__init__(seed)
+        self.sampler = type("Sampler", (), {})()
+        self.sampler.rng = np.random.default_rng(99)
+
+    def reset(self, **kwargs):
+        out = super().reset(**kwargs)
+        self.env.x[1] = float(self.sampler.rng.uniform())
+        return self._obs(), {}
+
+
+class PersistentGeneratorTest(unittest.TestCase):
+    def test_generators_held_by_objects_are_wound_back(self):
+        with tempfile.TemporaryDirectory() as d:
+            rows = rc.check_task(_PersistentGenGym(), "T", scenes=4, steps=5, log_dir=d, mode="rebuild")
+        self.assertTrue(all(r["same"] for r in rows), [r for r in rows if not r["same"]][:1])
+
+    def test_find_generators(self):
+        holder = type("H", (), {})()
+        holder.a = {"x": [np.random.default_rng(1)]}
+        holder.b = np.random.RandomState(2)
+        holder.c = np.zeros(3)
+        found = ce.find_generators([holder])
+        self.assertIn(id(holder.a["x"][0]), found)
+        self.assertIn(id(holder.b), found)

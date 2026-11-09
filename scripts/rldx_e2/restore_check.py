@@ -157,7 +157,7 @@ def run_attempt(env, raw, actions, reset=None):
     getter = ce.env_method(env, "get_state")
     model = (getter() or {}).get("model", "") if getter is not None else ""
     snap = dict(instruction=instruction(obs), attributes=attributes(raw), ep_meta=ep_meta(env, raw),
-                controllers=controllers(raw), model_sha=ce._sha(model or ""),
+                controllers=controllers(raw), model_sha=ce._sha(model or ""), model=model or "",
                 states=[np.asarray(raw.sim.get_state().flatten(), float)], success=[], check=[])
     for a in actions:
         step = env.step(copy_action(a))
@@ -195,7 +195,14 @@ def compare(first, retry, retry2=None):
         d2, w2 = divergence(retry["states"], retry2["states"])
         control = dict(retry_vs_retry2_diverges_at_step=d2, max_state_diff=w2,
                        controller_diffs=diff(retry["controllers"], retry2["controllers"]))
+    model_diff = None
+    if first["model_sha"] != retry["model_sha"]:
+        import difflib
+        lines = list(difflib.unified_diff(first["model"].splitlines(), retry["model"].splitlines(), lineterm="", n=0))
+        changed = [x for x in lines if x[:1] in "+-" and not x.startswith(("+++", "---"))]
+        model_diff = dict(changed_lines=len(changed), first=[x[:200] for x in changed[:6]])
     return dict(same=same, instruction=[first["instruction"], retry["instruction"]], attribute_diffs=attr,
+                model_diff=model_diff,
                 ep_meta_diffs=meta, controller_diffs=ctrl, determinism_control=control,
                 model_same=first["model_sha"] == retry["model_sha"],
                 state_diverges_at_step=diverge, max_state_diff=worst,
@@ -274,7 +281,10 @@ def main(argv=None):
                       f"(max {r['max_state_diff']:.3g}); success steps {r['success_steps']}, "
                       f"_check_success steps {r['check_steps']}")
                 if not r["model_same"]:
-                    print("      the scene model XML differs")
+                    md = r.get("model_diff") or {}
+                    print(f"      the scene model XML differs ({md.get('changed_lines')} changed lines), e.g.:")
+                    for line in (md.get("first") or [])[:4]:
+                        print(f"        {line[:150]}")
                 if r["instruction"][0] != r["instruction"][1]:
                     print(f"      instruction: {r['instruction']}")
                 c = r["determinism_control"] or {}

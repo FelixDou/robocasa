@@ -664,3 +664,17 @@ back afterwards.
 - The first build and the rebuild draw the same values, and different scenes still differ.
 - The check now also compares the scene model XML.
 - Tests: `FallbackTest`. The check is to be run again on all 20 tasks; all must be SAME.
+
+### Restore check in rebuild mode, run 2 (2026-11-10, `584f8cee`, 3 scenes per task)
+
+12 of 20 tasks SAME.
+- **Two rebuilds disagreed** in PreSoakPan, ScrubCuttingBoard, NavigateKitchen and RinseSinkBasin
+  scene 1; PreSoakPan even got another layout. So generators that persist across resets were not
+  wound back: only the env's `rng` was.
+- **The first build differed from rebuilds that agreed** in RinseSinkBasin scene 0, WashLettuce and
+  TurnOnElectricKettle scene 2.
+- **CloseFridge (all scenes) and CloseToasterOvenDoor:** identical states, but different model XML.
+
+**Change.** Every numpy Generator and RandomState reachable from the environment, or held at module
+level in RoboCasa, robosuite or gym, is now wound back (`find_generators`). When the model XML differs,
+the check prints the changed lines. Tests: `PersistentGeneratorTest`.
