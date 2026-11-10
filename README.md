@@ -15,8 +15,11 @@ This guide contains information about installation and setup. Please refer to th
 
 -------
 ## Updates
+* [10/28/2026] The leaderboard now accepts [**agentic submissions**](https://robocasa.ai/leaderboard/agentic.html): new models or novel agentic harnesses built around a base policy.
+* [10/14/2026] Released the [**subtask annotation pipeline**](https://robocasa.ai/docs/build/html/use_cases/subtask_annotations.html), with labelers covering all 300 composite tasks. It generates per-frame subtask labels directly from each demo's simulation state.
 * [7/7/2026] Our target composite task datasets have been updated to include per-frame **subtask annotations**. Every timestep is labeled with a subtask index, atomic-skill name, stage (i.e. pick / place / navigate), and a natural-language instruction, to support hierarchical policy learning.
 * [5/12/2026] **v1.0.1**: Updated horizon lengths (1.5x increase) across all tasks for consistency. Please update to the latest version for running evals.
+* [4/6/2026] [**RoboCasa365 Leaderboard**](https://robocasa.ai/leaderboard.html) published, comparing generalist robot policies on the multi-task learning benchmark and open to community model submissions.
 * [2/18/2026] **v1.0**: RoboCasa365 release, with 365 tasks, 2500+ kitchen scenes, 2200+ hours of robot demonstration data, and benchmarking support.
 * [10/31/2024] **v0.2**: using RoboSuite `v1.5` as the backend, with improved support for custom robot composition, composite controllers, more teleoperation devices, photo-realistic rendering.
 
@@ -25,6 +28,7 @@ This guide contains information about installation and setup. Please refer to th
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
 - [Tasks, datasets, policy learning, and additional use cases](#tasks-datasets-policy-learning-and-additional-use-cases)
+- [Questions](#questions)
 - [License](#license)
 - [Citation](#citation)
 
@@ -117,6 +121,10 @@ Note: If using SpaceMouse, you may need to modify the product ID to your appropr
 -------
 ## Tasks, datasets, policy learning, and additional use cases
 Please refer to the [documentation page](https://robocasa.ai/docs/introduction/overview.html) for information about tasks, datasets, benchmarking, and more.
+
+-------
+## Questions
+If you have any questions about RoboCasa, reach out at [robocasa@googlegroups.com](mailto:robocasa@googlegroups.com).
 
 -------
 ## License

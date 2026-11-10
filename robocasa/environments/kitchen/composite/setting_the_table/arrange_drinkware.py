@@ -14,7 +14,7 @@ class ArrangeDrinkware(Kitchen):
         4. Place the cup on the dining counter.
     """
 
-    EXCLUDE_LAYOUTS = Kitchen.DINING_COUNTER_EXCLUDED_LAYOUTS
+    EXCLUDE_LAYOUTS = Kitchen.DINING_COUNTER_EXCLUDED_LAYOUTS + [2, 7, 15, 24, 29, 31, 33, 34, 37, 42, 56, 59]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

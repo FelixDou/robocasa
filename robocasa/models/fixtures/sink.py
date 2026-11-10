@@ -361,16 +361,3 @@ class Sink(Fixture):
     @property
     def nat_lang(self):
         return "sink"
-
-    def check_obj_under_water(self, env, obj_name, xy_thresh=None):
-        if xy_thresh is None:
-            xy_thresh = env.objects[obj_name].horizontal_radius
-        obj_pos = np.array(env.sim.data.body_xpos[env.obj_body_id[obj_name]])
-        water_site_id = env.sim.model.site_name2id(self.water_site.get("name"))
-        water_site_pos = env.sim.data.site_xpos[water_site_id]
-        xy_check = np.linalg.norm(obj_pos[0:2] - water_site_pos[0:2]) < xy_thresh
-        z_check = (
-            obj_pos[2]
-            < water_site_pos[2] + string_to_array(self.water_site.get("size"))[1]
-        )
-        return xy_check and z_check and self.get_handle_state(env)["water_on"]
