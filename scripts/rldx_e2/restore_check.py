@@ -217,15 +217,26 @@ def check_task(env, task, scenes, steps, log_dir, mode=ce.DEFAULT_MODE):
     env = ce.install(env, task, Path(log_dir) / f"{task}_pairs.jsonl", mode=mode)
     acts = actions_for(env, steps)
     paired = env.reset
-    out = []
+    out, previous = [], None
     for j in range(scenes):
         first = run_attempt(env, raw, acts)
+        start = first["states"][0]
+        config = {k: first["ep_meta"].get(k) for k in ("layout_id", "style_id", "fixture_refs", "object_cfgs",
+                                                       "init_robot_base_pos")}
+        repeats = None
+        if previous is not None:
+            same_start = previous[0].shape == start.shape and float(np.max(np.abs(previous[0] - start))) <= 1e-9
+            repeats = dict(same_start_state=bool(same_start), same_configuration=bool(previous[1] == config))
+        previous = (start, config)
         retry = run_attempt(env, raw, acts)
 
         def restore_again():                        # the same retry once more, outside the pair count
             if paired.mode == "rebuild":
                 return paired.rebuild()
             obs = ce.env_method(env, "reset_to")(dict(paired.saved))
+            if paired.mode == "restore":                # as PairedReset does
+                ce.copy_back(paired.plain or [])
+                ce.clear_ep_meta(env)
             lang = ce.first_instruction(paired.saved)
             setter = ce.env_method(env, "set_task_description")
             if lang and setter is not None:
@@ -234,7 +245,7 @@ def check_task(env, task, scenes, steps, log_dir, mode=ce.DEFAULT_MODE):
                 obs = getter() if getter is not None else obs
             return obs
         retry2 = run_attempt(env, raw, acts, reset=restore_again)
-        out.append(dict(scene=j, **compare(first, retry, retry2)))
+        out.append(dict(scene=j, repeats_previous_scene=repeats, **compare(first, retry, retry2)))
     return out
 
 
@@ -248,7 +259,7 @@ def main(argv=None):
     p.add_argument("--seed", type=int, help="environment seed (default: the plan's E2 seed)")
     p.add_argument("--render", action="store_true", help="build with rendering, as E2 did (needs EGL)")
     p.add_argument("--mode", choices=ce.MODES, default=ce.DEFAULT_MODE,
-                   help="retry mode to check: rebuild (default) or restore (E2's first collection)")
+                   help="retry mode to check (default: restore; restore_legacy = E2's first collection)")
     a = p.parse_args(argv)
     if Path(a.output).exists():
         raise SystemExit(f"error: {a.output} exists")
@@ -257,7 +268,7 @@ def main(argv=None):
     seed = a.seed if a.seed is not None else int(plan["seed"])
     tasks = a.tasks or sorted(plan["tasks"])
     from robocasa.recovery.evaluate_recovery_benchmark import make_env
-    results, n_same = {}, 0
+    results, n_same, n_repeat = {}, 0, 0
     with tempfile.TemporaryDirectory() as log_dir:
         for t in tasks:
             env = make_env(t, "gym", split, seed, bool(a.render))
@@ -270,7 +281,10 @@ def main(argv=None):
             results[t] = rows
             ok = all(r.get("same") for r in rows)
             n_same += ok
-            print(f"{t:28s} {'SAME' if ok else 'DIFFERENT'}")
+            reps = [r for r in rows if (r.get("repeats_previous_scene") or {}).get("same_configuration")
+                    or (r.get("repeats_previous_scene") or {}).get("same_start_state")]
+            n_repeat += bool(reps)
+            print(f"{t:28s} {'SAME' if ok else 'DIFFERENT'}" + (f"   REPEATED SCENE x{len(reps)}" if reps else ""))
             for r in rows:
                 if "error" in r:
                     print(f"    error: {r['error']}")
@@ -300,7 +314,8 @@ def main(argv=None):
     out = dict(plan=PLAN, mode=a.mode, split=split, seed=seed, scenes=a.scenes, steps=a.steps, render=bool(a.render),
                action_scale=ACTION_SCALE, action_seed=ACTION_SEED, state_tol=STATE_TOL, tasks=results)
     Path(a.output).write_text(json.dumps(out, indent=1, default=str) + "\n")
-    print(f"{n_same} of {len(tasks)} tasks SAME; wrote {a.output}")
+    print(f"{n_same} of {len(tasks)} tasks SAME; {n_repeat} tasks with a scene repeating the previous one; "
+          f"wrote {a.output}")
     print("RESTORE CHECK DONE")
 
 

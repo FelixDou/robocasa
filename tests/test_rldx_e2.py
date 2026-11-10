@@ -509,7 +509,7 @@ class RestoreCheckTest(unittest.TestCase):
         self.assertIsNone(rows[0]["state_diverges_at_step"])
 
     def test_redrawn_target_is_caught(self):
-        rows = self.run_check(_Gym(redraw=True))
+        rows = self.run_check(_Gym(redraw=True), mode="restore_legacy")
         r = rows[0]
         self.assertFalse(r["same"])
         self.assertEqual(r["attribute_diffs"]["cabinet"], ["cab1", "cab_other"])
@@ -580,7 +580,8 @@ class RestoreCheckTest(unittest.TestCase):
             def step(self, a):
                 self.env.x = self.env.x + 0.01 * (self._ctrl().goal - self.env.x)
                 return super().step(np.zeros(3))
-        r = self.run_check(G())[0]
+        self.assertTrue(self.run_check(G())[0]["same"])                  # fixed restore: goal copied back
+        r = self.run_check(G(), mode="restore_legacy")[0]
         self.assertFalse(r["same"])
         self.assertTrue(any(k.startswith("robot0.right.goal") for k in r["controller_diffs"]), r["controller_diffs"])
         self.assertEqual(r["state_diverges_at_step"], 1)
@@ -616,7 +617,7 @@ class _RngGym(_Gym):
 class RebuildModeTest(unittest.TestCase):
     def test_rebuild_reproduces_the_scene_exactly(self):
         with tempfile.TemporaryDirectory() as d:
-            env = ce.install(_RngGym(), "T", Path(d) / "pairs.jsonl")
+            env = ce.install(_RngGym(), "T", Path(d) / "pairs.jsonl", mode="rebuild")
             o0, _ = env.reset()
             for _ in range(5):
                 env.step(np.ones(3))
@@ -633,7 +634,7 @@ class RebuildModeTest(unittest.TestCase):
     def test_rebuild_passes_the_restore_check_where_restore_fails(self):
         with tempfile.TemporaryDirectory() as d:
             same = rc.check_task(_RngGym(), "T", scenes=2, steps=20, log_dir=d, mode="rebuild")
-            diff = rc.check_task(_RngGym(), "T", scenes=2, steps=20, log_dir=d, mode="restore")
+            diff = rc.check_task(_RngGym(), "T", scenes=2, steps=20, log_dir=d, mode="restore_legacy")
         self.assertTrue(all(r["same"] for r in same), same)
         self.assertFalse(diff[0]["same"])
         self.assertIn("cabinet", diff[0]["attribute_diffs"])
@@ -641,7 +642,7 @@ class RebuildModeTest(unittest.TestCase):
     def test_rebuild_needs_an_rng(self):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(RuntimeError):
-                ce.install(Outer(FakeGymEnv()), "T", Path(d) / "pairs.jsonl")
+                ce.install(Outer(FakeGymEnv()), "T", Path(d) / "pairs.jsonl", mode="rebuild")
 
 
 class _FallbackGym(_RngGym):
@@ -665,7 +666,7 @@ class FallbackTest(unittest.TestCase):
     def test_scenes_still_differ_and_default_rng_is_restored(self):
         original = np.random.default_rng
         with tempfile.TemporaryDirectory() as d:
-            env = ce.install(_FallbackGym(), "T", Path(d) / "pairs.jsonl")
+            env = ce.install(_FallbackGym(), "T", Path(d) / "pairs.jsonl", mode="rebuild")
             sides = []
             for _ in range(12):
                 env.reset(); sides.append(env.env.side); env.reset()
@@ -703,3 +704,66 @@ class PersistentGeneratorTest(unittest.TestCase):
         found = ce.find_generators([holder])
         self.assertIn(id(holder.a["x"][0]), found)
         self.assertIn(id(holder.b), found)
+
+
+class _MetaGym(_Gym):
+    """Like RoboCasa: reset_to stores the scene's metadata on the task, and the next build reuses it."""
+
+    def __init__(self):
+        super().__init__(redraw=True)
+        self.env._ep_meta = {}
+
+    def reset(self, **kwargs):
+        out = super().reset(**kwargs)
+        if "cabinet" in self.env._ep_meta:                      # the next build reuses the stored scene
+            self.env.x = np.asarray(self.env._ep_meta["x0"], float).copy()
+            self.env.cabinet = self.env._ep_meta["cabinet"]
+            return self._obs(), {}
+        return out
+
+    def get_state(self):
+        st = super().get_state()
+        st["ep_meta"] = json.dumps(dict(self.env.get_ep_meta(), cabinet=self.env.cabinet, x0=self.env.x.tolist()))
+        return st
+
+    def reset_to(self, state):
+        self.env._ep_meta = json.loads(state["ep_meta"])
+        return super().reset_to(state)
+
+
+class FixedRestoreTest(unittest.TestCase):
+    def test_fixed_restore_matches_and_scenes_stay_fresh(self):
+        with tempfile.TemporaryDirectory() as d:
+            fixed = rc.check_task(_MetaGym(), "T", scenes=3, steps=10, log_dir=d, mode="restore")
+            legacy = rc.check_task(_MetaGym(), "T", scenes=3, steps=10, log_dir=d, mode="restore_legacy")
+        self.assertTrue(all(r["same"] for r in fixed), fixed[0])
+        self.assertFalse(any((r["repeats_previous_scene"] or {}).get("same_start_state") for r in fixed))
+        self.assertFalse(legacy[0]["same"])                                     # target redrawn
+        self.assertTrue(legacy[1]["repeats_previous_scene"]["same_start_state"])  # the stored scene came back
+
+    def test_copy_back_and_clear(self):
+        env = _MetaGym()
+        env.reset()
+        saved = ce.snapshot_plain(env)
+        env.env.target, env.env.cabinet = 9.0, "other"
+        env.env._ep_meta = {"cabinet": "x"}
+        self.assertEqual(sorted(ce.copy_back(saved)), ["_Raw.cabinet", "_Raw.target"])
+        self.assertEqual(env.env.target, 0.2)
+        self.assertTrue(ce.clear_ep_meta(env))
+        self.assertEqual(env.env._ep_meta, {})
+
+
+class RepeatedSceneCheckTest(unittest.TestCase):
+    def test_breakdown_counts_repeated_starts(self):
+        with tempfile.TemporaryDirectory() as d:
+            a = Path(d) / "T"
+            a.mkdir()
+            first = dict(role="first", task_name="T", state_sha="s", model_sha="m")
+            retry = dict(role="retry", task_name="T", restored_sha="s", model_sha="m", restore_residual=0.0,
+                         first_obs_distance=dict(missing=[], text_equal=True, image_max=0.0, state_max=0.0))
+            other = dict(first, state_sha="u")
+            retry_u = dict(retry, restored_sha="u")
+            rows = (first, retry, first, retry, other, retry_u)
+            (a / "pairs.jsonl").write_text("\n".join(json.dumps(x) for x in rows) + "\n")
+            lines, _ = ck.breakdown([("e2", a)])
+        self.assertTrue(any("2 distinct start states in 3 scenes" in x for x in lines), lines)

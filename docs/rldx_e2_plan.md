@@ -678,3 +678,39 @@ back afterwards.
 **Change.** Every numpy Generator and RandomState reachable from the environment, or held at module
 level in RoboCasa, robosuite or gym, is now wound back (`find_generators`). When the model XML differs,
 the check prints the changed lines. Tests: `PersistentGeneratorTest`.
+
+### Restore check in rebuild mode, run 3 (2026-11-10, `88c96e80`), and a change of approach
+
+12 of 20 tasks SAME, even with every reachable generator wound back. Rebuilds of the same scene still
+disagreed with each other in several tasks, including a different layout. **An exact rebuild is not
+reachable in RoboCasa**, so the rebuild mode is set aside.
+- CloseFridge and CloseToasterOvenDoor had identical states, and their model XML differed only in mesh
+  attributes (`content_type`, ordering).
+
+**A second defect in E2's first collection.** `reset_to` stores the scene's metadata on the task
+(`_ep_meta`). Nothing clears it, and RoboCasa reuses it to build the next scene: layout, style,
+fixtures, objects and robot start. robomimic's wrapper clears it on every reset; the gym wrapper E2
+used does not. So in E2's first collection the scenes after a retry largely repeated the previous one.
+- **Evidence:** first-attempt success was more than 3 SE from the task's expected rate in 10 of 20
+  tasks, at the extremes, e.g. OpenStandMixerHead 0.06 against 0.80 and TurnOnMicrowave 0.88 against
+  0.30.
+
+## Retry by a fixed restore (2026-11-10; default mode `restore`)
+
+The retry restores the first attempt's XML and state through `reset_to` (exact physical state). Then:
+1. Every plain value (numbers, strings, arrays) of the task, the robots, the composite and part
+   controllers that differs from the first attempt's is set back (`copy_back`). This fixes the
+   controller goals, NavigateKitchen's `target_pos` and OpenDrawer's side.
+2. The stored metadata is cleared (`clear_ep_meta`), so the next scene is built fresh.
+3. The retry gets the first attempt's instruction.
+
+Each retry row records `values_restored` and `ep_meta_cleared`. check_e2 now stops if any scene starts
+from the same state as an earlier scene of its task, and `--breakdown` counts repeated start states.
+The restore check now reports scenes repeating the previous one. Mode `restore_legacy` is E2's first
+collection.
+
+**Next.**
+1. `check_e2 --breakdown` on E2's first collection, to count its repeated scenes (for the record).
+2. The restore check in mode `restore` on all 20 tasks with 3 scenes. Every task must be SAME, with no
+   repeated scene.
+3. The new collection (seed 1501, new root), then steps 7–9 and the follow-up.

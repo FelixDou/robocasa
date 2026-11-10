@@ -5,7 +5,13 @@ official_rldx protocol (one environment per task, repeated resets) and 2 x scene
 the environment's reset() is replaced, per task environment:
   - reset 2j (first attempt of scene j): a normal reset; the full simulator state, model XML and episode
     metadata right after it are kept in memory;
-  - reset 2j+1 (retry of scene j), mode "rebuild" (default since 2026-11-10): the random generators the
+  - reset 2j+1 (retry of scene j), mode "restore" (default since 2026-11-10): the kept state is restored
+    through reset_to (RoboCasa's replay path), then every plain value of the task, the robots and their
+    controllers (numbers, strings, arrays) that differs from the first attempt's is set back, the stored
+    episode metadata is cleared (RoboCasa would otherwise reuse it for the next scene), and the retry gets
+    the first attempt's instruction. Mode "restore_legacy" is E2's first collection (none of this; its
+    scenes repeated and its retries started from default controller goals).
+  - Mode "rebuild" (tried 2026-11-10, not repeatable in RoboCasa): the random generators the
     scene is built from (the environment's rng, numpy's global state and Python's random) are wound back
     to their state before reset 2j, and the scene is built again by the same normal reset. Unseeded
     np.random.default_rng() calls during a build (RoboCasa's fallbacks) are seeded from the scene's own
@@ -48,8 +54,93 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 PAIRS_NAME = "pairs.jsonl"
-DEFAULT_MODE = "rebuild"
-MODES = ("rebuild", "restore")
+DEFAULT_MODE = "restore"
+MODES = ("restore", "restore_legacy", "rebuild")
+PLAIN_EXCLUDE = {"_ep_meta", "override_task_description"}
+
+
+def task_env(env):
+    """The innermost environment with a simulator (the RoboCasa task), under any wrappers."""
+    seen, node, found = set(), env, None
+    while node is not None and id(node) not in seen:
+        seen.add(id(node))
+        if hasattr(node, "__dict__") and "sim" in vars(node):
+            found = node
+        node = vars(node).get("env") if hasattr(node, "__dict__") else None
+    return found
+
+
+def _plain(v, depth=0):
+    if v is None or isinstance(v, (bool, int, float, str, np.generic)):
+        return True
+    if isinstance(v, np.ndarray):
+        return v.dtype.kind in "biuf" and v.size <= 100000
+    if depth < 3 and isinstance(v, (list, tuple)):
+        return all(_plain(x, depth + 1) for x in v)
+    if depth < 3 and isinstance(v, dict):
+        return all(isinstance(k, (str, int)) and _plain(x, depth + 1) for k, x in v.items())
+    return False
+
+
+def _same(a, b):
+    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+        try:
+            return np.array_equal(np.asarray(a), np.asarray(b))
+        except Exception:
+            return False
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    try:
+        return bool(a == b)
+    except Exception:
+        return False
+
+
+def plain_holders(env):
+    """The task environment, each robot, its composite controller and each part controller."""
+    raw = task_env(env)
+    out = [] if raw is None else [raw]
+    for robot in (getattr(raw, "robots", None) or []) if raw is not None else []:
+        out.append(robot)
+        cc = getattr(robot, "composite_controller", None)
+        if cc is not None:
+            out.append(cc)
+            out.extend((getattr(cc, "part_controllers", None) or {}).values())
+    return out
+
+
+def snapshot_plain(env):
+    """Plain values (numbers, strings, arrays and containers of them) of the task, robots and controllers."""
+    return [(obj, {k: copy.deepcopy(v) for k, v in vars(obj).items() if k not in PLAIN_EXCLUDE and _plain(v)})
+            for obj in plain_holders(env)]
+
+
+def copy_back(saved):
+    """Set every plain value that differs from the first attempt's back to it. Returns the names restored."""
+    restored = []
+    for obj, snap in saved:
+        cur = vars(obj)
+        for k, v in snap.items():
+            if k in cur and not _same(cur[k], v):
+                setattr(obj, k, copy.deepcopy(v))
+                restored.append(f"{type(obj).__name__}.{k}")
+    return restored
+
+
+def clear_ep_meta(env):
+    """reset_to stores the scene's metadata on the task, and RoboCasa reuses it for the next build (layout,
+    fixtures, objects, robot start): clear it so the next first attempt is a new scene."""
+    raw = task_env(env)
+    if raw is None or not hasattr(raw, "_ep_meta"):
+        return False
+    unset = getattr(raw, "unset_ep_meta", None)
+    if callable(unset):
+        unset()
+    else:
+        raw._ep_meta = {}
+    return True
 
 
 def env_rng(env):
@@ -228,7 +319,7 @@ class PairedReset:
         self.saved = None
         self.first_obs = None
         self.rng_states = None
-        if env_method(env, "get_state") is None or (mode == "restore" and env_method(env, "reset_to") is None):
+        if env_method(env, "get_state") is None or (mode != "rebuild" and env_method(env, "reset_to") is None):
             raise RuntimeError("E2 needs an environment with get_state() (and reset_to() in restore mode)")
         if mode == "rebuild":
             env_rng(env)[1] or capture_rng(env)          # fail at install, not at the first retry
@@ -254,6 +345,7 @@ class PairedReset:
             else:
                 result = self.base_reset(*args, **kwargs)
             obs = result[0] if isinstance(result, tuple) else result
+            self.plain = snapshot_plain(self.env) if self.mode == "restore" else None
             state, flat = _flat_state(self.env)
             self.saved = {key: state[key] for key in ("states", "model", "ep_meta") if key in state}
             self.saved["states"] = np.array(flat, copy=True)
@@ -278,6 +370,14 @@ class PairedReset:
             if self.saved is None:
                 raise RuntimeError("E2: a retry reset came before any first-attempt reset")
             obs = env_method(self.env, "reset_to")(dict(self.saved))
+            if self.mode == "restore":
+                # reset_to rebuilds the Python side of the task before loading the saved XML and state:
+                # controller goals stay at the default pose and values drawn during the build (targets,
+                # sides, anchors) can differ. Put the first attempt's plain values back, and clear the
+                # stored metadata so the next scene is built fresh.
+                names = copy_back(self.plain or [])
+                row.update(values_restored=len(names), values_restored_names=sorted(set(names))[:40],
+                           ep_meta_cleared=clear_ep_meta(self.env))
             # reset_to reloads the model, and some tasks draw their instruction again while doing so
             # (OpenDrawer: "Open the {side} drawer.", the side drawn when the robot is placed). The
             # robot pose and the target come back from the saved state, so the first attempt's own

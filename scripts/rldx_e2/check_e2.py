@@ -120,6 +120,11 @@ def check(plan, dirs, recorded_rows, smoke=False, tensor_fn=ce1.tensor_info):
                 problems.append(f"{root}: {t}: pairs.jsonl has resets {[x['reset_index'] for x in entries][:6]}..., "
                                 f"want 0..{want - 1} once each")
                 continue
+            starts = [x.get("state_sha") for x in entries[0::2]]
+            dup = len(starts) - len(set(starts))
+            if dup and not smoke:
+                problems.append(f"{root}: {t}: {dup} of {len(starts)} scenes start from the same state as an "
+                                "earlier scene (the scene was not built anew)")
             complete[t].append(root)
             for j in range(want // 2):
                 first, retry = entries[2 * j], entries[2 * j + 1]
@@ -157,6 +162,15 @@ def breakdown(dirs):
     for (t, why), k in sorted(bad.items()):
         lines.append(f"{t:28s} {k:3d}/{n[t]}  {why}")
     rerun = sorted({t for (t, why) in bad if why == "instruction differs"})
+    for _, root in dirs:
+        log = read_jsonl(Path(root) / "pairs.jsonl")
+        by = defaultdict(list)
+        for x in log:
+            if x.get("role") == "first":
+                by[x["task_name"]].append(x.get("state_sha"))
+        for t, starts in sorted(by.items()):
+            if len(starts) != len(set(starts)):
+                lines.append(f"{t:28s} {len(set(starts)):3d} distinct start states in {len(starts)} scenes")
     lines.append(f"total excluded: {sum(bad.values())} of {sum(n.values())} pairs")
     lines += [f"RERUN {t}" for t in rerun]
     return lines, rerun
