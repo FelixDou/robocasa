@@ -297,6 +297,14 @@ and passes the labeler's own checks. Otherwise go to option 2 for the failing
 stages. `expert_segments coverage` applies this to the R0 classes and writes
 `stage_segments.jsonl`, the source table for R2.
 
+The index also keeps upstream's instruction for every segment of the group
+and each task object's display name. `coverage` reports, per stage, the
+modal instruction sequence with object names as `{object_key}` (for example
+`pick up the {obj} from the cabinet` → `place the {obj} on the tray`). These
+are candidates for the stage instructions of later experiments (re-prompt,
+the recovery-mode prompt). They are not used in R1's decision, and the
+finished re-prompt trials keep the instructions they ran with.
+
 **R2: generation at the alarm states.** From each class-2 state at `a`:
 an optional release-and-retreat prefix (open the gripper, lift, return to a
 pre-grasp height) when the target is mis-grasped; the expert segment for the

@@ -216,6 +216,7 @@ def stage_events(predicate_names, predicate_values, segments, object_names, obje
                 "index": segments[k]["index"], "name": segments[k]["name"], "stage": segments[k]["stage"],
                 "lang": segments[k]["lang"], "start": segments[first]["start"], "end": segments[last]["end"],
                 "stages": [[s["name"], s["stage"]] for s in segments[first:last + 1]],
+                "langs": [s["lang"] for s in segments[first:last + 1]],
                 "moved_object": obj, "moved_distance": round(dist, 4),
             }
         events[name] = event
@@ -242,8 +243,20 @@ def ordered_windows(required, predicate_names, predicate_values, task_success=No
     return windows
 
 
+def instruction_template(langs, object_lang):
+    """Upstream instructions with each task object's display name replaced by ``{object_key}``."""
+    names = sorted(((str(v), k) for k, v in (object_lang or {}).items() if v), key=lambda kv: -len(kv[0]))
+    out = []
+    for lang in langs:
+        for text, key in names:
+            lang = lang.replace(text, "{" + key + "}")
+        out.append(lang)
+    return out
+
+
 def summarize_episode(task_name, episode, *, labels, predicate_names, predicate_values, task_success,
-                      object_names, object_pos, issues, review, parquet_rows=None, parquet_idx=None):
+                      object_names, object_pos, issues, review, parquet_rows=None, parquet_idx=None,
+                      object_lang=None):
     segments = segments_from_labels(labels["subtask_idx"], labels["subtask_name"], labels["subtask_stage"],
                                     labels["subtask_lang"])
     n = int(predicate_values.shape[0])
@@ -263,6 +276,7 @@ def summarize_episode(task_name, episode, *, labels, predicate_names, predicate_
         "clean": bool(n and task_success[-1] and not issues),
         "segments": segments,
         "objects": [str(o) for o in object_names],
+        "object_lang": dict(object_lang or {}),
         "stage_events": stage_events(predicate_names, predicate_values, segments, object_names, object_pos),
         "created_at": ladder.utc_now(),
     }
@@ -414,10 +428,17 @@ def run_index(output_dir, *, tasks=PILOT_TASKS, dataset_base=None, lerobot_overr
                                 predicate_names=names, predicate_values=values, task_success=success,
                                 required=frames[0]["required"], object_names=object_names, object_pos=pos,
                                 object_quat=quat, eef_pos=eef)
+            object_lang = {}
+            for name in object_names:
+                try:
+                    object_lang[name] = str(env.get_obj_lang(name))
+                except Exception:
+                    object_lang[name] = None
             rows, published = parquet_annotation(lerobots[task], episode)
             row = summarize_episode(task, episode, labels=labels, predicate_names=names, predicate_values=values,
                                     task_success=success, object_names=object_names, object_pos=pos,
-                                    issues=issues, review=result.review, parquet_rows=rows, parquet_idx=published)
+                                    issues=issues, review=result.review, parquet_rows=rows, parquet_idx=published,
+                                    object_lang=object_lang)
             row["required_env"] = list(frames[0]["required"])
             ladder.append_jsonl(index_path, row)
             log(f"[{n}/{len(todo)}] {task} ep {episode}: {row['frames']} frames, "
@@ -494,6 +515,9 @@ def stage_coverage(rows, task_name, stage, ordered=None, *, min_segments=R1_MIN_
     consistent = [(r, e) for r, e in usable if (e["segment"]["name"], e["segment"]["stage"]) == modal_key
                   and e["segment"]["moved_object"] == modal_object]
     lengths = [e["segment"]["end"] - e["segment"]["start"] for _, e in consistent]
+    templates = [tuple(instruction_template(e["segment"].get("langs") or [e["segment"]["lang"]], r.get("object_lang")))
+                 for r, e in consistent]
+    modal_template, template_share = _modal_share(templates)
     ok = len(consistent) >= min_segments and min(key_share, object_share) >= min_consistency
     out = {
         "task_name": task_name, "stage": stage, "demos": len(task_rows),
@@ -502,6 +526,8 @@ def stage_coverage(rows, task_name, stage, ordered=None, *, min_segments=R1_MIN_
         "upstream_segment": list(modal_key) if modal_key else None, "segment_share": round(key_share, 3),
         "moved_object": modal_object, "object_share": round(object_share, 3),
         "median_segment_frames": float(np.median(lengths)) if lengths else None,
+        "instruction_template": list(modal_template) if modal_template else None,
+        "instruction_share": round(template_share, 3),
         "segment_replay_ok": bool(ok),
     }
     if ordered is not None:
@@ -607,6 +633,12 @@ def write_coverage_md(result, path):
                      f"{c['consistent']} | {seg} | {c['segment_share']} | {c['moved_object']} | "
                      f"{c['object_share']} | {c['median_segment_frames']} | {c.get('ordered_window_empty')} | "
                      f"{'yes' if c['segment_replay_ok'] else 'no'} |")
+    lines += ["", "## Upstream instructions per stage", "",
+              "Modal instruction sequence of the consistent segments (object names as `{object_key}`).", "",
+              "| Task | Stage | Instructions | Share |", "|---|---|---|---:|"]
+    for c in result["stages"]:
+        text = " → ".join(f"\"{t}\"" for t in (c.get("instruction_template") or [])) or "-"
+        lines.append(f"| {c['task_name']} | `{c['stage']}` | {text} | {c.get('instruction_share')} |")
     Path(path).write_text("\n".join(lines) + "\n")
 
 

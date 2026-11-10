@@ -17,6 +17,12 @@ from robocasa.recovery import recoverability_ladder as ladder
 REQUIRED = ["kettle_on_tray", "mug_on_tray", "cabinet_closed", "gripper_released"]
 PREDICATES = sorted(REQUIRED)
 OBJECTS = ["obj", "obj2"]  # mug, kettle
+OBJECT_LANG = {"obj": "mug", "obj2": "kettle"}
+LANGS = {("PickPlaceCabinetToCounter", "pick"): "pick up the mug from the cabinet",
+         ("PickPlaceCabinetToCounter", "place"): "place the mug on the tray",
+         ("PickPlaceCounterToCounter", "pick"): "pick up the kettle from the counter",
+         ("PickPlaceCounterToCounter", "place"): "place the kettle on the tray",
+         ("CloseCabinet", "execute"): "close the cabinet doors", ("done", "done"): "task complete"}
 
 
 def tea_demo(mug_first=False, close=True):
@@ -30,7 +36,7 @@ def tea_demo(mug_first=False, close=True):
                                  np.empty(T, object))
     start = 0
     for i, (end, name, stage) in enumerate(plan):
-        idx[start:end], names[start:end], stages[start:end], langs[start:end] = i, name, stage, f"{stage} {name}"
+        idx[start:end], names[start:end], stages[start:end], langs[start:end] = i, name, stage, LANGS[(name, stage)]
         start = end
     pos = np.zeros((T, 2, 3), np.float32)
     pos[:, 0, 0] = np.clip((np.arange(T) - (0 if mug_first else 25)) / 20, 0, 1) * 0.5  # mug moves
@@ -58,7 +64,7 @@ def write_demo(index_dir, episode, *, mug_first=False, close=True, issues=()):
     row = es.summarize_episode("ArrangeTea", episode, labels=labels, predicate_names=PREDICATES,
                                predicate_values=values, task_success=success, object_names=OBJECTS,
                                object_pos=pos, issues=list(issues), review=[], parquet_rows=60,
-                               parquet_idx=labels["subtask_idx"])
+                               parquet_idx=labels["subtask_idx"], object_lang=OBJECT_LANG)
     ladder.append_jsonl(Path(index_dir) / "index.shard0.jsonl", row)
     return row
 
@@ -102,6 +108,11 @@ class HelperTest(unittest.TestCase):
                for i, (n, s) in enumerate([("NavigateKitchen", "navigate"), ("PickPlaceCabinetToCounter", "pick"),
                                            ("NavigateKitchen", "navigate"), ("PickPlaceCabinetToCounter", "place")])]
         self.assertEqual(es.subtask_group(jam, 3), (1, 3))        # stops at the pick, not the drive before it
+
+    def test_instruction_template(self):
+        self.assertEqual(es.instruction_template(["pick up the bread roll from the cabinet", "place the bread roll in the basket"],
+                                                 {"bread": "bread roll", "basket": "basket", "x": None}),
+                         ["pick up the {bread} from the cabinet", "place the {bread} in the {basket}"])
 
     def test_moved_object(self):
         pos = tea_demo()[3]
@@ -186,6 +197,11 @@ class CoverageTest(unittest.TestCase):
             self.assertEqual(stages["mug_on_tray"]["class2_states"], 2)
             self.assertEqual(stages["mug_on_tray"]["ordered_window_empty"], 3)
             self.assertEqual(stages["mug_on_tray"]["moved_object"], "obj")
+            self.assertEqual(stages["mug_on_tray"]["instruction_template"],
+                             ["pick up the {obj} from the cabinet", "place the {obj} on the tray"])
+            self.assertEqual(stages["mug_on_tray"]["instruction_share"], 1.0)
+            self.assertEqual(stages["cabinet_closed"]["instruction_template"], ["close the cabinet doors"])
+            self.assertIn('"pick up the {obj} from the cabinet"', (out / "r1_coverage.md").read_text())
             health = result["health"]["ArrangeTea"]
             self.assertEqual((health["demos"], health["clean"], health["labeler_flagged"]), (14, 12, 1))
             self.assertEqual(health["published_label_agreement_mean"], 1.0)
