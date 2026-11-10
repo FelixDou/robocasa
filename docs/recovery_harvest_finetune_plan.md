@@ -262,6 +262,41 @@ this order and use the first that works for all five tasks:
    a motion script on privileged object poses through the existing IK stack.
    Only the subtasks that class-2 states are stuck on need scripts.
 
+*R1 design (11 November 2026, before any R1 output).* Upstream RoboCasa
+released its subtask annotation pipeline on 14 October 2026: a registered
+labeler per composite task (all 300, including the five here) that replays a
+demo's simulator states and writes per-frame labels (atomic-task name,
+pick/place/navigate/execute stage, instruction). It was merged into this
+fork; its only environment changes are an `ArrangeDrinkware` layout
+exclusion and a duplicate `Sink` method removed (the two were identical), so
+the five pilot tasks are untouched. Its labels need the whole demo and
+assume it succeeds, so they are used only on expert demos. Our predicates
+stay the stage definition everywhere else (ladder, alarm, R0, SAFE).
+
+The LeRobot folders of the target human demos ship
+`extras/episode_*/{states.npz, ep_meta.json, model.xml.gz}`, so the first R1
+question is answered: the demos are replayable. `expert_segments index`
+replays the first 100 demos per task with upstream's `reset_to`, and records
+per frame upstream's labels, our predicates and every task object's pose.
+
+Stage-to-segment join: the frame where a stage's predicate first becomes
+true and stays true for 5 frames selects the upstream segment that completes
+it. That is the containing segment, or the previous one when the frame is in
+`done` or within 10 frames and the first quarter of a segment. The expert
+segment is that segment plus the earlier segments of the same subtask (back
+to its pick, navigation included). The moved object is the task object that
+moves most over it (none below 3 cm: a fixture subtask). The join does not
+use the ladder's order, because demonstrators reorder stages (ArrangeTea's
+mug before the kettle). The ladder-ordered window is reported next to it.
+
+**R1 decision rule (frozen with this code):** segment replay is the R1
+source if every (task, stage) that holds a class-2 state has at least 10
+usable segments that agree on the upstream subtask and the moved object, with
+agreement at least 0.8 on each. Usable means a demo that ends in task success
+and passes the labeler's own checks. Otherwise go to option 2 for the failing
+stages. `expert_segments coverage` applies this to the R0 classes and writes
+`stage_segments.jsonl`, the source table for R2.
+
 **R2: generation at the alarm states.** From each class-2 state at `a`:
 an optional release-and-retreat prefix (open the gripper, lift, return to a
 pre-grasp height) when the target is mis-grasped; the expert segment for the
@@ -404,12 +439,19 @@ sampling-seed schedule, as in the re-prompt trials:
    2. Tipped objects, grasps and undone subtasks are flags only. `decide`
    applies the hand-filled `manual_class` column of `review.csv` (class 1
    cannot be changed) and computes Gate R0.
+8. **Done (R1):** `robocasa/recovery/expert_segments.py`. `index` replays the
+   target human demos (CPU, sharded, resumable) with upstream's labelers and
+   our predicates; `coverage` joins them with the R0 classes, writes
+   `r1_coverage.{json,md}` and `stage_segments.jsonl`, and applies the R1
+   decision rule. Demo health in the report: clean demos, labeler flags,
+   frame/row mismatches and agreement with the labels upstream published in
+   the parquet `subtask_idx` column.
 
 Tests (simulator- and PyTorch-free; the detector save/load test runs only
 where PyTorch is installed):
 
 ```bash
-python -m unittest tests.test_hs_p_alarm tests.test_alarm_branching tests.test_failure_audit tests.test_recoverability_ladder
+python -m unittest tests.test_hs_p_alarm tests.test_alarm_branching tests.test_failure_audit tests.test_recoverability_ladder tests.test_expert_segments
 ```
 
 ### Phase A runbook (cluster)
@@ -480,6 +522,21 @@ the provisional class, and run:
 ALARM_REVIEW=$ALARM_ROOT/r0_audit/review.csv bash scripts/run_alarm_branching_xr1.sh decide
 ```
 
+R1 expert segments (CPU only, no GPU or policy server; 5 shards by default,
+`R1_SHARDS`, `R1_MAX_EPISODES`). The index can run before R0 is decided; the
+decision needs `decide` first.
+
+```bash
+bash scripts/run_alarm_branching_xr1.sh segments
+bash scripts/run_alarm_branching_xr1.sh segments-status
+bash scripts/run_alarm_branching_xr1.sh r1
+```
+
+`r1` writes `$ALARM_ROOT/r1_segments/coverage/r1_coverage.md`. Check the
+demo-health table first: errors 0, row mismatches 0, and agreement with the
+published labels near 1 (a low value means the replay differs from
+upstream's).
+
 Outputs:
 - the spec under `$STORAGE_BS/robocasa_checkpoints/safe/hs_p_alarm_spec_*`;
 - alarms, branches and `gate_a/` under
@@ -518,5 +575,6 @@ Runs go from a pinned worktree if other recovery runs share the checkout.
 - Whether ladder v2 snapshots on `/gs/bs` are complete for all 76 parents
   (A1 needs them). Answered: all 41 branched parents had complete snapshots.
 - R1 answers: whether the composite human demos for the five tasks include
-  replayable states or object poses, and which subtasks the class-2 states
-  are stuck on.
+  replayable states or object poses (answered: yes, per-frame simulator
+  states in the LeRobot `extras/`), and which subtasks the class-2 states
+  are stuck on (from `r1`).

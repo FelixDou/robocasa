@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Phase A of docs/recovery_harvest_finetune_plan.md: recoverability at the Hide-and-Seek + P alarm.
-#   export | score | plan | start | resume | status | analyze | audit | decide
+#   export | score | plan | start | resume | status | analyze | audit | decide | segments | segments-status | r1
 # audit/decide are step R0 of the redesign (failure audit; simulator only, no policy server).
+# segments/r1 are step R1 (human-demo expert segments; CPU simulator replay, then a join with R0).
 # export and score are CPU-only (SAFE env). start/resume reuse the ladder worker
 # (one XR-1 server GPU + one simulator GPU + one port per worker).
 set -euo pipefail
 action=${1:-status}
-case "$action" in export|score|plan|start|resume|status|analyze|audit|decide) ;; *)
-  echo "Usage: $0 {export|score|plan|start|resume|status|analyze|audit|decide}"; exit 1 ;; esac
+case "$action" in export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1) ;; *)
+  echo "Usage: $0 {export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1}"; exit 1 ;; esac
 
 export STORAGE_BS=${STORAGE_BS:-/gs/bs/tga-shinoda/felid}
 export ROBOCASA_REPO=${ROBOCASA_REPO:-/gs/fs/tga-shinoda/felid/robocasa}
@@ -116,6 +117,49 @@ if [[ "$action" == decide ]]; then
   review=()
   [[ -z "${ALARM_REVIEW:-}" ]] || review=(--review "$ALARM_REVIEW")
   exec "$py" -m robocasa.recovery.failure_audit decide --audit-dir "$audit_dir" "${review[@]}"
+fi
+
+segments_dir="$ALARM_ROOT/r1_segments"
+if [[ "$action" == segments ]]; then
+  # CPU only: replays the target-split human demos with upstream's labelers and our predicates.
+  export ROBOCASA_DATASET_BASE=${ROBOCASA_DATASET_BASE:-$STORAGE_BS/robocasa_datasets}
+  shards=${R1_SHARDS:-5}
+  "$py" -c "import h5py, termcolor, tqdm, robocasa.utils.subtask_labeling" \
+    || { echo "Missing upstream labeling dependencies in $py (pip install h5py termcolor tqdm)"; exit 1; }
+  resume=()
+  [[ ! -e "$segments_dir/index/index_manifest.json" ]] || resume=(--resume)
+  mkdir -p "$segments_dir/index"
+  git -C "$ROBOCASA_REPO" rev-parse HEAD > "$segments_dir/git_commit.txt"
+  stamp=$(date +%Y%m%d_%H%M%S)
+  # Shard 0 writes the manifest first, so the others always find it.
+  for shard in $(seq 0 $((shards - 1))); do
+    log="$log_dir/$(basename "$ALARM_ROOT")_r1_segments_shard${shard}_${stamp}.log"
+    CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 \
+      PYTHONPATH="$ROBOCASA_REPO" nohup nice -n 10 "$py" -u -m robocasa.recovery.expert_segments index \
+      --output-dir "$segments_dir/index" --dataset-base "$ROBOCASA_DATASET_BASE" \
+      --max-episodes "${R1_MAX_EPISODES:-100}" --shard-index "$shard" --num-shards "$shards" "${resume[@]}" \
+      > "$log" 2>&1 &
+    echo "shard=$shard pid=$! log=$log"
+    if [[ "$shard" == 0 && ${#resume[@]} == 0 ]]; then
+      for _ in $(seq 1 120); do [[ -e "$segments_dir/index/index_manifest.json" ]] && break; sleep 5; done
+      [[ -e "$segments_dir/index/index_manifest.json" ]] || { echo "shard 0 wrote no manifest; see $log"; exit 1; }
+      resume=(--resume)
+    fi
+  done
+  echo "out=$segments_dir/index"
+  exit 0
+fi
+if [[ "$action" == segments-status ]]; then
+  echo "index rows: $(cat "$segments_dir"/index/index*.jsonl 2>/dev/null | wc -l)"
+  echo "errors: $(cat "$segments_dir"/index/errors*.jsonl 2>/dev/null | wc -l)"
+  grep -h "INDEX SHARD" "$log_dir/$(basename "$ALARM_ROOT")"_r1_segments_shard*.log 2>/dev/null || true
+  exit 0
+fi
+if [[ "$action" == r1 ]]; then
+  provisional=()
+  [[ -z "${R1_ALLOW_PROVISIONAL:-}" ]] || provisional=(--allow-provisional)
+  exec "$py" -m robocasa.recovery.expert_segments coverage --index-dir "$segments_dir/index" \
+    --audit-dir "$audit_dir" --output-dir "$segments_dir/coverage" "${provisional[@]}"
 fi
 
 # start | resume: one ladder worker per GPU pair, writing to $branch_root/shard<i>.
