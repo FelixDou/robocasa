@@ -827,3 +827,15 @@ class BothAttemptsRestoredTest(unittest.TestCase):
         self.assertTrue(log[0]["first_restored"])
         self.assertEqual(log[0]["first_restore_residual"], 0.0)
         self.assertIsNone(ck.pair_problem(log[0], log[1]))
+
+
+class SecondCollectionPlanTest(unittest.TestCase):
+    def test_new_seeds_and_smoke_seed(self):
+        used = {1401: ["first collection"], 1102: ["first smoke"]}
+        plan, flags = pe.build(*e1_inputs(), seed=1501, used=used, shards=2, smoke_seed=1103)
+        self.assertEqual(plan["seed"], 1501)
+        self.assertEqual(plan["rerun_seeds"][:2], [1511, 1521])
+        self.assertEqual(plan["smoke_seed"], 1103)
+        self.assertEqual(flags[flags.index("--seed") + 1], "1501")
+        with self.assertRaises(SystemExit):
+            pe.build(*e1_inputs(), seed=1501, used=used, shards=2, smoke_seed=1102)

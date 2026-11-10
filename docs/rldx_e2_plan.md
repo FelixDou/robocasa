@@ -744,3 +744,105 @@ first attempt starts there. The retry restores it again, so both attempts go thr
   `first_restore_residual`).
 - Cost: one extra model reload per scene.
 - Test: `BothAttemptsRestoredTest`.
+
+### Restore check, both attempts restored (2026-11-10, `adc7ce47`, all 20 tasks, 3 scenes)
+
+**20 of 20 tasks SAME; no scene repeats the previous one.** The first attempt and the retry now start
+from the same restored scene, with the same task values and controllers, and give the same
+trajectory under the same actions.
+
+## Second collection (decided 2026-11-10)
+
+E2 is collected again into a new root, with code `<E2_SHA>` (this section), base seed **1501**
+(rerun seeds 1511–1591) and smoke seed **1103**. These seeds are unused; the first collection's
+scenes have been seen.
+- **Unchanged:** the rules, paths, tasks, 50 scenes per task, budget, latency, analysis, follow-up
+  and the 2% gate.
+- **The first collection** (`rldx1_e2_20261106_143309`) is kept and not used, for two reasons: its
+  retries were not valid second attempts, and its scenes repeated.
+
+**B0. Session** (as step 0, with a new root):
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/26.9.3/bin/conda shell.bash hook)"
+conda activate /gs/bs/tga-shinoda/felid/envs/robocasa_openpi
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export RLDX_REPO=$PROJECT_FS/RLDX-1
+export CLIENT_PY=$STORAGE_BS/envs/robocasa_openpi/bin/python SAFE_PY=$STORAGE_BS/envs/vla_safe/bin/python
+export UV_CACHE_DIR=$STORAGE_BS/uv_cache UV_LINK_MODE=copy HF_HOME=$STORAGE_BS/hf_home
+export TRANSFORMERS_CACHE=$HF_HOME/transformers WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+export SAFE35_ROOT=$STORAGE_BS/robocasa_rollouts/safe/rldx1_original_safe35_natural50_20260808_203158
+export RLDX_EXPORT=$SAFE35_ROOT/official_safe_supported20_natural50
+export RLDX_RAW=$($CLIENT_PY -I -c "import json,sys; print(json.load(open(sys.argv[1]))['source_dataset'])" $RLDX_EXPORT/conversion_report.json)
+export E1_FREEZE=$STORAGE_BS/robocasa_checkpoints/safe/e2_freeze_20261029_205743/e2_freeze_manifest.json
+export RLDX_SNAPSHOT=$HF_HOME/hub/models--RLWRLD--RLDX-1-FT-RC365/snapshots/587e9ecdcc5e7184fcc17f58713908edff5af041
+export E1_ROOT=$STORAGE_BS/robocasa_rollouts/safe/rldx1_e1_20261105_210723
+export RESET_SIM=$STORAGE_BS/robocasa_checkpoints/safe/xr1_list_c_20261103_211633/reset.json
+export E2_SHA=<E2_SHA>
+export E2_REPO=$PROJECT_FS/robocasa_rldx_e2_${E2_SHA:0:8}
+export E2_ROOT=$STORAGE_BS/robocasa_rollouts/safe/rldx1_e2b_$(date +%Y%m%d_%H%M%S)
+export E2_LOG=$STORAGE_BS/robocasa_logs/eval/$(basename $E2_ROOT)
+mkdir -p $E2_ROOT $E2_LOG; env | grep -E '^(E1_|E2_|RLDX_|RESET_SIM|SAFE35_ROOT|CLIENT_PY|SAFE_PY)' > $E2_ROOT/session.env
+echo "E2_ROOT=$E2_ROOT"
+```
+
+**B1.** Step 1 (worktree, assets, tests), then step 2 (frozen inputs), unchanged.
+
+**B2. Plan** (must print seed 1501, smoke 1103, 2,000 rollouts, and the same λ and paths as before):
+
+```bash
+cd $E2_REPO
+$CLIENT_PY -I scripts/rldx_e2/plan_e2.py --e1-plan $E1_ROOT/plan.json --e1-result $E1_ROOT/e1_result.json \
+  --freeze-manifest $E1_FREEZE --reset-sim $RESET_SIM --seed-roots $STORAGE_BS/robocasa_rollouts/safe \
+  --seed 1501 --smoke-seed 1103 --output $E2_ROOT 2>&1 | tee $E2_LOG/plan.log
+```
+
+**B3.** Step 4 (servers), unchanged.
+
+**B4. Smoke** (seed 1103, two scenes):
+
+```bash
+cd $E2_REPO
+mapfile -t FLAGS < $E2_ROOT/collector_flags_e2.txt
+CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 $CLIENT_PY -u scripts/rldx_e2/collect_e2.py \
+  --output-dir $E2_ROOT/smoke --tasks NavigateKitchen "${FLAGS[@]}" --seed 1103 --num-rollouts 4 \
+  --host 127.0.0.1 --port 20150 2>&1 | tail -n 3 | tee $E2_LOG/smoke.log
+$CLIENT_PY -I scripts/rldx_e2/check_e2.py --plan $E2_ROOT/plan.json --smoke smoke=$E2_ROOT/smoke 2>&1 | tee -a $E2_LOG/smoke.log
+$CLIENT_PY -I -c "import json,sys; [print(r['reset_index'], r['role'], r.get('mode'), r.get('first_restore_residual'), r.get('restore_residual'), r.get('values_restored', r.get('first_values_restored')), r.get('ep_meta_cleared'), (r.get('first_obs_distance') or {}).get('image_max')) for r in map(json.loads, open(sys.argv[1]))]" $E2_ROOT/smoke/pairs.jsonl
+```
+
+Continue only with `CHECK OK (smoke)`, every row in mode `restore`, residuals 0, and
+`ep_meta_cleared` True. NavigateKitchen is used because its target was redrawn by the old restore.
+
+**B5. Collect.** Create the queue script, which now reads the base seed from the plan, then sweep and
+launch as in step 6:
+
+```bash
+cat > $E2_ROOT/run_tasks.sh <<'SH'
+#!/bin/bash
+# One E2 collector per task, in order, on one GPU. Usage: run_tasks.sh SHARD GPU PORT
+set -u
+source $E2_ROOT/session.env
+shard=$1 gpu=$2 port=$3
+base=$($CLIENT_PY -I -c "import json,sys; print(json.load(open(sys.argv[1]))['seed'])" $E2_ROOT/plan.json)
+mapfile -t FLAGS < $E2_ROOT/collector_flags_e2.txt
+cd $E2_REPO
+while read -r task; do
+  [ -z "$task" ] && continue
+  d=$E2_ROOT/collection/$task
+  if [ -e "$d" ]; then echo "$(date +%F_%T) $task: directory exists, skipped"; continue; fi
+  tries=$(ls -d $E2_ROOT/collection_incomplete/${task}_try* 2>/dev/null | wc -l)
+  seed=$((base + 10 * tries))
+  echo "$(date +%F_%T) $task: start, seed $seed"
+  CUDA_VISIBLE_DEVICES=$gpu MUJOCO_EGL_DEVICE_ID=$gpu $CLIENT_PY -u scripts/rldx_e2/collect_e2.py \
+    --output-dir $d --tasks $task "${FLAGS[@]}" --seed $seed --host 127.0.0.1 --port $port \
+    > $E2_LOG/collection_$task.log 2>&1 < /dev/null
+  echo "$(date +%F_%T) $task: exit $?"
+done < $E2_ROOT/tasks_e2_shard$shard.txt
+SH
+chmod +x $E2_ROOT/run_tasks.sh
+```
+
+**B6.** Steps 7–9 and the follow-up, from `$E2_REPO`, unchanged. The collection check now also stops on
+repeated scenes.

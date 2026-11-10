@@ -144,6 +144,7 @@ def main():
     p.add_argument("--reset-sim", required=True, help="reset.json of the reset simulation (R_opt cutoffs)")
     p.add_argument("--seed-roots", nargs="+", required=True)
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    p.add_argument("--smoke-seed", type=int, default=SMOKE_SEED)
     p.add_argument("--scenes", type=int, default=SCENES)
     p.add_argument("--shards", type=int, default=4)
     p.add_argument("--output", required=True)
@@ -156,7 +157,7 @@ def main():
     inputs = {k: getattr(a, k) for k in ("e1_plan", "e1_result", "freeze_manifest", "reset_sim")}
     loaded = {k: json.loads(Path(v).read_text()) for k, v in inputs.items()}
     plan, flags = build(loaded["e1_plan"], loaded["e1_result"], loaded["freeze_manifest"], loaded["reset_sim"],
-                        a.seed, used, a.scenes, a.shards)
+                        a.seed, used, a.scenes, a.shards, smoke_seed=a.smoke_seed)
     plan["inputs"] = {k: dict(path=str(Path(v).resolve()), sha256=sha256(v)) for k, v in inputs.items()}
     out.mkdir(parents=True, exist_ok=True)
     (out / "collector_flags_e2.txt").write_text("\n".join(flags) + "\n")
