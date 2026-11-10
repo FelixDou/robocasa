@@ -747,7 +747,7 @@ class FixedRestoreTest(unittest.TestCase):
         saved = ce.snapshot_plain(env)
         env.env.target, env.env.cabinet = 9.0, "other"
         env.env._ep_meta = {"cabinet": "x"}
-        self.assertEqual(sorted(ce.copy_back(saved)), ["_Raw.cabinet", "_Raw.target"])
+        self.assertEqual(sorted(ce.copy_back(saved, env)), ["task.cabinet", "task.target"])
         self.assertEqual(env.env.target, 0.2)
         self.assertTrue(ce.clear_ep_meta(env))
         self.assertEqual(env.env._ep_meta, {})
@@ -767,3 +767,47 @@ class RepeatedSceneCheckTest(unittest.TestCase):
             (a / "pairs.jsonl").write_text("\n".join(json.dumps(x) for x in rows) + "\n")
             lines, _ = ck.breakdown([("e2", a)])
         self.assertTrue(any("2 distinct start states in 3 scenes" in x for x in lines), lines)
+
+
+class RebuiltControllerTest(unittest.TestCase):
+    def test_copy_back_reaches_controllers_rebuilt_by_reset_to(self):
+        """reset_to builds new robot and controller objects: values are copied back by position."""
+        class Ctrl:
+            def __init__(self, goal):
+                self.goal = np.asarray(goal, float)
+
+        def robot(goal):
+            r = type("Robot", (), {})()
+            r.composite_controller = type("CC", (), {})()
+            r.composite_controller.part_controllers = {"right": Ctrl(goal)}
+            return r
+
+        class G(_Gym):
+            def __init__(self):
+                super().__init__()
+                self.env.robots = [robot(np.zeros(3))]
+
+            def reset(self, **kw):
+                out = super().reset(**kw)
+                self.env.robots = [robot(self.env.x.copy())]
+                return out
+
+            def reset_to(self, state):
+                obs = super().reset_to(state)
+                self.env.robots = [robot(np.full(3, 7.0))]          # new objects, default goal
+                return obs
+
+            def step(self, a):
+                g = self.env.robots[0].composite_controller.part_controllers["right"].goal
+                self.env.x = self.env.x + 0.01 * (g - self.env.x)
+                return super().step(np.zeros(3))
+        with tempfile.TemporaryDirectory() as d:
+            rows = rc.check_task(G(), "T", scenes=2, steps=10, log_dir=d, mode="restore")
+        self.assertTrue(all(r["same"] for r in rows), rows[0])
+
+    def test_model_normalization_and_benign_refs(self):
+        a = '<geom quat="0.9833 0.181989 0 0"/><mesh name="m" content_type="model/obj" file="f"/>'
+        b = '<geom quat="0.983301 0.181989 0 0"/><mesh name="m" file="f"/>'
+        self.assertEqual(rc.normalize_model(a), rc.normalize_model(b))
+        self.assertTrue(rc.benign("fixture_refs.sink", ["<Sink s>", False], "<Sink s>"))
+        self.assertFalse(rc.benign("target", ["<Sink s>", False], "<Sink s>"))

@@ -157,7 +157,7 @@ def run_attempt(env, raw, actions, reset=None):
     getter = ce.env_method(env, "get_state")
     model = (getter() or {}).get("model", "") if getter is not None else ""
     snap = dict(instruction=instruction(obs), attributes=attributes(raw), ep_meta=ep_meta(env, raw),
-                controllers=controllers(raw), model_sha=ce._sha(model or ""), model=model or "",
+                controllers=controllers(raw), model_sha=ce._sha(normalize_model(model or "")), model=model or "",
                 states=[np.asarray(raw.sim.get_state().flatten(), float)], success=[], check=[])
     for a in actions:
         step = env.step(copy_action(a))
@@ -169,6 +169,20 @@ def run_attempt(env, raw, actions, reset=None):
         except Exception as exc:
             snap["check"].append(f"error: {exc}")
     return snap
+
+
+def normalize_model(xml):
+    """The model XML as MuJoCo re-serializes it after a reload differs only in float rounding and an optional
+    mesh content_type attribute: compare numbers at 4 decimals and drop that attribute."""
+    import re
+    xml = re.sub(r' content_type="[^"]*"', "", xml)
+    return re.sub(r"-?\d+\.\d+(e-?\d+)?", lambda m: f"{float(m.group(0)):.4f}", xml)
+
+
+def benign(key, first, retry):
+    """A fixture reference stored as (fixture, False) on a fresh build and as the fixture after a restore."""
+    return key.startswith("fixture_refs.") and isinstance(first, list) and len(first) == 2 and \
+        first[1] is False and first[0] == retry
 
 
 def divergence(states_a, states_b):
@@ -184,7 +198,7 @@ def divergence(states_a, states_b):
 def compare(first, retry, retry2=None):
     diverge, worst = divergence(first["states"], retry["states"])
     ctrl = diff(first["controllers"], retry["controllers"])
-    attr = diff(first["attributes"], retry["attributes"])
+    attr = {k: v for k, v in diff(first["attributes"], retry["attributes"]).items() if not benign(k, *v)}
     meta = diff(first["ep_meta"], retry["ep_meta"])
     succ = [i for i, (x, y) in enumerate(zip(first["success"], retry["success"])) if x != y]
     check = [i for i, (x, y) in enumerate(zip(first["check"], retry["check"])) if x != y]
@@ -235,7 +249,7 @@ def check_task(env, task, scenes, steps, log_dir, mode=ce.DEFAULT_MODE):
                 return paired.rebuild()
             obs = ce.env_method(env, "reset_to")(dict(paired.saved))
             if paired.mode == "restore":                # as PairedReset does
-                ce.copy_back(paired.plain or [])
+                ce.copy_back(paired.plain or [], env)
                 ce.clear_ep_meta(env)
             lang = ce.first_instruction(paired.saved)
             setter = ce.env_method(env, "set_task_description")

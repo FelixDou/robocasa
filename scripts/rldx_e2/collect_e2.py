@@ -99,33 +99,40 @@ def _same(a, b):
 
 
 def plain_holders(env):
-    """The task environment, each robot, its composite controller and each part controller."""
+    """(key, object): the task environment, each robot, its composite controller and each part controller.
+    Keyed by position, because reset_to rebuilds the robots and controllers as new objects."""
     raw = task_env(env)
-    out = [] if raw is None else [raw]
-    for robot in (getattr(raw, "robots", None) or []) if raw is not None else []:
-        out.append(robot)
+    out = [] if raw is None else [("task", raw)]
+    for i, robot in enumerate((getattr(raw, "robots", None) or []) if raw is not None else []):
+        out.append((f"robot{i}", robot))
         cc = getattr(robot, "composite_controller", None)
         if cc is not None:
-            out.append(cc)
-            out.extend((getattr(cc, "part_controllers", None) or {}).values())
+            out.append((f"robot{i}.composite", cc))
+            for name, c in (getattr(cc, "part_controllers", None) or {}).items():
+                out.append((f"robot{i}.{name}", c))
     return out
 
 
 def snapshot_plain(env):
     """Plain values (numbers, strings, arrays and containers of them) of the task, robots and controllers."""
-    return [(obj, {k: copy.deepcopy(v) for k, v in vars(obj).items() if k not in PLAIN_EXCLUDE and _plain(v)})
-            for obj in plain_holders(env)]
+    return [(key, {k: copy.deepcopy(v) for k, v in vars(obj).items() if k not in PLAIN_EXCLUDE and _plain(v)})
+            for key, obj in plain_holders(env)]
 
 
-def copy_back(saved):
-    """Set every plain value that differs from the first attempt's back to it. Returns the names restored."""
+def copy_back(saved, env):
+    """Set every plain value that differs from the first attempt's back to it, on the objects that exist now.
+    Returns the names restored."""
+    now = dict(plain_holders(env))
     restored = []
-    for obj, snap in saved:
+    for key, snap in saved:
+        obj = now.get(key)
+        if obj is None:
+            continue
         cur = vars(obj)
         for k, v in snap.items():
             if k in cur and not _same(cur[k], v):
                 setattr(obj, k, copy.deepcopy(v))
-                restored.append(f"{type(obj).__name__}.{k}")
+                restored.append(f"{key}.{k}")
     return restored
 
 
@@ -375,7 +382,7 @@ class PairedReset:
                 # controller goals stay at the default pose and values drawn during the build (targets,
                 # sides, anchors) can differ. Put the first attempt's plain values back, and clear the
                 # stored metadata so the next scene is built fresh.
-                names = copy_back(self.plain or [])
+                names = copy_back(self.plain or [], self.env)
                 row.update(values_restored=len(names), values_restored_names=sorted(set(names))[:40],
                            ep_meta_cleared=clear_ep_meta(self.env))
             # reset_to reloads the model, and some tasks draw their instruction again while doing so

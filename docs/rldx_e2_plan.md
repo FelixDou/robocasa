@@ -714,3 +714,17 @@ collection.
 2. The restore check in mode `restore` on all 20 tasks with 3 scenes. Every task must be SAME, with no
    repeated scene.
 3. The new collection (seed 1501, new root), then steps 7–9 and the follow-up.
+
+### Restore check, fixed restore, run 1 (2026-11-10, `d36e935f`)
+
+- **Scene freshness fixed:** no scene repeats the previous one in any task.
+- **Still 0 of 20 SAME.** After the restore, the controller goals were still the default constant.
+  `reset_to` rebuilds the robots and controllers as new objects, so the values were being copied onto
+  the old ones.
+- **Change:** `copy_back` now resolves the task, each robot, its composite controller and its named
+  part controllers by position after the restore (test: `RebuiltControllerTest`).
+- **Check treats two harmless differences as equal:**
+  - the model XML that MuJoCo re-serializes (float rounding at the 6th digit, an optional mesh
+    `content_type` attribute), compared at 4 decimals;
+  - a fixture reference stored as `(fixture, False)` on a fresh build and as the fixture after a
+    restore.
