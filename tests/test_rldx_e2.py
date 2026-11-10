@@ -133,7 +133,7 @@ class PairedResetTest(unittest.TestCase):
         """OpenDrawer on the cluster: reset_to drew the other side, so the retry's instruction differed."""
         with tempfile.TemporaryDirectory() as d:
             env = ce.install(Outer(DrawerGymEnv(["left", "right", "right", "left"])), "OpenDrawer",
-                             Path(d) / "pairs.jsonl", mode="restore")
+                             Path(d) / "pairs.jsonl", mode="restore_legacy")
             o0, _ = env.reset()
             self.assertEqual(o0["annotation.human.task_description"], "Open the left drawer.")
             o1, _ = env.reset()                    # reset_to draws "right"; the override restores "left"
@@ -811,3 +811,19 @@ class RebuiltControllerTest(unittest.TestCase):
         self.assertEqual(rc.normalize_model(a), rc.normalize_model(b))
         self.assertTrue(rc.benign("fixture_refs.sink", ["<Sink s>", False], "<Sink s>"))
         self.assertFalse(rc.benign("target", ["<Sink s>", False], "<Sink s>"))
+
+
+class BothAttemptsRestoredTest(unittest.TestCase):
+    def test_first_attempt_starts_from_the_restored_scene(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = ce.install(Outer(DrawerGymEnv(["left", "right", "right", "left", "right"])), "OpenDrawer",
+                             Path(d) / "pairs.jsonl", mode="restore")
+            o0, _ = env.reset()                    # built "left", restored (draws "right"), override "left"
+            o1, _ = env.reset()
+            self.assertEqual(o0["annotation.human.task_description"], "Open the left drawer.")
+            self.assertEqual(o1["annotation.human.task_description"], "Open the left drawer.")
+            np.testing.assert_array_equal(o0["state"], o1["state"])
+            log = [json.loads(x) for x in (Path(d) / "pairs.jsonl").read_text().splitlines()]
+        self.assertTrue(log[0]["first_restored"])
+        self.assertEqual(log[0]["first_restore_residual"], 0.0)
+        self.assertIsNone(ck.pair_problem(log[0], log[1]))

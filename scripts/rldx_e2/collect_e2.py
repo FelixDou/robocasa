@@ -5,7 +5,9 @@ official_rldx protocol (one environment per task, repeated resets) and 2 x scene
 the environment's reset() is replaced, per task environment:
   - reset 2j (first attempt of scene j): a normal reset; the full simulator state, model XML and episode
     metadata right after it are kept in memory;
-  - reset 2j+1 (retry of scene j), mode "restore" (default since 2026-11-10): the kept state is restored
+  - mode "restore" (default since 2026-11-10): right after the build of reset 2j, the scene is saved and
+    restored once, and the first attempt starts from that restored scene; reset 2j+1 restores it again.
+    Both attempts therefore go through the same restore path. A restore: the kept state is restored
     through reset_to (RoboCasa's replay path), then every plain value of the task, the robots and their
     controllers (numbers, strings, arrays) that differs from the first attempt's is set back, the stored
     episode metadata is cleared (RoboCasa would otherwise reuse it for the next scene), and the retry gets
@@ -341,6 +343,43 @@ class PairedReset:
         with self.log_path.open("a") as fh:
             fh.write(json.dumps(row, sort_keys=True) + "\n")
 
+    def _restored(self, row):
+        """The kept scene through reset_to; in mode "restore", plain values copied back and the stored
+        metadata cleared; the kept instruction given. Returns (obs, info, flat state)."""
+        obs = env_method(self.env, "reset_to")(dict(self.saved))
+        if self.mode == "restore":
+            # reset_to rebuilds the Python side of the task before loading the saved XML and state:
+            # controller goals stay at the default pose and values drawn during the build (targets,
+            # sides, anchors) can differ. Put the built scene's plain values back, and clear the stored
+            # metadata so the next scene is built fresh.
+            names = copy_back(self.plain or [], self.env)
+            row.update(values_restored=len(names), values_restored_names=sorted(set(names))[:40],
+                       ep_meta_cleared=clear_ep_meta(self.env))
+        # reset_to reloads the model, and some tasks draw their instruction again while doing so
+        # (OpenDrawer: "Open the {side} drawer."): give the kept instruction for the whole attempt. The
+        # wrapper's next ordinary reset clears the override.
+        lang = first_instruction(self.saved)
+        setter = env_method(self.env, "set_task_description")
+        if lang and setter is not None:
+            setter(lang)
+            row["instruction_restored"] = True
+        else:
+            row["instruction_restored"] = False
+        getter = env_method(self.env, "get_current_observation")
+        if getter is not None and (row["instruction_restored"] or not isinstance(obs, dict)):
+            obs = getter()
+        _, flat = _flat_state(self.env)
+        info = {"success": False}
+        subtask = env_method(self.env, "_get_subtask_eval")
+        if subtask is not None:
+            try:
+                value = subtask()
+                if value is not None:
+                    info["subtask_eval"] = value
+            except Exception:
+                pass
+        return obs, info, flat
+
     def __call__(self, *args, **kwargs):
         k = self.k
         row = dict(task_name=self.task, reset_index=k, scene=k // 2, created_at=self.clock(), mode=self.mode)
@@ -356,10 +395,22 @@ class PairedReset:
             state, flat = _flat_state(self.env)
             self.saved = {key: state[key] for key in ("states", "model", "ep_meta") if key in state}
             self.saved["states"] = np.array(flat, copy=True)
-            self.first_obs = {key: (np.array(v, copy=True) if isinstance(v, np.ndarray) else v)
-                              for key, v in obs.items()} if isinstance(obs, dict) else None
             row.update(role="first", state_sha=_sha(flat), model_sha=_sha(state.get("model", "")),
                        ep_meta_sha=_sha(state.get("ep_meta", "") or ""))
+            if self.mode == "restore":
+                # The first attempt also starts from the restored scene, so both attempts go through the
+                # same restore path: a fresh build and a restore differ in internal controller state that
+                # is not a plain value, while two restores are identical (docs/rldx_e2_plan.md).
+                sub = {}
+                obs, info, rflat = self._restored(sub)
+                residual = (float(np.max(np.abs(rflat - self.saved["states"])))
+                            if rflat.shape == self.saved["states"].shape else float("inf"))
+                row.update(first_restored=True, first_restore_residual=residual,
+                           first_values_restored=sub.get("values_restored"), ep_meta_cleared=sub.get("ep_meta_cleared"),
+                           instruction_restored=sub.get("instruction_restored"))
+                result = (obs, info)
+            self.first_obs = {key: (np.array(v, copy=True) if isinstance(v, np.ndarray) else v)
+                              for key, v in obs.items()} if isinstance(obs, dict) else None
         elif self.mode == "rebuild":
             if self.saved is None or self.rng_states is None:
                 raise RuntimeError("E2: a retry reset came before any first-attempt reset")
@@ -376,46 +427,13 @@ class PairedReset:
         else:
             if self.saved is None:
                 raise RuntimeError("E2: a retry reset came before any first-attempt reset")
-            obs = env_method(self.env, "reset_to")(dict(self.saved))
-            if self.mode == "restore":
-                # reset_to rebuilds the Python side of the task before loading the saved XML and state:
-                # controller goals stay at the default pose and values drawn during the build (targets,
-                # sides, anchors) can differ. Put the first attempt's plain values back, and clear the
-                # stored metadata so the next scene is built fresh.
-                names = copy_back(self.plain or [], self.env)
-                row.update(values_restored=len(names), values_restored_names=sorted(set(names))[:40],
-                           ep_meta_cleared=clear_ep_meta(self.env))
-            # reset_to reloads the model, and some tasks draw their instruction again while doing so
-            # (OpenDrawer: "Open the {side} drawer.", the side drawn when the robot is placed). The
-            # robot pose and the target come back from the saved state, so the first attempt's own
-            # instruction is the right one: give it to the retry for its whole length. The wrapper's
-            # next ordinary reset clears the override.
-            lang = first_instruction(self.saved)
-            setter = env_method(self.env, "set_task_description")
-            if lang and setter is not None:
-                setter(lang)
-                row["instruction_restored"] = True
-            else:
-                row["instruction_restored"] = False
-            getter = env_method(self.env, "get_current_observation")
-            if getter is not None and (row["instruction_restored"] or not isinstance(obs, dict)):
-                obs = getter()
-            _, flat = _flat_state(self.env)
+            obs, info, flat = self._restored(row)
             residual = (float(np.max(np.abs(flat - self.saved["states"])))
                         if flat.shape == self.saved["states"].shape else float("inf"))
             dist = obs_distance(self.first_obs, obs) if isinstance(obs, dict) and self.first_obs else None
             row.update(role="retry", restored_sha=_sha(self.saved["states"]), state_sha=_sha(flat),
                        model_sha=_sha(self.saved.get("model", "")), restore_residual=residual,
                        first_obs_distance=dist)
-            info = {"success": False}
-            subtask = env_method(self.env, "_get_subtask_eval")
-            if subtask is not None:
-                try:
-                    value = subtask()
-                    if value is not None:
-                        info["subtask_eval"] = value
-                except Exception:
-                    pass
             result = (obs, info)
         self._log(row)
         self.k += 1

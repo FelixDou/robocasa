@@ -728,3 +728,19 @@ collection.
     `content_type` attribute), compared at 4 decimals;
   - a fixture reference stored as `(fixture, False)` on a fresh build and as the fixture after a
     restore.
+
+### Restore check, fixed restore, run 2 (2026-11-10, `01bac69f`; first 7 tasks pasted)
+
+- **Plain values now match.** No controller, attribute or model difference remains after the
+  restore.
+- **The first step still diverges** (about 0.066 in most tasks). A fresh build and a restore differ
+  in internal state that is not a plain value.
+- **Two restores are identical** in every task and scene (the control).
+
+**Change: both attempts start from the restored scene.** Right after the build, the scene is saved
+and restored once, with plain values copied back, the metadata cleared and the instruction kept; the
+first attempt starts there. The retry restores it again, so both attempts go through the same path.
+- The physical start state is the built scene's exactly (each first row records
+  `first_restore_residual`).
+- Cost: one extra model reload per scene.
+- Test: `BothAttemptsRestoredTest`.
