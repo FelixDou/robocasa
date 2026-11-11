@@ -358,6 +358,83 @@ N = 10 attempts per state (different source segments or script seeds).
 class-2 states with at least one generated success. Below 0.5, the generator
 is the problem; fix it before generating training data.
 
+*R2 design (draft, 11 November 2026; binding once committed with the R2
+code).* The robot is a mobile manipulator, so plain MimicGen replay (fixed base,
+object-relative arm poses) does not cover the stages that need driving
+(`strawberry_on_pancake`, `basket_on_dining_counter`: 8 of the 25 staged
+states). The design uses three facts from the code:
+
+- Target-split scenes come from 10 fixed kitchens (layout and style 1–10), and
+  the target human demos are recorded in the same kitchens. Parents and
+  demos both store `layout_id`, `style_id` and `fixture_refs` in `ep_meta`.
+  Within one kitchen, fixtures have the same world poses, so a demo's base
+  path between the same fixtures is a valid path for the alarm state.
+- `stage_segments.jsonl` splits each expert segment into upstream steps
+  (pick, navigate, place, execute) with frame bounds, the target object and
+  the instructions.
+- The environment's 12-d action is an arm pose delta in the base frame,
+  gripper, base velocity, torso and a base/arm mode switch. An executor that
+  tracks pose targets produces actions in exactly the space XR-1 acts in, so
+  the generated data can train XR-1 directly.
+
+R2 has three parts:
+
+1. **R2a source matching (no simulator).** For each class-2 state, read its
+   kitchen and fixture refs and the R0 facts at the alarm (what the gripper
+   holds, whether the target is tipped). Choose:
+   - the first step to run: `pick` if the target is not held, the step after
+     the pick if it is, with release-and-retreat first if the gripper holds
+     anything else;
+   - up to 10 source segments for the stage and the state's target object,
+     ranked by: same kitchen and the same fixture refs for the stage's
+     fixtures, then same kitchen, then the target's pose in its reference
+     frame closest to the alarm state's;
+   - the stage's reference for each step: the target object for `pick`, and
+     for `place` the receptacle named in the place instruction (or the
+     stage predicate's fixture, e.g. the dining counter).
+
+   Steps that need driving can only use same-kitchen sources. A state without
+   one is reported as not coverable, not forced.
+2. **R2b executor (simulator).** Restore the alarm snapshot. Then:
+   - optional release-and-retreat: open the gripper, lift 10 cm, back off;
+   - per step, take the source end-effector poses relative to the step's
+     reference at the step's first frame, transform them into the alarm
+     scene, approach the first pose by interpolation, then track the poses
+     with the arm's pose-delta action and the source's gripper commands;
+   - `navigate`: track the source's world-frame base path (same kitchen
+     only) in base mode;
+   - stop the expert once the stage predicate holds for 5 steps, or after the
+     source segment's length plus 50%.
+
+   Then XR-1 takes over: task instruction, context reset, until success or
+   the fixed budget (0.5 H from the alarm, expert time included). The
+   observations are recorded as XR-1 receives them, with the executed actions,
+   the source segment and the step boundaries.
+3. **Executor checks before Gate R**, on demo states, not alarm states:
+   - *self-replay*: from a demo's own state at the segment start, replaying
+     its own segment must complete the stage in at least 0.9 of 20 demos per
+     stage;
+   - *transfer*: from another same-kitchen demo's segment-start state, at
+     least 0.7.
+
+   Below these, the executor is the problem, and the alarm states are not run.
+
+Gate R then uses N = 10 attempts per class-2 state (distinct source segments
+where available) and reports two rates. The **expert rate** is the share of
+attempts where the expert completes the stuck stage, which separates executor
+failures from continuation failures. The **full rate** is the share of
+attempts ending in full-task success; Gate R uses this one, at the 0.5
+threshold above.
+
+Open before the code:
+- the R2a check: per class-2 state, how many of the 500 target demos share its
+  kitchen and fixture refs. This decides whether the same-kitchen requirement
+  for driving leaves enough sources. Run it on all 500 demos, since the index
+  covers 100 per task.
+- the arm controller's delta scaling and frame (OSC pose, base frame), read
+  from the composite controller config at run time and tested in self-replay;
+- the GarnishPancake state `cf428856ba92f99d9d7d` (no stage to replay).
+
 **What changes downstream.**
 
 - Phase B keeps its parent collection (fresh seeds until 30 alarmed failed
