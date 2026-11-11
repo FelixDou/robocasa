@@ -413,7 +413,10 @@ $CLIENT_PY -I scripts/rldx_e2/analyze_e2.py --plan $E2_ROOT/plan.json --pairs $E
 
 Paste `analyze.log` back and copy `e2_result.json` to the Mac.
 
-## Result (2026-11-09)
+## Result (2026-11-09; first collection, superseded)
+
+*Not used: these retries were not valid second attempts (see the follow-up concern and the restore
+check). E2's result is the second collection, at the end of this file.*
 
 **Run.**
 - Root `rldx1_e2_20261106_143309`, collected with code `0810b17f`.
@@ -846,3 +849,85 @@ chmod +x $E2_ROOT/run_tasks.sh
 
 **B6.** Steps 7–9 and the follow-up, from `$E2_REPO`, unchanged. The collection check now also stops on
 repeated scenes.
+
+## Result, second collection (2026-11-11; this is E2's result)
+
+**Run.**
+- Root `rldx1_e2b_20261110_150955`, collected and analysed with code `22461afd`. Seed 1501; no task
+  was rerun. The smoke run (NavigateKitchen, seed 1103) passed: mode `restore` on every row, residuals
+  0, `ep_meta_cleared` True.
+- Scoring was interrupted once by the end of a session. The partial SAFE-LSTM scores were moved to
+  `safe_scores_incomplete_try1` (not used) and all six runs were repeated.
+
+**Gates.**
+- **Collection:** `CHECK OK`, 1,000 of 1,000 pairs usable, restore residual 0, largest first-image
+  difference 0, no repeated scene.
+- **Scoring:** both steps `SCORING OK`, with every reproduction difference 0 (SAFE-LSTM normalization
+  and recorded scores; Hide-and-Seek's 60 calibration and 200 test rollouts). 2,000 rollouts scored.
+- **Retry validity:** the full-budget retry succeeds in 0.515 of scenes against 0.516 for the first
+  attempt (atomic 0.626 / 0.627, composite 0.257 / 0.257). The first collection's gap (0.392 against
+  0.508) is gone, and no task has retries that never succeed after a successful first attempt.
+
+**Hashes.** `e2_result.json` `ff8ba95f…`, `e2_followup.json` `4cbc02e2…`, `pairs.json` `2f44d2ab…`,
+`plan.json` `3d6fd313…`. Copies and logs are in the paper worktree:
+`reports/paper_time_aware_fusion/rss2027_stage2/evidence/e2b/`.
+
+**Success within 1.25 H_k** (1,000 scenes; 95% CIs from scenes resampled within task):
+
+| Rule | Success | Resets | Unnecessary | Lost a success |
+|---|---|---:|---:|---:|
+| No reset | 0.516 [0.489, 0.542] | 0 | 0 | 0 |
+| P | 0.514 [0.488, 0.540] | 529 | 45 | 40 |
+| SAFE-LSTM + P (primary) | 0.514 [0.489, 0.539] | 535 | 51 | 41 |
+| Hide-and-Seek + P (descriptive) | 0.513 [0.487, 0.538] | 531 | 47 | 41 |
+| Success-tuned timer (R_opt) | 0.512 [0.486, 0.536] | 545 | 61 | 37 |
+
+**Paired differences** ("only" = scenes won by one rule and lost by the other):
+
+| Contrast | Δ | 95% CI | Only first / only second |
+|---|---:|---|---|
+| **SAFE-LSTM + P − P (primary)** | **0.000** | **[−0.004, +0.004]** | 2 / 2 |
+| P − none | −0.002 | [−0.019, +0.015] | 38 / 40 |
+| SAFE-LSTM + P − none | −0.002 | [−0.019, +0.015] | 39 / 41 |
+| R_opt − P | −0.002 | [−0.008, +0.004] | 4 / 6 |
+| SAFE-LSTM + P − R_opt | +0.002 | [−0.005, +0.009] | 7 / 5 |
+| Hide-and-Seek + P − P (descriptive) | −0.001 | [−0.004, +0.002] | 1 / 2 |
+
+- **Latency.** Charging 8 steps per learned-monitor reset changes nothing (SAFE-LSTM + P 0.000,
+  Hide-and-Seek + P −0.001).
+- **By type.**
+  - Atomic (700): none 0.627, P 0.641, SAFE-LSTM + P 0.641, Hide-and-Seek + P 0.640, R_opt 0.636.
+  - Composite (300): none 0.257, P 0.217, SAFE-LSTM + P 0.217, Hide-and-Seek + P 0.217, R_opt 0.223.
+- **Restore check.** Full-budget retry success 0.830 after a successful first attempt, 0.180 after
+  a failed one.
+
+**Against the plan.**
+- *SAFE − P ≈ +0.006 (half-width about 0.02):* observed 0.000 [−0.004, +0.004], inside the predicted
+  range. The CI is narrower than sized because the rules share the retry and differ on 4 scenes.
+- *Retry success r = 0.245 (XR-1 pilot):* observed 0.180 after a failure, about 27% lower.
+- *R_opt matches the fused monitors at 1.25 H_k:* yes (+0.002 [−0.005, +0.009]).
+
+**Follow-up** (same code; F0 OK):
+- **F1.** oracle@P 0.554: +0.038 [0.027, 0.050] over no reset, +0.040 [0.029, 0.052] over P.
+  oracle@SAFE 0.555 (+0.001 over oracle@P). oracle@0 0.603: +0.087 [0.071, 0.104] over no reset.
+- **F2.** Mantel–Haenszel OR 10.2 [7.4, 14.6]. Retry success after a failure is 0.180, against 0.382
+  if attempts were independent within the task. 397 of 1,000 scenes fail both attempts (composite
+  193 of 300). StackBowlsCabinet never succeeds; LoadDishwasher succeeds on 2 of 50 first attempts.
+- **F3.** Stopping at P's alarm saves 22.9 s per failed attempt (36% of its 72.8 s) and stops 45 of
+  516 successes (8.7%). SAFE-LSTM + P saves 0.31 s more per scene [0.21, 0.42] and stops 0.006 more
+  successes per scene [0.002, 0.011]. Hide-and-Seek + P: +0.05 s [−0.08, +0.19], +0.002 [0.000, 0.005].
+
+**Against the follow-up expectations (written before the first run):** F1 oracle@0 +0.087 (expected
++0.07), oracle@P +0.038 (expected +0.02 to +0.04), oracle@SAFE within 0.01 of oracle@P (yes). F2 OR
+10.2 (expected 5–15), composite more dependent (yes). F3 P saves 36% (expected about a third); SAFE
+saves 0.3 s more per scene, not the expected ~1 s per failure (0.6 s per failure), and stops 6 more
+successes (expected about 7).
+
+**Conclusion.** With a valid retry, the first collection's conclusion holds:
+- Resetting at any alarm does not raise success on this policy and budget. The timer's resets win 38
+  scenes and lose 40 against no reset; on composite tasks they lose 0.040.
+- SAFE-LSTM's earlier warning changes the outcome of 4 scenes in 1,000, 2 each way.
+- Even a perfect detector at the timer's timing would gain only +0.04. The limit is that failure is
+  mostly a property of the scene (OR 10): a failed scene's retry succeeds 18% of the time.
+- Where an earlier warning does help is in stopping a failing attempt: SAFE-LSTM + P saves 0.3 s per
+  scene over P at the cost of 0.6 more stopped successes per 100 scenes.
