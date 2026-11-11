@@ -297,6 +297,48 @@ and passes the labeler's own checks. Otherwise go to option 2 for the failing
 stages. `expert_segments coverage` applies this to the R0 classes and writes
 `stage_segments.jsonl`, the source table for R2.
 
+**R0 decision (11 November 2026).** Gate R0 passed: 26 of the 29
+never-recovered states are class 2 (threshold 10), 3 are class 3. All 40
+scene checks matched and there were 0 errors. `decide` ran without manual
+overrides; the review images still need checking before R2.
+
+**First R1 coverage run (11 November 2026).** The index replayed 100 demos
+per task with 0 errors. All 500 demos succeed and none is flagged by
+upstream's checks, and the replay agrees exactly with the labels upstream
+published (1.0 on every task). Under the rule above, 4 stuck stages failed:
+
+- `CuttingToolSelection:correct_tool_on_cutting_board` (5 states): the
+  upstream subtask agreed in 100/100, but the moved object was the peeler in
+  60 and the knife in 40. The correct tool depends on the food in the scene,
+  so no single object can reach 0.8.
+- `ArrangeBreadBasket:basket_on_dining_counter` (3 states): the subtask
+  agreed in 99/99, but the bread rides in the basket and moves as far, so
+  the most-moved object was the basket in only 0.535. The instruction always
+  names the basket.
+- `GarnishPancake:all_latched` (2) and `BreadSelection:all_latched` (1):
+  every ladder stage had latched at the alarm without task success, so the
+  state has no current stage.
+
+**Amendment 1 (11 November 2026, after that run and before any R2 code).**
+The first two failures come from the object rule, not from missing demos, so:
+
+1. A segment's object is the first task object its instructions name
+   (`pick up the {basket}`), and the most-moved object only when none is named
+   (fixture subtasks).
+2. A stage passes if at least 0.8 of its usable segments agree on the
+   upstream subtask, objects that are targets in at least 0.2 of them cover at
+   least 0.8 of them, and each such object has at least 10 segments of its
+   own. R2 draws segments for the object the stuck state needs.
+3. A class-2 `all_latched` state takes the first required stage undone at
+   its alarm (R0 `regressed_at_alarm`). A state with nothing undone has no stage
+   to replay. It is listed separately (decision
+   `segment_replay_except_unstaged_states`), and its failure is checked on the
+   R0 images before deciding whether R2 can address it.
+
+The original rule's decision is still computed and reported next to the
+amended one. In the first run, the unstaged state is GarnishPancake
+`cf428856ba92f99d9d7d`: every stage latched, nothing undone, no flags.
+
 The index also keeps upstream's instruction for every segment of the group
 and each task object's display name. `coverage` reports, per stage, the
 modal instruction sequence with object names as `{object_key}` (for example

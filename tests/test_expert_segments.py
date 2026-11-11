@@ -71,9 +71,11 @@ def write_demo(index_dir, episode, *, mug_first=False, close=True, issues=()):
 
 def write_audit(audit_dir, stuck, decided=True):
     audit_dir = Path(audit_dir)
-    for i, (stage, cls) in enumerate(stuck):
+    for i, item in enumerate(stuck):
+        stage, cls = item[:2]
+        regressed = list(item[2]) if len(item) > 2 else []
         row = {"parent_id": f"p{i}", "task_name": "ArrangeTea", "required_subtasks": REQUIRED,
-               "stage_at_alarm": stage, "provisional_class": cls}
+               "stage_at_alarm": stage, "provisional_class": cls, "regressed_at_alarm": regressed}
         ladder.append_jsonl(audit_dir / "states.jsonl", row)
         if decided:
             ladder.append_jsonl(audit_dir / "r0_states.jsonl", {"parent_id": f"p{i}", "final_class": cls})
@@ -217,8 +219,56 @@ class CoverageTest(unittest.TestCase):
             write_audit(audit, [("mug_on_tray", "recoverable"), ("all_latched", "recoverable")])
             result = es.coverage(index, audit, Path(tmp, "r1"))
             self.assertEqual(result["decision"], "segment_replay_incomplete_check_scripted_expert")
-            self.assertIn("ArrangeTea:mug_on_tray", result["stuck_stages_failing"])
-            self.assertTrue(any(f.startswith("ArrangeTea:all_latched") for f in result["stuck_stages_failing"]))
+            self.assertEqual(result["stuck_stages_failing"], ["ArrangeTea:mug_on_tray"])
+            self.assertEqual(result["unstaged_states"], [{"parent_id": "p1", "task_name": "ArrangeTea"}])
+
+    def test_all_latched_states_take_the_undone_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            index, audit = Path(tmp, "index"), Path(tmp, "audit")
+            for ep in range(12):
+                write_demo(index, ep)
+            write_audit(audit, [("mug_on_tray", "recoverable"),
+                                ("all_latched", "recoverable", ["mug_on_tray"]),
+                                ("all_latched", "unrecoverable", ["kettle_on_tray"])])
+            result = es.coverage(index, audit, Path(tmp, "r1"))
+            self.assertEqual(result["decision"], "segment_replay")
+            self.assertEqual(result["class2_states_by_stage_source"], {"alarm": 1, "undone": 1})
+            stages = {c["stage"]: c for c in result["stages"]}
+            self.assertEqual(stages["mug_on_tray"]["class2_states"], 2)
+            # A state with nothing undone has no stage to replay; it is listed, not failed.
+            audit2 = Path(tmp, "audit2")
+            write_audit(audit2, [("mug_on_tray", "recoverable"), ("all_latched", "recoverable")])
+            result = es.coverage(index, audit2, Path(tmp, "r1b"))
+            self.assertEqual(result["decision"], "segment_replay_except_unstaged_states")
+            self.assertEqual(result["stuck_stages_failing"], [])
+
+    def test_targets_follow_the_instruction_and_may_vary_by_scene(self):
+        def row(episode, langs, moved, object_lang):
+            seg = {"name": "PickPlaceDrawerToCounter", "stage": "place", "lang": langs[-1], "langs": langs,
+                   "start": 0, "end": 100, "moved_object": moved}
+            return {"task_name": "T", "episode": episode, "clean": True, "object_lang": object_lang,
+                    "stage_events": {"on_board": {"true_at_start": False, "first_true": 50, "segment": seg}}}
+
+        tools = {"knife": "knife", "peeler": "peeler", "board": "cutting board"}
+        rows = [row(i, ["pick up the peeler from the drawer", "place the peeler on the cutting board"], "peeler",
+                    tools) for i in range(12)]
+        rows += [row(12 + i, ["pick up the knife from the drawer", "place the knife on the cutting board"], "knife",
+                     tools) for i in range(11)]
+        cov = es.stage_coverage(rows, "T", "on_board")
+        self.assertTrue(cov["segment_replay_ok"])
+        self.assertFalse(cov["segment_replay_ok_original_rule"])
+        self.assertEqual(cov["target_objects"], {"peeler": 12, "knife": 11})
+        # Carried contents: the bread moves as far as the basket, the instruction names the basket.
+        basket = {"basket": "basket", "bread": "bread"}
+        rows = [row(i, ["pick up the basket", "navigate to the dining counter", "place the basket on the dining counter"],
+                    "bread" if i % 2 else "basket", basket) for i in range(12)]
+        cov = es.stage_coverage(rows, "T", "on_board")
+        self.assertEqual(cov["target_objects"], {"basket": 12})
+        self.assertEqual(cov["target_from_instruction"], 1.0)
+        self.assertTrue(cov["segment_replay_ok"])
+        # A target with too few segments of its own fails the stage.
+        rows = rows[:12] + [row(20 + i, ["pick up the bread"], "bread", basket) for i in range(4)]
+        self.assertFalse(es.stage_coverage(rows, "T", "on_board")["segment_replay_ok"])
 
     def test_requires_decided_classes_unless_allowed(self):
         with tempfile.TemporaryDirectory() as tmp:

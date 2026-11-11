@@ -44,6 +44,7 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 import traceback
 
@@ -55,6 +56,7 @@ from robocasa.recovery import recoverability_ladder as ladder
 PILOT_TASKS = ("ArrangeBreadBasket", "ArrangeTea", "BreadSelection", "CuttingToolSelection", "GarnishPancake")
 DISTRACTOR_PREFIXES = ("distr", "dstr")
 DONE_STAGE = "done"
+ALL_LATCHED = "all_latched"
 NAVIGATE = "NavigateKitchen"
 
 # Frozen with this code (11 November 2026, before any R1 output exists).
@@ -489,8 +491,13 @@ def load_r0(audit_dir, allow_provisional=False):
         cls = final.get(row["parent_id"], row["provisional_class"] if allow_provisional else None)
         if cls is None:
             raise ValueError(f"{row['parent_id']} has no final class in r0_states.jsonl")
-        out.append({"parent_id": row["parent_id"], "task_name": row["task_name"],
-                    "stage": row["stage_at_alarm"], "class": cls, "class_source": "final" if final else "provisional"})
+        stage, source = row["stage_at_alarm"], "alarm"
+        if stage == ALL_LATCHED:
+            # Amendment 1: every stage had latched, so the stage to redo is the one undone at the alarm.
+            undone = [n for n in (row.get("regressed_at_alarm") or []) if n in req]
+            stage, source = (undone[0], "undone") if undone else (ALL_LATCHED, "none")
+        out.append({"parent_id": row["parent_id"], "task_name": row["task_name"], "stage": stage,
+                    "stage_source": source, "class": cls, "class_source": "final" if final else "provisional"})
     return out, required
 
 
@@ -500,6 +507,15 @@ def _modal_share(values):
         return None, 0.0
     value, n = Counter(values).most_common(1)[0]
     return value, n / len(values)
+
+
+def target_object(segment, object_lang):
+    """(object key, source): the first task object the segment's instructions name, else the most-moved one."""
+    for text in instruction_template(segment.get("langs") or [segment["lang"]], object_lang):
+        match = re.search(r"\{([^{}]+)\}", text)
+        if match:
+            return match.group(1), "instruction"
+    return segment.get("moved_object"), "displacement"
 
 
 def stage_coverage(rows, task_name, stage, ordered=None, *, min_segments=R1_MIN_SEGMENTS,
@@ -514,11 +530,24 @@ def stage_coverage(rows, task_name, stage, ordered=None, *, min_segments=R1_MIN_
     modal_object, object_share = _modal_share(objects)
     consistent = [(r, e) for r, e in usable if (e["segment"]["name"], e["segment"]["stage"]) == modal_key
                   and e["segment"]["moved_object"] == modal_object]
+    ok_original = len(consistent) >= min_segments and min(key_share, object_share) >= min_consistency
+    # Amendment 1 (11 November 2026, after the first coverage run): the object is the one the
+    # instructions name, and each object that is a target in at least (1 - min_consistency) of the
+    # segments needs min_segments of its own. Carried contents (bread in the basket) and scene-dependent
+    # targets (knife or peeler) broke the single most-moved-object rule.
+    on_key = [(r, e) for r, e in usable if (e["segment"]["name"], e["segment"]["stage"]) == modal_key]
+    targets = [target_object(e["segment"], r.get("object_lang")) for r, e in on_key]
+    counts = Counter(t for t, _ in targets)
+    floor = (1.0 - min_consistency) * len(on_key)
+    groups = {t: n for t, n in counts.items() if n >= floor and n > 0}
+    covered = sum(groups.values()) / len(on_key) if on_key else 0.0
+    ok = bool(groups) and key_share >= min_consistency and covered >= min_consistency \
+        and all(n >= min_segments for n in groups.values())
+    consistent = [(r, e) for (r, e), (t, _) in zip(on_key, targets) if t in groups]
     lengths = [e["segment"]["end"] - e["segment"]["start"] for _, e in consistent]
     templates = [tuple(instruction_template(e["segment"].get("langs") or [e["segment"]["lang"]], r.get("object_lang")))
                  for r, e in consistent]
     modal_template, template_share = _modal_share(templates)
-    ok = len(consistent) >= min_segments and min(key_share, object_share) >= min_consistency
     out = {
         "task_name": task_name, "stage": stage, "demos": len(task_rows),
         "true_at_start": sum(bool(e and e["true_at_start"]) for _, e in events),
@@ -528,7 +557,12 @@ def stage_coverage(rows, task_name, stage, ordered=None, *, min_segments=R1_MIN_
         "median_segment_frames": float(np.median(lengths)) if lengths else None,
         "instruction_template": list(modal_template) if modal_template else None,
         "instruction_share": round(template_share, 3),
+        "target_objects": {str(t): n for t, n in sorted(groups.items(), key=lambda kv: -kv[1])},
+        "target_coverage": round(covered, 3),
+        "target_from_instruction": round(sum(src == "instruction" for _, src in targets) / len(targets), 3)
+        if targets else 0.0,
         "segment_replay_ok": bool(ok),
+        "segment_replay_ok_original_rule": bool(ok_original),
     }
     if ordered is not None:
         spans = [o for o in ordered if o is not None]
@@ -564,7 +598,9 @@ def coverage(index_dir, audit_dir, output_dir, *, allow_provisional=False, min_s
         raise ValueError(f"No index rows in {index_dir}")
     states, required = load_r0(audit_dir, allow_provisional)
     ordered = _ordered_by_stage(index_dir, rows, required)
-    stuck = Counter((s["task_name"], s["stage"]) for s in states if s["class"] == "recoverable")
+    class2 = [s for s in states if s["class"] == "recoverable"]
+    unstaged = [s for s in class2 if s["stage"] == ALL_LATCHED]
+    stuck = Counter((s["task_name"], s["stage"]) for s in class2 if s["stage"] != ALL_LATCHED)
     tables = []
     for task in sorted(required):
         for stage in required[task]:
@@ -577,6 +613,13 @@ def coverage(index_dir, audit_dir, output_dir, *, allow_provisional=False, min_s
     needed = [by_key[k] for k in sorted(stuck) if k in by_key]
     failing = [f"{c['task_name']}:{c['stage']}" for c in needed if not c["segment_replay_ok"]]
     failing += [f"{t}:{s} (no stage in the ladder list)" for t, s in unknown]
+    failing_original = [f"{c['task_name']}:{c['stage']}" for c in needed if not c["segment_replay_ok_original_rule"]]
+    if failing:
+        decision = "segment_replay_incomplete_check_scripted_expert"
+    elif unstaged:
+        decision = "segment_replay_except_unstaged_states"
+    else:
+        decision = "segment_replay"
     health = {}
     for task in sorted({r["task_name"] for r in rows}):
         task_rows = [r for r in rows if r["task_name"] == task]
@@ -591,9 +634,14 @@ def coverage(index_dir, audit_dir, output_dir, *, allow_provisional=False, min_s
         }
     result = {
         "kind": "r1_coverage", "index_dir": str(index_dir), "audit_dir": str(audit_dir),
-        "class_source": states[0]["class_source"], "class2_states": sum(stuck.values()),
+        "class_source": states[0]["class_source"], "class2_states": len(class2),
+        "class2_states_by_stage_source": dict(Counter(s["stage_source"] for s in class2)),
+        "unstaged_states": [{"parent_id": s["parent_id"], "task_name": s["task_name"]} for s in unstaged],
+        "decision_original_rule": "segment_replay" if not failing_original and not unknown
+        else "segment_replay_incomplete_check_scripted_expert",
+        "stuck_stages_failing_original_rule": failing_original,
         "thresholds": {"min_segments": min_segments, "min_consistency": min_consistency},
-        "decision": ("segment_replay" if not failing else "segment_replay_incomplete_check_scripted_expert"),
+        "decision": decision,
         "stuck_stages_failing": failing, "health": health, "stages": tables, "created_at": ladder.utc_now(),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -604,8 +652,10 @@ def coverage(index_dir, audit_dir, output_dir, *, allow_provisional=False, min_s
                 continue
             for stage, event in sorted(row["stage_events"].items()):
                 if event["segment"]:
+                    target, source = target_object(event["segment"], row.get("object_lang"))
                     stream.write(json.dumps({"task_name": row["task_name"], "episode": row["episode"],
-                                             "stage": stage, **event["segment"]}) + "\n")
+                                             "stage": stage, **event["segment"], "target_object": target,
+                                             "target_source": source}) + "\n")
     write_coverage_md(result, output_dir / "r1_coverage.md")
     return result
 
@@ -617,22 +667,32 @@ def write_coverage_md(result, path):
              f"Thresholds: at least {result['thresholds']['min_segments']} consistent clean segments per stuck "
              f"stage, and at least {result['thresholds']['min_consistency']:.0%} agreement on the upstream "
              "subtask and on the moved object.", ""]
+    lines += ["Amendment 1 (11 November 2026, after the first run): the object of a segment is the one its "
+              "instructions name, every object that is a target in at least 20% of the segments needs its own "
+              "segments, and an `all_latched` state is assigned the stage undone at its alarm. Under the original "
+              f"rule: **{result['decision_original_rule']}** "
+              f"(failing: {', '.join(result['stuck_stages_failing_original_rule']) or 'none'}).", ""]
     if result["stuck_stages_failing"]:
         lines += ["Stuck stages without enough segments: " + ", ".join(result["stuck_stages_failing"]), ""]
+    if result["unstaged_states"]:
+        lines += ["Class-2 states with every stage latched and nothing undone (no stage to replay): "
+                  + ", ".join(f"{s['task_name']} `{s['parent_id']}`" for s in result["unstaged_states"]), ""]
     lines += ["## Demo health", "", "| Task | Demos | Clean | Success | Labeler flagged | Row mismatch | "
               "Agreement with published labels | Errors |", "|---|---:|---:|---:|---:|---:|---:|---:|"]
     for task, h in result["health"].items():
         lines.append(f"| {task} | {h['demos']} | {h['clean']} | {h['success_at_end']} | {h['labeler_flagged']} | "
                      f"{h['rows_mismatch']} | {h['published_label_agreement_mean']} | {h['errors']} |")
     lines += ["", "## Stages", "", "| Task | Stage | Class-2 states | Usable | Consistent | Upstream segment | "
-              "Share | Moved object | Share | Median frames | Ordered window empty | OK |",
-              "|---|---|---:|---:|---:|---|---:|---|---:|---:|---:|---|"]
+              "Share | Target objects | Target coverage | Median frames | Ordered window empty | OK | OK (original) |",
+              "|---|---|---:|---:|---:|---|---:|---|---:|---:|---:|---|---|"]
     for c in result["stages"]:
         seg = "/".join(c["upstream_segment"]) if c["upstream_segment"] else "-"
         lines.append(f"| {c['task_name']} | `{c['stage']}` | {c['class2_states']} | {c['usable']} | "
-                     f"{c['consistent']} | {seg} | {c['segment_share']} | {c['moved_object']} | "
-                     f"{c['object_share']} | {c['median_segment_frames']} | {c.get('ordered_window_empty')} | "
-                     f"{'yes' if c['segment_replay_ok'] else 'no'} |")
+                     f"{c['consistent']} | {seg} | {c['segment_share']} | "
+                     f"{', '.join(f'{k}: {n}' for k, n in c['target_objects'].items()) or '-'} | "
+                     f"{c['target_coverage']} | {c['median_segment_frames']} | {c.get('ordered_window_empty')} | "
+                     f"{'yes' if c['segment_replay_ok'] else 'no'} | "
+                     f"{'yes' if c['segment_replay_ok_original_rule'] else 'no'} |")
     lines += ["", "## Upstream instructions per stage", "",
               "Modal instruction sequence of the consistent segments (object names as `{object_key}`).", "",
               "| Task | Stage | Instructions | Share |", "|---|---|---|---:|"]
