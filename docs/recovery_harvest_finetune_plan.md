@@ -362,13 +362,20 @@ is the problem; fix it before generating training data.
 code).* The robot is a mobile manipulator, so plain MimicGen replay (fixed base,
 object-relative arm poses) does not cover the stages that need driving
 (`strawberry_on_pancake`, `basket_on_dining_counter`: 8 of the 25 staged
-states). The design uses three facts from the code:
+states). The design uses four facts from the code and the data:
 
-- Target-split scenes come from 10 fixed kitchens (layout and style 1–10), and
-  the target human demos are recorded in the same kitchens. Parents and
-  demos both store `layout_id`, `style_id` and `fixture_refs` in `ep_meta`.
-  Within one kitchen, fixtures have the same world poses, so a demo's base
-  path between the same fixtures is a valid path for the alarm state.
+- The alarm states and the demos are in different kitchens. The 5 pilot tasks
+  have target-split human demos only (kitchens 1–10, target object
+  instances), while the ladder runs XR-1 in the pretrain split (kitchens
+  11–60, pretrain object instances). The R2a check confirmed it: 0 of the
+  ~500 demos per task share a kitchen with any class-2 state. No demo
+  world-frame base path can be reused, and the arm motions must transfer
+  across kitchens and object instances.
+- RoboCasa computes the base pose in front of a fixture with
+  `EnvUtils.compute_robot_base_placement_pose(env, fixture, ref_object)`.
+  NavigateKitchen uses it as its goal and counts success as base within
+  0.20 m and `cos(yaw error) >= 0.98`. This gives a kitchen-independent
+  goal for driving.
 - `stage_segments.jsonl` splits each expert segment into upstream steps
   (pick, navigate, place, execute) with frame bounds, the target object and
   the instructions.
@@ -379,43 +386,48 @@ states). The design uses three facts from the code:
 
 R2 has three parts:
 
-1. **R2a source matching (no simulator).** For each class-2 state, read its
-   kitchen and fixture refs and the R0 facts at the alarm (what the gripper
-   holds, whether the target is tipped). Choose:
+1. **R2a source matching (no simulator).** For each class-2 state, read the
+   R0 facts at the alarm (what the gripper holds, whether the target is
+   tipped). Choose:
    - the first step to run: `pick` if the target is not held, the step after
      the pick if it is, with release-and-retreat first if the gripper holds
      anything else;
-   - up to 10 source segments for the stage and the state's target object,
-     ranked by: same kitchen and the same fixture refs for the stage's
-     fixtures, then same kitchen, then the target's pose in its reference
-     frame closest to the alarm state's;
+   - up to 10 source segments for the stage and the state's target object
+     category, ranked by how close the target's pose relative to the robot
+     base at the step's first frame is to the alarm state's (kitchen is not
+     a criterion, since none match);
    - the stage's reference for each step: the target object for `pick`, and
      for `place` the receptacle named in the place instruction (or the
      stage predicate's fixture, e.g. the dining counter).
-
-   Steps that need driving can only use same-kitchen sources. A state without
-   one is reported as not coverable, not forced.
 2. **R2b executor (simulator).** Restore the alarm snapshot. Then:
    - optional release-and-retreat: open the gripper, lift 10 cm, back off;
-   - per step, take the source end-effector poses relative to the step's
-     reference at the step's first frame, transform them into the alarm
-     scene, approach the first pose by interpolation, then track the poses
-     with the arm's pose-delta action and the source's gripper commands;
-   - `navigate`: track the source's world-frame base path (same kitchen
-     only) in base mode;
+   - `navigate` (scripted, not replayed): in base mode, turn toward, drive to
+     and align with `compute_robot_base_placement_pose(env, fixture,
+     ref_object)` for the fixture holding the place reference, with a
+     proportional controller on the base-velocity action; done when the
+     NavigateKitchen test above holds;
+   - `pick` / `place`: take the source end-effector poses relative to the
+     step's reference at the step's first frame, transform them into the
+     alarm scene, approach the first pose by interpolation, then track the
+     poses with the arm's pose-delta action and the source's gripper
+     commands;
    - stop the expert once the stage predicate holds for 5 steps, or after the
-     source segment's length plus 50%.
+     source segment's length plus 50% (navigation: 300 steps).
 
    Then XR-1 takes over: task instruction, context reset, until success or
    the fixed budget (0.5 H from the alarm, expert time included). The
    observations are recorded as XR-1 receives them, with the executed actions,
    the source segment and the step boundaries.
-3. **Executor checks before Gate R**, on demo states, not alarm states:
-   - *self-replay*: from a demo's own state at the segment start, replaying
-     its own segment must complete the stage in at least 0.9 of 20 demos per
-     stage;
-   - *transfer*: from another same-kitchen demo's segment-start state, at
-     least 0.7.
+3. **Executor checks before Gate R**:
+   - *self-replay* (tests the controller): from a target demo's own state at
+     the segment start, replaying its own segment must complete the stage in
+     at least 0.9 of 20 demos per stage;
+   - *pretrain transfer* (tests what the alarm states need: other kitchens,
+     other object instances, scripted driving): 20 fresh pretrain-split
+     resets per task, seeds disjoint from Phase A and Phase B; the executor
+     runs every stage in order with sources from the target demos; per
+     stage, the completion rate among runs that reached it must be at least
+     0.7.
 
    Below these, the executor is the problem, and the alarm states are not run.
 
@@ -427,12 +439,12 @@ attempts ending in full-task success; Gate R uses this one, at the 0.5
 threshold above.
 
 Open before the code:
-- the R2a check: per class-2 state, how many of the 500 target demos share its
-  kitchen and fixture refs. This decides whether the same-kitchen requirement
-  for driving leaves enough sources. Run it on all 500 demos, since the index
-  covers 100 per task.
 - the arm controller's delta scaling and frame (OSC pose, base frame), read
   from the composite controller config at run time and tested in self-replay;
+- whether pick grasps transfer from target to pretrain object instances of
+  the same category; the pretrain-transfer check measures it, and a failing
+  category falls back to a scripted top-down grasp on the object's bounding
+  box;
 - the GarnishPancake state `cf428856ba92f99d9d7d` (no stage to replay).
 
 **What changes downstream.**
