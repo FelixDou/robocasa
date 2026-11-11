@@ -664,9 +664,10 @@ def write_coverage_md(result, path):
     lines = ["# R1: expert segments from the human demos", "",
              f"Decision: **{result['decision']}** (class-2 states: {result['class2_states']}, "
              f"classes from {result['class_source']} R0 classes).", "",
-             f"Thresholds: at least {result['thresholds']['min_segments']} consistent clean segments per stuck "
-             f"stage, and at least {result['thresholds']['min_consistency']:.0%} agreement on the upstream "
-             "subtask and on the moved object.", ""]
+             f"Thresholds: at least {result['thresholds']['min_consistency']:.0%} of a stuck stage's clean "
+             "segments agree on the upstream subtask, its target objects cover at least "
+             f"{result['thresholds']['min_consistency']:.0%} of them, and each target object has at least "
+             f"{result['thresholds']['min_segments']} segments of its own.", ""]
     lines += ["Amendment 1 (11 November 2026, after the first run): the object of a segment is the one its "
               "instructions name, every object that is a target in at least 20% of the segments needs its own "
               "segments, and an `all_latched` state is assigned the stage undone at its alarm. Under the original "
