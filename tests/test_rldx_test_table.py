@@ -273,6 +273,23 @@ class RldxTestTableTest(unittest.TestCase):
         self.assertIn("G1_models", out["failures"])
         self.assertNotIn("table2", out)
 
+    def test_normalizations_get_the_trajectory_tolerance(self):
+        """G1 accepts normalizations within 1e-12 of R7's (floating-point noise) and refuses larger gaps."""
+        path = self.new["1"] / "normalizations.json"
+        norms = json.loads(path.read_text())
+        norms["rnd"]["0"]["pooled"]["location"] += 1e-14
+        path.write_text(json.dumps(norms))
+        status, text, out = self.run_table("noise.json")
+        self.assertEqual(status, 0, text)
+        g = out["checks"]["G1_models"]["families"]["+".join(self.ru.DETECTORS)]["1"]
+        self.assertGreater(g["normalizations_max_abs_diff"], 0.0)
+        self.assertEqual(list(g["normalizations_by_detector"]), ["rnd"])
+        norms["rnd"]["0"]["pooled"]["location"] += 1e-9
+        path.write_text(json.dumps(norms))
+        status, text, out = self.run_table("drift.json")
+        self.assertEqual(status, 1)
+        self.assertIn("G1_models", out["failures"])
+
     def test_E1_P_and_trajectories_are_gates(self):
         self.set_e1_P(shift=0.01)
         status, text, out = self.run_table("bad_p.json")

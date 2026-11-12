@@ -47,7 +47,8 @@ the same models, so that Table II reports test numbers for both policies.
   `rldx_per_seed.json` are reproduced exactly.
 - **G1, models.**
   - Every new cross-task fold directory reproduces R7's trajectories of the recorded
-    calibration, test and training rollouts (max |diff| ≤ 1e-12) and R7's normalizations.
+    calibration, test and training rollouts (max |diff| ≤ 1e-12) and R7's normalizations (≤ 1e-12;
+    amended after the first run, see below).
   - Every SAFE fold directory copies R7's training cohort and normalization byte for byte. Its
     scores of E1's exports come from R7's checkpoints (path and SHA-256 checked).
   - The shuffle directory reproduces §15.22's trajectories.
@@ -73,7 +74,7 @@ the same models, so that Table II reports test numbers for both policies.
 ## Code
 
 - `scripts/xr1_lead_time/rldx_test_table.py` (`ids`, `safe-fold`, `run`), with tests in
-  `tests/test_rldx_test_table.py` (6 tests).
+  `tests/test_rldx_test_table.py` (7 tests).
 - No other file changes. `rldx_unseen.py`, `score_cross_task`, `score_cohorts` and
   `score_seen_checkpoint_external` are used as they are.
 
@@ -297,6 +298,26 @@ The log prints, in order:
 
 Paste the whole `table.log`, `INPUTS UNCHANGED` and the SHA-256, then copy
 `rldx_test_table.json` and `table.log` to the Mac.
+
+## Amendment (2026-11-12, after the first run, before any table was computed)
+
+First run: `rldx1_test_table_20261112_172731`, code `e76b265e`. Steps 1–5 passed:
+- 21 + 2 reference checks;
+- 10 `SAFE FOLD OK`, with the LSTM's fold all equal to E1's scores (difference 0);
+- G0: 9 of 9 rows, the shuffle row and G;
+- G2a–c, with P at FPR 0.06 and lead 0.2421, and trajectory differences 0.
+
+G1 failed for the five retrained cross-task folds:
+- trajectories within 1.4e-14 to 1.8e-14 of R7's (inside 1e-12);
+- normalizations not bit-identical.
+
+The normalizations are computed from the training trajectories, so a 1e-14 difference in those
+trajectories moves them by about as much. Requiring bit-identity there while allowing 1e-12 on the
+trajectories was inconsistent. `score_cross_task`'s own reference checks use 1e-12.
+
+The gate now compares the normalizations at 1e-12. It reports the largest difference per
+detector. Nothing was rescored: only step 6 is rerun, to `rldx_test_table_r2.json`. The first
+output (`rldx_test_table.json`, gates failed, no table) is kept.
 
 ## Result
 

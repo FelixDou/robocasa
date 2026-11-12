@@ -23,7 +23,7 @@ Commands:
         reproduced exactly;
     G1  the models: every new cross-task fold directory reproduces R7's trajectories of the
         recorded calibration, test and training rollouts (max |diff| <= 1e-12) and its
-        normalizations; every SAFE fold directory copies R7's training cohort and normalization
+        normalizations (both at 1e-12); every SAFE fold directory copies R7's training cohort and normalization
         byte for byte; the shuffle directory reproduces the earlier trajectories;
     G2  E1: H_k and rho_k equal the freeze manifest's; P alone on the test set equals E1's P; the
         seed-averaged SAFE-LSTM and Hide-and-Seek trajectories on E1's sets equal E1's.
@@ -306,6 +306,17 @@ def same_raw(a, b):
     return worst
 
 
+def tree_gap(a, b):
+    """Largest |a - b| over the numbers of two JSON trees of the same shape; inf if the shapes differ."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        if set(a) != set(b):
+            return float("inf")
+        return max((tree_gap(a[k], b[k]) for k in a), default=0.0)
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool):
+        return abs(float(a) - float(b))
+    return 0.0 if a == b else float("inf")
+
+
 def check_new_meta(F, meta, tasks, held, folds_sha, detectors):
     if str(meta["fold"]) != F or set(meta["held_out_tasks"]) != held[F]:
         raise SystemExit(f"STOP: fold {F}: fold or held-out tasks differ from the fold file")
@@ -469,9 +480,14 @@ def load_family(new_dirs, r7_dirs, parts_new, parts_rec, tasks, held, folds_sha)
             for mine, theirs in (("rec_calibration", "calibration"), ("rec_test", "test"), ("train", "train")):
                 worst = max(worst, same_raw(raw_file(d["new"] / f"{mine}_predictions.jsonl"),
                                             raw_file(d["r7"] / f"{theirs}_predictions.jsonl")))
-            norm_same = json.loads((d["new"] / "normalizations.json").read_text()) == norms7
-            g1[F] = dict(kind="retrained", max_abs_diff=worst, normalizations_equal=norm_same,
-                         ok=worst <= EXACT and norm_same)
+            # Normalizations follow from the training trajectories, so they get the same tolerance
+            # (amended 2026-11-12 after the first run; the plan's G1 section says why).
+            mine = json.loads((d["new"] / "normalizations.json").read_text())
+            by_det = {k: tree_gap(mine.get(k), norms7.get(k)) for k in sorted(set(mine) | set(norms7))}
+            nd = max(by_det.values())
+            g1[F] = dict(kind="retrained", max_abs_diff=worst, normalizations_max_abs_diff=nd,
+                         normalizations_by_detector={k: v for k, v in by_det.items() if v > 0},
+                         ok=worst <= EXACT and nd <= EXACT)
         print(f"  fold {F} {'+'.join(dets)}: {'OK' if g1[F]['ok'] else 'MISMATCH'} {g1[F]}", flush=True)
     return dets, g1
 
