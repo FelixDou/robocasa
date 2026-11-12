@@ -88,9 +88,10 @@ class E1bTest(unittest.TestCase):
         rk, H, data = e1b.e1_data(self.root / "e1", man)
         want = e1b.choose(data["calibration"] + data["test"], rk)
         self.assertEqual(fz["paths"], json.loads(json.dumps(want)))
+        self.assertEqual((fz["detectors"], list(fz["paths"])), (["hide_and_seek"], ["hide_and_seek"]))
         self.assertEqual(fz["e1_counts"]["calibration"], dict(successes=40, failures=40))
         self.assertIn("design_check", fz)
-        self.assertEqual(set(fz["design_check"]["detectors"]), set(ae.DETS))
+        self.assertEqual(set(fz["design_check"]["detectors"]), {"hide_and_seek"})
         self.assertEqual(fz["e1b_seeds"], {"calibration": 1601, "test": 1701})
 
     def test_analysis_runs_the_E1_rule_with_the_frozen_paths(self):
@@ -100,12 +101,35 @@ class E1bTest(unittest.TestCase):
         self.assertIn("ANALYSIS DONE", text)
         out = json.loads((self.root / "result.json").read_text())
         fz = json.loads((self.root / "freeze.json").read_text())
-        for k in ae.DETS:
-            self.assertEqual(out["frozen_paths"][k], dict(u=fz["paths"][k]["u"], s=fz["paths"][k]["s"]))
-            self.assertIn("H3", out["detectors"][k])
-            self.assertEqual(len(out["null_references"]["noise"]), ae.K_NULL)
+        self.assertEqual(list(out["results"]), ["hide_and_seek"])
+        self.assertEqual(out["frozen_paths"], {"hide_and_seek": dict(u=fz["paths"]["hide_and_seek"]["u"],
+                                                                     s=fz["paths"]["hide_and_seek"]["s"])})
+        self.assertIn("H3", out["results"]["hide_and_seek"])
+        self.assertEqual(len(out["null_references"]["noise"]), ae.K_NULL)
         self.assertTrue(out["checks"]["R_recorded"]["ok"])
         self.assertEqual(out["checks"]["S_sets"]["overlap_with_e1"], 0)
+
+    def test_rule_matches_analyze_e1_for_hide_and_seek(self):
+        """With E1's random streams, the one-detector rule gives analyze_e1's numbers for Hide-and-Seek and P."""
+        rng = np.random.default_rng(5)
+        cal, test, dev = make_rows(rng, prefix="c"), make_rows(rng, prefix="t"), make_rows(rng, n=10, prefix="d")
+        paths = {"safe": dict(u=1.5, s=0.0), "hide_and_seek": dict(u=1.0, s=2.0)}
+        pools = {t: [rng.normal(0, 1, 300) for _ in range(3)] for t in ("TaskA", "TaskB")}
+        devC = cl.Cohort(dev, "safe")
+        mine = e1b.run_rule(cal, test, e1t.rk(), {"hide_and_seek": paths["hide_and_seek"]}, devC, pools, B=30, K=5)
+        ref = ae.analyze(cal, test, e1t.rk(), paths, devC, pools, B=30, K=5, seed=e1b.SEED)
+        for i in (0, 1, 2, 4):               # point, bootstrap, null references, decision
+            got, want = mine[i], ref[i]
+            if i == 0:
+                self.assertEqual(got["P"]["test"], want["P"]["test"])
+                got, want = got["hide_and_seek"]["gain"], want["hide_and_seek"]["gain"]
+            elif i == 2:
+                self.assertEqual(got, want)   # same null draws: P and the null cohorts read no detector score
+                continue
+            else:
+                got, want = got["hide_and_seek"], want["hide_and_seek"]
+            self.assertEqual(json.dumps(got, sort_keys=True, default=float), json.dumps(want, sort_keys=True, default=float))
+        self.assertEqual(mine[3], ref[3])
 
     def test_gates_refuse(self):
         self.assertEqual(self.freeze()[0], 0)

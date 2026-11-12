@@ -1,4 +1,4 @@
-# E1b: a second test of H3 on new RLDX-1 rollouts (plan and runbook)
+# E1b: a second test of H3 for Hide-and-Seek on new RLDX-1 rollouts (plan and runbook)
 
 **Status.** Written 2026-11-12, before any E1b rollout exists. Branch `claude/rldx-e1b` (from
 `claude/rldx-e1`). The author decided to run it after E1 and R15.
@@ -13,14 +13,36 @@
   rollouts, the Hide-and-Seek ensemble gained 0.094 with 23 false alarms (P: 24).
 - **The question:** was Hide-and-Seek's failure the score or the path fixed on 60 successes?
   R15 cannot answer it, because it chose the path on the rollouts it evaluates.
-- **E1b:** paths fixed on E1's 1,600 rollouts, tested on new rollouts with E1's rule.
+- **E1b:** Hide-and-Seek + P with its path fixed on E1's 1,600 rollouts, tested on new rollouts
+  with E1's rule.
+
+## Decision after the first freeze (2026-11-12, before any E1b rollout)
+
+The first freeze, at code `6322c89a` (`e1b_freeze.json`, sha256 `1e5ab16d…`), chose new paths
+for both detectors. Its preview on E1's data (paths chosen on E1's calibration set, the rule
+applied to E1's test set) gave:
+
+| Detector | Path | False alarms (P: 24) | Gain, 97.5% CI | Matched gain, 97.5% CI | Preview |
+|---|---|---|---|---|---|
+| Hide-and-Seek | u 0.2301, s 5 | 23 | 0.094 [0.040, 0.152] | 0.101 [0.044, 0.147] | passes |
+| SAFE-LSTM | u 2.9249, s 20 | 32 | 0.053 [−0.004, 0.100] | 0.022 [−0.024, 0.064] | fails |
+
+The new path helps Hide-and-Seek and hurts SAFE-LSTM, which passed E1 with its own path.
+
+**Author's decision:** E1b tests Hide-and-Seek + P alone. SAFE-LSTM keeps its E1 result and is
+not scored on E1b's rollouts.
+
+This decision used E1's data only. The rule is unchanged, including the 97.5% intervals E1 used
+for two detectors, which is conservative for one. The first freeze is kept and not used; the
+second freeze (`e1b_freeze_hs.json`) chooses Hide-and-Seek's path only, by the same rule, on the
+same data.
 
 ## Fixed before collection
 
-Everything is E1's except the paths and the null fusions' data.
+Everything is E1's except the tested detector, its path and the null fusions' data.
 
 - **Kept from E1:**
-  - Models: SAFE-LSTM and Hide-and-Seek, seeds 0–2, from the E1 freeze manifest
+  - Models: Hide-and-Seek, seeds 0–2, from the E1 freeze manifest
     (`e2_freeze_20261029_205743/e2_freeze_manifest.json`, sha256 `917c06e6ab701f9f…`).
   - H_k and ρ_k, the policy snapshot (`587e9ecd`) and the audited RLDX-1 source.
   - The collector settings: 20 successes and 20 failures per task in each set.
@@ -29,8 +51,8 @@ Everything is E1's except the paths and the null fusions' data.
     - (b) the same at matched false alarms;
     - (c) the exact binomial bound on test false alarms;
     - (d) the gain beats 38 of 39 random and 38 of 39 resampled fusions.
-  - 2,000 paired bootstrap replicates, and Bonferroni over the two detectors.
-- **New paths:** chosen by `scripts/rldx_e1/e1b.py freeze` with `confirm_lead.fit_fast` on all
+  - 2,000 paired bootstrap replicates and 97.5% intervals (E1's level).
+- **New path:** chosen by `scripts/rldx_e1/e1b.py freeze` with `confirm_lead.fit_fast` on all
   1,600 E1 rollouts (calibration and test sets). Each candidate's margin is set on E1's 800
   successes; E1's 800 failures choose the path. Only (u, s) is frozen. The margin is set on
   E1b's new calibration successes, so Proposition 1 applies.
@@ -40,17 +62,19 @@ Everything is E1's except the paths and the null fusions' data.
   - calibration base seed 1601, test base seed 1701 (smoke: 1105);
   - the planner refuses any seed used by an earlier RLDX-1 collection.
 - **Analysis seed:** 20261112.
-- **Design check (not a result):** `freeze --design-check` chooses the paths on E1's calibration
-  set alone and applies the rule to E1's test set. It previews the test out of sample, decides
-  nothing and is reported as a preview.
+- **Design check (not a result):** `freeze --design-check` chooses the path on E1's calibration
+  set alone and applies the rule to E1's test set. It previews the test out of sample and is
+  reported as a preview.
 
 ## Reporting (fixed now)
 
 - E1's result stays as it is. E1b is reported as a second, separately planned test, whatever
   its outcome.
-- If E1b passes for a detector, the paper can say that a test with paths fixed on 1,600
-  rollouts confirms it, and that the first test with paths fixed on 60 successes did not.
+- If E1b passes, the paper can say that a test with the path fixed on 1,600 rollouts confirms
+  Hide-and-Seek's early warning, and that the first test, with the path fixed on 60 successes,
+  did not.
 - If E1b fails, R15's 0.094 is a property of E1's rollouts, and the paper says so.
+- The first test's SAFE-LSTM result is part of E1 and stays reported with it.
 
 ## Gates
 
@@ -59,22 +83,25 @@ Everything is E1's except the paths and the null fusions' data.
 3. **Scoring:** as in E1. Each monitor first reproduces its recorded scores exactly.
 4. **Analysis:**
    - **R:** E1's gate on the recorded rollouts.
-   - **F:** E1's score files are the ones the freeze read, and the paths recomputed from them
-     equal the frozen ones.
+   - **F:** E1's score files are the ones the freeze read, the freeze tests Hide-and-Seek only,
+     and the path recomputed from them equals the frozen one.
    - **S:** the plan used E1b's seeds, and no E1b rollout is an E1 rollout.
 
 ## Code
 
-- `scripts/rldx_e1/e1b.py` (`freeze`, `analyze`), with tests in `tests/test_rldx_e1b.py` (3
+- `scripts/rldx_e1/e1b.py` (`freeze`, `analyze`), with tests in `tests/test_rldx_e1b.py` (4
   tests).
-- `analyze_e1.py`, `plan_e1.py`, `check_e1_collection.py` and `score_e1.py` are reused
-  unchanged.
+  - It runs `analyze_e1.py`'s point estimate, bootstrap, null references and decision for
+    Hide-and-Seek alone.
+  - A test checks that these equal `analyze_e1.analyze`'s Hide-and-Seek and P numbers on the
+    same data.
+- `plan_e1.py`, `check_e1_collection.py` and `score_e1.py hs` are reused unchanged.
 
 ## Cost
 
 - **Collection:** the same as E1, about 2,500 rollouts. E1 took about a day on four GPUs. On two
   GPUs, plan with `--shards-per-set 1` (about twice as long).
-- **Scoring:** a few hours, as in E1.
+- **Scoring:** Hide-and-Seek only, on CPU, as in E1 (no GPU, no SAFE export).
 
 ## Runbook
 
@@ -148,11 +175,11 @@ snapshot directory is unchanged (`ls -l --time-style=+%F $RLDX_SNAPSHOT`).
 ```bash
 cd $E1B_REPO
 CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 $SAFE_PY -I -u scripts/rldx_e1/e1b.py freeze --freeze-manifest $E1_FREEZE \
-  --e1-scores-dir $E1_ROOT/scores --design-check --output $E1B_ROOT/e1b_freeze.json 2>&1 | tee $E1B_LOG/freeze.log
+  --e1-scores-dir $E1_ROOT/scores --design-check --output $E1B_ROOT/e1b_freeze_hs.json 2>&1 | tee $E1B_LOG/freeze_hs.log
 ```
 
-It prints the two frozen paths (and E1's for comparison), the design check and `FREEZE OK`.
-Paste `freeze.log` back and copy `e1b_freeze.json` to the Mac before step 4.
+It prints the frozen path (and E1's for comparison), the design check and `FREEZE OK`.
+Paste `freeze_hs.log` back and copy `e1b_freeze_hs.json` to the Mac before step 4.
 
 ### 4. Plan (reads the recorded collection; no monitor is scored)
 
@@ -233,52 +260,33 @@ $CLIENT_PY -I scripts/rldx_e1/check_e1_collection.py --plan $E1B_ROOT/plan.json 
 
 Continue only with `CHECK OK` and every shard `VALID`.
 
-### 9. SAFE exports and scores (CPU exports; one GPU for SAFE; Hide-and-Seek on CPU)
+### 9. Hide-and-Seek scores (CPU)
 
 ```bash
 cd $E1B_REPO
-for set in calibration test; do
-  $CLIENT_PY -m robocasa.recovery.safe.merge_atomic_datasets --source-dirs $E1B_ROOT/collection/$set/shard* \
-    --output-dir $E1B_ROOT/merged/$set 2>&1 | tail -n 2
-  $CLIENT_PY -m robocasa.recovery.safe.validate_atomic_dataset --dataset-dir $E1B_ROOT/merged/$set | tail -n 1
-  $CLIENT_PY -m robocasa.recovery.safe.export_to_official_safe --dataset-dir $E1B_ROOT/merged/$set \
-    --output-dir $E1B_ROOT/safe_export/$set --summary-only 2>&1 | tail -n 3
-done
-export SAFE_REPO=$PROJECT_FS/SAFE RLDX_CAL=$RLDX_ROOT/calibration/lstm FREEZE_SCORES=$(dirname $E1_FREEZE)/scores_run2
-for s in 0 1 2; do
-  for set in calibration test; do
-    CUDA_VISIBLE_DEVICES=0 $SAFE_PY -u -m robocasa.recovery.safe.score_seen_checkpoint_external \
-      --export-dir $E1B_ROOT/safe_export/$set --safe-repo $SAFE_REPO --training-run-dir $RLDX_ROOT/final/lstm_seed$s \
-      --output-dir $E1B_ROOT/safe_scores/$set/seed$s --group all --device cuda 2>&1 | tail -n 1
-  done
-done | tee $E1B_LOG/safe_external.log
-$SAFE_PY -I scripts/rldx_e1/score_e1.py safe --freeze-manifest $E1_FREEZE --calibration-dir $RLDX_CAL \
-  $(for s in 0 1 2; do echo --recorded-scores $s $E1_ROOT/safe_scores/recorded/seed$s; done) \
-  $(for set in calibration test; do for s in 0 1 2; do echo --e1-scores $set $s $E1B_ROOT/safe_scores/$set/seed$s; done; done) \
-  --output-dir $E1B_ROOT/scores 2>&1 | tee $E1B_LOG/score_safe.log
 unset OPENBLAS_NUM_THREADS
 CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 PYTHONPATH=$E1B_REPO $SAFE_PY -I scripts/rldx_e1/score_e1.py hs \
-  --freeze-manifest $E1_FREEZE --freeze-scores-dir $FREEZE_SCORES --recorded-dataset $RLDX_RAW --output-dir $E1B_ROOT/scores \
+  --freeze-manifest $E1_FREEZE --freeze-scores-dir $(dirname $E1_FREEZE)/scores_run2 --recorded-dataset $RLDX_RAW \
+  --output-dir $E1B_ROOT/scores \
   $(for d in $E1B_ROOT/collection/*/shard*; do echo "$(basename $(dirname $d))=$d"; done) 2>&1 | tee $E1B_LOG/score_hs.log
 ```
 
-Each merged set must be `VALID` with 800 rollouts in its export. Both scorers print their
-reproduction checks and `SCORING OK`. The SAFE scorer reuses E1's re-scored recorded rollouts
-for its reproduction check.
+It prints the reproduction checks on the recorded rollouts, 800 rollouts scored per set, and
+`SCORING OK`. SAFE-LSTM is not scored on E1b's rollouts.
 
 ### 10. Analysis (CPU, minutes)
 
 ```bash
 cd $E1B_REPO
 CUDA_VISIBLE_DEVICES="" $SAFE_PY -I scripts/rldx_e1/e1b.py analyze --freeze-manifest $E1_FREEZE \
-  --e1b-freeze $E1B_ROOT/e1b_freeze.json --calibration-dir $RLDX_ROOT/calibration/lstm \
+  --e1b-freeze $E1B_ROOT/e1b_freeze_hs.json --calibration-dir $RLDX_ROOT/calibration/lstm \
   --hs-scores-dir $(dirname $E1_FREEZE)/scores_run2 \
   --e1-scores-dir $E1_ROOT/scores --e1b-scores-dir $E1B_ROOT/scores --plan $E1B_ROOT/plan.json \
   --output $E1B_ROOT/e1b_result.json 2>&1 | tee $E1B_LOG/analyze.log
 sha256sum -c --quiet $E1B_LOG/e1_inputs.sha256 && echo "E1 INPUTS UNCHANGED"
 ```
 
-It prints gates R, F and S, then one line per detector (false alarms against the bound, the gain
+It prints gates R, F and S, then the Hide-and-Seek line (false alarms against the bound, the gain
 and matched gain with their 97.5% CIs, the null p-values, conditions (a)–(d), and whether H3
 holds), and `ANALYSIS DONE`. Paste `analyze.log` back and copy `e1b_result.json` to the Mac.
 
