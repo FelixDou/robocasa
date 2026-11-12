@@ -319,6 +319,58 @@ The gate now compares the normalizations at 1e-12. It reports the largest differ
 detector. Nothing was rescored: only step 6 is rerun, to `rldx_test_table_r2.json`. The first
 output (`rldx_test_table.json`, gates failed, no table) is kept.
 
-## Result
+## Result (2026-11-12)
 
-(to be written after the run)
+Run `rldx1_test_table_20261112_172731`:
+- **Code:** scoring at `e76b265e`, table at `6f2f3ad7`.
+- **Output:** `rldx_test_table_r2.json` (sha256 `6ce4a39c…`), copied to
+  `reports/safe_robocasa365_research_plan_20260823/evidence/rldx1_test_table_20261112_172731/`.
+  The first output, `rldx_test_table.json`, has its gates failed and no table.
+
+**Gates.** All passed.
+- **G1:** the five retrained folds match R7's trajectories to ≤ 1.8e-14 and its normalizations
+  to ≤ 1.1e-14 (PCA-KMeans only); the 10 SAFE folds copy R7's; the shuffle reproduces exactly.
+- **G0:** 9 of 9 rows, the shuffle row and G.
+- **G2:**
+  - H_k and ρ_k are equal;
+  - P is FPR 0.06 with lead 0.2421, as in E1;
+  - the SAFE-LSTM and Hide-and-Seek trajectories equal E1's (difference 0).
+
+**Table II, RLDX-1 test set** (path chosen on calibration failures; single models, mean ± std
+over seeds 0–2):
+
+| Row | Seen FPR | Seen Δℓ | Seen TWA | Unseen FPR | Unseen Δℓ | Unseen TWA |
+|---|---|---|---|---|---|---|
+| Timer G | 0.075 | −0.078 | 0.544 | 0.077 | – | 0.542 |
+| Timer P | 0.060 | – | 0.591 | – | – | – |
+| Mahalanobis | 0.070 | 0.011 ± 0.000 | 0.592 ± 0.000 | 0.084 | 0.014 ± 0.004 | 0.546 ± 0.001 |
+| Cosine k-NN | 0.068 | −0.010 ± 0.000 | 0.582 ± 0.000 | 0.085 | 0.022 ± 0.000 | 0.550 ± 0.000 |
+| PCA-KMeans | 0.070 | 0.005 ± 0.005 | 0.589 ± 0.003 | 0.082 | 0.012 ± 0.002 | 0.547 ± 0.000 |
+| RND | 0.062 | 0.001 ± 0.004 | 0.590 ± 0.003 | 0.089 | 0.018 ± 0.010 | 0.546 ± 0.008 |
+| SAFE-MLP | 0.061 | 0.002 ± 0.003 | 0.592 ± 0.001 | 0.090 | 0.009 ± 0.000 | 0.541 ± 0.000 |
+| SAFE-LSTM | 0.075 | 0.054 ± 0.002 | 0.611 ± 0.002 | 0.118 | 0.043 ± 0.005 | 0.544 ± 0.002 |
+| Hide-and-Seek | 0.064 | 0.096 ± 0.003 | 0.637 ± 0.001 | 0.083 | 0.108 ± 0.013 | 0.593 ± 0.006 |
+| First step | 0.060 | 0.001 ± 0.001 | 0.591 ± 0.000 | 0.079 | 0.003 ± 0.004 | 0.543 ± 0.001 |
+| Zero input | 0.063 | 0.017 ± 0.014 | 0.598 ± 0.006 | 0.079 | 0.002 ± 0.004 | 0.543 ± 0.000 |
+| Shuffle | 0.062 | 0.022 ± 0.016 | 0.601 ± 0.011 | – | – | – |
+
+Timer leads: P 0.242; G 0.164 (seen) and 0.162 (unseen).
+
+**Reading.**
+- **Against the expectations:**
+  - Hide-and-Seek and SAFE-LSTM gain the most, and the OOD rows and ablations gain little, as
+    expected.
+  - G is much stronger than on the validation set (lead 0.164 against 0.032), contrary to the
+    expectation. Its one global margin is set on 400 calibration successes instead of 60, so it
+    is far less conservative. The gains over G are smaller than on validation for every row.
+- **Validation → test (seen + P):** Hide-and-Seek 0.074 → 0.096, SAFE-LSTM 0.036 → 0.054,
+  SAFE-MLP 0.008 → 0.002.
+- **Against E1 (Table III, three-seed ensembles, paths fixed on the validation set):**
+  - E1 gave Hide-and-Seek + P 0.032 at the same target and SAFE-LSTM + P 0.044.
+  - With the path re-chosen on the 400 new calibration rollouts, single Hide-and-Seek models gain
+    0.096 at FPR 0.064, and single SAFE-LSTM models 0.054 at FPR 0.075.
+  - So Hide-and-Seek's weak E1 result may come partly from a path fixed on 60 validation
+    successes. This is descriptive: adaptive paths raise the FPR (Sec. IV-D), and Table II has no
+    matched comparison.
+- **The R7 variant** (training failures choose the path) gives the same picture (Hide-and-Seek
+  0.093, SAFE-LSTM 0.052), except the first-step control, at −0.040.
