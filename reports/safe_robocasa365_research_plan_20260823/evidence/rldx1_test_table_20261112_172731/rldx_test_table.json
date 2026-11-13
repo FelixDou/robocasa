@@ -1,0 +1,177 @@
+{
+ "plan": "docs/rldx_test_table_plan.md (R15)",
+ "status": "exploratory (Table II on RLDX-1's test set)",
+ "checks": {
+  "G2a_Hk_rho_k": {
+   "H_equal": true,
+   "rho_max_abs_diff": 0.0,
+   "ok": true
+  },
+  "G1_models": {
+   "families": {
+    "hide_and_seek+hide_and_seek_zero+hide_and_seek_first+mahalanobis+cosine_knn+pca_kmeans+rnd": {
+     "0": {
+      "kind": "retrained",
+      "max_abs_diff": 1.4210854715202004e-14,
+      "normalizations_equal": false,
+      "ok": false
+     },
+     "1": {
+      "kind": "retrained",
+      "max_abs_diff": 1.4210854715202004e-14,
+      "normalizations_equal": false,
+      "ok": false
+     },
+     "2": {
+      "kind": "retrained",
+      "max_abs_diff": 1.7763568394002505e-14,
+      "normalizations_equal": false,
+      "ok": false
+     },
+     "3": {
+      "kind": "retrained",
+      "max_abs_diff": 1.4210854715202004e-14,
+      "normalizations_equal": false,
+      "ok": false
+     },
+     "all": {
+      "kind": "retrained",
+      "max_abs_diff": 1.4210854715202004e-14,
+      "normalizations_equal": false,
+      "ok": false
+     }
+    },
+    "safe_lstm": {
+     "0": {
+      "kind": "safe_copy",
+      "same_r7_dir": true,
+      "hashes_equal": true,
+      "ok": true
+     },
+     "1": {
+      "kind": "safe_copy",
+      "same_r7_dir": true,
+      "hashes_equal": true,
+      "ok": true
+     },
+     "2": {
+      "kind": "safe_copy",
+      "same_r7_dir": true,
+      "hashes_equal": true,
+      "ok": true
+     },
+     "3": {
+      "kind": "safe_copy",
+      "same_r7_dir": true,
+      "hashes_equal": true,
+      "ok": true
+     },
+     "all": {
+      "kind": "safe_copy",
+      "same_r7_dir": true,
+      "hashes_equal": true,
+      "ok": true
+     }
+    },
+    "safe_indep": {
+     "0": {
+      "kind": "safe_copy",
+      "same_r7_dir": true,
+      "hashes_equal": true,
+      "ok": true
+     },
+     "1": {
+      "kind": "safe_copy",
+      "same_r7_dir": true,
+      "hashes_equal": true,
+      "ok": true
+     },
+     "2": {
+      "kind": "safe_copy",
+      "same_r7_dir": true,
+      "hashes_equal": true,
+      "ok": true
+     },
+     "3": {
+      "kind": "safe_copy",
+      "same_r7_dir": true,
+      "hashes_equal": true,
+      "ok": true
+     },
+     "all": {
+      "kind": "safe_copy",
+      "same_r7_dir": true,
+      "hashes_equal": true,
+      "ok": true
+     }
+    },
+    "shuffle": {
+     "reference_checks": {
+      "rec_calibration/hide_and_seek_task_shuffle": true,
+      "rec_test/hide_and_seek_task_shuffle": true
+     },
+     "train_max_abs_diff": 0.0,
+     "ok": true
+    }
+   },
+   "ok": false
+  },
+  "G0_code_path": {
+   "rows_differing": [],
+   "shuffle_ok": true,
+   "G_unseen_ok": true,
+   "ok": true
+  },
+  "G2b_P_equals_E1": {
+   "now": [
+    0.06,
+    0.2421
+   ],
+   "e1": [
+    0.06,
+    0.2421
+   ],
+   "ok": true
+  },
+  "G2c_trajectories_equal_E1": {
+   "max_abs_diff": {
+    "safe_lstm": 0.0,
+    "hide_and_seek": 0.0
+   },
+   "ok": true
+  }
+ },
+ "failures": [
+  "G1_models"
+ ],
+ "counts": {
+  "calibration": {
+   "rollouts": 800,
+   "successes": 400,
+   "failures": 400
+  },
+  "test": {
+   "rollouts": 800,
+   "successes": 400,
+   "failures": 400
+  }
+ },
+ "inputs": {
+  "folds": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_unseen_20261029_135501/rldx_folds.json",
+   "sha256": "079ce858f08076ae33352d744c3417f653c2f3d76875949af1aabef9003f199f"
+  },
+  "e1_result": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/rldx1_e1_20261105_210723/e1_result.json",
+   "sha256": "c619419ed0d99a7b7378600e3cdb41ba256f6cb1709026925a763efb329e1bce"
+  },
+  "r7_table": {
+   "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/rldx1_unseen_20261029_135501/rldx_unseen_safe.json",
+   "sha256": "1bcbbd975d1c6fbc043c23b9579b9040d2953bed7c3399118e45923c90e5eb5c"
+  },
+  "ids": {
+   "calibration": "07aceaed1d552e52e114483097ccb4ee4a39b5a2ef3ffe0c34b347a2309fcbac",
+   "test": "fd5188693c07bbf242b115962c1fe246936472888da272964ae0a947f790c190"
+  }
+ }
+}

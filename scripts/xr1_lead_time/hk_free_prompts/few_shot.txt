@@ -1,0 +1,7 @@
+The same robot and policy performed these other tasks. For each, the instruction and the median duration of its successful attempts:
+{examples}
+
+The robot is now given this instruction:
+"{instruction}"
+
+How many seconds does a successful attempt typically take? Answer with a single number of seconds.

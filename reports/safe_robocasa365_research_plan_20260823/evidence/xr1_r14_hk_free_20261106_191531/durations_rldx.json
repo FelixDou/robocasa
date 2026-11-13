@@ -1,0 +1,1256 @@
+{
+ "plan": "docs/xr1_review_analyses_plan.md (R14)",
+ "cohort": "rldx",
+ "model": {
+  "path": "/gs/bs/tga-shinoda/felid/hf/hub/models--Qwen--Qwen3-8B/snapshots/b968826d9c46dd6066d109eabc6255188de91218",
+  "files_sha256": {
+   "config.json": "f7c4eadfbbf522470667b797a3c89be2524832d2d599797248dc304fff447c30",
+   "generation_config.json": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2"
+  },
+  "snapshot": "b968826d9c46dd6066d109eabc6255188de91218"
+ },
+ "generation": {
+  "do_sample": false,
+  "max_new_tokens": 16,
+  "thinking": false
+ },
+ "prompts_file": {
+  "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_r14_hk_free_20261106_191531/prompts_rldx.json",
+  "sha256": "e784226a018e09c2201b6031fbc1ae4126d460d961f691da199ae1ed7eb1192f"
+ },
+ "prompt_sha256": {
+  "system.txt": "7190182f622301868890f4d610e5cf27f78cdfec6c3b0f4a6e0c6a448713ca6e",
+  "zero_shot.txt": "f8e893deea7862e06065651f5a9db7a85574895c517f15a7d74194b29f5ca666",
+  "few_shot.txt": "a450b10699c977602c411d2c90db564d2510dfe64bd17ea2e7ee695f9a238bcf",
+  "retry.txt": "5baa15a25893bf76d09ccb6c9ede0fb1af33a699c4970781c26a8654bb8e8007"
+ },
+ "folds_sha256": "079ce858f08076ae33352d744c3417f653c2f3d76875949af1aabef9003f199f",
+ "seconds_per_inference": 0.4,
+ "answers": 120,
+ "parse_failures": {
+  "zero": {
+   "prompts": 20,
+   "failed": 0
+  },
+  "few": {
+   "prompts": 100,
+   "failed": 0
+  }
+ },
+ "zero": {
+  "CloseFridge": 5.0,
+  "CloseToasterOvenDoor": 5.0,
+  "CoffeeSetupMug": 120.0,
+  "LoadDishwasher": 120.0,
+  "NavigateKitchen": 15.0,
+  "OpenCabinet": 15.0,
+  "OpenDrawer": 15.0,
+  "OpenStandMixerHead": 15.0,
+  "PickPlaceCounterToCabinet": 45.0,
+  "PickPlaceCounterToStove": 45.0,
+  "PickPlaceDrawerToCounter": 120.0,
+  "PreSoakPan": 30.0,
+  "RinseSinkBasin": 30.0,
+  "ScrubCuttingBoard": 45.0,
+  "SlideDishwasherRack": 15.0,
+  "StackBowlsCabinet": 45.0,
+  "TurnOnElectricKettle": 15.0,
+  "TurnOnMicrowave": 5.0,
+  "TurnOnSinkFaucet": 15.0,
+  "WashLettuce": 30.0
+ },
+ "few": {
+  "0": {
+   "CloseFridge": 12.0,
+   "CloseToasterOvenDoor": 12.0,
+   "CoffeeSetupMug": 25.0,
+   "LoadDishwasher": 45.0,
+   "NavigateKitchen": 12.0,
+   "OpenCabinet": 12.0,
+   "OpenDrawer": 12.0,
+   "OpenStandMixerHead": 22.0,
+   "PickPlaceCounterToCabinet": 25.0,
+   "PickPlaceCounterToStove": 25.0,
+   "PickPlaceDrawerToCounter": 12.0,
+   "PreSoakPan": 45.0,
+   "RinseSinkBasin": 120.0,
+   "ScrubCuttingBoard": 25.0,
+   "SlideDishwasherRack": 22.0,
+   "StackBowlsCabinet": 12.0,
+   "TurnOnElectricKettle": 15.0,
+   "TurnOnMicrowave": 12.0,
+   "TurnOnSinkFaucet": 15.0,
+   "WashLettuce": 25.0
+  },
+  "1": {
+   "CloseFridge": 12.0,
+   "CloseToasterOvenDoor": 12.0,
+   "CoffeeSetupMug": 30.0,
+   "LoadDishwasher": 105.0,
+   "NavigateKitchen": 12.0,
+   "OpenCabinet": 12.0,
+   "OpenDrawer": 16.0,
+   "OpenStandMixerHead": 15.0,
+   "PickPlaceCounterToCabinet": 45.0,
+   "PickPlaceCounterToStove": 32.0,
+   "PickPlaceDrawerToCounter": 22.0,
+   "PreSoakPan": 28.0,
+   "RinseSinkBasin": 45.0,
+   "ScrubCuttingBoard": 45.0,
+   "SlideDishwasherRack": 42.0,
+   "StackBowlsCabinet": 45.0,
+   "TurnOnElectricKettle": 45.0,
+   "TurnOnMicrowave": 12.0,
+   "TurnOnSinkFaucet": 30.0,
+   "WashLettuce": 45.0
+  },
+  "2": {
+   "CloseFridge": 12.0,
+   "CloseToasterOvenDoor": 9.0,
+   "CoffeeSetupMug": 45.0,
+   "LoadDishwasher": 45.0,
+   "NavigateKitchen": 12.0,
+   "OpenCabinet": 12.0,
+   "OpenDrawer": 12.0,
+   "OpenStandMixerHead": 15.0,
+   "PickPlaceCounterToCabinet": 45.0,
+   "PickPlaceCounterToStove": 45.0,
+   "PickPlaceDrawerToCounter": 12.0,
+   "PreSoakPan": 30.0,
+   "RinseSinkBasin": 110.0,
+   "ScrubCuttingBoard": 45.0,
+   "SlideDishwasherRack": 12.0,
+   "StackBowlsCabinet": 45.0,
+   "TurnOnElectricKettle": 45.0,
+   "TurnOnMicrowave": 12.0,
+   "TurnOnSinkFaucet": 12.0,
+   "WashLettuce": 45.0
+  },
+  "3": {
+   "CloseFridge": 12.0,
+   "CloseToasterOvenDoor": 12.0,
+   "CoffeeSetupMug": 30.0,
+   "LoadDishwasher": 45.0,
+   "NavigateKitchen": 12.0,
+   "OpenCabinet": 12.0,
+   "OpenDrawer": 12.0,
+   "OpenStandMixerHead": 12.0,
+   "PickPlaceCounterToCabinet": 45.0,
+   "PickPlaceCounterToStove": 45.0,
+   "PickPlaceDrawerToCounter": 45.0,
+   "PreSoakPan": 30.0,
+   "RinseSinkBasin": 120.0,
+   "ScrubCuttingBoard": 45.0,
+   "SlideDishwasherRack": 45.0,
+   "StackBowlsCabinet": 45.0,
+   "TurnOnElectricKettle": 45.0,
+   "TurnOnMicrowave": 12.0,
+   "TurnOnSinkFaucet": 12.0,
+   "WashLettuce": 45.0
+  },
+  "all": {
+   "CloseFridge": 12.0,
+   "CloseToasterOvenDoor": 9.0,
+   "CoffeeSetupMug": 30.0,
+   "LoadDishwasher": 45.0,
+   "NavigateKitchen": 12.0,
+   "OpenCabinet": 12.0,
+   "OpenDrawer": 12.0,
+   "OpenStandMixerHead": 12.0,
+   "PickPlaceCounterToCabinet": 45.0,
+   "PickPlaceCounterToStove": 45.0,
+   "PickPlaceDrawerToCounter": 12.0,
+   "PreSoakPan": 45.0,
+   "RinseSinkBasin": 120.0,
+   "ScrubCuttingBoard": 45.0,
+   "SlideDishwasherRack": 45.0,
+   "StackBowlsCabinet": 45.0,
+   "TurnOnElectricKettle": 12.0,
+   "TurnOnMicrowave": 12.0,
+   "TurnOnSinkFaucet": 12.0,
+   "WashLettuce": 45.0
+  }
+ },
+ "raw": [
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "CloseFridge",
+   "answer": "5",
+   "retry_answer": null,
+   "parsed": 5.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "CloseToasterOvenDoor",
+   "answer": "5",
+   "retry_answer": null,
+   "parsed": 5.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "CoffeeSetupMug",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "LoadDishwasher",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "NavigateKitchen",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "OpenCabinet",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "OpenDrawer",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "OpenStandMixerHead",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "PickPlaceCounterToCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "PickPlaceCounterToStove",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "PickPlaceDrawerToCounter",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "PreSoakPan",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "RinseSinkBasin",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "ScrubCuttingBoard",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "SlideDishwasherRack",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "StackBowlsCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "TurnOnElectricKettle",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "TurnOnMicrowave",
+   "answer": "5",
+   "retry_answer": null,
+   "parsed": 5.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "TurnOnSinkFaucet",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "zero",
+   "fold": null,
+   "task": "WashLettuce",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "CloseFridge",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "CloseToasterOvenDoor",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "CoffeeSetupMug",
+   "answer": "25",
+   "retry_answer": null,
+   "parsed": 25.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "LoadDishwasher",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "NavigateKitchen",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "OpenCabinet",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "OpenDrawer",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "OpenStandMixerHead",
+   "answer": "22",
+   "retry_answer": null,
+   "parsed": 22.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "PickPlaceCounterToCabinet",
+   "answer": "25",
+   "retry_answer": null,
+   "parsed": 25.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "PickPlaceCounterToStove",
+   "answer": "25",
+   "retry_answer": null,
+   "parsed": 25.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "PickPlaceDrawerToCounter",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "PreSoakPan",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "RinseSinkBasin",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "ScrubCuttingBoard",
+   "answer": "25",
+   "retry_answer": null,
+   "parsed": 25.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "SlideDishwasherRack",
+   "answer": "22",
+   "retry_answer": null,
+   "parsed": 22.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "StackBowlsCabinet",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "TurnOnElectricKettle",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "TurnOnMicrowave",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "TurnOnSinkFaucet",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "0",
+   "task": "WashLettuce",
+   "answer": "25",
+   "retry_answer": null,
+   "parsed": 25.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "CloseFridge",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "CloseToasterOvenDoor",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "CoffeeSetupMug",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "LoadDishwasher",
+   "answer": "105",
+   "retry_answer": null,
+   "parsed": 105.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "NavigateKitchen",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "OpenCabinet",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "OpenDrawer",
+   "answer": "16",
+   "retry_answer": null,
+   "parsed": 16.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "OpenStandMixerHead",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "PickPlaceCounterToCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "PickPlaceCounterToStove",
+   "answer": "32",
+   "retry_answer": null,
+   "parsed": 32.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "PickPlaceDrawerToCounter",
+   "answer": "22",
+   "retry_answer": null,
+   "parsed": 22.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "PreSoakPan",
+   "answer": "28",
+   "retry_answer": null,
+   "parsed": 28.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "RinseSinkBasin",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "ScrubCuttingBoard",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "SlideDishwasherRack",
+   "answer": "42",
+   "retry_answer": null,
+   "parsed": 42.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "StackBowlsCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "TurnOnElectricKettle",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "TurnOnMicrowave",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "TurnOnSinkFaucet",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "1",
+   "task": "WashLettuce",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "CloseFridge",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "CloseToasterOvenDoor",
+   "answer": "9",
+   "retry_answer": null,
+   "parsed": 9.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "CoffeeSetupMug",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "LoadDishwasher",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "NavigateKitchen",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "OpenCabinet",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "OpenDrawer",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "OpenStandMixerHead",
+   "answer": "15",
+   "retry_answer": null,
+   "parsed": 15.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "PickPlaceCounterToCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "PickPlaceCounterToStove",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "PickPlaceDrawerToCounter",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "PreSoakPan",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "RinseSinkBasin",
+   "answer": "110",
+   "retry_answer": null,
+   "parsed": 110.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "ScrubCuttingBoard",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "SlideDishwasherRack",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "StackBowlsCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "TurnOnElectricKettle",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "TurnOnMicrowave",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "TurnOnSinkFaucet",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "2",
+   "task": "WashLettuce",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "CloseFridge",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "CloseToasterOvenDoor",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "CoffeeSetupMug",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "LoadDishwasher",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "NavigateKitchen",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "OpenCabinet",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "OpenDrawer",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "OpenStandMixerHead",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "PickPlaceCounterToCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "PickPlaceCounterToStove",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "PickPlaceDrawerToCounter",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "PreSoakPan",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "RinseSinkBasin",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "ScrubCuttingBoard",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "SlideDishwasherRack",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "StackBowlsCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "TurnOnElectricKettle",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "TurnOnMicrowave",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "TurnOnSinkFaucet",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "3",
+   "task": "WashLettuce",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "CloseFridge",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "CloseToasterOvenDoor",
+   "answer": "9",
+   "retry_answer": null,
+   "parsed": 9.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "CoffeeSetupMug",
+   "answer": "30",
+   "retry_answer": null,
+   "parsed": 30.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "LoadDishwasher",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "NavigateKitchen",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "OpenCabinet",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "OpenDrawer",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "OpenStandMixerHead",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "PickPlaceCounterToCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "PickPlaceCounterToStove",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "PickPlaceDrawerToCounter",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "PreSoakPan",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "RinseSinkBasin",
+   "answer": "120",
+   "retry_answer": null,
+   "parsed": 120.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "ScrubCuttingBoard",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "SlideDishwasherRack",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "StackBowlsCabinet",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "TurnOnElectricKettle",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "TurnOnMicrowave",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "TurnOnSinkFaucet",
+   "answer": "12",
+   "retry_answer": null,
+   "parsed": 12.0,
+   "fallback": false
+  },
+  {
+   "kind": "few",
+   "fold": "all",
+   "task": "WashLettuce",
+   "answer": "45",
+   "retry_answer": null,
+   "parsed": 45.0,
+   "fallback": false
+  }
+ ]
+}

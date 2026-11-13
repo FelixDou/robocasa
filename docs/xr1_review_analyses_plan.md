@@ -1045,6 +1045,106 @@ CPU. Exploratory on opened cohorts. Answers the 2026-11-03 mock review (paper fo
   comparator.
 
 
+## R14. Timers that do not use the time limit H_k (written 2026-11-06, before any run)
+
+**Why.** Shinoda sensei (2026-11-06): H_k is a heuristic and cannot be used for unknown tasks;
+can it be estimated from the instruction with an LLM?
+- **XR-1:** H_k is RoboCasa's hand-set per-task limit (`robocasa/utils/dataset_registry.py`:
+  300, 450, 750, 900 control steps).
+- **RLDX-1:** H_k is the longest training failure (`rldx_unseen.py`).
+- **Seen tasks:** our setting matches SAFE, FIPER and Hide-and-Seek. H_k defines failure (the rollout
+  ran out of time) and the unit of ℓ, as FIPER's normalized detection time does.
+- **Unseen tasks:** our setting differs. G alarms at c·H_k, so it is given each held-out task's limit.
+  SAFE and Hide-and-Seek calibrate their thresholds per raw timestep on seen tasks and give the
+  monitor no timing of the new task. The "unseen tasks: no gain over G" result therefore uses a
+  timer that knows more than theirs.
+- **P:** uses H_k only through its margin. Its cutoff is c_k H_k = min(H_k, ρ_k H_k + δ H_k), and
+  ρ_k H_k is a duration measured on the task's own successes.
+
+R14 keeps H_k where it defines the problem: failure is a timeout at H_k, and ℓ = (L − T)/H_k. It
+removes H_k from the monitors. CPU, except D2's LLM call (one GPU, minutes). Exploratory on opened
+cohorts, like R6–R13.
+
+**Timers.** Each is a monotone score thresholded with Proposition 1's margin, fitted like G with
+`confirm_lead.fit_fast` on the fold's seen-task calibration successes. Each is fused with every score
+of Tables I–II exactly as G is. They differ only in the time unit D that replaces H_k in the timer,
+alarming at t ≥ min(λ D, H_k); the cap only says that the rollout has ended.
+- **G (H_k)** — the current timer, D = H_k. It must reproduce R6/R7 (gate K1).
+- **G_abs** — D = 1 inference: one elapsed-time cutoff for all tasks, set on seen tasks. It uses the
+  same information as SAFE's and Hide-and-Seek's raw-time thresholds. **Primary H_k-free timer.**
+- **G_LLM** — D = D̂, an LLM's estimate of a successful rollout's duration from the instruction text.
+  - **D1 (zero-shot):** the instruction only.
+  - **D2 (few-shot, primary LLM variant):** the instruction, plus each of the fold's seen tasks
+    with one example instruction and its median training-success duration.
+  - Two rules hold for both: the held-out task's own durations are never shown, and the prompt never
+    names RoboCasa.
+  - *Amended 2026-11-06, before any call.* The estimate is per task, from one instruction:
+    the first reset at seed 0 (`ep_meta` lang). The stored rollouts do not record their
+    instructions. A per-task estimate is also the same kind of quantity as H_k.
+  - On calibration (seen) tasks, the D2 estimate of a task comes from a prompt that leaves that
+    task out of the examples. So λ is calibrated on estimates made the way a held-out task's are.
+  - The answer's unit does not matter: λ absorbs any constant factor. Seconds are used as given.
+- **Seen-task check (descriptive):** G_abs and G_LLM on seen tasks (fold all), to show how much of
+  P's advantage over G is task timing.
+
+**LLM protocol (fixed before any call).**
+- **Model:** one open-weights instruction model with a pinned HF revision (default Qwen3-8B; the
+  author may choose another before the run). Temperature 0, one call per distinct instruction.
+- **Files:** prompt templates in `scripts/xr1_lead_time/hk_free_prompts/`. Their SHA-256 is
+  recorded in the result. Raw outputs are stored verbatim.
+- **Answer:** a single number of seconds. A non-number is re-asked once with a format reminder,
+  then set to the median of the seen tasks' durations, and counted.
+- **Accuracy:** reported per task against the observed 95th percentile of training successes,
+  ρ_k H_k: Spearman ρ, median |log ratio|, and the worst task.
+
+**P without H_k (descriptive sensitivity, seen tasks).**
+- **P_mult:** c_k = ρ_k H_k (1 + δ), a multiplicative margin with δ set by Proposition 1. The H_k
+  term is gone; the min(·, H_k) cap stays, since it only marks the rollout's end.
+- **Reported:** P_mult's FPR, lead and false alarms, and SAFE-LSTM + P_mult and Hide-and-Seek + P_mult
+  gains, beside the published P rows.
+- **Decision rule (fixed now):** if every gain moves by ≤ 0.01 of the limit, the paper keeps P and
+  says in one sentence that the H_k-free margin gives the same result. Otherwise P_mult goes in the
+  appendix and the author decides.
+
+**Scope.**
+- **Cohorts:** XR-1 (R6's folds and score families) and RLDX-1 (R7's).
+- **Rows:** every detector with an unseen column in Tables I–II.
+- **Reported:** per timer — the timer alone (FPR, false alarms, mean lead, TWA); each score fused
+  with it (same-target gain over that timer, gain matched to its false alarms, TWA); seed-averaged,
+  with per-seed SD as in R6.
+- **Not in scope:** new rollouts, and E1/E2. E1 and E2 use P on seen tasks only; P_mult covers them.
+
+**Gates (no result without them):**
+- **K1:** G (H_k) reproduces R6's `seen_unseen_tables_b1ids.json` and R7's `rldx_unseen.json` unseen
+  rows exactly (FPR, lead, gain).
+- **K2:** with D set to H_k, the generalized timer code equals `fit_fast`/`alarm_vec` on every fold.
+  With D = 1 on a synthetic cohort, it matches a direct elapsed-time conformal threshold.
+- **K3:** every timer's seen-task calibration FPR is ≤ 0.05. Its held-out-task test false alarms are
+  reported (no guarantee there, as for G).
+- **K4:** the prompt SHA-256 matches the committed files, and every instruction has a recorded raw
+  output. The failure-to-parse count is ≤ 5% of instructions, or D2 is reported as failed.
+- **K5:** with δ = 0, P_mult and P give the same alarms (both cut at ρ_k H_k), a check of the code
+  path.
+
+**Expectations (written before running).**
+- **G_abs** is much weaker than G on unseen tasks: task lengths span 29–272 inferences on XR-1, so one
+  cutoff alarms early on short tasks or late on long ones. Expected lead 0.03–0.08 below G at its FPR,
+  and FPR on held-out tasks well above 0.05 for short tasks.
+- **Learned scores + G_abs** gain clearly over G_abs on unseen tasks (expected +0.03 or more for
+  SAFE-LSTM and Hide-and-Seek), unlike their ≈ 0 gain over G. This is the result the paper would
+  report: once the timer is not given the new task's limit, the policy's state carries warning.
+- **D2** ranks tasks well (Spearman ≥ 0.6) and lands between G_abs and G. D1 is worse than D2.
+- **P_mult** changes gains by < 0.01 (H_k enters P only through δ, which is small).
+
+**Paper use (decided after the result, by the author).**
+- **Stage 1:**
+  - in the problem setup, one sentence saying that H_k is the benchmark's hand-set limit and that
+    it defines failure;
+  - in the unseen-task table, G_abs (and, if it works, G_LLM) beside G;
+  - the abstract or conclusion changes only if the unseen-task finding changes.
+- **Stage 2:** the same rows in the appendix, and G_LLM framed as an answer to how a new task's
+  time scale can be obtained.
+
 ## Runbook
 
 Run on TSUBAME from a pinned worktree, CPU only for R1–R4, following
@@ -2728,6 +2828,159 @@ sha256sum $R13_ROOT/*.json; basename $R13_ROOT
 Copy both JSONs to `reports/safe_robocasa365_research_plan_20260823/evidence/<R13_TAG>/`.
 
 
+### 12. R14: timers without H_k (CPU, plus one GPU for minutes)
+
+Code: `scripts/xr1_lead_time/hk_free.py`, with prompt templates in
+`scripts/xr1_lead_time/hk_free_prompts/`. `seen_unseen_tables.py` and `rldx_unseen.py` take
+`--r14-durations`. Tests: `tests/test_xr1_hk_free.py`, plus one R14 test each in
+`test_xr1_seen_unseen_tables` and `test_xr1_rldx_unseen`.
+
+`R14_SHA` is the full SHA of the pushed commit on `claude/review-analyses` that contains this
+step.
+- **Steps 12.0–12.2 and 12.4:** CPU, about 30 minutes with the export loads.
+- **Step 12.3:** one GPU.
+- **Allocation:** the simplest is one GPU allocation for everything, for example
+  `qrsh -g tga-shinoda -l gpu_1=1 -l h_rt=3:00:00`.
+
+**12.0 Environment, pinned code, inputs, unit tests.**
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+export PROJECT_FS=/gs/fs/tga-shinoda/felid STORAGE_BS=/gs/bs/tga-shinoda/felid
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0 HF_HOME=$STORAGE_BS/hf_home
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+source $STORAGE_BS/robocasa_logs/eval/xr1_r11_rows_20261030_220636/paths.env   # XT_ROOT RS_ROOT R6_ROOT PSEED_ROOT OOD_ROOT R11_ROOT ...
+source $STORAGE_BS/robocasa_logs/eval/rldx1_unseen_20261029_135501/paths.env    # R7_ROOT, FOLDS (RLDX-1), RLDX_ROOT, RLDXHS_ROOT, ...
+export RLDX_FOLDS=$FOLDS R7S=$R7_ROOT/safe
+export SAFE_PY=$STORAGE_BS/envs/vla_safe/bin/python CLIENT_PY=$STORAGE_BS/envs/robocasa_openpi/bin/python
+export R14_SHA=<R14_SHA>
+export R14_REPO=$PROJECT_FS/robocasa_r14hk_${R14_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/review-analyses
+test -e $R14_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R14_REPO $R14_SHA
+test "$(git -C $R14_REPO rev-parse HEAD)" = "$R14_SHA" && echo "HEAD OK" || echo "STOP: worktree HEAD is not R14_SHA"
+cd $R14_REPO
+export XR1_FOLDS=$R14_REPO/scripts/xr1_lead_time/cross_task_folds.json
+export R14_TAG=xr1_r14_hk_free_$(date +%Y%m%d_%H%M%S)
+export R14_ROOT=$CK/$R14_TAG R14_LOG=$STORAGE_BS/robocasa_logs/eval/$R14_TAG
+mkdir -p $R14_ROOT $R14_LOG
+printf 'export %s=%q\n' R14_SHA "$R14_SHA" R14_REPO "$R14_REPO" R14_TAG "$R14_TAG" R14_ROOT "$R14_ROOT" \
+  R14_LOG "$R14_LOG" XR1_FOLDS "$XR1_FOLDS" RLDX_FOLDS "$RLDX_FOLDS" R7S "$R7S" SAFE_PY "$SAFE_PY" \
+  CLIENT_PY "$CLIENT_PY" > $R14_LOG/paths.env
+echo "R14_TAG=$R14_TAG"
+cmp $XR1_FOLDS $R11_REPO/scripts/xr1_lead_time/cross_task_folds.json && echo "XR-1 FOLDS SAME AS R11"
+echo "2dd19df0  R11 XR-1 tables:" $(sha256sum $R11_ROOT/seen_unseen_tables_r11.json | cut -c1-8)
+echo "761e1ded  R11 RLDX-1 table:" $(sha256sum $R11_ROOT/rldx_unseen_r11.json | cut -c1-8)
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_xr1_hk_free tests.test_xr1_seen_unseen_tables \
+  tests.test_xr1_rldx_unseen 2>&1 | tail -n 3
+"$CLIENT_PY" -c "import torch, transformers; print('torch', torch.__version__, 'transformers', transformers.__version__, 'cuda', torch.cuda.is_available())"
+```
+
+Continue only if all of these hold:
+- `HEAD OK` and `XR-1 FOLDS SAME AS R11` print;
+- the two hashes match their prefixes;
+- the tests end with `OK`;
+- the last line shows transformers ≥ 4.51 and `cuda True` (`robocasa_openpi` runs step 12.3; `vla_safe` has no
+  transformers). If it doesn't, report it before going on.
+
+**12.1 One instruction per task (CPU, RoboCasa).** This uses the first reset at seed 0 for each task.
+The pinned worktree has no RoboCasa assets (they are not in git). They are hard-linked from the
+shared checkout, as in E2's step 1.
+
+```bash
+mkdir -p $R14_REPO/robocasa/models/assets
+cp -aln $PROJECT_FS/robocasa/robocasa/models/assets/. $R14_REPO/robocasa/models/assets/
+cd $R14_REPO
+MUJOCO_GL=egl PYTHONPATH=$R14_REPO "$CLIENT_PY" -u scripts/xr1_lead_time/hk_free.py instructions \
+  --folds $XR1_FOLDS $RLDX_FOLDS --seed 0 --output $R14_ROOT/instructions.json 2>&1 | grep -v Warning | tee $R14_LOG/instructions.log | tail -n 45
+```
+
+It must end with `wrote ... (N tasks)`, with every XR-1 and RLDX-1 task listed.
+
+**12.2 Prompts (CPU).**
+
+```bash
+cd $R14_REPO
+"$SAFE_PY" -I scripts/xr1_lead_time/hk_free.py prompts --cohort xr1 --instructions $R14_ROOT/instructions.json \
+  --folds $XR1_FOLDS --runtime-bundle $XR1_RUNTIME_BUNDLE --output $R14_ROOT/prompts_xr1.json
+"$SAFE_PY" -I scripts/xr1_lead_time/hk_free.py prompts --cohort rldx --instructions $R14_ROOT/instructions.json \
+  --folds $RLDX_FOLDS --safe-dir $RLDX_ROOT/calibration/lstm --output $R14_ROOT/prompts_rldx.json
+"$SAFE_PY" -I - $R14_ROOT/prompts_xr1.json <<'PY'
+import json, sys
+p = json.load(open(sys.argv[1]))
+t = sorted(p["zero"])[0]
+print("SYSTEM:", p["system"]); print("ZERO:", p["zero"][t]); print("FEW (fold 0):", p["few"]["0"][t])
+PY
+```
+
+**12.3 The model, then the answers (one GPU).** Download once (from a login node if compute nodes
+have no internet), then pin the snapshot that was fetched:
+
+```bash
+"$CLIENT_PY" -c "from huggingface_hub import snapshot_download; print(snapshot_download('Qwen/Qwen3-8B'))" | tail -n 1 \
+  | tee $R14_LOG/model_snapshot.txt
+export LLM_DIR=$(cat $R14_LOG/model_snapshot.txt); echo "export LLM_DIR=$LLM_DIR" >> $R14_LOG/paths.env
+cd $R14_REPO
+for c in xr1 rldx; do
+  HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 "$CLIENT_PY" -u scripts/xr1_lead_time/hk_free.py llm \
+    --prompts $R14_ROOT/prompts_$c.json --model $LLM_DIR --output $R14_ROOT/durations_$c.json 2>&1 \
+    | grep -v -i warn | tee $R14_LOG/llm_$c.log | tail -n 45
+done
+```
+
+Each log starts with the two parse counts. More than 5% of either kind unparsed means that
+LLM timer is reported as failed (gate K4).
+
+**12.4 The tables with R14 (CPU, minutes).** These are the R11 commands (9.5 and 9.6) plus
+`--r14-durations`, writing to `$R14_ROOT`.
+
+```bash
+cd $R14_REPO
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/seen_unseen_tables.py run \
+  --calibration $E1_OUT/calibration_predictions.jsonl --test $E1_OUT/test_predictions.jsonl \
+  --runtime-bundle $XR1_RUNTIME_BUNDLE --folds $XR1_FOLDS \
+  --safe-fold-dirs $RS_ROOT/folds/fold_{0,1,2,3} --xt-fold-dirs $XT_ROOT/fold_{0,1,2,3} \
+  --actprobe-fold-dirs $R6_ROOT/actprobe/fold_{0,1,2,3} $R6_ROOT/actprobe/fold_all_b1ids \
+  --ood-fold-dirs $R6_ROOT/ood/fold_{0,1,2,3} \
+  --ood-source-bundle $XR1_BASELINE_ROOT/develop/baseline_bundle.json \
+  --amend2-scores $AMEND2_ROOT/scores/lead_calibration_predictions.jsonl $AMEND2_ROOT/scores/confirmatory_test_predictions.jsonl \
+  --amend2-normalizations $AMEND2_ROOT/scores/normalizations.json \
+  --ood-seen 0 $OOD_ROOT/seed0/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed0/heldout/test_with_baselines.jsonl \
+  --ood-seen 1 $OOD_ROOT/seed1/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed1/heldout/test_with_baselines.jsonl \
+  --ood-seen 2 $OOD_ROOT/seed2/heldout/calibration_with_baselines.jsonl $OOD_ROOT/seed2/heldout/test_with_baselines.jsonl \
+  --run-c $PSEED_ROOT/per_seed_fused_heldout.json --ood-fused $OOD_ROOT/ood_per_seed_fused_heldout.json \
+  --cross-task-result $XT_ROOT/cross_task_lead.json --cross-task-safe-result $RS_ROOT/cross_task_safe.json \
+  --actprobe-reference-normalizations $PSEED_ROOT/actprobe_scores/normalizations.json \
+  --actprobe-t-fold-dirs $R11_ROOT/actprobe_t/fold_{0,1,2,3,all} \
+  --safe-lstm-fold-dirs $R11_ROOT/safe_lstm/fold_{0,1,2,3,all} \
+  --r6-result $R6_ROOT/seen_unseen_tables_b1ids.json \
+  --r14-durations $R14_ROOT/durations_xr1.json \
+  --output $R14_ROOT/seen_unseen_tables_r14.json 2>&1 | tee $R14_LOG/tables_xr1.log | tail -n 60
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 nice -n 10 "$SAFE_PY" -I -u scripts/xr1_lead_time/rldx_unseen.py run \
+  --safe-dir $RLDX_ROOT/calibration/lstm --inputs-dir $RLDXHS_ROOT/inputs --folds $RLDX_FOLDS \
+  --fold-dirs $R7_ROOT/folds/fold_{0,1,2,3,all} \
+  --fold-dirs $R7S/folds/lstm/fold_0_f32 $R7S/folds/lstm/fold_{1,2,3,all} \
+  --fold-dirs $R7S/folds/indep/fold_{0,1,2,3,all} \
+  --fold-dirs $R11_ROOT/rldx_actprobe/fold_{0,1,2,3,all} --unreferenced actprobe actprobe_t \
+  --reference-per-seed $RLDXPS_ROOT/rldx_per_seed.json \
+  --r14-durations $R14_ROOT/durations_rldx.json \
+  --output $R14_ROOT/rldx_unseen_r14.json 2>&1 | tee $R14_LOG/tables_rldx.log | tail -n 45
+"$SAFE_PY" -I - $R11_ROOT $R14_ROOT <<'PY'
+import json, sys
+a, b = sys.argv[1], sys.argv[2]
+for old, new in (("seen_unseen_tables_r11.json", "seen_unseen_tables_r14.json"), ("rldx_unseen_r11.json", "rldx_unseen_r14.json")):
+    x, y = json.load(open(f"{a}/{old}")), json.load(open(f"{b}/{new}"))
+    same = all(x[k] == y[k] for k in ("table1", "table2") if k in x)
+    print(new, "PUBLISHED ROWS UNCHANGED" if same else "STOP: published rows changed")
+PY
+sha256sum $R14_ROOT/*.json
+```
+
+Report:
+- `instructions.log`, the 12.2 printout and both `llm_*.log`;
+- `tables_xr1.log` and `tables_rldx.log`, which end in `R14 OK`;
+- the two `PUBLISHED ROWS UNCHANGED` lines and the hashes.
+
 ## Result
 
 Recorded 2026-10-28.
@@ -4121,3 +4374,113 @@ not a formality.
 
 **Evidence (copied 2026-11-03).** `evidence/xr1_list_c_20261103_211633/list_c.json`
 (`3b48bccd…`) and `reset.json` (`3dac8155…`) match the cluster's hashes.
+
+### R14
+
+Run `xr1_r14_hk_free_20261106_191531`, code `575f3dd6`, one GPU on r10n2. The LLM is Qwen3-8B,
+snapshot `b968826d`, greedy decoding without thinking.
+- **Gates.** All passed, and both tables end in `R14 OK`.
+  - K1: G here equals the published unseen + G rows, max difference 0.0 on both policies.
+  - K5: P here equals the published seen + P rows.
+  - K4: every prompt matches the committed templates, and every answer parsed: XR-1 38 zero-shot and
+    190 few-shot, RLDX-1 20 and 100.
+  - The published rows (`table1`, `table2`) are identical to R11's on both policies.
+- **Earlier attempts.** `xr1_r14_hk_free_20261106_190353` (code `69f5b083`) stopped at its unit tests:
+  the test file needed pytest, which the SAFE environment lacks. That folder is empty. At `575f3dd6`,
+  step 12.1 first failed because the worktree lacked RoboCasa assets; they were then hard-linked in
+  (runbook amended, `4fd03356`).
+- **Hashes.**
+  - `seen_unseen_tables_r14.json` `1578f312…`, `rldx_unseen_r14.json` `e785586c…`;
+  - `durations_xr1.json` `80e18905…`, `durations_rldx.json` `65d8ddfd…`, `instructions.json` `1024ca79…`;
+  - `prompts_xr1.json` `9486de9a…`, `prompts_rldx.json` `e784226a…`.
+- **Evidence.** Copied 2026-11-06 to `evidence/xr1_r14_hk_free_20261106_191531/`. The hashes match
+  the cluster. `logs/` holds `model_snapshot.txt` and `paths.env`. The run's `.log` files are in the
+  local copy only, since the repository ignores `*.log`.
+
+**Timers alone (Proposition 1 on seen-task calibration; test on held-out tasks, pooled over folds).**
+
+| Timer | XR-1 unseen FP / lead / TWA | XR-1 seen FP / lead | RLDX-1 unseen FP / lead | RLDX-1 seen FP / lead |
+|---|---|---|---|---|
+| G (H_k) | 9 / 0.126 / 0.551 | 8 / 0.123 | 0 / 0.026 | 1 / 0.027 |
+| G_abs (elapsed time) | 19 / 0.122 / 0.536 | 20 / 0.130 | 7 / 0.066 | 5 / 0.057 |
+| G_llm_zero | 22 / 0.131 / 0.537 | 21 / 0.119 | 4 / 0.043 | 3 / 0.041 |
+| G_llm_few | 10 / 0.076 / 0.525 | 14 / 0.154 | 0 / 0.039 | 0 / 0.070 |
+| P | | 21 / 0.225 | | 3 / 0.271 |
+| P_mult | | 20 / 0.217 | | 3 / 0.264 |
+
+XR-1 has 380 test successes; RLDX-1 has 100.
+- **Without H_k the timer needs about twice the false alarms for the same lead.** On XR-1 at about 17
+  false alarms, G's lead is about 0.19. G_abs and G_llm_few are about 0.15–0.16, inferred from the
+  fused leads and their matched gains below.
+
+**LLM duration estimates against the observed ρ_k H_k (seconds).**
+
+| Cohort | Variant | Spearman | Median abs. log ratio | Median ratio | Worst task (estimate / observed) |
+|---|---|---:|---:|---:|---|
+| XR-1 | zero-shot | 0.43 | 0.54 | 0.68 | CoffeeSetupMug (120 / 18 s) |
+| XR-1 | few-shot, held out | 0.63 | 0.63 | 0.56 | PrepareCoffee (18 / 78 s) |
+| RLDX-1 | zero-shot | 0.33 | 0.66 | 0.84 | CoffeeSetupMug (120 / 11 s) |
+| RLDX-1 | few-shot, held out | 0.31 | 0.75 | 0.81 | SlideDishwasherRack (45 / 12 s) |
+
+The typical estimate is off by a factor of 1.7–2.1, and it is too short on XR-1.
+
+**Unseen tasks, score fused with each timer: gain over that timer, matched gain in brackets.**
+- Seed-average ensemble (one fit on the averaged score):
+
+| Detector | G | G_abs | G_llm_zero | G_llm_few |
+|---|---|---|---|---|
+| XR-1 Hide-and-Seek | +0.127 [+0.048] | +0.126 [+0.097] | +0.127 [+0.129] | +0.169 [+0.073] |
+| XR-1 SAFE-LSTM | +0.061 [−0.003] | +0.045 [+0.013] | +0.073 [+0.068] | +0.088 [+0.009] |
+| XR-1 SAFE-MLP | +0.017 [−0.085] | +0.002 [−0.004] | +0.017 [−0.005] | +0.036 [−0.040] |
+| XR-1 Mahalanobis / k-NN / PCA-KMeans / RND | +0.045 to +0.053 [−0.068 to −0.085] | +0.009 to +0.023 [−0.015 to +0.004] | +0.041 to +0.059 [−0.008 to +0.010] | +0.048 to +0.062 [−0.034 to −0.043] |
+| XR-1 Hide-and-Seek zero-input / first-step | +0.033 / +0.000 | +0.000 / +0.000 | +0.037 / +0.000 | +0.032 / +0.000 |
+| RLDX-1 Hide-and-Seek | +0.191 [+0.084] | +0.162 [+0.122] | +0.180 [+0.140] | +0.180 [+0.058] |
+| RLDX-1 SAFE-LSTM | +0.104 [−0.068] | +0.073 [+0.033] | +0.091 [+0.047] | +0.093 [−0.052] |
+
+- Single training seeds (mean ± SD over seeds 0–2):
+
+| Detector | G | G_abs | G_llm_zero | G_llm_few |
+|---|---|---|---|---|
+| XR-1 Hide-and-Seek | +0.122 ± 0.005 [+0.012 ± 0.009] | +0.112 ± 0.007 [+0.087 ± 0.015] | +0.127 ± 0.004 [+0.102 ± 0.021] | +0.157 ± 0.009 [+0.055 ± 0.009] |
+| XR-1 SAFE-LSTM | +0.058 ± 0.020 [−0.001 ± 0.019] | +0.056 ± 0.011 [+0.026 ± 0.017] | +0.052 ± 0.014 [+0.063 ± 0.039] | +0.084 ± 0.012 [+0.001 ± 0.017] |
+| XR-1 SAFE-MLP | +0.028 ± 0.009 [−0.074 ± 0.009] | +0.002 ± 0.000 [−0.004 ± 0.000] | +0.027 ± 0.008 [+0.027 ± 0.005] | +0.031 ± 0.002 [−0.045 ± 0.002] |
+| RLDX-1 Hide-and-Seek | +0.196 ± 0.013 [+0.083 ± 0.071] | +0.168 ± 0.011 [+0.136 ± 0.023] | +0.186 ± 0.018 [+0.158 ± 0.041] | +0.181 ± 0.017 [+0.058 ± 0.046] |
+| RLDX-1 SAFE-LSTM | +0.101 ± 0.006 [−0.011 ± 0.002] | +0.076 ± 0.004 [+0.053 ± 0.012] | +0.091 ± 0.002 [+0.047 ± 0.002] | +0.092 ± 0.005 [−0.041 ± 0.005] |
+
+- **Matched** here means one timer margin over all held-out tasks, set on the test successes to the
+  fused monitor's false-alarm count. It is test-tuned and descriptive, with no CI. With G it is close
+  to R6's matched values: SAFE −0.085 here against −0.079 there, Hide-and-Seek +0.048 against +0.051.
+- **Hide-and-Seek** gains over every timer on both policies, and its matched gain is larger when the
+  timer is not given H_k.
+- **SAFE-MLP and the OOD scores** lose 0.07–0.09 to G at matched false alarms, and are about even with
+  G_abs. Their same-target gains over G come from extra false alarms.
+- **SAFE-LSTM** is about even with G at matched false alarms and slightly ahead of G_abs.
+
+**P without H_k (seen tasks).** P_mult against P, gain of each score fused with it:
+- **XR-1:** every gain moves by at most 0.009. Hide-and-Seek +0.071 → +0.080, SAFE-MLP +0.030 →
+  +0.031, SAFE-LSTM +0.033 → +0.034; the others move by −0.001 to +0.006.
+- **RLDX-1:** ActProbe +0.047 → +0.064 (+0.017), Hide-and-Seek zero-input +0.018 → +0.006 (−0.012),
+  Hide-and-Seek +0.083 → +0.078, SAFE-LSTM +0.034 → +0.035; the others move by at most 0.006.
+- By the rule fixed in the plan, two RLDX-1 rows move by more than 0.01, so P_mult goes in the
+  appendix and the author decides. The main rows (Hide-and-Seek, SAFE) move by at most 0.009 on
+  both policies.
+
+**Expectations against results.**
+- *G_abs much weaker than G at its own FPR, with held-out FPR well above 0.05:* **no.** It reaches
+  nearly G's lead (0.122 vs 0.126) at twice the false alarms (FPR 0.050). It is weaker at equal false
+  alarms (about 0.15–0.16 vs 0.19).
+- *Learned scores gain ≥ +0.03 over G_abs:*
+  - Hide-and-Seek: **yes** (+0.126, matched +0.097);
+  - SAFE-LSTM: **yes** at the same target (+0.045), but only +0.013 matched;
+  - SAFE-MLP and the OOD scores: **no** (about 0).
+- *D2 Spearman ≥ 0.6, landing between G_abs and G:* XR-1 0.63, RLDX-1 0.31. G_llm_few is about
+  G_abs's level at equal false alarms, **not** between.
+- *P_mult changes gains by < 0.01:* **yes** on XR-1; **no** for two secondary RLDX-1 rows.
+
+**What this changes.**
+- **H_k as timing information.** On unseen tasks, G uses the task's hand-set limit, which carries
+  timing information a new task would not have. An LLM reading the instruction does not recover it.
+- **Comparing with the literature.** For a comparison like SAFE's and Hide-and-Seek's, where the
+  monitor gets no timing of the new task, the H_k-free timers are the fair comparator.
+- **Hide-and-Seek's unseen-task result** holds against all of them.
+- **No new rollouts.** None of this needs new rollouts; E1 and E2 (seen tasks, P) are unaffected.

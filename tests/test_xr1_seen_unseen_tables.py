@@ -241,6 +241,48 @@ class RunTests(unittest.TestCase):
             self.assertAlmostEqual(got["fpr"], fp / n, places=12)
             self.assertAlmostEqual(got["tpr"], float(np.mean(hits)), places=12)
 
+    def test_r14_timers_without_hk(self):
+        """R14: --r14-durations adds every timer, reproduces unseen + G (K1) and seen + P (K5), and
+        leaves the published tables unchanged."""
+        import hashlib
+        import hk_free as hk
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args, held, cal, te = build(root)
+            tasks = sorted({r["task_name"] for r in cal})
+            ins = {t: f"Do the {t} job." for t in tasks}
+            med = {t: 10.0 + 3 * i for i, t in enumerate(tasks)}
+            prompts = hk.build_prompts(ins, held, med)
+            prompts["example_median_seconds"] = med
+            answer = {f"Do the {t} job.\"\n\nHow many": str(8 + 5 * i) for i, t in enumerate(tasks)}
+            zero, few, raw, fails = hk.answer_all(prompts, lambda m: next((v for k, v in answer.items()
+                                                                         if k in m[1]["content"]), "?"))
+            folds_path = args[args.index("--folds") + 1]
+            dur = dict(prompt_sha256=hk.prompts_sha256(),
+                       folds_sha256=hashlib.sha256(Path(folds_path).read_bytes()).hexdigest(),
+                       zero=zero, few=few, answers=len(raw), parse_failures=fails)
+            (root / "dur.json").write_text(json.dumps(dur))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(su.main(args), 0)
+            base = json.loads((root / "tables.json").read_text())
+            (root / "tables.json").unlink()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + ["--r14-durations", str(root / "dur.json")])
+            self.assertEqual(status, 0, buf.getvalue())
+            self.assertIn("R14 OK", buf.getvalue())
+            out = json.loads((root / "tables.json").read_text())
+            self.assertEqual(out["table2"], base["table2"])
+            self.assertEqual(out["table1"], base["table1"])
+            r = out["r14"]
+            self.assertTrue(all(v <= 1e-12 for v in r["checks"]["K1_G_reproduces_unseen_plus_G"].values()))
+            for name, by in r["unseen"].items():
+                self.assertEqual(set(by), set(hk.TIMERS))
+                self.assertEqual(by["G_abs"]["seed_average"]["n_success"], 10 * len(fx.TASKS))
+            for name in (su.SAFE, su.HS):
+                self.assertEqual(set(r["seen"][name]), set(hk.SEEN_TIMERS))
+                self.assertLessEqual(r["checks"]["K5_P_reproduces_seen_plus_P"][name]["max_abs_diff"], 1e-12)
+
     def test_r11_rows_and_unchanged_r6_rows(self):
         """R11: ActProbe joins Table II; SAFE-LSTM and ActProbe-T rows come from optional fold dirs; T6
         requires every row of the earlier output to be reproduced exactly."""

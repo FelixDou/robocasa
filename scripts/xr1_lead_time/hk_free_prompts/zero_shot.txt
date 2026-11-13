@@ -1,0 +1,4 @@
+The robot is given this instruction:
+"{instruction}"
+
+How many seconds does a successful attempt typically take? Answer with a single number of seconds.
