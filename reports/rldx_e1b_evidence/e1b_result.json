@@ -1,0 +1,241 @@
+{
+ "plan": "docs/rldx_e1b_plan.md",
+ "status": "E1b (second test of H3, Hide-and-Seek + P; rule and path fixed before collection)",
+ "seed": 20261112,
+ "detectors": [
+  "hide_and_seek"
+ ],
+ "replicates": 2000,
+ "level": 0.975,
+ "k_null": 39,
+ "mc_alpha": 0.05,
+ "frozen_paths": {
+  "hide_and_seek": {
+   "u": 0.2301,
+   "s": 5.0
+  }
+ },
+ "e1b_freeze": {
+  "path": "/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/rldx1_e1b_20261112_195208/e1b_freeze_hs.json",
+  "sha256": "395d6af2ce4c2a8d55b9c22135c32c568ec8798612e411357e9eafe07efdb10a"
+ },
+ "e1b_seeds": {
+  "calibration": 1601,
+  "test": 1701
+ },
+ "checks": {
+  "R_recorded": {
+   "gate": {
+    "safe": {
+     "lam": 0.0421,
+     "want_lam": 0.0421,
+     "gain": 0.0342,
+     "want_gain": 0.0342,
+     "ok": true
+    },
+    "hide_and_seek": {
+     "lam": 0.068,
+     "want_lam": 0.068,
+     "gain": 0.0834,
+     "want_gain": 0.0834,
+     "ok": true
+    }
+   },
+   "ok": true
+  },
+  "F_freeze": {
+   "files_equal": true,
+   "paths_equal": {
+    "hide_and_seek": true
+   }
+  },
+  "S_sets": {
+   "seeds": {
+    "calibration": 1601,
+    "test": 1701
+   },
+   "overlap_with_e1": 0,
+   "counts": {
+    "calibration": {
+     "set": "calibration",
+     "failures": 400,
+     "successes": 400,
+     "failures_not_at_limit": [],
+     "successes_at_or_past_limit": []
+    },
+    "test": {
+     "set": "test",
+     "failures": 400,
+     "successes": 400,
+     "failures_not_at_limit": [],
+     "successes_at_or_past_limit": [
+      "0a81d1cf4038bd83ee32936c"
+     ]
+    }
+   }
+  }
+ },
+ "max_false_alarms": 39,
+ "P": {
+  "path": {
+   "lam": 0.043,
+   "u": Infinity,
+   "s": 0.0
+  },
+  "test": {
+   "fpr": 0.0675,
+   "fp": 27,
+   "fpr_wilson95": [
+    0.0468,
+    0.0964
+   ],
+   "recall": 1.0,
+   "mean_lead": 0.2686,
+   "by50": 0.1,
+   "by75": 0.65,
+   "alarms_at_final_inference": 20
+  }
+ },
+ "results": {
+  "hide_and_seek": {
+   "path": {
+    "lam": 0.164,
+    "u": 0.2301,
+    "s": 5.0
+   },
+   "test": {
+    "fpr": 0.0475,
+    "fp": 19,
+    "fpr_wilson95": [
+     0.0306,
+     0.073
+    ],
+    "recall": 1.0,
+    "mean_lead": 0.3222,
+    "by50": 0.2975,
+    "by75": 0.535,
+    "alarms_at_final_inference": 92
+   },
+   "gain": 0.05354386262791909,
+   "matched_gain": 0.11255307265174685,
+   "matched_P_delta": 0.11500000000000055,
+   "matched_P_fp": 19,
+   "disabled": false,
+   "gain_ci": [
+    0.0006782964953625725,
+    0.12928980011025804
+   ],
+   "matched_ci": [
+    0.04911862378303625,
+    0.14101771030193821
+   ],
+   "matched_infeasible": 0,
+   "a_gain_ci_above_zero": true,
+   "b_matched_ci_above_zero": true,
+   "c_false_alarms_within_bound": true,
+   "d_beats_null_fusions": true,
+   "null_p": {
+    "noise": 0.025,
+    "safe_resampled": 0.025
+   },
+   "H3": true
+  }
+ },
+ "null_references": {
+  "noise": [
+   -0.011524043157326906,
+   0.0,
+   0.0,
+   -0.04309808297572218,
+   0.0,
+   -0.030438637889350816,
+   -0.01999641504173729,
+   0.0,
+   -0.053787439688899534,
+   0.0,
+   -0.03064538348966429,
+   -0.022896279321669856,
+   -0.03133442123399823,
+   0.0,
+   -0.031902189057813085,
+   0.0,
+   -0.013907447344993195,
+   0.0,
+   -0.039424086080864146,
+   -0.005705668247273576,
+   -0.02945292995333682,
+   -0.008247321581215461,
+   -0.018631537604172965,
+   -0.02842598689696023,
+   -0.016557181287549697,
+   0.011512082821808468,
+   -0.014480160368087289,
+   0.0,
+   -0.03949756984586873,
+   -0.03145995962288076,
+   -0.03053095876988239,
+   -0.02711772890824629,
+   -0.02846669530582147,
+   0.0,
+   0.0,
+   -0.012437189270847577,
+   0.0,
+   -0.030460500279458708,
+   -0.03249710462272689
+  ],
+  "safe_resampled": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ]
+ },
+ "by_type": {
+  "atomic": {
+   "hide_and_seek": 0.0918
+  },
+  "composite": {
+   "hide_and_seek": -0.0357
+  }
+ },
+ "seconds": {
+  "hide_and_seek": {
+   "gain_seconds": 1.21
+  }
+ }
+}

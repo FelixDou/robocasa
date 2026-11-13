@@ -290,6 +290,42 @@ It prints gates R, F and S, then the Hide-and-Seek line (false alarms against th
 and matched gain with their 97.5% CIs, the null p-values, conditions (a)–(d), and whether H3
 holds), and `ANALYSIS DONE`. Paste `analyze.log` back and copy `e1b_result.json` to the Mac.
 
-## Result
+## Result (2026-11-13, run `rldx1_e1b_20261112_195208`, code `bf6f6080`)
 
-(to be written after the run)
+**H3 holds for Hide-and-Seek + P.** Every gate passed:
+
+- **Smoke:** `CHECK OK (smoke)`.
+- **Collection:** every shard `VALID`, `CHECK OK`, 400 successes and 400 failures in each set,
+  and no errors.
+- **Scoring:** the recorded calibration (60) and test (200) scores were reproduced exactly
+  (max |diff| 0), followed by `SCORING OK`.
+- **Analysis:** gates R, F and S passed, and E1's inputs were unchanged.
+
+E1b's test set (400 successes, 400 failures), with the path frozen in `e1b_freeze_hs.json`
+(u 0.2301, s 5) and the margin set on E1b's calibration successes:
+
+| Monitor | False alarms (bound 39) | Mean lead | Gain, 97.5% CI | Matched gain, 97.5% CI | Null p (noise, resampled) | (a) (b) (c) (d) |
+|---|---|---|---|---|---|---|
+| P | 27 | 0.269 | — | — | — | — |
+| Hide-and-Seek + P | 19 | 0.322 | 0.054 [0.001, 0.129] | 0.113 [0.049, 0.141] | 0.025, 0.025 | all true |
+
+- **The null fusions:** the gain beats all 39 noise fusions and all 39 resampled fusions.
+- **Reported alongside:**
+  - **By type:** atomic 0.092, composite −0.036.
+  - **In seconds:** 1.21 s.
+  - **Run to the limit:** every failure ran to its limit, and one test success
+    (`0a81d1cf4038bd83ee32936c`) ended at its limit.
+- **Reading:**
+  - The test with the path fixed on E1's 1,600 rollouts credits Hide-and-Seek's early warning;
+    E1's test, with the path fixed on 60 successes, did not.
+  - At the same target, the interval's lower end (0.0007) is barely above zero. The matched
+    interval is clearly above zero, because Hide-and-Seek + P raises fewer false alarms than P.
+  - As on XR-1, the gain comes from the atomic tasks.
+- **Paper reporting (author's decision, stated on 2026-11-12 before collection):**
+  - The paper reports H3 for Hide-and-Seek: E1's test, then E1b.
+  - SAFE-LSTM's E1 result stays in E1's record and is not discussed in the paper.
+  - This supersedes the last bullet of "Reporting".
+- **Evidence:** `reports/rldx_e1b_evidence/` contains:
+  - `e1b_result.json` (sha256 `bd0aab11e5e56b54…`);
+  - both freeze files;
+  - the smoke, check, scoring, freeze and analysis logs.

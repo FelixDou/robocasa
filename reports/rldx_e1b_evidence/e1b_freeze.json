@@ -1,0 +1,116 @@
+{
+ "plan": "docs/rldx_e1b_plan.md",
+ "status": "frozen before any E1b rollout",
+ "e1_freeze": {
+  "path": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/e2_freeze_20261029_205743/e2_freeze_manifest.json",
+  "sha256": "917c06e6ab701f9f2dcc81f4e54086e210c67cebd35aa39aebd9444d9f431f68"
+ },
+ "e1_scores": {
+  "path": "/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/rldx1_e1_20261105_210723/scores",
+  "files": {
+   "calibration_safe_lstm_predictions.jsonl": "53c212865ae78912862faf4bc2b51d6a56eab0ab8e783228581372a27e9bdbfd",
+   "calibration_hide_and_seek_predictions.jsonl": "5e45c805bf9b65797d8bac7e259d684b363ddec3266ca8dc1fe342b8d8c07108",
+   "test_safe_lstm_predictions.jsonl": "9c88ecd6bc1ee3cf78b0e3578cb175ec0aa8be14f8e8f8fcf0e420c58ab99b32",
+   "test_hide_and_seek_predictions.jsonl": "6c4f080420fac08666b347b3e4024def3d87187d09c7a93e2560dd9783ee909d",
+   "safe_lstm_scoring.json": "e1794027a2f69abd4a4ee05847cee3b5bfe7b9d74ebaa6fded882d0b3259f429"
+  }
+ },
+ "e1_counts": {
+  "calibration": {
+   "successes": 400,
+   "failures": 400
+  },
+  "test": {
+   "successes": 400,
+   "failures": 400
+  }
+ },
+ "chosen_on": "E1 calibration and test sets (fit_fast; successes set the margin, failures choose)",
+ "paths": {
+  "safe": {
+   "u": 2.9249,
+   "s": 20.0,
+   "lam_at_fit": 0.1473
+  },
+  "hide_and_seek": {
+   "u": 0.2301,
+   "s": 5.0,
+   "lam_at_fit": 0.1726
+  }
+ },
+ "null_paths_and_pools": "E1 calibration and test sets",
+ "analysis_seed": 20261112,
+ "e1b_seeds": {
+  "calibration": 1601,
+  "test": 1701
+ },
+ "design_check": {
+  "note": "out-of-sample preview on E1's data; not a result and not part of the decision",
+  "paths": {
+   "safe": {
+    "u": 3.1109,
+    "s": 10.0,
+    "lam_at_fit": 0.1783
+   },
+   "hide_and_seek": {
+    "u": 0.109,
+    "s": 5.0,
+    "lam_at_fit": 0.1831
+   }
+  },
+  "replicates": 2000,
+  "lines": [
+   "P: false alarms 24, lead 0.2421 | max false alarms 39",
+   "safe           FA  32 | gain +0.0529 CI [-0.0041, +0.1000] | matched +0.0222 CI [-0.0241, +0.0639] | null p {'noise': 0.025, 'safe_resampled': 0.025} | a False b False c True d True -> H3 does not hold",
+   "hide_and_seek  FA  23 | gain +0.0943 CI [+0.0397, +0.1517] | matched +0.1007 CI [+0.0439, +0.1470] | null p {'noise': 0.025, 'safe_resampled': 0.025} | a True b True c True d True -> H3 HOLDS"
+  ],
+  "detectors": {
+   "safe": {
+    "gain": 0.05286275769897515,
+    "matched_gain": 0.022170762999480655,
+    "fp": 32,
+    "gain_ci": [
+     -0.004106544705013096,
+     0.10002406748213817
+    ],
+    "matched_ci": [
+     -0.024124793387321482,
+     0.06389581691083601
+    ],
+    "matched_infeasible": 0,
+    "a_gain_ci_above_zero": false,
+    "b_matched_ci_above_zero": false,
+    "c_false_alarms_within_bound": true,
+    "d_beats_null_fusions": true,
+    "null_p": {
+     "noise": 0.025,
+     "safe_resampled": 0.025
+    },
+    "H3": false
+   },
+   "hide_and_seek": {
+    "gain": 0.09433570680689715,
+    "matched_gain": 0.1007027062642641,
+    "fp": 23,
+    "gain_ci": [
+     0.039675814999148226,
+     0.15165263070074755
+    ],
+    "matched_ci": [
+     0.04385842671754597,
+     0.14700761574857768
+    ],
+    "matched_infeasible": 0,
+    "a_gain_ci_above_zero": true,
+    "b_matched_ci_above_zero": true,
+    "c_false_alarms_within_bound": true,
+    "d_beats_null_fusions": true,
+    "null_p": {
+     "noise": 0.025,
+     "safe_resampled": 0.025
+    },
+    "H3": true
+   }
+  }
+ }
+}
