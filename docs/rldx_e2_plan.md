@@ -850,6 +850,13 @@ chmod +x $E2_ROOT/run_tasks.sh
 **B6.** Steps 7–9 and the follow-up, from `$E2_REPO`, unchanged. The collection check now also stops on
 repeated scenes.
 
+**Paper reporting (author's decision, 2026-11-13, after this result).** After E1b confirmed
+Hide-and-Seek + P on new RLDX-1 rollouts (`docs/rldx_e1b_plan.md`), the paper's H4 and its reset
+experiment name Hide-and-Seek + P as the main monitor again, as before 2026-11-06, with SAFE-LSTM +
+P alongside. This result was known when the decision was made. Both contrasts are null
+(Hide-and-Seek + P − P −0.001 [−0.004, +0.002]; SAFE-LSTM + P − P 0.000 [−0.004, +0.004]). The
+analysis above is unchanged.
+
 ## Result, second collection (2026-11-11; this is E2's result)
 
 **Run.**
