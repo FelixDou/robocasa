@@ -363,6 +363,45 @@ Paste the whole `table.log`, `INPUTS UNCHANGED` and the SHA-256. Then, on the Ma
 rsync -av tsubame:<R16_ROOT>/evidence/ <local worktree>/reports/rldx_e1b_test_table_evidence/
 ```
 
+### Amendment (2026-11-13, before step 3's output was seen): one GPU, one background run
+
+The allocation has one H100 and 48 cores, and the author is away for a day. Steps 3–8 therefore run
+as one background script, `scripts/xr1_lead_time/rldx_e1b_table_pipeline.sh`. Its commands, thread
+settings and outputs are the ones above.
+
+**What differs:**
+- **Step 6** runs both SAFE heads on GPU 0: the LSTM's 15 runs, then the MLP's, three at a time.
+- **Order:** steps 5 and 6 run together. Step 7 runs after step 6, and step 8 after steps 5 and 7.
+- **Gates** are checked by the script, which stops at the first failure. Gate E is checked again
+  from the merged sets and the export reports.
+- **Reference counts:** the 21 fold-all and 2 shuffle reference checks are logged, not enforced.
+  The gate is `REFERENCE OK` with rc 0, and step 8's G1 checks the folds against R7 again.
+
+**Reruns:**
+- A rerun skips the steps that passed.
+- A step that left output without passing has that output moved to `partial_<time>/`, not
+  deleted, and runs again.
+- Steps 3 and 4 run by hand are kept when their logs show that their gates passed.
+
+Before use, it was run locally with stand-in commands:
+- a fresh run;
+- steps 3–4 run by hand;
+- a failed GPU run, then a rerun;
+- a second launch while one runs;
+- a command run by hand still running at launch.
+
+**Launch** (session shell, after step 1; `<SHA>` is the pushed commit containing the script):
+
+```bash
+git -C $PROJECT_FS/robocasa fetch origin claude/rldx-e1b-table
+git -C $PROJECT_FS/robocasa show <SHA>:scripts/xr1_lead_time/rldx_e1b_table_pipeline.sh > $R16_LOG/rldx_e1b_table_pipeline.sh
+cd $R16_REPO
+nohup setsid bash $R16_LOG/rldx_e1b_table_pipeline.sh $R16_ROOT/session.env >> $R16_LOG/pipeline.log 2>&1 < /dev/null &
+```
+
+**Progress:** `tail -n 30 $R16_LOG/pipeline.log`. The run is done when it prints
+`R16 PIPELINE DONE`. The evidence is then in `$R16_ROOT/evidence/`, together with `pipeline.log`.
+
 ## Result
 
 (to be written after the run)
