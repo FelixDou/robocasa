@@ -118,6 +118,63 @@ Then, on the Mac:
 rsync -av tsubame:<R17_ROOT>/evidence/ <local worktree>/reports/r17_elapsed_time_evidence/
 ```
 
-## Result
+## Result (2026-11-15)
 
-(to be written after the run)
+**Output:** `rldx_e1b_r17.json` (sha256 `f531fd5a…`), in `reports/r17_elapsed_time_evidence/`.
+
+**The log in the evidence folder is from a failed first attempt.** `R17_SHA` was unset, so the path
+read `robocasa_r17_/…` and Python could not find the script. The successful run's `r17.log` is in
+its own `R17_LOG` on the cluster, still to be copied. The JSON records every gate.
+
+**Gates.** All passed.
+- R16's G0, G1, G2a–c: `OK`.
+- **K0:** `table2` equals R16's output (sha256 `9f41e264…`).
+- **K1:** G reproduces every unseen + G row; maximum difference 0.0.
+- **K5:** P reproduces every seen + P row.
+- `r17_failures` is empty.
+
+**Timers alone, unseen tasks:** the elapsed-time timer E has FPR 0.075 (30 false alarms) and lead
+0.071; G has 0.065 (26) and 0.156. P on seen tasks: 0.0675, 0.269.
+
+**RLDX-1 test set, single models (mean ± std over seeds):**
+
+| Row | Seen + P: FPR | Δℓ | Matched | Unseen + E: FPR | Δℓ | Matched |
+|---|---|---|---|---|---|---|
+| Mahalanobis | 0.068 | 0.000 ± 0.000 | 0.000 ± 0.000 | 0.068 | 0.013 ± 0.000 | 0.010 ± 0.000 |
+| Cosine k-NN | 0.068 | 0.000 ± 0.000 | 0.000 ± 0.000 | 0.085 | 0.035 ± 0.000 | 0.022 ± 0.000 |
+| PCA-KMeans | 0.068 | 0.000 ± 0.000 | 0.000 ± 0.000 | 0.054 | 0.011 ± 0.007 | 0.017 ± 0.008 |
+| RND | 0.068 | 0.001 ± 0.001 | 0.001 ± 0.001 | 0.099 | 0.050 ± 0.012 | 0.026 ± 0.004 |
+| SAFE-MLP | 0.068 | 0.000 ± 0.000 | 0.000 ± 0.000 | 0.075 | 0.000 ± 0.000 | −0.005 ± 0.000 |
+| SAFE-LSTM | 0.070 | 0.031 ± 0.003 | 0.029 ± 0.003 | 0.078 | 0.083 ± 0.008 | 0.075 ± 0.011 |
+| Hide-and-Seek | 0.055 | 0.072 ± 0.017 | 0.110 ± 0.017 | 0.056 | 0.136 ± 0.023 | 0.140 ± 0.013 |
+| First step | 0.069 | 0.004 ± 0.004 | 0.002 ± 0.002 | 0.081 | −0.007 ± 0.005 | −0.019 ± 0.003 |
+| Zero input | 0.073 | 0.013 ± 0.011 | 0.006 ± 0.006 | 0.075 | 0.000 ± 0.000 | −0.005 ± 0.000 |
+| Shuffle | 0.067 | 0.011 ± 0.006 | 0.013 ± 0.011 | – | – | – |
+
+**Unseen-task ensembles, same target [matched]:**
+
+| | over E | over G |
+|---|---|---|
+| Hide-and-Seek | 0.146 [0.157] | 0.080 [0.097] |
+| SAFE-LSTM | 0.082 [0.070] | 0.056 [−0.009] |
+| SAFE-MLP | 0.000 [−0.005] | 0.006 [−0.017] |
+| Zero input | 0.000 [−0.005] | 0.006 [−0.017] |
+| OOD scores | 0.011–0.063 [0.010–0.037] | 0.008–0.030 [−0.036 to −0.026] |
+
+**P without H_k:** P_mult changes no single-model gain by more than 0.004 (largest: SAFE-LSTM,
+0.031 to 0.035).
+
+**Against the expectations:**
+- **Hold:**
+  - E alone leads less than G (0.071 against 0.156).
+  - Hide-and-Seek has the largest gain, and its matched gain over E is larger than over G.
+  - The zero input gains 0.
+  - P_mult changes gains by at most 0.01.
+- **Missed:**
+  - RND (0.050) and cosine k-NN (0.035) exceed the ~0.02 expected for OOD rows over E.
+  - SAFE-LSTM (0.083) is above "a few hundredths".
+  - Both are at FPRs of 0.078 to 0.099, against E's 0.075, and smaller when matched.
+
+**Paper:** Table II's RLDX-1 matched and unseen cells, the timer-lead footnote (E 0.071) and the
+second-policy sentence (0.136, 0.140 matched, zero input 0.000) come from this file, as fixed
+under Reporting.
