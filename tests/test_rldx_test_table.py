@@ -308,6 +308,31 @@ class RldxTestTableTest(unittest.TestCase):
         self.assertEqual(set(r["timers_alone"]["unseen"]), {"G", "G_abs"})
         self.assertEqual(set(r["timers_alone"]["seen"]), {"P", "P_mult"})
 
+    def test_r18_curves(self):
+        """R18: calibrated lead-FPR curves for every row and timer; a point recomputed by hand."""
+        import lead_fpr_curves as lfc
+        psd = load("per_seed_detection")
+        status, text, out = self.run_table("r18.json", extra=["--curves"])
+        self.assertEqual(status, 0, text)
+        self.assertIn("R18 CURVES OK", text)
+        r = out["r18"]
+        self.assertEqual(set(r["seen"]), set(self.ru.DETECTORS) | {"safe_lstm", "safe_indep", SHUFFLE})
+        self.assertEqual(set(r["unseen"]), set(self.ru.DETECTORS) | {"safe_lstm", "safe_indep"})
+        self.assertEqual(set(r["timers"]["seen"]), {"G", "E", "P"})
+        H = self.H
+        point = lfc.at_alpha(r["seen"]["hide_and_seek"]["seed_0"], 0.05)
+        self.assertEqual(point["n_success"], sum(not p["failed"] for p in self.e1["test"]))
+        self.assertEqual(len(r["seen"]["hide_and_seek"]["seed_0"]), len(lfc.ALPHAS))
+        # The elapsed-time timer alone: recompute its alpha = 0.05 point with per_seed_detection.
+        cal = [dict(score=np.arange(1, p["length"] + 1, dtype=float), L=p["length"], horizon=H[p["task_name"]],
+                    failed=p["failed"]) for p in self.e1["calibration"]]
+        te = [dict(score=np.arange(1, p["length"] + 1, dtype=float), L=p["length"], horizon=H[p["task_name"]],
+                   failed=p["failed"]) for p in self.e1["test"]]
+        tau = psd.threshold(cal)
+        want = psd.evaluate(te, tau)
+        got = lfc.at_alpha(r["timers"]["seen"]["E"], 0.05)
+        self.assertEqual((got["fpr"], got["mean_lead"]), (want["fpr"], want["mean_lead"]))
+
     def test_r17_needs_the_reference_table(self):
         status, text, _ = self.run_table("table.json")
         self.assertEqual(status, 0, text)

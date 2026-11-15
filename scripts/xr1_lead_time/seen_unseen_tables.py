@@ -302,6 +302,63 @@ def print_r14(r):
         print(f"  {name:28s}" + "".join(f"{by[t]['seed_average']['gain']:+11.3f}" for t in hk.SEEN_TIMERS))
 
 
+# ---- R18: calibrated lead-FPR curves (lead_fpr_curves.py) -------------------------------------
+
+R18_PLAN = "docs/r18_lead_fpr_curves_plan.md (R18)"
+
+
+def r18_xr1(cal, te, held, folds, seen, unseen, table1, rkP, names):
+    """R18 on XR-1: lead-FPR curves of every named monitor (seen and unseen) and of the timers G, E, P.
+    C1: at alpha = 0.05 every curve point equals Table I's row (FPR and lead; seed average and seeds)."""
+    import lead_fpr_curves as lfc
+    lab = lambda s: "seed_average" if s is None else f"seed_{s}"
+    labels = [None, *SEEDS]
+    out = dict(plan=R18_PLAN, alphas=list(lfc.ALPHAS), seen={}, unseen={}, timers=dict(seen={}, unseen={}))
+    c1 = {}
+
+    def unseen_parts(traj_by_fold, s):
+        return [(scored([r for r in cal if r["task_name"] not in held[F]], traj_by_fold[F], s),
+                 scored([r for r in te if r["task_name"] in held[F]], traj_by_fold[F], s)) for F in folds]
+
+    for name in names:
+        sc = {lab(s): lfc.curve([(scored(cal, seen[name], s), scored(te, seen[name], s))]) for s in labels}
+        uc = {lab(s): lfc.curve(unseen_parts(unseen[name], s)) for s in labels}
+        sc["mean_std_over_seeds"] = lfc.mean_std([sc[lab(s)] for s in SEEDS])
+        uc["mean_std_over_seeds"] = lfc.mean_std([uc[lab(s)] for s in SEEDS])
+        out["seen"][name], out["unseen"][name] = sc, uc
+        if name in table1:
+            c1[name] = max(abs(lfc.at_alpha(cv[lab(s)], 0.05)[k] - table1[name][side][lab(s)][k])
+                           for side, cv in (("seen", sc), ("unseen", uc)) for s in labels for k in ("fpr", "mean_lead"))
+    for kind in lfc.TIMER_KINDS:
+        out["timers"]["seen"][kind] = lfc.curve([(lfc.timer_rows(cal, kind, rkP), lfc.timer_rows(te, kind, rkP))])
+    for kind in ("G", "E"):
+        out["timers"]["unseen"][kind] = lfc.curve(
+            [(lfc.timer_rows([r for r in cal if r["task_name"] not in held[F]], kind),
+              lfc.timer_rows([r for r in te if r["task_name"] in held[F]], kind)) for F in folds])
+    g = table1["global_timer"]
+    c1["global_timer"] = max(abs(lfc.at_alpha(out["timers"][side]["G"], 0.05)[k] - g[side]["seed_average"][k])
+                             for side in ("seen", "unseen") for k in ("fpr", "mean_lead"))
+    out["checks"] = dict(C1_alpha_005_equals_table1=c1)
+    problems = [f"C1: {k}: the alpha = 0.05 point differs from Table I by {v}" for k, v in c1.items() if not v <= TOL]
+    return out, problems
+
+
+def print_r18(r, alphas=(0.02, 0.05, 0.10, 0.20)):
+    import lead_fpr_curves as lfc
+    print("R18 lead-FPR curves, test FPR and mean lead at calibration targets " + ", ".join(map(str, alphas)))
+    for side in ("seen", "unseen"):
+        print(f"  {side}:")
+        for name, by in r[side].items():
+            cells = []
+            for a in alphas:
+                p = lfc.at_alpha(by["mean_std_over_seeds"], a)
+                cells.append(f"{p['fpr']['mean']:.3f}/{p['mean_lead']['mean']:.3f}")
+            print(f"    {name:28s} " + "  ".join(cells))
+        for kind, pts in r["timers"][side].items():
+            cells = [f"{lfc.at_alpha(pts, a)['fpr']:.3f}/{lfc.at_alpha(pts, a)['mean_lead']:.3f}" for a in alphas]
+            print(f"    timer {kind:22s} " + "  ".join(cells))
+
+
 # ---- loading ----------------------------------------------------------------------------------
 
 def check_fold_meta(label, F, meta, tasks, held, folds_sha, detectors):
@@ -633,6 +690,10 @@ def run(args):
         r14, r14_failures = r14_xr1(args.r14_durations, D, cal, te, held, folds, tasks,
                                     OOD + (SAFE, ACTPROBE) + HS_FAMILY + tuple(extra), seen, seen_fused,
                                     unseen_fused, bundle, rkP, folds_sha)
+    r18, r18_failures = None, []
+    if args.curves:
+        names = OOD + (SAFE,) + tuple(n for n in extra if n == SAFE_LSTM) + HS_FAMILY
+        r18, r18_failures = r18_xr1(cal, te, held, folds, seen, unseen, table1, rkP, names)
     out = dict(base, checks=checks, reproduction_failures=[], table1=table1, table2=table2,
                notes=dict(std="ddof 1 over training seeds 0-2; timers are deterministic",
                           unseen_normalization="pooled over the fold's seen tasks",
@@ -640,6 +701,9 @@ def run(args):
     if args.r14_durations:
         out["r14"] = r14
         out["r14_failures"] = r14_failures
+    if args.curves:
+        out["r18"] = r18
+        out["r18_failures"] = r18_failures
     out_path.write_text(json.dumps(out, indent=1, default=float) + "\n")
 
     def cell(d, k):
@@ -668,6 +732,13 @@ def run(args):
             return 1
         print_r14(r14)
         print("R14 OK")
+    if args.curves:
+        if r18_failures:
+            print("R18 FAILED (no curve is used):\n  " + "\n  ".join(r18_failures))
+            return 1
+        print("R18 C1: every alpha = 0.05 point equals Table I")
+        print_r18(r18)
+        print("R18 CURVES OK")
     return 0
 
 
@@ -695,6 +766,7 @@ def main(argv=None):
     r.add_argument("--safe-lstm-fold-dirs", nargs="+", help="R11: SAFE-LSTM fold directories 0-3 and all")
     r.add_argument("--actprobe-t-fold-dirs", nargs="+", help="R11: ActProbe-with-timestep fold directories 0-3 and all")
     r.add_argument("--r14-durations", help="R14: hk_free.py llm output for the XR-1 folds")
+    r.add_argument("--curves", action="store_true", help="R18: calibrated lead-FPR curves (lead_fpr_curves.py)")
     r.add_argument("--r6-result", help="R11 gate T6: R6's seen_unseen_tables JSON, reproduced exactly")
     r.add_argument("--output", required=True)
     args = ap.parse_args(argv)

@@ -188,7 +188,76 @@ class HelperTests(unittest.TestCase):
             self.assertAlmostEqual(got[k], want[k], places=12)
 
 
+    def test_r18_vectorized_threshold_equals_per_seed_detection(self):
+        """R18: lead_fpr_curves.calibration_table/threshold_at are psd.evaluate/psd.threshold at any alpha."""
+        import lead_fpr_curves as lfc
+        rng = np.random.default_rng(3)
+        rows = []
+        for i in range(60):
+            failed = i % 3 == 0
+            L = 25 if failed else int(rng.integers(5, 24))
+            rows.append(dict(score=rng.standard_normal(L) + (0.04 * np.arange(L) if failed else 0), L=L, horizon=25,
+                             failed=failed, task_name="T"))
+        taus, fpr, lead = lfc.calibration_table(rows)
+        for j in range(0, len(taus), 7):
+            e = psd.evaluate(rows, taus[j])
+            self.assertEqual((fpr[j], lead[j]), (e["fpr"], e["mean_lead"]))
+        self.assertEqual(lfc.threshold_at((taus, fpr, lead), 0.05), psd.threshold(rows))
+        keep = psd.ALPHA
+        try:
+            for alpha in (0.0, 0.02, 0.1, 0.3):
+                psd.ALPHA = alpha
+                self.assertEqual(lfc.threshold_at((taus, fpr, lead), alpha), psd.threshold(rows))
+        finally:
+            psd.ALPHA = keep
+        # Timers are scores: E alarms at one inference count, P at rho_k + margin of H_k.
+        e_rows = lfc.timer_rows(rows, "E")
+        self.assertEqual(psd.first(e_rows[0]["score"], 7.0), 7)
+        p_rows = lfc.timer_rows(rows, "P", {"T": 0.4})
+        # Thresholds are score values, so the boundary is computed as the score is (15 / 25 - 0.4).
+        self.assertEqual(psd.first(p_rows[0]["score"], 15 / 25 - 0.4), 15)
+        self.assertEqual(psd.first(p_rows[0]["score"], np.nextafter(15 / 25 - 0.4, 1.0)), 16)
+
+
 class RunTests(unittest.TestCase):
+    def test_r18_curves_reproduce_table_one(self):
+        """R18: --curves adds calibrated lead-FPR curves; at alpha = 0.05 they equal Table I (C1), and the
+        tables do not change."""
+        import lead_fpr_curves as lfc
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args, held, cal, te = build(root)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(su.main(args), 0)
+            base = json.loads((root / "tables.json").read_text())
+            (root / "tables.json").unlink()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + ["--curves"])
+            self.assertEqual(status, 0, buf.getvalue())
+            self.assertIn("R18 CURVES OK", buf.getvalue())
+            out = json.loads((root / "tables.json").read_text())
+            self.assertEqual(out["table1"], base["table1"])
+            self.assertEqual(out["table2"], base["table2"])
+            r = out["r18"]
+            self.assertEqual(out["r18_failures"], [])
+            c1 = r["checks"]["C1_alpha_005_equals_table1"]
+            self.assertTrue(set(OOD) | {su.SAFE, su.HS, "global_timer"} <= set(c1))
+            self.assertTrue(all(v <= 1e-12 for v in c1.values()))
+            for side in ("seen", "unseen"):
+                for name in (*OOD, su.SAFE, *su.HS_FAMILY):
+                    by = r[side][name]
+                    self.assertEqual(len(by["seed_average"]), len(lfc.ALPHAS))
+                    self.assertEqual(len(by["mean_std_over_seeds"]), len(lfc.ALPHAS))
+                    n = by["seed_average"][0]
+                    self.assertEqual((n["n_success"], n["n_failure"]), (10 * len(fx.TASKS), 10 * len(fx.TASKS)))
+            self.assertEqual(set(r["timers"]["seen"]), {"G", "E", "P"})
+            self.assertEqual(set(r["timers"]["unseen"]), {"G", "E"})
+            # A larger target never lowers the calibration FPR budget: the timer's test lead does not
+            # decrease from alpha = 0 to alpha = 0.3.
+            e = r["timers"]["unseen"]["E"]
+            self.assertLessEqual(e[0]["mean_lead"], e[-1]["mean_lead"])
+
     def test_tables_report_every_row_and_reproduce_the_published_runs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

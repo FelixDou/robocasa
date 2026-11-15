@@ -37,6 +37,11 @@ R17 (docs/r17_elapsed_time_plan.md), with run --elapsed-time: every row of the p
 With --reference-table, the table itself must equal an earlier run's (K0), so the R17 rows belong to
 the published Table II.
 
+R18 (docs/r18_lead_fpr_curves_plan.md), with run --curves: calibrated lead-FPR curves on the test
+set (lead_fpr_curves.py) of every monitor alone (seen and unseen tasks; the shuffle on seen tasks only)
+and of the timers G, E and P. The same code reproduces XR-1's Table I at alpha = 0.05 (gate C1 in
+seen_unseen_tables.py); RLDX-1 has no standalone table to compare with.
+
 Usage:
   python -I rldx_test_table.py ids --inputs-dir RLDXHS/inputs --e1-scores-dir E1/scores --output-dir IDS
   python -I rldx_test_table.py safe-fold --r7-fold-dir R7S/folds/lstm/fold_0 --folds FOLDS \\
@@ -499,6 +504,39 @@ def elapsed_time_block(parts, held, folds, detectors, rk, rows):
     return result, problems
 
 
+R18_PLAN = "docs/r18_lead_fpr_curves_plan.md (R18)"
+
+
+def rldx_curves(parts, held, folds, detectors, rk):
+    """R18 on RLDX-1: the same curves as seen_unseen_tables.r18_xr1, from the test-set rows' scores."""
+    import lead_fpr_curves as lfc
+    tag = lambda lab: "" if lab == "seed_average" else "#" + lab.split("_", 1)[1]
+    labels = ["seed_average"] + [f"seed_{s}" for s in SEEDS]
+    rows = lambda rs, key: [dict(score=np.asarray(r[key], float), L=r["L"], horizon=r["horizon"], failed=bool(r["failed"]),
+                                 task_name=r["task_name"]) for r in rs]
+    cal, te = parts["calibration"], parts["test"]
+    out = dict(plan=R18_PLAN, alphas=list(lfc.ALPHAS), seen={}, unseen={}, timers=dict(seen={}, unseen={}))
+    for d in detectors:
+        sc = {lab: lfc.curve([(rows(cal, f"{d}{tag(lab)}@all/task"), rows(te, f"{d}{tag(lab)}@all/task"))])
+              for lab in labels}
+        sc["mean_std_over_seeds"] = lfc.mean_std([sc[f"seed_{s}"] for s in SEEDS])
+        out["seen"][d] = sc
+        if d == SHUFFLE:
+            continue
+        uc = {lab: lfc.curve([(rows([r for r in cal if r["task_name"] not in held[F]], f"{d}{tag(lab)}@{F}"),
+                               rows([r for r in te if r["task_name"] in held[F]], f"{d}{tag(lab)}@{F}")) for F in folds])
+              for lab in labels}
+        uc["mean_std_over_seeds"] = lfc.mean_std([uc[f"seed_{s}"] for s in SEEDS])
+        out["unseen"][d] = uc
+    for kind in lfc.TIMER_KINDS:
+        out["timers"]["seen"][kind] = lfc.curve([(lfc.timer_rows(cal, kind, rk), lfc.timer_rows(te, kind, rk))])
+    for kind in ("G", "E"):
+        out["timers"]["unseen"][kind] = lfc.curve(
+            [(lfc.timer_rows([r for r in cal if r["task_name"] not in held[F]], kind),
+              lfc.timer_rows([r for r in te if r["task_name"] in held[F]], kind)) for F in folds])
+    return out
+
+
 def print_r17(r):
     print("\nR17 timers alone on the test set (FPR, FP, lead, TWA)")
     for side, timers in (("unseen", R17_UNSEEN_TIMERS), ("seen", R17_SEEN_TIMERS)):
@@ -715,6 +753,13 @@ def run(a):
             print("\nR17 ELAPSED-TIME OK")
     elif a.elapsed_time:
         print("R17 FAILED: no R17 rows without K0")
+    if a.curves and status == 0:
+        import seen_unseen_tables as sut
+        result["r18"] = rldx_curves(parts_new, held, folds, detectors + [SHUFFLE], rk)
+        sut.print_r18(result["r18"])
+        print("\nR18 CURVES OK")
+    elif a.curves:
+        print("R18 FAILED: no curves after a failed gate")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     write_json(out_path, result)
     return status
@@ -742,6 +787,7 @@ def main(argv=None):
     r.add_argument("--fold-dirs", nargs="+", action="append", required=True)
     r.add_argument("--r7-fold-dirs", nargs="+", action="append", required=True)
     r.add_argument("--elapsed-time", action="store_true", help="R17: also fit every row against R14's timers")
+    r.add_argument("--curves", action="store_true", help="R18: calibrated lead-FPR curves (lead_fpr_curves.py)")
     r.add_argument("--reference-table", help="R17 K0: an earlier run's output whose table2 this run must equal")
     a = p.parse_args(argv)
     return {"ids": ids_cmd, "safe-fold": safe_fold_cmd, "run": run}[a.cmd](a)
