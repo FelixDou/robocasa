@@ -263,6 +263,64 @@ class RldxTestTableTest(unittest.TestCase):
                          sum(p["failed"] and p["split"] == "train" and p["task_name"] not in self.held[F]
                              for F in ("0", "1", "2", "3") for p in self.plan))
 
+    def test_r17_elapsed_time_rows(self):
+        """R17: the paper's rows against R14's timers, with G and P reproducing the table (K1, K5)."""
+        status, text, _ = self.run_table("table.json")
+        self.assertEqual(status, 0, text)
+        status, text, out = self.run_table("r17.json", extra=["--elapsed-time",
+                                                              "--reference-table", str(self.root / "table.json")])
+        self.assertEqual(status, 0, text)
+        self.assertIn("R17 ELAPSED-TIME OK", text)
+        self.assertTrue(out["checks"]["R17_K0_table_equals_reference"]["ok"])
+        self.assertEqual(out["r17_failures"], [])
+        r = out["r17"]
+        self.assertTrue(all(v <= 1e-12 for v in r["checks"]["K1_G_reproduces_unseen_plus_G"].values()))
+        self.assertTrue(all(r["checks"]["K5_P_reproduces_seen_plus_P"].values()))
+        self.assertEqual(set(r["unseen"]), set(self.ru.DETECTORS) | {"safe_lstm", "safe_indep"})
+        self.assertEqual(set(r["seen"]), set(self.ru.DETECTORS) | {"safe_lstm", "safe_indep", SHUFFLE})
+        n_test = {k: sum(p["failed"] == k for p in self.e1["test"]) for k in (False, True)}
+        table = out["table2"]["calibration"]
+        for d, by in r["unseen"].items():
+            v = by["G_abs"]["seed_average"]
+            self.assertEqual((v["n_success"], v["n_failure"]), (n_test[False], n_test[True]))
+            self.assertEqual(set(by), {"G", "G_abs"})
+            self.assertEqual(set(by["G_abs"]), {"seed_average", "seed_0", "seed_1", "seed_2", "mean_std_over_seeds"})
+            # G's rows are the table's own unseen rows.
+            self.assertAlmostEqual(by["G"]["seed_average"]["gain"], table[d]["unseen"]["seed_average"]["gain"], places=12)
+            for F, p in v["paths"].items():
+                # G's margin is a fraction of H_k; G_abs's is a number of inferences, the same for every task.
+                self.assertLessEqual(by["G"]["seed_average"]["paths"][F]["timer"]["lam"], 1.0 + 1e-9)
+                self.assertGreater(p["timer"]["lam"], 1.0)
+        # The elapsed-time timer alone alarms at one inference count for every task (capped at H_k):
+        # recount its false alarms on the held-out test successes from the rollout lengths. The stored
+        # margin is rounded to 4 decimals; the fitted one is a success length plus a tiny epsilon, so a
+        # success that ends exactly at the cutoff stays silent.
+        eps = load("confirm_lead").EPS
+        paths = r["unseen"]["hide_and_seek"]["G_abs"]["seed_average"]["paths"]
+        fp = 0
+        for F, p in paths.items():
+            lam = p["timer"]["lam"] + 1e-7
+            for q in self.e1["test"]:
+                if q["task_name"] in self.held[F] and not q["failed"]:
+                    fp += int(np.ceil(min(self.H[q["task_name"]], lam) - eps) <= q["length"])
+        self.assertEqual(fp, r["unseen"]["hide_and_seek"]["G_abs"]["seed_average"]["timer"]["fp"])
+        self.assertEqual(r["timers_alone"]["unseen"]["G_abs"]["fp"], fp)
+        self.assertEqual(set(r["timers_alone"]["unseen"]), {"G", "G_abs"})
+        self.assertEqual(set(r["timers_alone"]["seen"]), {"P", "P_mult"})
+
+    def test_r17_needs_the_reference_table(self):
+        status, text, _ = self.run_table("table.json")
+        self.assertEqual(status, 0, text)
+        ref = json.loads((self.root / "table.json").read_text())
+        ref["table2"]["calibration"]["hide_and_seek"]["seen"]["seed_average"]["gain"] += 0.001
+        (self.root / "changed.json").write_text(json.dumps(ref))
+        status, text, out = self.run_table("r17_bad.json", extra=["--elapsed-time",
+                                                                  "--reference-table", str(self.root / "changed.json")])
+        self.assertEqual(status, 1)
+        self.assertIn("DIFFERS FROM", text)
+        self.assertNotIn("r17", out)
+        self.assertFalse(out["checks"]["R17_K0_table_equals_reference"]["ok"])
+
     def test_a_retrained_fold_that_differs_from_R7_stops_the_table(self):
         path = self.new["2"] / "rec_test_predictions.jsonl"
         rows = [json.loads(l) for l in path.read_text().splitlines()]

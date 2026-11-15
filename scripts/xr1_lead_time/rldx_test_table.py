@@ -28,6 +28,15 @@ Commands:
     G2  E1: H_k and rho_k equal the freeze manifest's; P alone on the test set equals E1's P; the
         seed-averaged SAFE-LSTM and Hide-and-Seek trajectories on E1's sets equal E1's.
 
+R17 (docs/r17_elapsed_time_plan.md), with run --elapsed-time: every row of the paper's Table II
+(path chosen on calibration failures) is also fitted against R14's timers (hk_free.py):
+  unseen tasks  G, as a gate (K1: equal to the table's unseen + G rows, 1e-12), and G_abs, the
+                elapsed-time timer, which is not given H_k;
+  seen tasks    P, as a gate (K5: equal to the table's seen + P rows at their stored 4 decimals),
+                and P_mult, P without H_k.
+With --reference-table, the table itself must equal an earlier run's (K0), so the R17 rows belong to
+the published Table II.
+
 Usage:
   python -I rldx_test_table.py ids --inputs-dir RLDXHS/inputs --e1-scores-dir E1/scores --output-dir IDS
   python -I rldx_test_table.py safe-fold --r7-fold-dir R7S/folds/lstm/fold_0 --folds FOLDS \\
@@ -445,6 +454,73 @@ def strip(x):
     return json.loads(json.dumps(x, default=float))
 
 
+# ---- R17: the elapsed-time timer as the unseen-task comparator ---------------------------------
+
+R17_PLAN = "docs/r17_elapsed_time_plan.md (R17)"
+R17_UNSEEN_TIMERS = ("G", "G_abs")
+R17_SEEN_TIMERS = ("P", "P_mult")
+
+
+def elapsed_time_block(parts, held, folds, detectors, rk, rows):
+    """R17: the rows of table2.calibration fitted against R14's timers (hk_free.block).
+    rows: that table, for gates K1 (G = unseen + G, 1e-12) and K5 (P = seen + P at 4 decimals)."""
+    import hk_free as hk
+    labels = ["seed_average"] + [f"seed_{s}" for s in SEEDS]
+    tag = lambda lab: "" if lab == "seed_average" else "#" + lab.split("_", 1)[1]
+    out_u, out_s, k1, k5 = {}, {}, {}, {}
+    for d in detectors:
+        def pairs_u(lab, d=d):
+            out = {}
+            for F in folds:
+                cal = cal_rows(parts, "calibration", keep=lambda r, F=F: r["task_name"] not in held[F])
+                test = [r for r in parts["test"] if r["task_name"] in held[F]]
+                key = f"{d}{tag(lab)}@{F}"
+                out[F] = (cl.Cohort(cal, key), cl.Cohort(test, key))
+            return out
+
+        def pairs_s(lab, d=d):
+            key = f"{d}{tag(lab)}@all/task"
+            return {ALL: (cl.Cohort(cal_rows(parts, "calibration"), key), cl.Cohort(parts["test"], key))}
+        out_s[d] = hk.block(pairs_s, labels, R17_SEEN_TIMERS, None, rk)
+        k5[d] = all(round(out_s[d]["P"][lab][k], 4) == round(rows[d]["seen"][lab][k], 4)
+                    for lab in labels for k in ("fpr", "mean_lead", "gain"))
+        if "unseen" in rows[d]:
+            out_u[d] = hk.block(pairs_u, labels, R17_UNSEEN_TIMERS, None, rk)
+            k1[d] = max(abs(out_u[d]["G"][lab][k] - rows[d]["unseen"][lab][k])
+                        for lab in labels for k in ("fpr", "mean_lead", "gain"))
+    problems = [f"K1: {d}: G here differs from unseen + G by {v}" for d, v in k1.items() if not v <= EXACT]
+    problems += [f"K5: {d}: P here differs from seen + P at 4 decimals" for d, ok in k5.items() if not ok]
+    first = next(d for d in detectors if d in out_u)
+    result = dict(plan=R17_PLAN, path_choice="calibration failures (the paper's Table II)",
+                  checks=dict(K1_G_reproduces_unseen_plus_G=k1, K5_P_reproduces_seen_plus_P=k5),
+                  timers_alone=dict(unseen={t: out_u[first][t]["seed_average"]["timer"] for t in R17_UNSEEN_TIMERS},
+                                    seen={t: out_s[first][t]["seed_average"]["timer"] for t in R17_SEEN_TIMERS}),
+                  unseen=out_u, seen=out_s)
+    return result, problems
+
+
+def print_r17(r):
+    print("\nR17 timers alone on the test set (FPR, FP, lead, TWA)")
+    for side, timers in (("unseen", R17_UNSEEN_TIMERS), ("seen", R17_SEEN_TIMERS)):
+        for t in timers:
+            v = r["timers_alone"][side][t]
+            print(f"  {side:6s} {t:7s} {v['fpr']:.3f} {v['fp']:3d} {v['mean_lead']:.3f} {v['twa']:.3f}")
+    print("R17 unseen tasks against the elapsed-time timer G_abs (single models: FPR, gain+-std, TWA+-std, "
+          "matched gain+-std | three-seed ensemble: gain [matched]; G's gain for comparison)")
+    for d, by in r["unseen"].items():
+        m, e, g = by["G_abs"]["mean_std_over_seeds"], by["G_abs"]["seed_average"], by["G"]["seed_average"]
+        mg = m.get("matched_gain", dict(mean=float("nan"), std=float("nan")))
+        em = e["matched"]["gain"] if e["matched"] else float("nan")
+        gm = g["matched"]["gain"] if g["matched"] else float("nan")
+        print(f"  {d:26s} {m['fpr']['mean']:.3f} {m['gain']['mean']:+.3f}+-{m['gain']['std']:.3f} "
+              f"{m['twa']['mean']:.3f}+-{m['twa']['std']:.3f} {mg['mean']:+.3f}+-{mg['std']:.3f} | "
+              f"{e['gain']:+.3f} [{em:+.3f}] | G {g['gain']:+.3f} [{gm:+.3f}]")
+    print("R17 seen tasks: single-model gain over P and over P without H_k (P_mult), mean+-std")
+    for d, by in r["seen"].items():
+        p, q = by["P"]["mean_std_over_seeds"]["gain"], by["P_mult"]["mean_std_over_seeds"]["gain"]
+        print(f"  {d:26s} P {p['mean']:+.3f}+-{p['std']:.3f}  P_mult {q['mean']:+.3f}+-{q['std']:.3f}")
+
+
 # ---- run -------------------------------------------------------------------------------------
 
 def load_family(new_dirs, r7_dirs, parts_new, parts_rec, tasks, held, folds_sha):
@@ -614,10 +690,34 @@ def run(a):
                              f"{m['twa']['mean']:.3f}+-{m['twa']['std']:.3f}"
             u = cell(row["unseen"]["mean_std_over_seeds"]) if "unseen" in row else "--"
             print(f"  {d:26s} {cell(row['seen']['mean_std_over_seeds'])} | {u}")
+    print("\nRLDX-1 TEST TABLE OK")
+
+    status = 0
+    if a.reference_table:
+        ref = json.loads(Path(a.reference_table).read_text())
+        same = json.dumps(strip(ref.get("table2")), sort_keys=True) == json.dumps(strip(result["table2"]), sort_keys=True)
+        result["checks"]["R17_K0_table_equals_reference"] = dict(
+            reference=str(Path(a.reference_table).resolve()), sha256=sha256(a.reference_table), ok=same)
+        print(f"R17 K0: Table II {'equals' if same else 'DIFFERS FROM'} {a.reference_table}")
+        if not same:
+            result["r17_failures"] = ["K0: Table II differs from the reference table"]
+            status = 1
+    if a.elapsed_time and status == 0:
+        r17, problems = elapsed_time_block(parts_new, held, folds, detectors + [SHUFFLE], rk,
+                                           result["table2"]["calibration"])
+        result["r17"], result["r17_failures"] = r17, problems
+        if problems:
+            print("R17 FAILED (no R17 result is used):\n  " + "\n  ".join(problems))
+            status = 1
+        else:
+            print("R17 K1: G reproduces every unseen + G row; K5: P reproduces every seen + P row")
+            print_r17(r17)
+            print("\nR17 ELAPSED-TIME OK")
+    elif a.elapsed_time:
+        print("R17 FAILED: no R17 rows without K0")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     write_json(out_path, result)
-    print("\nRLDX-1 TEST TABLE OK")
-    return 0
+    return status
 
 
 def main(argv=None):
@@ -641,6 +741,8 @@ def main(argv=None):
         r.add_argument(name, required=True)
     r.add_argument("--fold-dirs", nargs="+", action="append", required=True)
     r.add_argument("--r7-fold-dirs", nargs="+", action="append", required=True)
+    r.add_argument("--elapsed-time", action="store_true", help="R17: also fit every row against R14's timers")
+    r.add_argument("--reference-table", help="R17 K0: an earlier run's output whose table2 this run must equal")
     a = p.parse_args(argv)
     return {"ids": ids_cmd, "safe-fold": safe_fold_cmd, "run": run}[a.cmd](a)
 
