@@ -59,6 +59,13 @@ comparator to be an elapsed-time baseline without H_k.
 - **Text:** the unseen-task ensembles, at the same target and matched, come from the same files
   (`seed_average`).
 - **G:** still reported, in one sentence, so readers can compare.
+- **Amendment (2026-11-15, still before the run):** draft v3's Table II also has a Matched column
+  on each side. RLDX-1's come from R17 too:
+  - seen tasks: `r17.seen[d].P.mean_std_over_seeds.matched_gain`;
+  - unseen tasks: `r17.unseen[d].G_abs.mean_std_over_seeds.matched_gain`.
+
+  The seen FPR and Δℓ stay R16's, and gate K5 ties them to `r17.seen[d].P`. The code is
+  unchanged; this is a reporting rule only.
 
 ## Runbook
 
