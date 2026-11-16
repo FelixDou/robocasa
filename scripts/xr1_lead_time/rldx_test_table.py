@@ -37,6 +37,11 @@ R17 (docs/r17_elapsed_time_plan.md), with run --elapsed-time: every row of the p
 With --reference-table, the table itself must equal an earlier run's (K0), so the R17 rows belong to
 the published Table II.
 
+R19 (docs/r19_triage_b_plan.md), with run --r19: the draft v3 mock review's offline analyses
+(r19_extras.py): native functional bands (seen + P, unseen + E and + G), a full-pipeline bootstrap of
+the unseen-task gains (gate B0: its point estimates equal R17's), the timers' alarms at the limit,
+lead in seconds, per-task gains and the zero-input model's saturation.
+
 R18 (docs/r18_lead_fpr_curves_plan.md), with run --curves: calibrated lead-FPR curves on the test
 set (lead_fpr_curves.py) of every monitor alone (seen and unseen tasks; the shuffle on seen tasks only)
 and of the timers G, E and P. The same code reproduces XR-1's Table I at alpha = 0.05 (gate C1 in
@@ -537,6 +542,50 @@ def rldx_curves(parts, held, folds, detectors, rk):
     return out
 
 
+def r19_rldx(parts, held, folds, rk, types, reference, B):
+    """R19 on RLDX-1 (r19_extras). reference: R17's output, for gate B0."""
+    import r19_extras as rx
+    spi = 0.4                                   # 8 control steps per inference at 20 Hz
+    cal, te = parts["calibration"], parts["test"]
+    unseen_parts = {F: ([r for r in cal if r["task_name"] not in held[F]], [r for r in te if r["task_name"] in held[F]])
+                    for F in folds}
+    heads = ("safe_indep", "safe_lstm", "hide_and_seek")
+    bands = {}
+    for d in heads:
+        bands[d] = dict(seen=rx.native_band({ALL: (cal, te)}, lambda F, d=d: f"{d}~@all/task",
+                                            lambda F, d=d: f"{d}@all/task", "P", rk),
+                        unseen={t: rx.native_band(unseen_parts, lambda F, d=d: f"{d}~@{F}", lambda F, d=d: f"{d}@{F}", t, rk)
+                                for t in ("G_abs", "G")})
+    design = rx.UnseenDesign(cal, te, held, folds)
+    key_ofs = {d: (lambda F, d=d: f"{d}@{F}") for d in heads + ("hide_and_seek_zero",)}
+    boot, point = rx.boot_unseen(design, key_ofs, ("G_abs", "G"), rk, B=B,
+                                 contrasts=(("hide_and_seek", "safe_indep"), ("hide_and_seek", "hide_and_seek_zero")))
+    ref = {t: {d: reference["r17"]["unseen"][d][t]["seed_average"] for d in key_ofs} for t in ("G_abs", "G")}
+    b0 = rx.check_point(point, ref)
+    detail, limits = {}, {}
+    for d in heads:
+        seen_pairs = {ALL: (cl.Cohort(cal, f"{d}@all/task"), cl.Cohort(te, f"{d}@all/task"))}
+        un_pairs = design.pairs(lambda F, d=d: f"{d}@{F}")
+        ds, du = rx.leads_detail(seen_pairs, "P", rk), rx.leads_detail(un_pairs, "G_abs", rk)
+        detail[d] = dict(seen=dict(seconds=rx.seconds(ds, types, spi), per_task=rx.per_task(ds)),
+                         unseen=dict(seconds=rx.seconds(du, types, spi), per_task=rx.per_task(du)))
+        if d == "hide_and_seek":
+            limits = dict(P_seen=rx.timer_at_limit(ds), E_unseen=rx.timer_at_limit(du),
+                          G_unseen=rx.timer_at_limit(rx.leads_detail(un_pairs, "G", rk)))
+    sat = {f"{d}{tag}": rx.saturation(cal, f"{d}{tag}@all/task")
+           for d in ("hide_and_seek_zero", "hide_and_seek") for tag in ("", "#0", "#1", "#2")}
+    band_ok = all(b["seen"]["checks"]["ok"] and all(u["checks"]["ok"] for u in b["unseen"].values()) for b in bands.values())
+    checks = dict(B0_point_equals_r17=b0, N0_band_timer_equals_hk_fit=band_ok)
+    problems = [k for k, v in (("B0", b0["ok"]), ("N0", band_ok)) if not v]
+    return dict(plan=rx.PLAN, checks=checks, native_bands=bands, bootstrap_unseen=boot, leads=detail,
+                timers_at_limit=limits, zero_input_saturation=sat), problems
+
+
+def print_r19(r):
+    import r19_extras as rx
+    rx.print_summary(r)
+
+
 def print_r17(r):
     print("\nR17 timers alone on the test set (FPR, FP, lead, TWA)")
     for side, timers in (("unseen", R17_UNSEEN_TIMERS), ("seen", R17_SEEN_TIMERS)):
@@ -607,6 +656,8 @@ def load_family(new_dirs, r7_dirs, parts_new, parts_rec, tasks, held, folds_sha)
 
 
 def run(a):
+    if a.r19:
+        ru.KEEP_RAW = True                      # native bands read the normalized raw score
     out_path = Path(a.output)
     if out_path.exists():
         raise SystemExit(f"error: output exists: {out_path}")
@@ -753,6 +804,20 @@ def run(a):
             print("\nR17 ELAPSED-TIME OK")
     elif a.elapsed_time:
         print("R17 FAILED: no R17 rows without K0")
+    if a.r19 and status == 0:
+        reference = json.loads(Path(a.r19_reference).read_text()) if a.r19_reference else None
+        if reference is None or "r17" not in reference:
+            raise SystemExit("error: --r19 needs --r19-reference, R17's output (it holds the r17 block)")
+        r19, problems = r19_rldx(parts_new, held, folds, rk, bundle["task_types"], reference, a.r19_boot)
+        result["r19"], result["r19_failures"] = r19, problems
+        if problems:
+            print("R19 FAILED (no R19 result is used): " + ", ".join(problems) + f" {r19['checks']}")
+            status = 1
+        else:
+            print(f"R19 B0: point estimates equal R17's (max |diff| {r19['checks']['B0_point_equals_r17']['max_abs_diff']}); "
+                  "N0: band timers equal hk_free.fit's")
+            print_r19(r19)
+            print("\nR19 OK")
     if a.curves and status == 0:
         import seen_unseen_tables as sut
         result["r18"] = rldx_curves(parts_new, held, folds, detectors + [SHUFFLE], rk)
@@ -788,6 +853,9 @@ def main(argv=None):
     r.add_argument("--r7-fold-dirs", nargs="+", action="append", required=True)
     r.add_argument("--elapsed-time", action="store_true", help="R17: also fit every row against R14's timers")
     r.add_argument("--curves", action="store_true", help="R18: calibrated lead-FPR curves (lead_fpr_curves.py)")
+    r.add_argument("--r19", action="store_true", help="R19: the mock review's offline analyses (r19_extras.py)")
+    r.add_argument("--r19-reference", help="R19 gate B0: R17's output (rldx_e1b_r17.json)")
+    r.add_argument("--r19-boot", type=int, default=1000, help="R19 bootstrap replicates")
     r.add_argument("--reference-table", help="R17 K0: an earlier run's output whose table2 this run must equal")
     a = p.parse_args(argv)
     return {"ids": ids_cmd, "safe-fold": safe_fold_cmd, "run": run}[a.cmd](a)

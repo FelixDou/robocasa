@@ -359,6 +359,60 @@ def print_r18(r, alphas=(0.02, 0.05, 0.10, 0.20)):
             print(f"    timer {kind:22s} " + "  ".join(cells))
 
 
+# ---- R19: the draft v3 mock review's offline analyses (r19_extras.py) ----------------------------
+
+def r19_xr1(cal, te, held, folds, raw_unseen, seen, rkP, types, reference, B):
+    """R19 on XR-1. raw_unseen {name: {F: {rid: {seed: raw normalized}}}}; seen {name: {rid: {seed: traj}}};
+    rows already carry name@F (running maximum, pooled) for every unseen name. reference: R14's output."""
+    import r19_extras as rx
+    spi = 0.8                                   # 16 control steps per inference at 20 Hz
+    for name, by_fold in raw_unseen.items():
+        for F in folds:
+            for r in cal + te:
+                per = by_fold[F][str(r["rollout_id"])]
+                r[f"{name}~@{F}"] = np.mean([per[s] for s in sorted(per)], axis=0)
+    for name, traj in seen.items():
+        for r in cal + te:
+            per = traj[str(r["rollout_id"])]
+            r[f"{name}@seen"] = np.mean([per[s] for s in sorted(per)], axis=0)
+            for s in sorted(per):
+                r[f"{name}#{s}@seen"] = np.asarray(per[s], float)
+    unseen_parts = {F: ([r for r in cal if r["task_name"] not in held[F]], [r for r in te if r["task_name"] in held[F]])
+                    for F in folds}
+    bands = {n: dict(unseen={t: rx.native_band(unseen_parts, lambda F, n=n: f"{n}~@{F}", lambda F, n=n: f"{n}@{F}", t, rkP)
+                             for t in ("G_abs", "G")}) for n in raw_unseen}
+    heads = tuple(raw_unseen)
+    design = rx.UnseenDesign(cal, te, held, folds)
+    key_ofs = {n: (lambda F, n=n: f"{n}@{F}") for n in heads + (ZERO,)}
+    boot, point = rx.boot_unseen(design, key_ofs, ("G_abs", "G"), rkP, B=B,
+                                 contrasts=((HS, SAFE), (HS, ZERO)))
+    ref = {t: {n: reference["r14"]["unseen"][n][t]["seed_average"] for n in key_ofs} for t in ("G_abs", "G")}
+    b0 = rx.check_point(point, ref)
+    detail, limits = {}, {}
+    for n in heads:
+        un_pairs = design.pairs(lambda F, n=n: f"{n}@{F}")
+        du = rx.leads_detail(un_pairs, "G_abs", rkP)
+        detail[n] = dict(unseen=dict(seconds=rx.seconds(du, types, spi), per_task=rx.per_task(du)))
+        if n in seen:
+            seen_pairs = {ALL: (cl.Cohort(cal, f"{n}@seen"), cl.Cohort(te, f"{n}@seen"))}
+            ds = rx.leads_detail(seen_pairs, "P", rkP)
+            detail[n]["seen"] = dict(seconds=rx.seconds(ds, types, spi), per_task=rx.per_task(ds))
+            if n == HS:
+                limits = dict(P_seen=rx.timer_at_limit(ds), E_unseen=rx.timer_at_limit(du),
+                              G_unseen=rx.timer_at_limit(rx.leads_detail(un_pairs, "G", rkP)))
+    sat = {}
+    for n in (ZERO, HS):
+        if n in seen:
+            for tag in ("", "#0", "#1", "#2"):
+                if f"{n}{tag}@seen" in cal[0]:
+                    sat[f"{n}{tag}"] = rx.saturation(cal, f"{n}{tag}@seen")
+    band_ok = all(all(u["checks"]["ok"] for u in b["unseen"].values()) for b in bands.values())
+    problems = [k for k, v in (("B0", b0["ok"]), ("N0", band_ok)) if not v]
+    return dict(plan=rx.PLAN, checks=dict(B0_point_equals_r14=b0, N0_band_timer_equals_hk_fit=band_ok),
+                native_bands=bands, seen_bands="R12 B2 (xr1_list_b_20261030_212017): SAFE-MLP and Hide-and-Seek + P",
+                bootstrap_unseen=boot, leads=detail, timers_at_limit=limits, zero_input_saturation=sat), problems
+
+
 # ---- loading ----------------------------------------------------------------------------------
 
 def check_fold_meta(label, F, meta, tasks, held, folds_sha, detectors):
@@ -392,8 +446,9 @@ def load_family(label, paths, detectors, tasks, held, folds_sha, wanted, need_al
     return data
 
 
-def trajectories(data, det, cohort_rows, cohort, held, norm):
-    """{F: {rid: {seed: normalized trajectory}}} for one detector of one family."""
+def trajectories(data, det, cohort_rows, cohort, held, norm, running_max=True):
+    """{F: {rid: {seed: normalized trajectory}}} for one detector of one family (R19's native bands read
+    the normalized raw score: running_max=False)."""
     out = {}
     for F, (_, norms, scores, _) in data.items():
         if det not in norms or det not in scores[cohort]:
@@ -416,7 +471,8 @@ def trajectories(data, det, cohort_rows, cohort, held, norm):
                 if len(raw) != r["L"] or not np.all(np.isfinite(raw)):
                     raise ValueError(f"fold {F}: {det} trajectory of {rid} has the wrong length or values")
                 st = n[s]["pooled"] if norm == "pooled" else n[s]["per_task"][r["task_name"]]
-                per[s] = (np.maximum.accumulate(raw) - st["location"]) / st["scale"]
+                per[s] = ((np.maximum.accumulate(raw) if running_max else np.asarray(raw, float))
+                          - st["location"]) / st["scale"]
             out[F][rid] = per
     return out
 
@@ -694,6 +750,25 @@ def run(args):
     if args.curves:
         names = OOD + (SAFE,) + tuple(n for n in extra if n == SAFE_LSTM) + HS_FAMILY
         r18, r18_failures = r18_xr1(cal, te, held, folds, seen, unseen, table1, rkP, names)
+    r19, r19_failures = None, []
+    if args.r19:
+        reference = json.loads(Path(args.r19_reference).read_text()) if args.r19_reference else None
+        if reference is None or "r14" not in reference:
+            raise SystemExit("error: --r19 needs --r19-reference, R14's output (it holds the r14 block)")
+
+        def unseen_raw(family, det):
+            data = {F: v for F, v in fam[family].items() if F != ALL}
+            c = trajectories(data, det, cal, ctl.CAL_COHORT, held, "pooled", running_max=False)
+            e = trajectories(data, det, te, ctl.TEST_COHORT, held, "pooled", running_max=False)
+            return {F: merge(c[F], e[F]) for F in folds}
+
+        raw_unseen = {SAFE: unseen_raw("safe", "safe"), HS: unseen_raw("xt", HS)}
+        if SAFE_LSTM in extra:
+            raw_unseen[SAFE_LSTM] = unseen_raw(SAFE_LSTM, SAFE_LSTM)
+        btypes = bundle.get("task_types") or {}
+        types = {r["task_name"]: (r.get("task_type") or btypes.get(r["task_name"])) for r in cal + te}
+        seen_for = {n: seen[n] for n in (SAFE, HS, ZERO, SAFE_LSTM) if n in seen}
+        r19, r19_failures = r19_xr1(cal, te, held, folds, raw_unseen, seen_for, rkP, types, reference, args.r19_boot)
     out = dict(base, checks=checks, reproduction_failures=[], table1=table1, table2=table2,
                notes=dict(std="ddof 1 over training seeds 0-2; timers are deterministic",
                           unseen_normalization="pooled over the fold's seen tasks",
@@ -701,6 +776,9 @@ def run(args):
     if args.r14_durations:
         out["r14"] = r14
         out["r14_failures"] = r14_failures
+    if args.r19:
+        out["r19"] = r19
+        out["r19_failures"] = r19_failures
     if args.curves:
         out["r18"] = r18
         out["r18_failures"] = r18_failures
@@ -732,6 +810,15 @@ def run(args):
             return 1
         print_r14(r14)
         print("R14 OK")
+    if args.r19:
+        if r19_failures:
+            print("R19 FAILED (no R19 result is used): " + ", ".join(r19_failures) + f" {r19['checks']}")
+            return 1
+        import r19_extras as rx
+        print(f"R19 B0: point estimates equal R14's (max |diff| {r19['checks']['B0_point_equals_r14']['max_abs_diff']}); "
+              "N0: band timers equal hk_free.fit's")
+        rx.print_summary(r19)
+        print("R19 OK")
     if args.curves:
         if r18_failures:
             print("R18 FAILED (no curve is used):\n  " + "\n  ".join(r18_failures))
@@ -767,6 +854,9 @@ def main(argv=None):
     r.add_argument("--actprobe-t-fold-dirs", nargs="+", help="R11: ActProbe-with-timestep fold directories 0-3 and all")
     r.add_argument("--r14-durations", help="R14: hk_free.py llm output for the XR-1 folds")
     r.add_argument("--curves", action="store_true", help="R18: calibrated lead-FPR curves (lead_fpr_curves.py)")
+    r.add_argument("--r19", action="store_true", help="R19: the mock review's offline analyses (r19_extras.py)")
+    r.add_argument("--r19-reference", help="R19 gate B0: R14's output (seen_unseen_tables_r14.json)")
+    r.add_argument("--r19-boot", type=int, default=1000, help="R19 bootstrap replicates")
     r.add_argument("--r6-result", help="R11 gate T6: R6's seen_unseen_tables JSON, reproduced exactly")
     r.add_argument("--output", required=True)
     args = ap.parse_args(argv)

@@ -175,6 +175,15 @@ def normalized(raw, stats):
     return (np.maximum.accumulate(raw) - stats["location"]) / stats["scale"]
 
 
+# R19 (r19_extras.native_band) also needs the normalized raw score, without the running maximum.
+# Off by default, so no earlier result reads or stores it.
+KEEP_RAW = False
+
+
+def normalized_raw(raw, stats):
+    return (np.asarray(raw, float) - stats["location"]) / stats["scale"]
+
+
 def attach(parts, F, norms, scores, held, detectors):
     """Keys d#s@F (one seed) and d@F (seed average); fold all also gets d#s@all/task and d@all/task.
 
@@ -202,11 +211,16 @@ def attach(parts, F, norms, scores, held, detectors):
                 for s in SEEDS:
                     r[f"{d}#{s}@{F}"] = per[s]
                 r[f"{d}@{F}"] = np.mean([per[s] for s in SEEDS], axis=0)
+                if KEEP_RAW:
+                    r[f"{d}~@{F}"] = np.mean([normalized_raw(row["raw"][s], norms[d][s]["pooled"]) for s in SEEDS], axis=0)
                 if F == ALL:
                     task = {s: normalized(row["raw"][s], norms[d][s]["per_task"][r["task_name"]]) for s in SEEDS}
                     for s in SEEDS:
                         r[f"{d}#{s}@all/task"] = task[s]
                     r[f"{d}@all/task"] = np.mean([task[s] for s in SEEDS], axis=0)
+                    if KEEP_RAW:
+                        r[f"{d}~@all/task"] = np.mean([normalized_raw(row["raw"][s], norms[d][s]["per_task"][r["task_name"]])
+                                                       for s in SEEDS], axis=0)
 
 
 # ---- fits ------------------------------------------------------------------------------------

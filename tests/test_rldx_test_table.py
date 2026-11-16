@@ -333,6 +333,36 @@ class RldxTestTableTest(unittest.TestCase):
         got = lfc.at_alpha(r["timers"]["seen"]["E"], 0.05)
         self.assertEqual((got["fpr"], got["mean_lead"]), (want["fpr"], want["mean_lead"]))
 
+    def test_r19_offline_analyses(self):
+        """R19: native bands, the unseen bootstrap (B0 against R17), leads, the timers at the limit, saturation."""
+        status, text, _ = self.run_table("r17.json", extra=["--elapsed-time"])
+        self.assertEqual(status, 0, text)
+        status, text, out = self.run_table("r19.json", extra=["--r19", "--r19-reference", str(self.root / "r17.json"),
+                                                              "--r19-boot", "3"])
+        self.assertEqual(status, 0, text)
+        self.assertIn("R19 OK", text)
+        r = out["r19"]
+        self.assertEqual(out["r19_failures"], [])
+        self.assertTrue(r["checks"]["B0_point_equals_r17"]["ok"])
+        self.assertTrue(r["checks"]["N0_band_timer_equals_hk_fit"])
+        self.assertEqual(set(r["native_bands"]), {"safe_indep", "safe_lstm", "hide_and_seek"})
+        for b in r["native_bands"].values():
+            self.assertEqual(set(b["unseen"]), {"G_abs", "G"})
+            self.assertIn("matched", b["seen"]["fused"])
+        boot = r["bootstrap_unseen"]
+        self.assertEqual(boot["samples"], 3)
+        self.assertIn("hide_and_seek_minus_safe_indep", boot["timers"]["G_abs"])
+        self.assertEqual(set(r["timers_at_limit"]), {"P_seen", "E_unseen", "G_unseen"})
+        self.assertIn("hide_and_seek_zero", r["zero_input_saturation"])
+        # A wrong reference stops R19.
+        ref = json.loads((self.root / "r17.json").read_text())
+        ref["r17"]["unseen"]["hide_and_seek"]["G_abs"]["seed_average"]["gain"] += 0.01
+        (self.root / "r17_bad.json").write_text(json.dumps(ref))
+        status, text, out = self.run_table("r19_bad.json", extra=["--r19", "--r19-reference", str(self.root / "r17_bad.json"),
+                                                                  "--r19-boot", "2"])
+        self.assertEqual(status, 1)
+        self.assertIn("R19 FAILED", text)
+
     def test_r17_needs_the_reference_table(self):
         status, text, _ = self.run_table("table.json")
         self.assertEqual(status, 0, text)

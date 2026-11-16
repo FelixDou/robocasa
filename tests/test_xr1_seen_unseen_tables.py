@@ -352,6 +352,43 @@ class RunTests(unittest.TestCase):
                 self.assertEqual(set(r["seen"][name]), set(hk.SEEN_TIMERS))
                 self.assertLessEqual(r["checks"]["K5_P_reproduces_seen_plus_P"][name]["max_abs_diff"], 1e-12)
 
+    def test_r19_offline_analyses(self):
+        """R19 on XR-1: unseen native bands, the bootstrap (B0 against R14), leads and saturation."""
+        import hashlib
+        import hk_free as hk
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args, held, cal, te = build(root)
+            tasks = sorted({r["task_name"] for r in cal})
+            ins = {t: f"Do the {t} job." for t in tasks}
+            med = {t: 10.0 + 3 * i for i, t in enumerate(tasks)}
+            prompts = hk.build_prompts(ins, held, med)
+            prompts["example_median_seconds"] = med
+            answer = {f"Do the {t} job.\"\n\nHow many": str(8 + 5 * i) for i, t in enumerate(tasks)}
+            zero, few, raw, fails = hk.answer_all(prompts, lambda m: next((v for k, v in answer.items()
+                                                                         if k in m[1]["content"]), "?"))
+            folds_path = args[args.index("--folds") + 1]
+            dur = dict(prompt_sha256=hk.prompts_sha256(),
+                       folds_sha256=hashlib.sha256(Path(folds_path).read_bytes()).hexdigest(),
+                       zero=zero, few=few, answers=len(raw), parse_failures=fails)
+            (root / "dur.json").write_text(json.dumps(dur))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(su.main(args + ["--r14-durations", str(root / "dur.json")]), 0)
+            (root / "tables.json").rename(root / "r14.json")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + ["--r19", "--r19-reference", str(root / "r14.json"), "--r19-boot", "3"])
+            self.assertEqual(status, 0, buf.getvalue())
+            self.assertIn("R19 OK", buf.getvalue())
+            r = json.loads((root / "tables.json").read_text())["r19"]
+            self.assertTrue(r["checks"]["B0_point_equals_r14"]["ok"])
+            self.assertTrue(set(r["native_bands"]) >= {su.SAFE, su.HS})
+            for b in r["native_bands"].values():
+                self.assertEqual(set(b["unseen"]), {"G_abs", "G"})
+            self.assertIn(f"{su.HS}_minus_{su.SAFE}", r["bootstrap_unseen"]["timers"]["G_abs"])
+            self.assertEqual(set(r["timers_at_limit"]), {"P_seen", "E_unseen", "G_unseen"})
+            self.assertIn("seen", r["leads"][su.HS])
+
     def test_r11_rows_and_unchanged_r6_rows(self):
         """R11: ActProbe joins Table II; SAFE-LSTM and ActProbe-T rows come from optional fold dirs; T6
         requires every row of the earlier output to be reproduced exactly."""
