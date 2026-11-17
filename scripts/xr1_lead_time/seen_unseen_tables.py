@@ -769,6 +769,13 @@ def run(args):
         types = {r["task_name"]: (r.get("task_type") or btypes.get(r["task_name"])) for r in cal + te}
         seen_for = {n: seen[n] for n in (SAFE, HS, ZERO, SAFE_LSTM) if n in seen}
         r19, r19_failures = r19_xr1(cal, te, held, folds, raw_unseen, seen_for, rkP, types, reference, args.r19_boot)
+    r20, r20_failures = None, []
+    if args.r20:
+        import r20_timer_g as r20m
+        reference = json.loads(Path(args.r20_reference).read_text()) if args.r20_reference else None
+        if reference is None or "timers_alone" not in (reference.get("r14") or {}):
+            raise SystemExit("error: --r20 needs --r20-reference, R14's output (it holds r14.timers_alone)")
+        r20, r20_failures = r20m.run(cal, te, held, folds, rkP, reference["r14"]["timers_alone"])
     out = dict(base, checks=checks, reproduction_failures=[], table1=table1, table2=table2,
                notes=dict(std="ddof 1 over training seeds 0-2; timers are deterministic",
                           unseen_normalization="pooled over the fold's seen tasks",
@@ -779,6 +786,9 @@ def run(args):
     if args.r19:
         out["r19"] = r19
         out["r19_failures"] = r19_failures
+    if args.r20:
+        out["r20"] = r20
+        out["r20_failures"] = r20_failures
     if args.curves:
         out["r18"] = r18
         out["r18_failures"] = r18_failures
@@ -819,6 +829,13 @@ def run(args):
               "N0: band timers equal hk_free.fit's")
         rx.print_summary(r19)
         print("R19 OK")
+    if args.r20:
+        import r20_timer_g as r20m
+        r20m.print_summary(r20, "XR-1")
+        if r20_failures:
+            print("R20 FAILED (no R20 result is used): " + ", ".join(r20_failures))
+            return 1
+        print("R20 OK")
     if args.curves:
         if r18_failures:
             print("R18 FAILED (no curve is used):\n  " + "\n  ".join(r18_failures))
@@ -857,6 +874,8 @@ def main(argv=None):
     r.add_argument("--r19", action="store_true", help="R19: the mock review's offline analyses (r19_extras.py)")
     r.add_argument("--r19-reference", help="R19 gate B0: R14's output (seen_unseen_tables_r14.json)")
     r.add_argument("--r19-boot", type=int, default=1000, help="R19 bootstrap replicates")
+    r.add_argument("--r20", action="store_true", help="R20: timer G as a Table II row (r20_timer_g.py)")
+    r.add_argument("--r20-reference", help="R20 gate T0: R14's output (seen_unseen_tables_r14.json)")
     r.add_argument("--r6-result", help="R11 gate T6: R6's seen_unseen_tables JSON, reproduced exactly")
     r.add_argument("--output", required=True)
     args = ap.parse_args(argv)

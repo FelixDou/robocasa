@@ -389,6 +389,53 @@ class RunTests(unittest.TestCase):
             self.assertEqual(set(r["timers_at_limit"]), {"P_seen", "E_unseen", "G_unseen"})
             self.assertIn("seen", r["leads"][su.HS])
 
+    def test_r20_timer_g_row(self):
+        """R20 on XR-1: G against P (seen) and E (unseen); gate T0 against R14's timers_alone."""
+        import hashlib
+        import hk_free as hk
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args, held, cal, te = build(root)
+            tasks = sorted({r["task_name"] for r in cal})
+            ins = {t: f"Do the {t} job." for t in tasks}
+            med = {t: 10.0 + 3 * i for i, t in enumerate(tasks)}
+            prompts = hk.build_prompts(ins, held, med)
+            prompts["example_median_seconds"] = med
+            answer = {f"Do the {t} job.\"\n\nHow many": str(8 + 5 * i) for i, t in enumerate(tasks)}
+            zero, few, raw, fails = hk.answer_all(prompts, lambda m: next((v for k, v in answer.items()
+                                                                         if k in m[1]["content"]), "?"))
+            folds_path = args[args.index("--folds") + 1]
+            dur = dict(prompt_sha256=hk.prompts_sha256(),
+                       folds_sha256=hashlib.sha256(Path(folds_path).read_bytes()).hexdigest(),
+                       zero=zero, few=few, answers=len(raw), parse_failures=fails)
+            (root / "dur.json").write_text(json.dumps(dur))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(su.main(args + ["--r14-durations", str(root / "dur.json")]), 0)
+            (root / "tables.json").rename(root / "r14.json")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + ["--r20", "--r20-reference", str(root / "r14.json")])
+            self.assertEqual(status, 0, buf.getvalue())
+            self.assertIn("R20 OK", buf.getvalue())
+            out = json.loads((root / "tables.json").read_text())
+            r = out["r20"]
+            self.assertEqual(out["r20_failures"], [])
+            self.assertEqual(r["checks"]["T0_timers_equal_reference"]["compared"], 4)
+            self.assertEqual((r["seen"]["comparator"], r["unseen"]["comparator"]), ("P", "G_abs"))
+            # G alone on unseen tasks is Table II's global timer.
+            g = out["table2"]["global_timer"]["unseen"]
+            self.assertEqual((r["unseen"]["fp"], r["unseen"]["mean_lead"]), (g["fp"], g["mean_lead"]))
+            # A wrong reference stops R20.
+            ref = json.loads((root / "r14.json").read_text())
+            ref["r14"]["timers_alone"]["seen"]["P"]["mean_lead"] += 1e-9
+            (root / "r14_bad.json").write_text(json.dumps(ref))
+            (root / "tables.json").unlink()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + ["--r20", "--r20-reference", str(root / "r14_bad.json")])
+            self.assertEqual(status, 1)
+            self.assertIn("R20 FAILED", buf.getvalue())
+
     def test_r11_rows_and_unchanged_r6_rows(self):
         """R11: ActProbe joins Table II; SAFE-LSTM and ActProbe-T rows come from optional fold dirs; T6
         requires every row of the earlier output to be reproduced exactly."""

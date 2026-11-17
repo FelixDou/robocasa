@@ -818,6 +818,24 @@ def run(a):
                   "N0: band timers equal hk_free.fit's")
             print_r19(r19)
             print("\nR19 OK")
+    if a.r20 and status == 0:
+        import r20_timer_g as r20m
+        reference = json.loads(Path(a.r20_reference).read_text()) if a.r20_reference else None
+        if reference is None or "timers_alone" not in (reference.get("r17") or {}):
+            raise SystemExit("error: --r20 needs --r20-reference, R17's output (it holds r17.timers_alone)")
+        rounded = (((reference.get("table2") or {}).get("calibration") or {}).get("timer_G") or {}).get("seen")
+        r20, problems = r20m.run(parts_new["calibration"], parts_new["test"], held, folds, rk,
+                                 reference["r17"]["timers_alone"], rounded)
+        result["r20"], result["r20_failures"] = r20, problems
+        print()
+        r20m.print_summary(r20, "RLDX-1")
+        if problems:
+            print("R20 FAILED (no R20 result is used): " + ", ".join(problems))
+            status = 1
+        else:
+            print("\nR20 OK")
+    elif a.r20:
+        print("R20 FAILED: no R20 rows after a failed gate")
     if a.curves and status == 0:
         import seen_unseen_tables as sut
         result["r18"] = rldx_curves(parts_new, held, folds, detectors + [SHUFFLE], rk)
@@ -856,6 +874,8 @@ def main(argv=None):
     r.add_argument("--r19", action="store_true", help="R19: the mock review's offline analyses (r19_extras.py)")
     r.add_argument("--r19-reference", help="R19 gate B0: R17's output (rldx_e1b_r17.json)")
     r.add_argument("--r19-boot", type=int, default=1000, help="R19 bootstrap replicates")
+    r.add_argument("--r20", action="store_true", help="R20: timer G as a Table II row (r20_timer_g.py)")
+    r.add_argument("--r20-reference", help="R20 gate T0: R17's output (rldx_e1b_r17.json)")
     r.add_argument("--reference-table", help="R17 K0: an earlier run's output whose table2 this run must equal")
     a = p.parse_args(argv)
     return {"ids": ids_cmd, "safe-fold": safe_fold_cmd, "run": run}[a.cmd](a)

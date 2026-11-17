@@ -363,6 +363,29 @@ class RldxTestTableTest(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("R19 FAILED", text)
 
+    def test_r20_timer_g_row(self):
+        """R20: G against P (seen) and E (unseen); T0 against R17's timers_alone; seen G against R16."""
+        status, text, _ = self.run_table("r17.json", extra=["--elapsed-time"])
+        self.assertEqual(status, 0, text)
+        status, text, out = self.run_table("r20.json", extra=["--r20", "--r20-reference", str(self.root / "r17.json")])
+        self.assertEqual(status, 0, text)
+        self.assertIn("R20 OK", text)
+        r = out["r20"]
+        self.assertEqual(out["r20_failures"], [])
+        t0 = r["checks"]["T0_timers_equal_reference"]
+        self.assertEqual(t0["compared"], 3)                  # R17 has no seen G
+        self.assertIn("seen_G_vs_R16_rounded", r["checks"])
+        self.assertTrue(r["checks"]["seen_G_vs_R16_rounded"]["matches"], r["checks"])
+        self.assertEqual((r["seen"]["comparator"], r["unseen"]["comparator"]), ("P", "G_abs"))
+        # A wrong reference stops R20.
+        ref = json.loads((self.root / "r17.json").read_text())
+        ref["r17"]["timers_alone"]["unseen"]["G"]["fp"] += 1
+        (self.root / "r17_bad20.json").write_text(json.dumps(ref))
+        status, text, out = self.run_table("r20_bad.json", extra=["--r20", "--r20-reference",
+                                                                  str(self.root / "r17_bad20.json")])
+        self.assertEqual(status, 1)
+        self.assertIn("R20 FAILED", text)
+
     def test_r17_needs_the_reference_table(self):
         status, text, _ = self.run_table("table.json")
         self.assertEqual(status, 0, text)
