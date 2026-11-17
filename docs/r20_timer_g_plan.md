@@ -168,4 +168,32 @@ rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r20_timer_
 
 ## Result
 
-(to be written after the run)
+Run `r20_timer_g_20261117_174756` at 028742de, 2026-11-17. Evidence is in
+`reports/r20_timer_g_evidence/`: `seen_unseen_tables_r20.json` (sha256 `41a52c2f…`),
+`rldx_e1b_r20.json` (`39721a0e…`) and both logs.
+
+- **Gates:**
+  - Both logs end with `R20 OK`.
+  - T0 holds exactly (max |diff| 0): 4 timers against R14 and 3 against R17.
+  - The scripts' own gates pass, and the frozen inputs are unchanged.
+- **G alone against the comparator alone** (G's FPR and false alarms; gain at the same target;
+  matched gain, with the comparator's false alarms):
+
+  | Policy | Seen tasks, against P | Unseen tasks, against E |
+  |---|---|---|
+  | XR-1 | 0.021 (8 FP); −0.1024; −0.0444 (P at 8 FP) | 0.024 (9 FP); +0.0043; +0.0222 (E at 9 FP) |
+  | RLDX-1 | 0.0575 (23 FP); −0.1143; −0.1016 (P at 23 FP) | 0.065 (26 FP); +0.0855; +0.0826 (E at 25 FP) |
+
+- **Expectations:**
+  - Same target: as written.
+  - Matched: as written. On XR-1, holding the comparator to G's fewer false alarms raises G's gain
+    (seen −0.102 → −0.044, unseen +0.004 → +0.022). On RLDX-1 it barely moves.
+  - RLDX-1's seen G uses R16's rule:
+    - FPR is equal and the lead differs by 3.6e-5 (R16 stores 4 decimals);
+    - R16's gain over P, −0.1142, is the difference of its rounded leads (0.1544 − 0.2686); the
+      exact value is −0.1143.
+    - The script's information check flagged this 8.2e-5 rounding difference as "differs".
+- **Reporting:** Table II's G rows in the paper (paper-drafts, `main.tex`):
+  - XR-1: 0.021, −0.102, −0.044 | 0.024, 0.004, 0.022;
+  - RLDX-1: 0.058, −0.114, −0.102 | 0.065, 0.085, 0.083.
+  - Timers are not ranked.
