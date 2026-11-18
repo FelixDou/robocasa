@@ -736,6 +736,59 @@ def r22_rldx(a, parts, parts_rec, held, folds, detectors, rk):
                             e1b=dict(path=str(Path(a.e1_result).resolve()), sha256=sha256(a.e1_result)))), problems
 
 
+R23_TOL = 1e-12
+
+
+def r23_rldx(a, parts, rk):
+    """R23 (docs/r23_h3_h1_rule_plan.md): the test of H3 judged by H1's rule. Hide-and-Seek + P's three-seed
+    ensemble on its registered frozen path (E1b), margin on the new calibration successes, matched exactly
+    (hk_free.matched_timer), with task-then-failure 95% CIs as Table III's XR-1 ensembles (97.5% for the
+    record). Gates: K1, false alarms and same-target gain equal E1b's registered result; K2, false alarms,
+    gain and matched gain equal R22's h3."""
+    import r22_fixed_paths as r22
+    ref22 = json.loads(Path(a.r23_reference).read_text())["r22"]["h3"]
+    e1b = json.loads(Path(a.e1_result).read_text())
+    hs = "hide_and_seek"
+    fp_ = e1b["frozen_paths"][hs]
+    pairs = {ALL: (cl.Cohort(cal_rows(parts, "calibration"), f"{hs}@all/task"), cl.Cohort(parts["test"], f"{hs}@all/task"))}
+    failed = [r for r in parts["test"] if r["failed"]]
+    row, _ = r22.frozen_row(pairs, {ALL: dict(u=float(fp_["u"]), s=float(fp_["s"]))}, "P", rk, failed)
+    reg = e1b["results"][hs]
+    checks = {}
+    d1 = max(abs(row["gain"] - reg["gain"]), 0.0 if row["fp"] == reg["test"]["fp"] else float("inf"))
+    checks["K1_registered_point"] = dict(fp=row["fp"], e1b_fp=reg["test"]["fp"], gain=row["gain"], e1b_gain=reg["gain"],
+                                         max_abs_diff=d1, ok=d1 <= R22_TOL_E1B)
+    m = (row["matched"] or {}).get("gain")
+    m22 = (ref22.get("matched") or {}).get("gain")
+    d2 = max(abs(row["gain"] - ref22["gain"]), abs(m - m22) if m is not None and m22 is not None else float("inf"),
+             0.0 if row["fp"] == ref22["fp"] else float("inf"))
+    checks["K2_equals_r22_h3"] = dict(matched_gain=m, r22_matched_gain=m22, max_abs_diff=d2, ok=d2 <= R23_TOL)
+    lo = (row["matched"] or {}).get("ci", {}).get("ci95", [float("nan")])[0]
+    verdict = dict(rule="H1's: the 95% CI of the matched gain lies above zero", matched_gain=m,
+                   ci95=(row["matched"] or {}).get("ci", {}).get("ci95"), passes=bool(lo > 0))
+    registered = dict(gain=reg["gain"], gain_ci=reg.get("gain_ci"), matched_gain=reg.get("matched_gain"),
+                      matched_ci=reg.get("matched_ci"), level=e1b.get("level"))
+    problems = [k.split("_", 1)[0] for k, v in checks.items() if not v["ok"]]
+    return dict(plan="docs/r23_h3_h1_rule_plan.md (R23)", checks=checks, h3=r22.strip(row), verdict=verdict,
+                registered=registered,
+                inputs=dict(r22=dict(path=str(Path(a.r23_reference).resolve()), sha256=sha256(a.r23_reference)),
+                            e1b=dict(path=str(Path(a.e1_result).resolve()), sha256=sha256(a.e1_result)))), problems
+
+
+def print_r23(r):
+    h = r["h3"]
+    m = h["matched"] or {}
+    print("R23 RLDX-1: the test of H3 under H1's rule (registered path, exact matching)")
+    print(f"  FA {h['fp']} (P alone {h['timer']['fp']})  same target {h['gain']:+.4f} 95% {h['gain_ci']['ci95']} "
+          f"97.5% {h['gain_ci']['ci97.5']}")
+    print(f"  Delta l {m.get('gain', float('nan')):+.4f} 95% {m.get('ci', {}).get('ci95')} 97.5% {m.get('ci', {}).get('ci97.5')}")
+    g = r["registered"]
+    print(f"  registered (grid matching): matched {g['matched_gain']} CI {g['matched_ci']}; same target {g['gain']} CI {g['gain_ci']}")
+    print(f"  H1's rule: {'passes' if r['verdict']['passes'] else 'fails'}")
+    for k, v in r["checks"].items():
+        print(f"R23 {k.split('_', 1)[0]}: {'OK' if v['ok'] else 'FAILED'} (max |diff| {v['max_abs_diff']:.3g})")
+
+
 R21_HEADS = ("safe_indep", "safe_lstm", "hide_and_seek")
 
 
@@ -1001,6 +1054,20 @@ def run(a):
             print("\nR22 OK")
     elif a.r22:
         print("R22 FAILED: no R22 result after a failed gate")
+    if a.r23 and status == 0:
+        if not a.r23_reference:
+            raise SystemExit("error: --r23 needs --r23-reference, R22's RLDX-1 output (rldx_e1b_r22.json)")
+        r23, problems = r23_rldx(a, parts_new, rk)
+        result["r23"], result["r23_failures"] = r23, problems
+        print()
+        print_r23(r23)
+        if problems:
+            print("R23 FAILED (no R23 result is used): " + ", ".join(problems))
+            status = 1
+        else:
+            print("\nR23 OK")
+    elif a.r23:
+        print("R23 FAILED: no R23 result after a failed gate")
     if a.curves and status == 0:
         import seen_unseen_tables as sut
         result["r18"] = rldx_curves(parts_new, held, folds, detectors + [SHUFFLE], rk)
@@ -1050,6 +1117,8 @@ def main(argv=None):
     r.add_argument("--r22", action="store_true", help="R22: every fused path fixed on the validation set")
     r.add_argument("--r22-reference", help="R22 gate K0: R17's output (rldx_e1b_r17.json)")
     r.add_argument("--r22-boot", type=int, default=1000, help="R22 unseen bootstrap replicates")
+    r.add_argument("--r23", action="store_true", help="R23: the test of H3 under H1's rule (exact matching, 95% CIs)")
+    r.add_argument("--r23-reference", help="R23 gate K2: R22's RLDX-1 output (rldx_e1b_r22.json)")
     r.add_argument("--reference-table", help="R17 K0: an earlier run's output whose table2 this run must equal")
     a = p.parse_args(argv)
     return {"ids": ids_cmd, "safe-fold": safe_fold_cmd, "run": run}[a.cmd](a)

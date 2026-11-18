@@ -11,6 +11,7 @@ Every result is evaluated once on the test cohort. Delta l (matched) is the gain
 timer held to the monitor's test false alarms (hk_free.matched_timer).
 """
 import math
+from collections import defaultdict
 import sys
 from pathlib import Path
 
@@ -142,6 +143,39 @@ def ensemble_row(pairs, val, timer, rk, failed_rows):
         row["matched"] = dict(r["matched"], ci95=qt.boot(a["fused"] - a["matched"], failed_rows)["ci95"])
     else:
         row["matched"] = None
+    return row, r
+
+
+def boot_levels(d, rows_failed, B=2000, seed=0, levels=(95.0, 97.5)):
+    """quantile_timer.boot's resampling (tasks, then failures within each drawn task; paired), with
+    percentile intervals at several levels. Level 95 reproduces qt.boot's ci95 exactly (R23)."""
+    rng = np.random.default_rng(seed)
+    bi = defaultdict(list)
+    for i, r in enumerate(rows_failed):
+        bi[r["task_name"]].append(i)
+    tasks = sorted(bi)
+    bs = []
+    for _ in range(B):
+        ii = np.concatenate([rng.choice(bi[t], len(bi[t])) for t in rng.choice(tasks, len(tasks))])
+        bs.append(d[ii].mean())
+    out = {}
+    for lv in levels:
+        a = (100.0 - lv) / 2.0
+        out[f"ci{lv:g}"] = np.round(np.percentile(bs, [a, 100.0 - a]), 4).tolist()
+    return out
+
+
+def frozen_row(pairs, frozen, timer, rk, failed_rows):
+    """A seen-task ensemble + timer on a given (frozen) path, judged like Table III's other ensembles:
+    false alarms, gains, and task-then-failure CIs at 95% and 97.5% (R23: H3 under H1's rule)."""
+    r = run_folds(pairs, timer, rk, frozen=frozen, keep=True)
+    a = r["_arrays"]
+    if len(failed_rows) != len(a["fused"]):
+        raise ValueError("failure rows and leads differ in length")
+    row = dict(fp=r["fp"], fpr=r["fpr"], mean_lead=r["mean_lead"], gain=r["gain"], timer=r["timer"],
+               gain_ci=boot_levels(a["fused"] - a["timer"], failed_rows), chosen=r["chosen"], paths=r["paths"])
+    row["matched"] = None if r["matched"] is None else dict(
+        r["matched"], ci=boot_levels(a["fused"] - a["matched"], failed_rows))
     return row, r
 
 

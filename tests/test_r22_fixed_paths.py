@@ -110,6 +110,25 @@ class R22Test(unittest.TestCase):
         tz = r22.teaser(r, r["h@all"], self.rk[r["task_name"]], r["horizon"], chosen, 0.2, 0.1)
         self.assertEqual(tz["P_alarm"], math.ceil(min(r["horizon"], 0.6 * r["horizon"]) - hk.EPS))
 
+    def test_boot_levels_and_frozen_row(self):
+        """R23: boot_levels' 95% interval is qt.boot's, and frozen_row on the validation-chosen path equals
+        ensemble_row's point estimates and intervals."""
+        pairs = {"all": (self.seen(self.cal), self.seen(self.te))}
+        Fte = [r for r in self.te if r["failed"]]
+        row, run_ = r22.ensemble_row(pairs, {"all": self.seen(self.val)}, "P", self.rk, Fte)
+        frow, _ = r22.frozen_row(pairs, run_["_chosen"], "P", self.rk, Fte)
+        for k in ("fp", "gain", "mean_lead"):
+            self.assertEqual(frow[k], row[k])
+        self.assertEqual(frow["matched"]["gain"], row["matched"]["gain"])
+        self.assertEqual(frow["gain_ci"]["ci95"], row["gain_ci95"])
+        self.assertEqual(frow["matched"]["ci"]["ci95"], row["matched"]["ci95"])
+        lo95, hi95 = frow["matched"]["ci"]["ci95"]
+        lo, hi = frow["matched"]["ci"]["ci97.5"]
+        self.assertLessEqual(lo, lo95)
+        self.assertGreaterEqual(hi, hi95)
+        with self.assertRaises(ValueError):
+            r22.frozen_row(pairs, run_["_chosen"], "P", self.rk, Fte[:-1])
+
     def test_k8(self):
         pairs = {"all": (self.seen(self.cal), self.seen(self.te))}
         row, _ = r22.ensemble_row(pairs, {"all": self.seen(self.val)}, "P", self.rk, [r for r in self.te if r["failed"]])

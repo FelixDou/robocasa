@@ -456,6 +456,43 @@ class RldxTestTableTest(unittest.TestCase):
         self.assertEqual(r["unseen_bootstrap"]["samples"], 2)
         self.assertIn("hide_and_seek_minus_safe_indep", r["unseen_bootstrap"]["timers"]["G_abs"])
 
+    def test_r23_h3_under_h1_rule(self):
+        """R23: H3's registered frozen path, exact matching, 95% and 97.5% CIs; K1 against E1b's registered
+        point, K2 against R22's h3."""
+        status, text, _ = self.run_table("r17.json", extra=["--elapsed-time"])
+        self.assertEqual(status, 0, text)
+        e1 = json.loads((self.root / "e1_result.json").read_text())
+        e1["frozen_paths"] = {"hide_and_seek": {"u": 0.5, "s": 2.0}}
+        e1["results"] = {"hide_and_seek": {"gain": 0.0, "test": {"fp": -1}}}
+        (self.root / "e1_result.json").write_text(json.dumps(e1))
+        r22 = ["--r22", "--r22-reference", str(self.root / "r17.json"), "--r22-boot", "2"]
+        _, _, out = self.run_table("r22_first.json", extra=r22)
+        h3 = out["r22"]["h3"]
+        e1["results"]["hide_and_seek"] = {"gain": h3["gain"], "test": {"fp": h3["fp"]},
+                                          "matched_gain": (h3["matched"] or {}).get("gain"),
+                                          "matched_ci": [0.0, 0.1], "gain_ci": [0.0, 0.1]}
+        (self.root / "e1_result.json").write_text(json.dumps(e1))
+        status, text, _ = self.run_table("r22.json", extra=r22)
+        self.assertEqual(status, 0, text)
+        r23 = ["--r23", "--r23-reference", str(self.root / "r22.json")]
+        status, text, out = self.run_table("r23.json", extra=r23)
+        self.assertEqual(status, 0, text)
+        self.assertIn("R23 OK", text)
+        r = out["r23"]
+        self.assertEqual(out["r23_failures"], [])
+        self.assertTrue(r["checks"]["K1_registered_point"]["ok"])
+        self.assertTrue(r["checks"]["K2_equals_r22_h3"]["ok"])
+        self.assertEqual(set(r["h3"]["gain_ci"]), {"ci95", "ci97.5"})
+        self.assertIn("passes", r["verdict"])
+        # A changed R22 reference stops R23 (K2).
+        ref = json.loads((self.root / "r22.json").read_text())
+        ref["r22"]["h3"]["gain"] += 1e-9
+        (self.root / "r22_bad.json").write_text(json.dumps(ref))
+        status, text, out = self.run_table("r23_bad.json", extra=["--r23", "--r23-reference", str(self.root / "r22_bad.json")])
+        self.assertEqual(status, 1)
+        self.assertIn("R23 FAILED", text)
+        self.assertEqual(out["r23_failures"], ["K2"])
+
     def test_r17_needs_the_reference_table(self):
         status, text, _ = self.run_table("table.json")
         self.assertEqual(status, 0, text)
