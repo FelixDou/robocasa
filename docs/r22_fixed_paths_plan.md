@@ -595,4 +595,27 @@ rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22b_fixed
 
 ## Result
 
+### Stage A (2026-11-18, r5n7): `STAGE A OK`
+
+- **A1** (Hide-and-Seek family, folds 0–3, from `1b2ffab0`): every fold printed six `reference ...
+  -> OK` lines and `REFERENCE OK`, with no errors. The August files hold 684 and 2,280 rows per fold:
+  three detectors × 228 and × 760 rollouts.
+- **A3** (OOD, folds 0–3, from `1b2ffab0`): every fold scored all four cohorts (1,522, 1,526, 454
+  and 1,643 rollouts) and exited 0.
+- **A2 + A4** (SAFE-MLP and SAFE-LSTM):
+  - The single-checkpoint run (from `1b2ffab0`) finished the 10 seed-0 calibration scorings and was
+    stopped during the 11th (see "What happened" above).
+  - The load-once run (from `131e963a`) ended with `BATCH OK: 20 written, 10 verified (max |diff| 0)`
+    on the calibration export: its rescorings of the 10 finished scorings are identical to them. It
+    ended with `BATCH OK: 30 written, 0 verified` on the test export, which had no finished scoring to
+    compare with. Those 30 come from the same code, which the calibration comparisons cover.
+- **Assembly** (from `131e963a`): 10 × `ASSEMBLY OK`. SAFE-MLP fold all reproduces both E1 cohorts and
+  the bundle normalization with max diff 0.0. Every SAFE-LSTM fold reproduces its training-run scores
+  with max diff 0.0. Each fold has 1,522 / 1,526 / 228 / 760 rollouts, seeds 0–2.
+- **Gate** (from `131e963a`): all 18 pairs `-> OK`. Every new directory reproduces its stored E1-cohort
+  trajectories and normalizations with max diff 0.0, and scores all 228 + 760 validation rollouts
+  for every detector and seed.
+
+### Stage B
+
 (to be written after the runs)
