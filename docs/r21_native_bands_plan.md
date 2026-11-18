@@ -244,4 +244,67 @@ rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r21_native
 
 ## Result
 
-(to be written after the run)
+Run `r21_native_bands_20261118_172324` at b571774b, on 2026-11-18. Evidence is in
+`reports/r21_native_bands_evidence/`: `seen_unseen_tables_r21.json` (sha256 `53599170…`),
+`rldx_e1b_r21.json` (`8f9dd45c…`) and both logs.
+
+- **Gates:**
+  - Both logs end with `R21 OK`, and the frozen inputs are unchanged.
+  - R0, N0 and C0 hold exactly (max |diff| 0).
+  - B0 holds exactly: 45 comparisons per policy.
+  - N1 holds exactly: 6 bands on XR-1, 9 on RLDX-1.
+  - N2 holds within R12's rounding (max 4.9e-5).
+  - The scripts' own gates pass.
+- **Matching (N2, information):** R12's grid matching gave a matched gain over P of 0.0677
+  (Hide-and-Seek) and 0.0055 (SAFE-MLP). R21's exact matching gives 0.0656 and 0.0053, with the same
+  timer false alarms (26 and 21).
+- **Ensembles, matched gain over the timer, with the full-pipeline 95% CI:**
+
+  | Head, policy | Seen: alone vs P | Seen: OR P | Unseen: alone vs E | Unseen: OR E | Unseen: alone vs G | Unseen: OR G |
+  |---|---|---|---|---|---|---|
+  | Hide-and-Seek, XR-1 | +0.047 [−0.038, 0.128] | +0.066 [−0.020, 0.136] | +0.147 [−0.030, 0.208] | +0.091 [−0.048, 0.165] | +0.070 [−0.149, 0.091] | +0.013 [−0.153, 0.076] |
+  | Hide-and-Seek, RLDX-1 | +0.086 [−0.034, 0.166] | +0.083 [−0.015, 0.135] | +0.143 [−0.066, 0.259] | +0.096 [−0.164, 0.187] | +0.019 [−0.162, 0.068] | −0.016 [−0.148, 0.042] |
+  | SAFE-MLP, XR-1 | −0.016 [−0.122, 0.054] | +0.005 [−0.081, 0.067] | −0.012 [−0.065, 0.030] | −0.027 [−0.068, 0.016] | −0.075 [−0.187, 0.059] | −0.036 [−0.124, 0.036] |
+  | SAFE-MLP, RLDX-1 | −0.126 [−0.232, −0.037] | +0.001 [−0.102, 0.028] | +0.004 [−0.044, 0.033] | −0.006 [−0.038, 0.028] | −0.119 [−0.261, −0.028] | −0.073 [−0.179, −0.003] |
+  | SAFE-LSTM, XR-1 | −0.016 [−0.140, 0.053] | +0.035 [−0.067, 0.078] | −0.021 [−0.122, 0.063] | −0.011 [−0.085, 0.060] | −0.090 [−0.231, 0.007] | −0.061 [−0.170, 0.029] |
+  | SAFE-LSTM, RLDX-1 | −0.021 [−0.093, 0.067] | +0.009 [−0.053, 0.078] | +0.033 [−0.103, 0.148] | +0.012 [−0.159, 0.132] | −0.075 [−0.204, 0.049] | −0.071 [−0.159, 0.028] |
+
+  - The bands alone over-alarm on unseen tasks. Hide-and-Seek reaches FPR 0.076 (XR-1) and 0.100
+    (RLDX-1); its fused rule reaches 0.074 and 0.118.
+  - Hide-and-Seek − SAFE-MLP (matched) is above zero only on RLDX-1's seen tasks: +0.212
+    [0.052, 0.354] for the bands alone, and +0.082 [0.005, 0.188] with the timer.
+- **Single models, matched gain, mean ± std over seeds (Hide-and-Seek):**
+
+  | Policy | Seen: alone vs P | Seen: OR P | Unseen: alone vs E | Unseen: OR E | Unseen: alone vs G | Unseen: OR G |
+  |---|---|---|---|---|---|---|
+  | XR-1 | +0.026 ± 0.039 | +0.065 ± 0.017 | +0.079 ± 0.027 | +0.057 ± 0.026 | −0.021 ± 0.041 | −0.025 ± 0.031 |
+  | RLDX-1 | +0.069 ± 0.027 | +0.082 ± 0.022 | +0.083 ± 0.037 | +0.061 ± 0.010 | −0.066 ± 0.020 | −0.047 ± 0.019 |
+
+- **Curves (single models, mean over seeds), against R18's timer curves:**
+  - Hide-and-Seek, seen tasks: above P up to an FPR of about 0.10, level with it around 0.11 to 0.12,
+    and slightly below it beyond. For example, on XR-1 at FPR 0.079: lead 0.303, against P's 0.27.
+  - Hide-and-Seek, unseen tasks: above E everywhere. Against G:
+    - XR-1: near it, and above it from FPR 0.15.
+    - RLDX-1: below it up to FPR 0.11, level around 0.15, above it beyond.
+  - SAFE-MLP: far below P on RLDX-1's seen tasks, and on or below the timers elsewhere.
+- **Expectations:**
+  - **Held:**
+    - the gates;
+    - every ensemble point estimate within a few hundredths of the rough values;
+    - over-alarming on unseen tasks;
+    - CIs over G including zero;
+    - SAFE-MLP's CIs including zero or below it;
+    - XR-1's seen-task CI including zero.
+  - **Not held:**
+    - Hide-and-Seek's gain over E has CIs that include zero on both policies (expected above zero).
+    - RLDX-1's seen-task CI includes zero (expected above zero).
+  - **Partly held:**
+    - Single models gain less than the ensemble on unseen tasks, but about as much on seen tasks.
+    - The curves lie above P only at low FPR.
+- **The CIs are lopsided:** several point estimates lie near the top of their interval (XR-1 over G:
+  0.013 in [−0.153, 0.076]; RLDX-1 over E: 0.096 in [−0.164, 0.187]). Resampled replicates mostly do
+  worse than the real data, which R19's constant-threshold CIs did not show. R21b diagnoses this
+  before the paper reports these CIs (`docs/r21b_band_ci_diagnostic_plan.md`).
+- **Reporting:** pending R21b. Under the fixed rules, the point estimates and the single-model values
+  above are what the paper quotes for the original alarm rules. The CI to quote depends on R21b's
+  interpretation rules.
