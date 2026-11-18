@@ -655,8 +655,50 @@ def load_family(new_dirs, r7_dirs, parts_new, parts_rec, tasks, held, folds_sha)
     return dets, g1
 
 
+R21_HEADS = ("safe_indep", "safe_lstm", "hide_and_seek")
+
+
+def r21_rldx(a, parts, held, folds, tasks, rk):
+    """R21 on RLDX-1 (r21_native_bands): each head's band on seen tasks against P and on unseen tasks against
+    E (G_abs) and G, per seed and as an ensemble, with curves and the bootstrap. Gate N1 against R19."""
+    import r21_native_bands as r21
+    ref19 = json.loads(Path(a.r21_reference).read_text()) if a.r21_reference else None
+    if ref19 is None or "native_bands" not in (ref19.get("r19") or {}):
+        raise SystemExit("error: --r21 needs --r21-reference, R19's RLDX-1 output (rldx_e1b_r19.json)")
+    cal, te = parts["calibration"], parts["test"]
+    r0 = {}
+    for d in R21_HEADS:
+        for s in SEEDS:
+            r0[f"{d}/seen/seed_{s}"] = r21.running_max_gap(cal + te, f"{d}~#{s}@all/task", f"{d}#{s}@all/task")
+            for F in folds:
+                r0[f"{d}/unseen/{F}/seed_{s}"] = r21.running_max_gap(cal + te, f"{d}~#{s}@{F}", f"{d}#{s}@{F}")
+    every = set(tasks)
+    sides = dict(seen=dict(design=r21.Design(cal, te, {ALL: every}, {ALL: every}), timers=("P",)),
+                 unseen=dict(design=r21.Design(cal, te, {F: every - held[F] for F in folds}, {F: held[F] for F in folds}),
+                             timers=("G_abs", "G")))
+
+    def keys(d, side):
+        at = (lambda F: "all/task") if side == "seen" else (lambda F: F)
+        out = {r21.ENSEMBLE: lambda F, d=d, at=at: f"{d}~@{at(F)}"}
+        for s in SEEDS:
+            out[f"seed_{s}"] = lambda F, d=d, s=s, at=at: f"{d}~#{s}@{at(F)}"
+        return out
+
+    spec = {d: {side: keys(d, side) for side in sides} for d in R21_HEADS}
+    res, problems = r21.run(sides, spec, rk, B=a.r21_boot, contrasts=(("hide_and_seek", "safe_indep"),), r0=r0,
+                            progress=lambda m: print(m, flush=True))
+    n1 = r21.check_r19(res, ref19["r19"]["native_bands"])
+    res["checks"]["N1_ensemble_equals_r19"] = n1
+    if not n1["ok"]:
+        problems.append("N1")
+    res["inputs"] = dict(r19=dict(path=str(Path(a.r21_reference).resolve()), sha256=sha256(a.r21_reference)))
+    return res, problems
+
+
 def run(a):
-    if a.r19:
+    if a.r21:
+        ru.KEEP_RAW_SEEDS = R21_HEADS           # R21's single-model bands read each seed's raw score
+    if a.r19 or a.r21:
         ru.KEEP_RAW = True                      # native bands read the normalized raw score
     out_path = Path(a.output)
     if out_path.exists():
@@ -836,6 +878,19 @@ def run(a):
             print("\nR20 OK")
     elif a.r20:
         print("R20 FAILED: no R20 rows after a failed gate")
+    if a.r21 and status == 0:
+        import r21_native_bands as r21m
+        r21, problems = r21_rldx(a, parts_new, held, folds, tasks, rk)
+        result["r21"], result["r21_failures"] = r21, problems
+        print()
+        r21m.print_summary(r21, "RLDX-1")
+        if problems:
+            print("R21 FAILED (no R21 result is used): " + ", ".join(problems))
+            status = 1
+        else:
+            print("\nR21 OK")
+    elif a.r21:
+        print("R21 FAILED: no R21 result after a failed gate")
     if a.curves and status == 0:
         import seen_unseen_tables as sut
         result["r18"] = rldx_curves(parts_new, held, folds, detectors + [SHUFFLE], rk)
@@ -876,6 +931,9 @@ def main(argv=None):
     r.add_argument("--r19-boot", type=int, default=1000, help="R19 bootstrap replicates")
     r.add_argument("--r20", action="store_true", help="R20: timer G as a Table II row (r20_timer_g.py)")
     r.add_argument("--r20-reference", help="R20 gate T0: R17's output (rldx_e1b_r17.json)")
+    r.add_argument("--r21", action="store_true", help="R21: the original alarm rules (r21_native_bands.py)")
+    r.add_argument("--r21-reference", help="R21 gate N1: R19's output (rldx_e1b_r19.json)")
+    r.add_argument("--r21-boot", type=int, default=1000, help="R21 bootstrap replicates")
     r.add_argument("--reference-table", help="R17 K0: an earlier run's output whose table2 this run must equal")
     a = p.parse_args(argv)
     return {"ids": ids_cmd, "safe-fold": safe_fold_cmd, "run": run}[a.cmd](a)

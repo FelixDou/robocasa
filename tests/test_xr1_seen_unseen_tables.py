@@ -436,6 +436,76 @@ class RunTests(unittest.TestCase):
             self.assertEqual(status, 1)
             self.assertIn("R20 FAILED", buf.getvalue())
 
+    def test_r21_original_rules(self):
+        """R21 on XR-1: SAFE's band for SAFE-MLP and Hide-and-Seek, seen (+ P) and unseen (+ E, + G); gates R0,
+        N0, B0, C0, N1 (against R19's output) and N2 (against an R12-shaped reference)."""
+        import hashlib
+        import hk_free as hk
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args, held, cal, te = build(root)
+            tasks = sorted({r["task_name"] for r in cal})
+            ins = {t: f"Do the {t} job." for t in tasks}
+            med = {t: 10.0 + 3 * i for i, t in enumerate(tasks)}
+            prompts = hk.build_prompts(ins, held, med)
+            prompts["example_median_seconds"] = med
+            answer = {f"Do the {t} job.\"\n\nHow many": str(8 + 5 * i) for i, t in enumerate(tasks)}
+            zero, few, raw_, fails = hk.answer_all(prompts, lambda m: next((v for k, v in answer.items()
+                                                                          if k in m[1]["content"]), "?"))
+            folds_path = args[args.index("--folds") + 1]
+            dur = dict(prompt_sha256=hk.prompts_sha256(),
+                       folds_sha256=hashlib.sha256(Path(folds_path).read_bytes()).hexdigest(),
+                       zero=zero, few=few, answers=len(raw_), parse_failures=fails)
+            (root / "dur.json").write_text(json.dumps(dur))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(su.main(args + ["--r14-durations", str(root / "dur.json")]), 0)
+            (root / "tables.json").rename(root / "r14.json")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(su.main(args + ["--r19", "--r19-reference", str(root / "r14.json"), "--r19-boot", "2"]), 0)
+            (root / "tables.json").rename(root / "r19.json")
+            base = json.loads((root / "r19.json").read_text())
+            # First run: a placeholder R12 reference, so N2 fails and nothing else does.
+            (root / "list_b_wrong.json").write_text(json.dumps({"B2": {k: dict(
+                standalone=dict(fpr=0.0, fp=0, mean_lead=0.0), fused_bonferroni=dict(fpr=0.0, fp=0, mean_lead=0.0, gain=0.0))
+                for k in ("safe", "hide_and_seek")}}))
+            r21_args = ["--r21", "--r21-reference", str(root / "r19.json"), "--r21-boot", "2"]
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + r21_args + ["--r21-r12-reference", str(root / "list_b_wrong.json")])
+            self.assertEqual(status, 1)
+            self.assertIn("R21 FAILED (no R21 result is used): N2", buf.getvalue())
+            out = json.loads((root / "tables.json").read_text())
+            self.assertEqual(out["r21_failures"], ["N2"])
+            r = out["r21"]
+            for k in ("R0_raw_running_max_equals_score", "N0_timer_equals_hk_fit", "B0_equals_r19_native_band",
+                      "C0_curve_at_alpha_equals_standalone", "N1_ensemble_equals_r19"):
+                self.assertTrue(r["checks"][k]["ok"], (k, r["checks"][k]))
+            self.assertEqual(r["checks"]["N1_ensemble_equals_r19"]["compared"], 4)      # 2 heads x (E, G)
+            self.assertEqual(out["table1"], base["table1"])
+            self.assertEqual(out["table2"], base["table2"])
+            # Second run: an R12 reference at 4 decimals of the seen ensemble passes N2.
+            ref = {}
+            for theirs, mine in (("safe", su.SAFE), ("hide_and_seek", su.HS)):
+                e = r["heads"][mine]["seen"]["P"]["seed_average"]
+                ref[theirs] = dict(standalone={k: (round(e["standalone"][k], 4) if k != "fp" else e["standalone"][k])
+                                               for k in ("fpr", "fp", "mean_lead", "tpr")},
+                                   fused_bonferroni={k: (round(e["fused"][k], 4) if k != "fp" else e["fused"][k])
+                                                     for k in ("fpr", "fp", "mean_lead", "tpr", "gain")})
+            (root / "list_b.json").write_text(json.dumps({"B2": ref}))
+            (root / "tables.json").unlink()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + r21_args + ["--r21-r12-reference", str(root / "list_b.json")])
+            self.assertEqual(status, 0, buf.getvalue())
+            self.assertIn("R21 OK", buf.getvalue())
+            r = json.loads((root / "tables.json").read_text())["r21"]
+            self.assertTrue(r["checks"]["N2_seen_ensemble_equals_r12_b2"]["ok"])
+            self.assertEqual(set(r["heads"]), {su.SAFE, su.HS})
+            self.assertEqual(set(r["heads"][su.HS]["unseen"]), {"G_abs", "G"})
+            self.assertIn("mean_std_over_seeds", r["heads"][su.HS]["seen"]["P"])
+            self.assertIn(f"{su.HS}_minus_{su.SAFE}", r["bootstrap"]["unseen"]["timers"]["G_abs"])
+            self.assertEqual(len(r["curves"][su.HS]["unseen"]["mean_std_over_seeds"]), len(r["curve_alphas"]))
+
     def test_r11_rows_and_unchanged_r6_rows(self):
         """R11: ActProbe joins Table II; SAFE-LSTM and ActProbe-T rows come from optional fold dirs; T6
         requires every row of the earlier output to be reproduced exactly."""

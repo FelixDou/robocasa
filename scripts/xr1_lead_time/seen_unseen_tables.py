@@ -413,6 +413,105 @@ def r19_xr1(cal, te, held, folds, raw_unseen, seen, rkP, types, reference, B):
                 bootstrap_unseen=boot, leads=detail, timers_at_limit=limits, zero_input_saturation=sat), problems
 
 
+# ---- R21: the original alarm rules (r21_native_bands.py) ---------------------------------------------
+
+def seen_amend2_raw(paths, norms_path, name, need):
+    """{rid: {seed: per-task normalized raw score}} (no running maximum) from the Amendment 2 files."""
+    norms = json.loads(Path(norms_path).read_text())
+    out = {}
+    for path in paths:
+        for r in load_jsonl(path):
+            if r.get("detector") != name or str(r["rollout_id"]) not in need:
+                continue
+            out[str(r["rollout_id"])] = {s: (np.asarray(raw, float) - norms[name][s][r["task_name"]]["location"])
+                                         / norms[name][s][r["task_name"]]["scale"] for s, raw in r["per_seed_raw"].items()}
+    if need - set(out):
+        raise ValueError(f"Amendment 2 {name} lacks {len(need - set(out))} selected rollouts")
+    return out
+
+
+def seen_safe_raw(rows, bundle):
+    """{rid: {seed: per-task normalized raw SAFE score}} with the bundle's frozen task normalization."""
+    norms = bundle["task_normalizations"]
+    return {str(r["rollout_id"]): {s: (np.asarray(raw, float) - norms[s][r["task_name"]]["location"])
+                                   / norms[s][r["task_name"]]["scale"] for s, raw in r["per_seed_raw_safe"].items()}
+            for r in rows}
+
+
+def r21_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, seen, rkP):
+    """R21 on XR-1: SAFE-MLP, Hide-and-Seek (and SAFE-LSTM with its fold directories) under SAFE's band, on
+    seen tasks against P and unseen tasks against E (G_abs) and G. Gates N1 (R19) and N2 (R12 B2)."""
+    import r21_native_bands as r21
+    ref19 = json.loads(Path(args.r21_reference).read_text()) if args.r21_reference else None
+    if ref19 is None or "native_bands" not in (ref19.get("r19") or {}):
+        raise SystemExit("error: --r21 needs --r21-reference, R19's XR-1 output (seen_unseen_tables_r19.json)")
+    if not args.r21_r12_reference:
+        raise SystemExit("error: --r21 needs --r21-r12-reference, R12's list_b.json (gate N2)")
+    list_b = json.loads(Path(args.r21_r12_reference).read_text())
+    rows = cal + te
+    need = {str(r["rollout_id"]) for r in rows}
+    heads = (SAFE, HS) + ((SAFE_LSTM,) if SAFE_LSTM in extra else ())
+    seen_raw = {SAFE: seen_safe_raw(rows, bundle),
+                HS: seen_amend2_raw(args.amend2_scores, args.amend2_normalizations, HS, need)}
+    if SAFE_LSTM in heads:
+        a_all = {ALL: fam[SAFE_LSTM][ALL]}
+        seen_raw[SAFE_LSTM] = merge(
+            trajectories(a_all, SAFE_LSTM, cal, ctl.CAL_COHORT, held, "per_task", running_max=False)[ALL],
+            trajectories(a_all, SAFE_LSTM, te, ctl.TEST_COHORT, held, "per_task", running_max=False)[ALL])
+
+    def unseen_raw(family, det):
+        data = {F: v for F, v in fam[family].items() if F != ALL}
+        c = trajectories(data, det, cal, ctl.CAL_COHORT, held, "pooled", running_max=False)
+        e = trajectories(data, det, te, ctl.TEST_COHORT, held, "pooled", running_max=False)
+        return {F: merge(c[F], e[F]) for F in folds}
+
+    raw_unseen = {SAFE: unseen_raw("safe", "safe"), HS: unseen_raw("xt", HS)}
+    if SAFE_LSTM in heads:
+        raw_unseen[SAFE_LSTM] = unseen_raw(SAFE_LSTM, SAFE_LSTM)
+    r0 = {}
+    for h in heads:
+        for r in rows:
+            rid = str(r["rollout_id"])
+            per = seen_raw[h][rid]
+            for s in SEEDS:
+                r[f"{h}~#{s}@seen"] = per[s]
+                r[f"{h}#{s}@seen"] = np.asarray(seen[h][rid][s], float)
+            r[f"{h}~@seen"] = np.mean([per[s] for s in SEEDS], axis=0)
+            for F in folds:
+                per = raw_unseen[h][F][rid]
+                for s in SEEDS:
+                    r[f"{h}~#{s}@{F}"] = per[s]
+                r[f"{h}~@{F}"] = np.mean([per[s] for s in sorted(per)], axis=0)
+        for s in SEEDS:
+            r0[f"{h}/seen/seed_{s}"] = r21.running_max_gap(rows, f"{h}~#{s}@seen", f"{h}#{s}@seen")
+            for F in folds:
+                r0[f"{h}/unseen/{F}/seed_{s}"] = r21.running_max_gap(rows, f"{h}~#{s}@{F}", f"{h}#{s}@{F}")
+    every = set(tasks)
+    sides = dict(seen=dict(design=r21.Design(cal, te, {ALL: every}, {ALL: every}), timers=("P",)),
+                 unseen=dict(design=r21.Design(cal, te, {F: every - held[F] for F in folds}, {F: held[F] for F in folds}),
+                             timers=("G_abs", "G")))
+
+    def keys(h, side):
+        at = (lambda F: "seen") if side == "seen" else (lambda F: F)
+        out = {r21.ENSEMBLE: lambda F, h=h, at=at: f"{h}~@{at(F)}"}
+        for s in SEEDS:
+            out[f"seed_{s}"] = lambda F, h=h, s=s, at=at: f"{h}~#{s}@{at(F)}"
+        return out
+
+    spec = {h: {side: keys(h, side) for side in sides} for h in heads}
+    res, problems = r21.run(sides, spec, rkP, B=args.r21_boot, contrasts=((HS, SAFE),), r0=r0,
+                            progress=lambda m: print(m, flush=True))
+    n1 = r21.check_r19(res, ref19["r19"]["native_bands"])
+    n2 = r21.check_r12(res, list_b)
+    res["checks"]["N1_ensemble_equals_r19"] = n1
+    res["checks"]["N2_seen_ensemble_equals_r12_b2"] = n2
+    problems += [k for k, v in (("N1", n1["ok"]), ("N2", n2["ok"])) if not v]
+    res["inputs"] = dict(r19=dict(path=str(Path(args.r21_reference).resolve()), sha256=sha256(args.r21_reference)),
+                         r12_list_b=dict(path=str(Path(args.r21_r12_reference).resolve()),
+                                         sha256=sha256(args.r21_r12_reference)))
+    return res, problems
+
+
 # ---- loading ----------------------------------------------------------------------------------
 
 def check_fold_meta(label, F, meta, tasks, held, folds_sha, detectors):
@@ -776,6 +875,9 @@ def run(args):
         if reference is None or "timers_alone" not in (reference.get("r14") or {}):
             raise SystemExit("error: --r20 needs --r20-reference, R14's output (it holds r14.timers_alone)")
         r20, r20_failures = r20m.run(cal, te, held, folds, rkP, reference["r14"]["timers_alone"])
+    r21, r21_failures = None, []
+    if args.r21:
+        r21, r21_failures = r21_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, seen, rkP)
     out = dict(base, checks=checks, reproduction_failures=[], table1=table1, table2=table2,
                notes=dict(std="ddof 1 over training seeds 0-2; timers are deterministic",
                           unseen_normalization="pooled over the fold's seen tasks",
@@ -789,6 +891,9 @@ def run(args):
     if args.r20:
         out["r20"] = r20
         out["r20_failures"] = r20_failures
+    if args.r21:
+        out["r21"] = r21
+        out["r21_failures"] = r21_failures
     if args.curves:
         out["r18"] = r18
         out["r18_failures"] = r18_failures
@@ -836,6 +941,13 @@ def run(args):
             print("R20 FAILED (no R20 result is used): " + ", ".join(r20_failures))
             return 1
         print("R20 OK")
+    if args.r21:
+        import r21_native_bands as r21m
+        r21m.print_summary(r21, "XR-1")
+        if r21_failures:
+            print("R21 FAILED (no R21 result is used): " + ", ".join(r21_failures))
+            return 1
+        print("R21 OK")
     if args.curves:
         if r18_failures:
             print("R18 FAILED (no curve is used):\n  " + "\n  ".join(r18_failures))
@@ -876,6 +988,10 @@ def main(argv=None):
     r.add_argument("--r19-boot", type=int, default=1000, help="R19 bootstrap replicates")
     r.add_argument("--r20", action="store_true", help="R20: timer G as a Table II row (r20_timer_g.py)")
     r.add_argument("--r20-reference", help="R20 gate T0: R14's output (seen_unseen_tables_r14.json)")
+    r.add_argument("--r21", action="store_true", help="R21: the original alarm rules (r21_native_bands.py)")
+    r.add_argument("--r21-reference", help="R21 gate N1: R19's output (seen_unseen_tables_r19.json)")
+    r.add_argument("--r21-r12-reference", help="R21 gate N2: R12's list_b.json")
+    r.add_argument("--r21-boot", type=int, default=1000, help="R21 bootstrap replicates")
     r.add_argument("--r6-result", help="R11 gate T6: R6's seen_unseen_tables JSON, reproduced exactly")
     r.add_argument("--output", required=True)
     args = ap.parse_args(argv)

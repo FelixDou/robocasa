@@ -386,6 +386,37 @@ class RldxTestTableTest(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("R20 FAILED", text)
 
+    def test_r21_original_rules(self):
+        """R21: each head's band on seen (+ P) and unseen (+ E, + G) tasks, per seed and as an ensemble; gates
+        R0, N0, B0, C0 and N1 against R19's output; a changed R19 reference stops R21."""
+        status, text, _ = self.run_table("r17.json", extra=["--elapsed-time"])
+        self.assertEqual(status, 0, text)
+        status, text, _ = self.run_table("r19.json", extra=["--r19", "--r19-reference", str(self.root / "r17.json"),
+                                                            "--r19-boot", "2"])
+        self.assertEqual(status, 0, text)
+        status, text, out = self.run_table("r21.json", extra=["--r21", "--r21-reference", str(self.root / "r19.json"),
+                                                              "--r21-boot", "2"])
+        self.assertEqual(status, 0, text)
+        self.assertIn("R21 OK", text)
+        r = out["r21"]
+        self.assertEqual(out["r21_failures"], [])
+        self.assertEqual(r["checks"]["N1_ensemble_equals_r19"]["compared"], 9)       # 3 heads x (P, E, G)
+        self.assertGreater(len(r["checks"]["R0_raw_running_max_equals_score"]["by"]), 0)
+        self.assertEqual(set(r["heads"]), {"safe_indep", "safe_lstm", "hide_and_seek"})
+        for by_side in r["heads"].values():
+            self.assertEqual(set(by_side["seen"]), {"P"})
+            self.assertEqual(set(by_side["unseen"]), {"G_abs", "G"})
+            self.assertIn("mean_std_over_seeds", by_side["unseen"]["G_abs"])
+        self.assertIn("hide_and_seek_minus_safe_indep", r["bootstrap"]["seen"]["timers"]["P"])
+        # A changed R19 reference stops R21.
+        ref = json.loads((self.root / "r19.json").read_text())
+        ref["r19"]["native_bands"]["hide_and_seek"]["seen"]["fused"]["mean_lead"] += 1e-9
+        (self.root / "r19_bad.json").write_text(json.dumps(ref))
+        status, text, out = self.run_table("r21_bad.json", extra=["--r21", "--r21-reference",
+                                                                  str(self.root / "r19_bad.json"), "--r21-boot", "2"])
+        self.assertEqual(status, 1)
+        self.assertIn("R21 FAILED", text)
+
     def test_r17_needs_the_reference_table(self):
         status, text, _ = self.run_table("table.json")
         self.assertEqual(status, 0, text)

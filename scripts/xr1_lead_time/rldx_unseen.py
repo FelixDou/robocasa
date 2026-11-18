@@ -178,6 +178,8 @@ def normalized(raw, stats):
 # R19 (r19_extras.native_band) also needs the normalized raw score, without the running maximum.
 # Off by default, so no earlier result reads or stores it.
 KEEP_RAW = False
+# R21 (r21_native_bands) also needs each seed's normalized raw score (d~#s@F), for these detectors only.
+KEEP_RAW_SEEDS = ()
 
 
 def normalized_raw(raw, stats):
@@ -213,6 +215,9 @@ def attach(parts, F, norms, scores, held, detectors):
                 r[f"{d}@{F}"] = np.mean([per[s] for s in SEEDS], axis=0)
                 if KEEP_RAW:
                     r[f"{d}~@{F}"] = np.mean([normalized_raw(row["raw"][s], norms[d][s]["pooled"]) for s in SEEDS], axis=0)
+                if d in KEEP_RAW_SEEDS:
+                    for s in SEEDS:
+                        r[f"{d}~#{s}@{F}"] = normalized_raw(row["raw"][s], norms[d][s]["pooled"])
                 if F == ALL:
                     task = {s: normalized(row["raw"][s], norms[d][s]["per_task"][r["task_name"]]) for s in SEEDS}
                     for s in SEEDS:
@@ -221,6 +226,9 @@ def attach(parts, F, norms, scores, held, detectors):
                     if KEEP_RAW:
                         r[f"{d}~@all/task"] = np.mean([normalized_raw(row["raw"][s], norms[d][s]["per_task"][r["task_name"]])
                                                        for s in SEEDS], axis=0)
+                    if d in KEEP_RAW_SEEDS:
+                        for s in SEEDS:
+                            r[f"{d}~#{s}@all/task"] = normalized_raw(row["raw"][s], norms[d][s]["per_task"][r["task_name"]])
 
 
 # ---- fits ------------------------------------------------------------------------------------
