@@ -426,6 +426,36 @@ class RldxTestTableTest(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("R21 FAILED", text)
 
+    def test_r22_fixed_paths(self):
+        """R22: Table II with paths fixed on the recorded validation rollouts, K0 against R17, K3 against a
+        registered frozen path (E1b's format), the unseen bootstrap."""
+        status, text, _ = self.run_table("r17.json", extra=["--elapsed-time"])
+        self.assertEqual(status, 0, text)
+        e1 = json.loads((self.root / "e1_result.json").read_text())
+        e1["frozen_paths"] = {"hide_and_seek": {"u": 0.5, "s": 2.0}}
+        e1["results"] = {"hide_and_seek": {"gain": 0.0, "test": {"fp": -1}}}
+        (self.root / "e1_result.json").write_text(json.dumps(e1))
+        r22 = ["--r22", "--r22-reference", str(self.root / "r17.json"), "--r22-boot", "2"]
+        status, text, out = self.run_table("r22_first.json", extra=r22)
+        self.assertEqual(status, 1, text)                                   # K3 against the placeholder
+        r = out["r22"]
+        self.assertEqual(out["r22_failures"], ["K3"])
+        for k in ("V0_disjoint", "K0_adaptive_reproduces_r17", "N0_timer_margins_unchanged"):
+            self.assertTrue(r["checks"][k]["ok"], (k, r["checks"][k]))
+        e1["results"]["hide_and_seek"] = {"gain": r["h3"]["gain"], "test": {"fp": r["h3"]["fp"]},
+                                          "matched_gain": (r["h3"]["matched"] or {}).get("gain")}
+        (self.root / "e1_result.json").write_text(json.dumps(e1))
+        status, text, out = self.run_table("r22.json", extra=r22)
+        self.assertEqual(status, 0, text)
+        self.assertIn("R22 OK", text)
+        r = out["r22"]
+        self.assertEqual(set(r["table2"]["seen"]), set(self.ru.DETECTORS) | {"safe_lstm", "safe_indep", SHUFFLE})
+        self.assertEqual(set(r["table2"]["unseen"]["hide_and_seek"]), {"G_abs", "G"})
+        self.assertIn("mean_std_over_seeds", r["table2"]["seen"]["hide_and_seek"]["P"])
+        self.assertIn("chosen", r["table2"]["seen"]["hide_and_seek"]["P"]["seed_0"])
+        self.assertEqual(r["unseen_bootstrap"]["samples"], 2)
+        self.assertIn("hide_and_seek_minus_safe_indep", r["unseen_bootstrap"]["timers"]["G_abs"])
+
     def test_r17_needs_the_reference_table(self):
         status, text, _ = self.run_table("table.json")
         self.assertEqual(status, 0, text)

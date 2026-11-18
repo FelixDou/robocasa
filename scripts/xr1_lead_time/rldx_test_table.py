@@ -655,6 +655,87 @@ def load_family(new_dirs, r7_dirs, parts_new, parts_rec, tasks, held, folds_sha)
     return dets, g1
 
 
+R22_TOL_E1B = 1e-9
+
+
+def r22_rldx(a, parts, parts_rec, held, folds, detectors, rk):
+    """R22 on RLDX-1 (r22_fixed_paths): Table II with every path fixed on the recorded validation rollouts
+    (R7's calibration successes and test rollouts), the unseen ensembles' bootstrap, and gates K0 (the adaptive
+    choice reproduces R17), K3 (H3's frozen path reproduces E1b's registered result) and N0."""
+    import r19_extras as rx
+    import r22_fixed_paths as r22
+    ref17 = json.loads(Path(a.r22_reference).read_text())["r17"]
+    e1b = json.loads(Path(a.e1_result).read_text())
+    labels = list(r22.LABELS)
+    tag = lambda lab: "" if lab == "seed_average" else "#" + lab.split("_", 1)[1]
+    val_rows = parts_rec["calibration"] + parts_rec["test"]
+    checks = {}
+    shared = {str(r["rollout_id"]) for r in val_rows} & {str(r["rollout_id"]) for c in SETS for r in parts[c]}
+    checks["V0_disjoint"] = dict(shared_ids=len(shared), validation=len(val_rows), ok=not shared)
+
+    def seen_pairs(d):
+        return lambda lab: {ALL: (cl.Cohort(cal_rows(parts, "calibration"), f"{d}{tag(lab)}@all/task"),
+                                  cl.Cohort(parts["test"], f"{d}{tag(lab)}@all/task"))}
+
+    def seen_val(d):
+        return lambda lab: {ALL: cl.Cohort(val_rows, f"{d}{tag(lab)}@all/task")}
+
+    def unseen_pairs(d):
+        def f(lab):
+            out = {}
+            for F in folds:
+                cal = cal_rows(parts, "calibration", keep=lambda r, F=F: r["task_name"] not in held[F])
+                test = [r for r in parts["test"] if r["task_name"] in held[F]]
+                out[F] = (cl.Cohort(cal, f"{d}{tag(lab)}@{F}"), cl.Cohort(test, f"{d}{tag(lab)}@{F}"))
+            return out
+        return f
+
+    def unseen_val(d):
+        return lambda lab: {F: cl.Cohort([r for r in val_rows if r["task_name"] not in held[F]], f"{d}{tag(lab)}@{F}")
+                            for F in folds}
+
+    table2, k0, n0 = dict(seen={}, unseen={}), {}, {}
+    for d in detectors + [SHUFFLE]:
+        fixed = r22.block(seen_pairs(d), seen_val(d), labels, ("P",), rk)
+        adaptive = r22.block(seen_pairs(d), None, labels, ("P",), rk)
+        ref = (ref17["seen"].get(d) or {}).get("P")
+        k0[f"seen/{d}"] = r22.k0(adaptive, {"P": ref}, ("P",), labels) if ref else dict(ok=True, note="no R17 row")
+        n0[f"seen/{d}"] = all(fixed["P"][lab]["paths"][ALL]["timer"] == adaptive["P"][lab]["paths"][ALL]["timer"] for lab in labels)
+        table2["seen"][d] = r22.strip(fixed)
+        if d == SHUFFLE:
+            continue
+        fixed = r22.block(unseen_pairs(d), unseen_val(d), labels, ("G_abs", "G"), rk)
+        adaptive = r22.block(unseen_pairs(d), None, labels, ("G_abs", "G"), rk)
+        ref = {t: (ref17["unseen"].get(d) or {}).get(t) for t in ("G_abs", "G")}
+        k0[f"unseen/{d}"] = r22.k0(adaptive, ref, ("G_abs", "G"), labels)
+        n0[f"unseen/{d}"] = all(fixed[t][lab]["paths"][F]["timer"] == adaptive[t][lab]["paths"][F]["timer"]
+                                for t in ("G_abs", "G") for lab in labels for F in fixed[t][lab]["paths"])
+        table2["unseen"][d] = r22.strip(fixed)
+    checks["K0_adaptive_reproduces_r17"] = dict(by=k0, ok=all(v["ok"] for v in k0.values()))
+    checks["N0_timer_margins_unchanged"] = dict(by=n0, ok=all(n0.values()))
+    # K3: H3's registered rule, frozen path from E1b, margin on the new calibration successes.
+    hs = "hide_and_seek"
+    fp_ = e1b["frozen_paths"][hs]
+    h3 = r22.run_folds(seen_pairs(hs)("seed_average"), "P", rk, frozen={ALL: dict(u=float(fp_["u"]), s=float(fp_["s"]))})
+    reg = e1b["results"][hs]
+    d3 = max(abs(h3["gain"] - reg["gain"]), 0.0 if h3["fp"] == reg["test"]["fp"] else float("inf"))
+    checks["K3_h3_reproduces_e1b"] = dict(fp=h3["fp"], e1b_fp=reg["test"]["fp"], gain=h3["gain"], e1b_gain=reg["gain"],
+                                          max_abs_diff=d3, ok=d3 <= R22_TOL_E1B,
+                                          matched_information=dict(r22=(h3["matched"] or {}).get("gain"),
+                                                                   e1b=reg.get("matched_gain")))
+    # Unseen ensembles: the full-pipeline bootstrap with the paths frozen.
+    design = rx.UnseenDesign(parts["calibration"], parts["test"], held, folds)
+    names = ["hide_and_seek", "safe_indep", "safe_lstm"]
+    boot, _ = r22.boot_unseen(design, {n: (lambda F, n=n: f"{n}@{F}") for n in names},
+                              lambda n: unseen_val(n)("seed_average"), ("G_abs", "G"), rk, B=a.r22_boot,
+                              contrasts=(("hide_and_seek", "safe_indep"),))
+    problems = [k.split("_", 1)[0] for k, v in checks.items() if not v["ok"]]
+    return dict(plan=r22.PLAN, checks=checks, validation=dict(rows=len(val_rows)), table2=table2,
+                h3=r22.strip(h3), unseen_bootstrap=r22.strip(boot),
+                inputs=dict(r17=dict(path=str(Path(a.r22_reference).resolve()), sha256=sha256(a.r22_reference)),
+                            e1b=dict(path=str(Path(a.e1_result).resolve()), sha256=sha256(a.e1_result)))), problems
+
+
 R21_HEADS = ("safe_indep", "safe_lstm", "hide_and_seek")
 
 
@@ -907,6 +988,19 @@ def run(a):
                 print("\nR21b OK")
     elif a.r21:
         print("R21 FAILED: no R21 result after a failed gate")
+    if a.r22 and status == 0:
+        import r22_fixed_paths as r22m
+        r22, problems = r22_rldx(a, parts_new, parts_rec, held, folds, detectors, rk)
+        result["r22"], result["r22_failures"] = r22, problems
+        print()
+        r22m.print_summary(r22, "RLDX-1")
+        if problems:
+            print("R22 FAILED (no R22 result is used): " + ", ".join(problems))
+            status = 1
+        else:
+            print("\nR22 OK")
+    elif a.r22:
+        print("R22 FAILED: no R22 result after a failed gate")
     if a.curves and status == 0:
         import seen_unseen_tables as sut
         result["r18"] = rldx_curves(parts_new, held, folds, detectors + [SHUFFLE], rk)
@@ -953,6 +1047,9 @@ def main(argv=None):
     r.add_argument("--r21b", action="store_true", help="R21b: the band CI diagnostic, after R21")
     r.add_argument("--r21b-reference", help="R21b gate D0: R21's output (rldx_e1b_r21.json)")
     r.add_argument("--r21b-boot", type=int, default=1000, help="R21b replicates per variant")
+    r.add_argument("--r22", action="store_true", help="R22: every fused path fixed on the validation set")
+    r.add_argument("--r22-reference", help="R22 gate K0: R17's output (rldx_e1b_r17.json)")
+    r.add_argument("--r22-boot", type=int, default=1000, help="R22 unseen bootstrap replicates")
     r.add_argument("--reference-table", help="R17 K0: an earlier run's output whose table2 this run must equal")
     a = p.parse_args(argv)
     return {"ids": ids_cmd, "safe-fold": safe_fold_cmd, "run": run}[a.cmd](a)

@@ -517,6 +517,198 @@ def r21_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, seen, rkP):
     return res, problems, diag, diag_problems
 
 
+# ---- R22: every fused path fixed on the validation set (r22_fixed_paths.py) ---------------------
+
+R22_VAL_COHORTS = ("august_calibration", "august_test")
+R22_TEASER_ROLLOUT = "d5be410e4f86cbc95d554fe7"
+
+
+def load_fold_cohorts(path, cohorts, wanted):
+    """cross_task_lead.load_fold_dir for any cohort names: (meta, norms, scores, path)."""
+    path = Path(path)
+    meta = json.loads((path / "scoring.json").read_text())
+    norms = json.loads((path / "normalizations.json").read_text())
+    scores = {}
+    for cohort in cohorts:
+        out = defaultdict(dict)
+        for row in load_jsonl(path / f"{cohort}_predictions.jsonl"):
+            rid = str(row["rollout_id"])
+            if rid in wanted[cohort]:
+                out[row["detector"]][rid] = dict(task_name=row["task_name"], failed=bool(row["failed"]),
+                                                 held_out=bool(row["held_out"]),
+                                                 raw={s: np.asarray(v, float) for s, v in row["per_seed_raw"].items()})
+        scores[cohort] = dict(out)
+    return meta, norms, scores, str(path.resolve())
+
+
+def r22_xr1(args, D, cal, te, held, folds, tasks, bundle, extra, seen, rkP, types):
+    """R22 on XR-1: Table II (seen + P, unseen + E and G), the seen-task ensembles, the unseen ensembles'
+    bootstrap, H2's nulls, per-type gains, the budget-allocated timer and Fig. 1, all with fixed paths; gates
+    V0, V1, K0 (against R14), K8 (against R8) and N0."""
+    import confirm_hide_and_seek as chs
+    import lead_time
+    import r19_extras as rx
+    import r22_fixed_paths as r22
+    ref14 = json.loads(Path(args.r22_reference).read_text())["r14"]
+    r8 = json.loads(Path(args.r22_r8).read_text())
+    # Validation rows: R8's selection (3 + 3 August calibration and 10 + 10 August test rollouts per task).
+    val_cal = lead_time.sel(lead_time.load(Path(args.r22_val_calibration)), 3)
+    val_test = lead_time.sel(lead_time.load(Path(args.r22_val_test)), 10)
+    val = val_cal + val_test
+    ids = {c: [str(r["rollout_id"]) for r in rows] for c, rows in zip(R22_VAL_COHORTS, (val_cal, val_test))}
+    want_ids = {c: set(r22_ids(p)) for c, p in zip(R22_VAL_COHORTS, args.r22_val_ids)}
+    checks = {}
+    checks["V1_selection_equals_stage_a_ids"] = {c: dict(selected=len(ids[c]), listed=len(want_ids[c]), ok=set(ids[c]) == want_ids[c])
+                                                for c in R22_VAL_COHORTS}
+    e1_ids = {str(r["rollout_id"]) for r in cal + te}
+    val_ids = {str(r["rollout_id"]) for r in val}
+    checks["V0_disjoint"] = dict(shared_ids=len(e1_ids & val_ids), shared_identities=len(cl.identities(cal + te) & cl.identities(val)),
+                                 tasks_equal={r["task_name"] for r in val} == tasks)
+    checks["V0_disjoint"]["ok"] = (checks["V0_disjoint"]["shared_ids"] == 0 and checks["V0_disjoint"]["shared_identities"] == 0
+                                   and checks["V0_disjoint"]["tasks_equal"])
+    # Seen-task validation scores: SAFE-MLP (R8's per-seed raw scores), the Hide-and-Seek family and the
+    # shuffle (Amendment 2's August files), the OOD scores (the per-seed calibrate / evaluate outputs) and
+    # SAFE-LSTM (stage A's fold all).
+    need = val_ids
+    seen_val = {SAFE: seen_safe(val, bundle)}
+    for name in (*HS_FAMILY, SHUFFLE):
+        seen_val[name] = seen_amend2(args.r22_val_hs_scores, args.amend2_normalizations, name, need)
+    seen_val.update(seen_ood(args.r22_ood_val, need))
+    root = Path(args.r22_scores_dir)
+    wanted = {c: set(ids[c]) for c in R22_VAL_COHORTS}
+
+    def fold_data(family, F):
+        return load_fold_cohorts(root / family / f"fold_{F}", R22_VAL_COHORTS, wanted)
+
+    def val_traj(family, det, Fs, norm):
+        data = {F: fold_data(family, F) for F in Fs}
+        out = {}
+        for c, rows in zip(R22_VAL_COHORTS, (val_cal, val_test)):
+            t = trajectories(data, det, rows, c, held, norm)
+            for F in Fs:
+                out.setdefault(F, {}).update(t[F])
+        return out
+
+    if SAFE_LSTM in extra:
+        seen_val[SAFE_LSTM] = val_traj("safe_lstm", SAFE_LSTM, [ALL], "per_task")[ALL]
+    unseen_fam = dict({SAFE: ("safe", "safe"), HS: ("xt", HS), ZERO: ("xt", ZERO), FIRST: ("xt", FIRST)},
+                      **{n: ("ood", n) for n in OOD})
+    if SAFE_LSTM in extra:
+        unseen_fam[SAFE_LSTM] = ("safe_lstm", SAFE_LSTM)
+    for name, (family, det) in unseen_fam.items():
+        traj = val_traj(family, det, folds, "pooled")
+        for F in folds:
+            for r in val:
+                per = traj[F][str(r["rollout_id"])]
+                r[f"{name}@{F}"] = np.mean([per[s] for s in SEEDS], axis=0)
+                for s in SEEDS:
+                    r[f"{name}#{s}@{F}"] = per[s]
+    labels = list(r22.LABELS)
+    tag = lambda lab: "" if lab == "seed_average" else "#" + lab.split("_", 1)[1]
+    seed_of = lambda lab: None if lab == "seed_average" else lab.split("_", 1)[1]
+
+    def seen_pairs(name):
+        return lambda lab: {ALL: (seen_cohort(seen[name], cal, seed_of(lab)), seen_cohort(seen[name], te, seed_of(lab)))}
+
+    def seen_val_of(name):
+        return lambda lab: {ALL: seen_cohort(seen_val[name], val, seed_of(lab))}
+
+    def unseen_pairs(name):
+        def f(lab):
+            out = {}
+            for F in folds:
+                c, e = D.C[f"{name}{tag(lab)}@{F}"]
+                out[F] = (c.take(D.cal_idx[F]), e.take(D.te_idx[F]))
+            return out
+        return f
+
+    def unseen_val_of(name):
+        return lambda lab: {F: cl.Cohort([r for r in val if r["task_name"] not in held[F]], f"{name}{tag(lab)}@{F}")
+                            for F in folds}
+
+    seen_names = [n for n in OOD + (SAFE,) + tuple(n for n in extra if n == SAFE_LSTM) + HS_FAMILY + (SHUFFLE,)]
+    unseen_names = list(unseen_fam)
+    table2, k0, n0 = dict(seen={}, unseen={}), {}, {}
+    for name in seen_names:
+        fixed = r22.block(seen_pairs(name), seen_val_of(name), labels, ("P",), rkP)
+        adaptive = r22.block(seen_pairs(name), None, labels, ("P",), rkP)
+        ref = (ref14["seen"].get(name) or {}).get("P")
+        k0[f"seen/{name}"] = r22.k0(adaptive, {"P": ref}, ("P",), labels) if ref else dict(ok=True, note="no R14 row")
+        n0[f"seen/{name}"] = all(fixed["P"][lab]["paths"][ALL]["timer"] == adaptive["P"][lab]["paths"][ALL]["timer"] for lab in labels)
+        table2["seen"][name] = r22.strip(fixed)
+    for name in unseen_names:
+        fixed = r22.block(unseen_pairs(name), unseen_val_of(name), labels, ("G_abs", "G"), rkP)
+        adaptive = r22.block(unseen_pairs(name), None, labels, ("G_abs", "G"), rkP)
+        ref = {t: (ref14["unseen"].get(name) or {}).get(t) for t in ("G_abs", "G")}
+        k0[f"unseen/{name}"] = r22.k0(adaptive, ref, ("G_abs", "G"), labels)
+        n0[f"unseen/{name}"] = all(fixed[t][lab]["paths"][F]["timer"] == adaptive[t][lab]["paths"][F]["timer"]
+                                   for t in ("G_abs", "G") for lab in labels for F in fixed[t][lab]["paths"])
+        table2["unseen"][name] = r22.strip(fixed)
+    checks["K0_adaptive_reproduces_r14"] = dict(by=k0, ok=all(v["ok"] for v in k0.values()))
+    checks["N0_timer_margins_unchanged"] = dict(by=n0, ok=all(n0.values()))
+    # Seen-task ensembles (Table III) and their per-type gains.
+    Fte = [r for r in te if r["failed"]]
+    ensembles, per_types, runs = {}, {}, {}
+    for name in (SAFE, HS, *OOD, FIRST, ZERO, SHUFFLE):
+        row, run_ = r22.ensemble_row(seen_pairs(name)("seed_average"), seen_val_of(name)("seed_average"), "P", rkP, Fte)
+        ensembles[name], runs[name] = row, run_
+        if name in (SAFE, HS) + OOD:
+            per_types[name] = r22.per_type(run_, types, 0.8)
+    checks["K8_fixed_paths_equal_r8"] = r22.k8(ensembles, r8, {"safe": SAFE, "hide_and_seek": HS})
+    # Unseen ensembles: the full-pipeline bootstrap with the paths frozen.
+    design = rx.UnseenDesign(cal, te, held, folds)
+    boot_names = [n for n in (HS, SAFE, SAFE_LSTM) if n in unseen_fam]
+    boot, _ = r22.boot_unseen(design, {n: (lambda F, n=n: f"{n}@{F}") for n in boot_names},
+                              lambda n: unseen_val_of(n)("seed_average"), ("G_abs", "G"), rkP, B=args.r22_boot,
+                              contrasts=((HS, SAFE),))
+    # H2's nulls (the raw Hide-and-Seek scores of every row first).
+    for path in list(args.amend2_scores) + list(args.r22_val_hs_scores):
+        files = chs.load_scores(path)
+        for r in cal + te + val:
+            row = files.get(HS, {}).get(str(r["rollout_id"]))
+            if row is not None:
+                r.setdefault("raw", {})[HS] = {str(s): np.asarray(v, float) for s, v in row["per_seed_raw"].items()}
+    norms_a2 = json.loads(Path(args.amend2_normalizations).read_text())
+    null_out = r22.nulls(cal, te, val, rkP, bundle["task_normalizations"], norms_a2, HS,
+                         {SAFE: (ensembles[SAFE]["matched"]["gain"], "safe_resampled"),
+                          HS: (ensembles[HS]["matched"]["gain"], f"{HS}_resampled")}, B=args.r22_null_draws)
+    budget = r22.budget_timer(cl.Cohort(val, "safe"), cl.Cohort(cal, "safe"), cl.Cohort(te, "safe"),
+                              qt.dev_fractions(bundle), rkP, runs[HS])
+    # Fig. 1: Hide-and-Seek + P's frozen path on the teaser rollout.
+    teaser = None
+    row = next((r for r in te if str(r["rollout_id"]) == R22_TEASER_ROLLOUT), None)
+    if row is not None:
+        chosen = runs[HS]["_chosen"][ALL]
+        c = seen_cohort(seen[HS], cal, None)
+        cu, rc = hk_prepared(c, rkP)
+        tm, fu = r22.certify(cu, rc, chosen)
+        score = np.mean([seen[HS][R22_TEASER_ROLLOUT][s] for s in SEEDS], axis=0)
+        teaser = r22.teaser(row, score, rkP[row["task_name"]], row["horizon"], chosen, fu["lam"], tm["lam"])
+    problems = [k.split("_", 1)[0] for k, v in checks.items()
+                if not (v["ok"] if "ok" in v else all(x["ok"] for x in v.values()))]
+    return dict(plan=r22.PLAN, checks=checks, validation=dict(counts={c: len(v) for c, v in ids.items()}),
+                table2=table2, ensembles_seen=r22.strip(ensembles), per_type=per_types, unseen_bootstrap=r22.strip(boot),
+                nulls=null_out, budget_timer=budget, teaser=teaser,
+                inputs=dict(r14=dict(path=str(Path(args.r22_reference).resolve()), sha256=sha256(args.r22_reference)),
+                            r8=dict(path=str(Path(args.r22_r8).resolve()), sha256=sha256(args.r22_r8)),
+                            scores_dir=str(root.resolve()))), problems
+
+
+def r22_ids(path):
+    """Rollout IDs from a JSON list, a JSON object with rollout_ids, or a JSONL file."""
+    if str(path).endswith(".jsonl"):
+        return [str(r["rollout_id"]) for r in load_jsonl(path)]
+    value = json.loads(Path(path).read_text())
+    if isinstance(value, dict):
+        value = value.get("rollout_ids", value.get("evaluation_rollout_ids", value.get("test")))
+    return [str(v) for v in value]
+
+
+def hk_prepared(c, rk):
+    import hk_free as hk
+    return hk.prepared(c, "P", ALL, None, rk)
+
+
 # ---- loading ----------------------------------------------------------------------------------
 
 def check_fold_meta(label, F, meta, tasks, held, folds_sha, detectors):
@@ -885,6 +1077,11 @@ def run(args):
         raise SystemExit("error: --r21b runs after R21: give --r21 and its references too")
     if args.r21:
         r21, r21_failures, r21b, r21b_failures = r21_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, seen, rkP)
+    r22, r22_failures = None, []
+    if args.r22:
+        btypes = bundle.get("task_types") or {}
+        types = {r["task_name"]: (r.get("task_type") or btypes.get(r["task_name"])) for r in cal + te}
+        r22, r22_failures = r22_xr1(args, D, cal, te, held, folds, tasks, bundle, extra, seen, rkP, types)
     out = dict(base, checks=checks, reproduction_failures=[], table1=table1, table2=table2,
                notes=dict(std="ddof 1 over training seeds 0-2; timers are deterministic",
                           unseen_normalization="pooled over the fold's seen tasks",
@@ -904,6 +1101,9 @@ def run(args):
     if args.r21b:
         out["r21b"] = r21b
         out["r21b_failures"] = r21b_failures
+    if args.r22:
+        out["r22"] = r22
+        out["r22_failures"] = r22_failures
     if args.curves:
         out["r18"] = r18
         out["r18_failures"] = r18_failures
@@ -964,6 +1164,13 @@ def run(args):
             print("R21b FAILED (no R21b result is used): " + ", ".join(r21b_failures))
             return 1
         print("R21b OK")
+    if args.r22:
+        import r22_fixed_paths as r22m
+        r22m.print_summary(r22, "XR-1")
+        if r22_failures:
+            print("R22 FAILED (no R22 result is used): " + ", ".join(r22_failures))
+            return 1
+        print("R22 OK")
     if args.curves:
         if r18_failures:
             print("R18 FAILED (no curve is used):\n  " + "\n  ".join(r18_failures))
@@ -1011,6 +1218,18 @@ def main(argv=None):
     r.add_argument("--r21b", action="store_true", help="R21b: the band CI diagnostic, after R21")
     r.add_argument("--r21b-reference", help="R21b gate D0: R21's output (seen_unseen_tables_r21.json)")
     r.add_argument("--r21b-boot", type=int, default=1000, help="R21b replicates per variant")
+    r.add_argument("--r22", action="store_true", help="R22: every fused path fixed on the validation set")
+    r.add_argument("--r22-scores-dir", help="R22: stage A's root (xt, ood, safe, safe_lstm fold directories)")
+    r.add_argument("--r22-val-calibration", help="R22: August calibration predictions ($XR1_PS_INPUTS)")
+    r.add_argument("--r22-val-test", help="R22: August test (event) predictions ($XR1_PS_INPUTS)")
+    r.add_argument("--r22-val-ids", nargs=2, metavar=("CALIBRATION_IDS", "TEST_IDS"), help="R22 gate V1: stage A's ID lists")
+    r.add_argument("--r22-val-hs-scores", nargs=2, metavar=("CALIBRATION", "TEST"), help="R22: Amendment 2's August files")
+    r.add_argument("--r22-ood-val", nargs=3, action="append", metavar=("SEED", "CALIBRATION", "TEST"),
+                   help="R22: the per-seed OOD calibrate / evaluate predictions (August cohorts)")
+    r.add_argument("--r22-reference", help="R22 gate K0: R14's output (seen_unseen_tables_r14.json)")
+    r.add_argument("--r22-r8", help="R22 gate K8: R8's fixed_path.json")
+    r.add_argument("--r22-boot", type=int, default=1000, help="R22 unseen bootstrap replicates")
+    r.add_argument("--r22-null-draws", type=int, default=100, help="R22 null fusions per family")
     r.add_argument("--r6-result", help="R11 gate T6: R6's seen_unseen_tables JSON, reproduced exactly")
     r.add_argument("--output", required=True)
     args = ap.parse_args(argv)

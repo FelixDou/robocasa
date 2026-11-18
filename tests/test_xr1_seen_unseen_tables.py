@@ -520,6 +520,133 @@ class RunTests(unittest.TestCase):
             with np.load(root / out["r21b"]["replicates_file"]) as z:
                 self.assertEqual(len(z[f"unseen__test__G_abs__{su.HS}__fused_matched"]), 2)
 
+    def test_r22_fixed_paths(self):
+        """R22 on XR-1: validation rows (R8's selection), stage A fold directories with the August cohorts,
+        Table II and the ensembles with fixed paths; gates V0, V1, K0 (against R14), K8 and N0."""
+        import hashlib
+        import hk_free as hk
+        import lead_time
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args, held, cal, te = build(root)
+            rng = np.random.default_rng(22)
+            bundle = json.loads((root / "bundle.json").read_text())
+            tn = bundle["task_normalizations"]
+            # R14's output (K0's reference).
+            tasks = sorted({r["task_name"] for r in cal})
+            ins = {t: f"Do the {t} job." for t in tasks}
+            med = {t: 10.0 + 3 * i for i, t in enumerate(tasks)}
+            prompts = hk.build_prompts(ins, held, med)
+            prompts["example_median_seconds"] = med
+            answer = {f"Do the {t} job.\"\n\nHow many": str(8 + 5 * i) for i, t in enumerate(tasks)}
+            zero, few, raw_, fails = hk.answer_all(prompts, lambda m: next((v for k, v in answer.items()
+                                                                          if k in m[1]["content"]), "?"))
+            folds_path = args[args.index("--folds") + 1]
+            dur = dict(prompt_sha256=hk.prompts_sha256(),
+                       folds_sha256=hashlib.sha256(Path(folds_path).read_bytes()).hexdigest(),
+                       zero=zero, few=few, answers=len(raw_), parse_failures=fails)
+            (root / "dur.json").write_text(json.dumps(dur))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(su.main(args + ["--r14-durations", str(root / "dur.json")]), 0)
+            (root / "tables.json").rename(root / "r14.json")
+            # Validation (August) rows: copies of the test rows with new IDs, seeds and SAFE scores.
+            val_files = {}
+            for name, per in (("valc", 4), ("valt", 10)):
+                out = []
+                for r in sx.jsonl(root / "test.jsonl"):
+                    i = int(r["rollout_id"].rsplit("-", 1)[1])
+                    if i >= per:
+                        continue
+                    n = r["source_inferences"]
+                    raw_safe = {s: (rng.standard_normal(n) + (0.8 * np.linspace(0, 1, n) if r["failed"] else 0.0)).tolist()
+                                for s in SEEDS}
+                    norm = {s: (np.maximum.accumulate(np.asarray(raw_safe[s])) - tn[s][r["task_name"]]["location"])
+                            / tn[s][r["task_name"]]["scale"] for s in SEEDS}
+                    out.append(dict(r, rollout_id=f"{name}-{r['task_name']}-{i}-{int(r['failed'])}",
+                                    environment_seed=r["environment_seed"] + 100000, per_seed_raw_safe=raw_safe,
+                                    safe_scores=np.mean([norm[s] for s in SEEDS], axis=0).tolist()))
+                sx.write_jsonl(root / f"{name}.jsonl", out)
+                val_files[name] = root / f"{name}.jsonl"
+            sel = {c: lead_time.sel(lead_time.load(val_files[n]), q) for c, n, q in
+                   (("august_calibration", "valc", 3), ("august_test", "valt", 10))}
+            for c, rows in sel.items():
+                (root / f"{c}_ids.json").write_text(json.dumps([r["rollout_id"] for r in rows]))
+            val_rows = sel["august_calibration"] + sel["august_test"]
+            # Amendment 2's August files (Hide-and-Seek family and shuffle) and the OOD per-seed outputs.
+            a2n = json.loads((root / "amend2_norms_seen.json").read_text())
+            for c, rows in sel.items():
+                out = []
+                for r in rows:
+                    for det in (*su.HS_FAMILY, su.SHUFFLE):
+                        per_raw = raw(rng, r, 0.5)
+                        per = per_task_traj(per_raw, {s: a2n[det][s][r["task_name"]] for s in SEEDS})
+                        out.append(dict(detector=det, rollout_id=r["rollout_id"], task_name=r["task_name"],
+                                        failed=r["failed"], per_seed_raw=per_raw,
+                                        safe_scores=np.mean([per[s] for s in SEEDS], axis=0).tolist()))
+                sx.write_jsonl(root / f"a2_{c}.jsonl", out)
+            ood_val = []
+            for s in SEEDS:
+                paths = []
+                for c, rows in sel.items():
+                    out = [dict(rollout_id=r["rollout_id"], task_name=r["task_name"], failed=r["failed"],
+                                baseline_scores={d: np.maximum.accumulate(rng.standard_normal(r["L"])).tolist() for d in OOD})
+                           for r in rows]
+                    sx.write_jsonl(root / f"ood_val_{s}_{c}.jsonl", out)
+                    paths.append(root / f"ood_val_{s}_{c}.jsonl")
+                ood_val.append((s, *paths))
+            # Stage A: each family's fold directories with the August cohorts added.
+            fam_dirs = {"xt": args[args.index("--xt-fold-dirs") + 1:][:4], "ood": args[args.index("--ood-fold-dirs") + 1:][:4],
+                        "safe": args[args.index("--safe-fold-dirs") + 1:][:4]}
+            for family, dirs in fam_dirs.items():
+                for F, d in zip(("0", "1", "2", "3"), dirs):
+                    d, new = Path(d), root / "r22a" / family / f"fold_{F}"
+                    new.mkdir(parents=True)
+                    for f in d.iterdir():
+                        (new / f.name).write_bytes(f.read_bytes())
+                    dets = list(json.loads((d / "normalizations.json").read_text()))
+                    for c, rows in sel.items():
+                        sx.write_jsonl(new / f"{c}_predictions.jsonl", [
+                            dict(detector=det, rollout_id=r["rollout_id"], task_name=r["task_name"], failed=r["failed"],
+                                 fold=F, held_out=r["task_name"] in held[F],
+                                 per_seed_raw={s: rng.standard_normal(r["L"]).tolist() for s in SEEDS})
+                            for det in dets for r in rows])
+            r22 = ["--r22", "--r22-scores-dir", str(root / "r22a"), "--r22-val-calibration", str(val_files["valc"]),
+                   "--r22-val-test", str(val_files["valt"]),
+                   "--r22-val-ids", str(root / "august_calibration_ids.json"), str(root / "august_test_ids.json"),
+                   "--r22-val-hs-scores", str(root / "a2_august_calibration.jsonl"), str(root / "a2_august_test.jsonl"),
+                   "--r22-reference", str(root / "r14.json"), "--r22-boot", "2", "--r22-null-draws", "2"]
+            for s, c, t in ood_val:
+                r22 += ["--r22-ood-val", s, str(c), str(t)]
+            (root / "r8.json").write_text(json.dumps({"rows": {}}))
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + r22 + ["--r22-r8", str(root / "r8.json")])
+            self.assertEqual(status, 1, buf.getvalue())                     # K8 against an empty R8
+            out = json.loads((root / "tables.json").read_text())
+            self.assertEqual(out["r22_failures"], ["K8"])
+            r = out["r22"]
+            for k in ("V0_disjoint", "K0_adaptive_reproduces_r14", "N0_timer_margins_unchanged"):
+                self.assertTrue(r["checks"][k]["ok"], (k, r["checks"][k]))
+            self.assertTrue(all(v["ok"] for v in r["checks"]["V1_selection_equals_stage_a_ids"].values()))
+            self.assertEqual(r["validation"]["counts"], {c: len(v) for c, v in sel.items()})
+            rows8 = {k: dict(path=dict(u=None if e["chosen"]["all"]["u"] is None else round(e["chosen"]["all"]["u"], 4),
+                                       s=e["chosen"]["all"]["s"]), gain=round(e["gain"], 4))
+                     for k, e in (("safe", r["ensembles_seen"][su.SAFE]), ("hide_and_seek", r["ensembles_seen"][su.HS]))}
+            (root / "r8.json").write_text(json.dumps({"rows": rows8}))
+            (root / "tables.json").unlink()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + r22 + ["--r22-r8", str(root / "r8.json")])
+            self.assertEqual(status, 0, buf.getvalue())
+            self.assertIn("R22 OK", buf.getvalue())
+            r = json.loads((root / "tables.json").read_text())["r22"]
+            self.assertIn(su.HS, r["table2"]["seen"])
+            self.assertEqual(set(r["table2"]["unseen"][su.HS]), {"G_abs", "G"})
+            self.assertIn("ci95", r["ensembles_seen"][su.HS]["matched"])
+            self.assertEqual(set(r["nulls"]["nulls"]), {"noise", "safe_resampled", f"{su.HS}_resampled"})
+            self.assertIn(f"{su.HS}_minus_{su.SAFE}", r["unseen_bootstrap"]["timers"]["G_abs"])
+            self.assertIsNotNone(r["budget_timer"])
+
     def test_r11_rows_and_unchanged_r6_rows(self):
         """R11: ActProbe joins Table II; SAFE-LSTM and ActProbe-T rows come from optional fold dirs; T6
         requires every row of the earlier output to be reproduced exactly."""
