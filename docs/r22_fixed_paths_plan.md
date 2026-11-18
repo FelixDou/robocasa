@@ -616,6 +616,110 @@ rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22b_fixed
   trajectories and normalizations with max diff 0.0, and scores all 228 + 760 validation rollouts
   for every detector and seed.
 
-### Stage B
+### Stage B (2026-11-18, run `r22b_fixed_paths_20261118_211756`, from `131e963a`): `R22 OK`
 
-(to be written after the runs)
+Both runs ended with `R22 OK`, and `INPUTS UNCHANGED`. Evidence is in
+`reports/r22_fixed_paths_evidence/`:
+- `seen_unseen_tables_r22.json`, sha256 `fc776307…`;
+- `rldx_e1b_r22.json`, `76280d1b…`;
+- `stage_a_check.json`, `026e9082…`;
+- both logs.
+
+**Gates.**
+- **V0 and V1.** XR-1's validation set has 228 + 760 rows and equals stage A's IDs. RLDX-1's has 260
+  rows. Both are disjoint from calibration and test.
+- **K0.** The adaptive choice reproduces R14's and R17's Table II exactly.
+- **N0.** The timer margins are unchanged.
+- **K8.** The seen-task paths equal R8's: SAFE-MLP u 0.8342, s 0, gain 0.0073; Hide-and-Seek u 0.0552,
+  s 2, gain 0.0718.
+- **K3.** H3 with its registered frozen path reproduces E1b's 19 false alarms and its gain of 0.05354,
+  with max diff 0.
+  - Its matched gain is 0.1108 under `hk_free.matched_timer`, the rule this paper uses, against E1b's
+    0.1126.
+  - E1b loosened P's margin on a discrete grid (`stage2_frozen_sizing.loosen_fast`, `DELTA_GRID`).
+    `hk_free` takes the exact margin with the same number of false alarms, which gives P slightly
+    more lead.
+  - H3's registered statistic stays 0.1126.
+
+**Table II with fixed paths.** Δℓ̄ is the matched gain, mean ± std over 3 seeds; the adaptive value
+(R14 / R17) is in brackets.
+
+| XR-1 | seen + P: FPR, Δℓ̄ | unseen + E: FPR, Δℓ̄ |
+|---|---|---|
+| Mahalanobis | 0.051, 0.030±0.002 (0.030) | 0.054, −0.013±0.000 (−0.015) |
+| Cosine k-NN | 0.047, 0.017±0.000 (0.008) | 0.050, −0.017±0.000 (−0.013) |
+| PCA-KMeans | 0.054, 0.007±0.010 (0.007) | 0.050, −0.015±0.001 (−0.001) |
+| RND | 0.058, −0.003±0.008 (0.006) | 0.053, −0.014±0.001 (−0.010) |
+| SAFE-MLP | 0.046, 0.037±0.029 (0.013) | 0.050, −0.006±0.000 (−0.004) |
+| SAFE-LSTM | 0.047, 0.027±0.013 (0.017) | 0.054, 0.020±0.033 (0.026) |
+| Hide-and-Seek | 0.037, 0.065±0.008 (0.036) | 0.049, 0.042±0.029 (0.087) |
+| First step | 0.060, −0.021±0.024 (−0.003) | 0.050, −0.006±0.000 (−0.012) |
+| Zero input | 0.052, −0.002±0.003 (−0.007) | 0.050, −0.006±0.000 (−0.006) |
+| Shuffle | 0.056, −0.008±0.012 (−0.005) | – |
+
+| RLDX-1 | seen + P: FPR, Δℓ̄ | unseen + E: FPR, Δℓ̄ |
+|---|---|---|
+| Mahalanobis | 0.059, −0.011±0.021 (0.000) | 0.062, 0.013±0.003 (0.010) |
+| Cosine k-NN | 0.068, 0.000±0.000 (0.000) | 0.070, 0.039±0.000 (0.022) |
+| PCA-KMeans | 0.058, 0.001±0.000 (0.000) | 0.058, 0.016±0.006 (0.017) |
+| RND | 0.062, −0.012±0.019 (0.001) | 0.096, 0.020±0.013 (0.026) |
+| SAFE-MLP | 0.065, −0.003±0.003 (0.000) | 0.075, −0.005±0.000 (−0.005) |
+| SAFE-LSTM | 0.065, 0.033±0.005 (0.029) | 0.075, 0.067±0.001 (0.075) |
+| Hide-and-Seek | 0.066, 0.047±0.020 (0.110) | 0.027, 0.050±0.011 (0.140) |
+| First step | 0.068, −0.001±0.004 (0.002) | 0.050, −0.014±0.016 (−0.019) |
+| Zero input | 0.073, 0.006±0.006 (0.006) | 0.075, −0.005±0.000 (−0.005) |
+| Shuffle | 0.064, 0.001±0.002 (0.013) | – |
+
+**XR-1 seen-task ensembles + P (Table III).** P alone raises 21 false alarms. FA is the number of
+false alarms; the interval is the bootstrap 95% CI of the matched gain. The adaptive value is in
+brackets.
+
+| Monitor + P | FA | Δℓ̄, same target | Δℓ̄, matched [95% CI] |
+|---|---|---|---|
+| SAFE-MLP | 16 | 0.007 | **0.039 [0.008, 0.072]** (0.015) |
+| Hide-and-Seek | 23 | 0.072 | 0.057 [−0.014, 0.121] (0.056) |
+| Mahalanobis | 20 | 0.019 | **0.032 [0.001, 0.065]** (0.030) |
+| Cosine k-NN | 18 | −0.002 | 0.017 [−0.013, 0.052] |
+| PCA-KMeans | 21 | 0.011 | 0.007 [−0.020, 0.039] |
+| RND | 22 | 0.003 | −0.010 [−0.033, 0.017] |
+| First step | 21 | −0.002 | −0.006 [−0.014, 0.007] (−0.003) |
+| Zero input | 22 | 0.009 | −0.004 [−0.015, 0.010] (−0.003) |
+| Shuffle | 24 | 0.010 | −0.014 [−0.028, 0.002] (−0.011) |
+
+- **H2 nulls.** SAFE-MLP and Hide-and-Seek beat all 100 noise fusions and all 100 resampled fusions
+  (rank p = 0.0099). The nulls' largest matched gain is 0.005.
+- **Budget timer.** β = 0.02 gives 23 FA and −0.009 over P. Hide-and-Seek + P gains 0.064 over this
+  timer.
+- **Per task type** (matched, fraction of H_k; seconds in brackets):
+  - Hide-and-Seek: atomic 0.141 (5.1 s), composite 0.026 (−0.1 s).
+  - SAFE-MLP: atomic 0.104 (3.4 s), composite 0.015 (0.8 s).
+- **Fig. 1** (rollout `d5be410e…`, CloseToasterOvenDoor, L = H = 29): Hide-and-Seek's score alarms at
+  step 8, the fused timer at 26 and P at 20.
+
+**Unseen-task ensembles, full-pipeline bootstrap with frozen paths.** The intervals are 95% CIs of
+the matched gain.
+
+| | XR-1 vs E | XR-1 vs G | RLDX-1 vs E | RLDX-1 vs G |
+|---|---|---|---|---|
+| Hide-and-Seek | 0.002 [−0.062, 0.132] | 0.019 [−0.059, 0.121] | 0.040 [−0.005, 0.171] | 0.076 [−0.027, 0.129] |
+| SAFE-MLP | −0.006 [−0.057, 0.011] | −0.037 [−0.171, 0.048] | −0.005 [−0.033, 0.012] | −0.033 [−0.106, 0.012] |
+| SAFE-LSTM | 0.007 [−0.073, 0.049] | 0.012 [−0.093, 0.088] | 0.058 [−0.043, 0.092] | −0.048 [−0.131, 0.012] |
+| Hide-and-Seek − SAFE-MLP | 0.008 [−0.048, 0.156] | 0.056 [−0.040, 0.221] | **0.045 [0.002, 0.177]** | **0.109 [0.004, 0.201]** |
+
+With paths fixed on validation, the Hide-and-Seek ensembles on unseen tasks raise far fewer test
+false alarms than the target:
+- XR-1: 4 against E's 19, and 9 against G's 9.
+- RLDX-1: 5 against E's 30, and 3 against G's 26.
+
+The matched comparisons are therefore made at low false-alarm counts.
+
+**Against the expectations.**
+- On seen tasks, the fixed paths change little. SAFE-MLP's matched gain rises from 0.015 to 0.039,
+  with a CI above zero. Hide-and-Seek's ensemble is unchanged (0.057, CI includes zero).
+- On unseen tasks, the adaptive gains of Hide-and-Seek mostly came from tuning the path on the
+  calibration data:
+  - XR-1, Hide-and-Seek + E: 0.097 becomes 0.002;
+  - RLDX-1, Hide-and-Seek + E: 0.157 becomes 0.040;
+  - no unseen-task fused CI now lies above zero.
+- Hide-and-Seek still beats SAFE-MLP on RLDX-1's unseen tasks.
+- H3, the band rows and the timers are unchanged.

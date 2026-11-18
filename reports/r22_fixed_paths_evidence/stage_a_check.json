@@ -1,0 +1,1036 @@
+{
+ "plan": "docs/r22_fixed_paths_plan.md (R22 stage A)",
+ "pairs": {
+  "xt/0": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/xt/fold_0",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_20261027_212141/fold_0",
+   "lead_calibration": {
+    "compared": 4566,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 4578,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "hide_and_seek",
+     "hide_and_seek_first",
+     "hide_and_seek_zero"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "hide_and_seek",
+     "hide_and_seek_first",
+     "hide_and_seek_zero"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "ood/0": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/ood/fold_0",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_seen_unseen_20261028_235911/ood/fold_0",
+   "lead_calibration": {
+    "compared": 6088,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 6104,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "knn_cosine",
+     "mahalanobis",
+     "pca_kmeans",
+     "rnd"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "knn_cosine",
+     "mahalanobis",
+     "pca_kmeans",
+     "rnd"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "safe/0": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/safe/fold_0",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_safe_20261028_193716/folds/fold_0",
+   "lead_calibration": {
+    "compared": 1522,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 1526,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "safe"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "safe"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "safe_lstm/0": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/safe_lstm/fold_0",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_r11_rows_20261030_220636/safe_lstm/fold_0",
+   "lead_calibration": {
+    "compared": 1522,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 1526,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "safe_lstm"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "safe_lstm"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "xt/1": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/xt/fold_1",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_20261027_212141/fold_1",
+   "lead_calibration": {
+    "compared": 4566,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 4578,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "hide_and_seek",
+     "hide_and_seek_first",
+     "hide_and_seek_zero"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "hide_and_seek",
+     "hide_and_seek_first",
+     "hide_and_seek_zero"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "ood/1": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/ood/fold_1",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_seen_unseen_20261028_235911/ood/fold_1",
+   "lead_calibration": {
+    "compared": 6088,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 6104,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "knn_cosine",
+     "mahalanobis",
+     "pca_kmeans",
+     "rnd"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "knn_cosine",
+     "mahalanobis",
+     "pca_kmeans",
+     "rnd"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "safe/1": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/safe/fold_1",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_safe_20261028_193716/folds/fold_1",
+   "lead_calibration": {
+    "compared": 1522,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 1526,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "safe"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "safe"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "safe_lstm/1": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/safe_lstm/fold_1",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_r11_rows_20261030_220636/safe_lstm/fold_1",
+   "lead_calibration": {
+    "compared": 1522,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 1526,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "safe_lstm"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "safe_lstm"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "xt/2": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/xt/fold_2",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_20261027_212141/fold_2",
+   "lead_calibration": {
+    "compared": 4566,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 4578,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "hide_and_seek",
+     "hide_and_seek_first",
+     "hide_and_seek_zero"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "hide_and_seek",
+     "hide_and_seek_first",
+     "hide_and_seek_zero"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "ood/2": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/ood/fold_2",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_seen_unseen_20261028_235911/ood/fold_2",
+   "lead_calibration": {
+    "compared": 6088,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 6104,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "knn_cosine",
+     "mahalanobis",
+     "pca_kmeans",
+     "rnd"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "knn_cosine",
+     "mahalanobis",
+     "pca_kmeans",
+     "rnd"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "safe/2": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/safe/fold_2",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_safe_20261028_193716/folds/fold_2",
+   "lead_calibration": {
+    "compared": 1522,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 1526,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "safe"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "safe"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "safe_lstm/2": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/safe_lstm/fold_2",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_r11_rows_20261030_220636/safe_lstm/fold_2",
+   "lead_calibration": {
+    "compared": 1522,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 1526,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "safe_lstm"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "safe_lstm"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "xt/3": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/xt/fold_3",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_20261027_212141/fold_3",
+   "lead_calibration": {
+    "compared": 4566,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 4578,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "hide_and_seek",
+     "hide_and_seek_first",
+     "hide_and_seek_zero"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "hide_and_seek",
+     "hide_and_seek_first",
+     "hide_and_seek_zero"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "ood/3": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/ood/fold_3",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_seen_unseen_20261028_235911/ood/fold_3",
+   "lead_calibration": {
+    "compared": 6088,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 6104,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "knn_cosine",
+     "mahalanobis",
+     "pca_kmeans",
+     "rnd"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "knn_cosine",
+     "mahalanobis",
+     "pca_kmeans",
+     "rnd"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "safe/3": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/safe/fold_3",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_safe_20261028_193716/folds/fold_3",
+   "lead_calibration": {
+    "compared": 1522,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 1526,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "safe"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "safe"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "safe_lstm/3": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/safe_lstm/fold_3",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_r11_rows_20261030_220636/safe_lstm/fold_3",
+   "lead_calibration": {
+    "compared": 1522,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 1526,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "safe_lstm"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "safe_lstm"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "safe/all": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/safe/fold_all",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_cross_task_safe_20261028_193716/folds/fold_all",
+   "lead_calibration": {
+    "compared": 1522,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 1526,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "safe"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "safe"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  },
+  "safe_lstm/all": {
+   "new": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22a_validation_scores_20261118_195917/safe_lstm/fold_all",
+   "stored": "/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/xr1_r11_rows_20261030_220636/safe_lstm/fold_all",
+   "lead_calibration": {
+    "compared": 1522,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "confirmatory_test": {
+    "compared": 1526,
+    "missing": 0,
+    "label_mismatch": 0,
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "normalizations": {
+    "max_abs_diff": 0.0,
+    "ok": true
+   },
+   "august_calibration": {
+    "rollouts": 228,
+    "detectors": [
+     "safe_lstm"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "august_test": {
+    "rollouts": 760,
+    "detectors": [
+     "safe_lstm"
+    ],
+    "seeds": [
+     "0",
+     "1",
+     "2"
+    ],
+    "missing": 0,
+    "nonfinite": 0,
+    "label_mismatch": 0,
+    "seed_mismatch": 0,
+    "ok": true
+   },
+   "ok": true
+  }
+ },
+ "failed": []
+}
