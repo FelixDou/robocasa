@@ -21,6 +21,8 @@ calibration successes, split per task into reference and nonconformity halves.
              resampled rollout never lands in both halves) and test rollouts within task and class;
              every band and timer refitted, the timer re-matched; percentile 95% CIs.
 """
+import hashlib
+import json
 import math
 import sys
 from pathlib import Path
@@ -71,6 +73,15 @@ def band_alarms(trajectories, fit):
         j = first(x, fit)
         out[i] = math.inf if j is None else float(j + 1)
     return out
+
+
+def cat(parts):
+    return np.concatenate(parts) if parts else np.zeros(0, int)
+
+
+def distinct_count(n):
+    """Expected number of distinct rollouts in a bootstrap sample of n, rounded (at least 1)."""
+    return max(1, int(round(n * (1 - (1 - 1 / n) ** n))))
 
 
 def light(r):
@@ -128,8 +139,40 @@ class Design:
                 by = self.test_by[(t, f)]
                 if len(by):
                     test.append(rng.choice(by, len(by)))
-        cat = lambda v: np.concatenate(v) if v else np.zeros(0, int)
         return cat(ref), cat(conf), cat(test)
+
+    def draw_test(self, rng):
+        """R21b `test`: calibration as it is; tasks with replacement, then test rollouts within class."""
+        test = []
+        for t in rng.choice(self.tasks, len(self.tasks)):
+            for f in (False, True):
+                by = self.test_by[(t, f)]
+                if len(by):
+                    test.append(rng.choice(by, len(by)))
+        return np.arange(len(self.ref)), np.arange(len(self.conf)), cat(test)
+
+    def draw_calibration(self, rng, mode):
+        """R21b calibration variants (test rows as they are):
+          full      tasks with replacement, then successes within task and half with replacement
+          rollouts  every task once, successes within task and half with replacement
+          distinct  every task once, m of the n successes per task and half without replacement, m the
+                    expected number of distinct rollouts in a bootstrap sample of n
+          tasks     tasks with replacement, each drawn task's successes as they are"""
+        ref, conf = [], []
+        tasks = rng.choice(self.tasks, len(self.tasks)) if mode in ("full", "tasks") else self.tasks
+        for t in tasks:
+            for by, pick in ((self.ref_by[t], ref), (self.conf_by[t], conf)):
+                if not len(by):
+                    continue
+                if mode in ("full", "rollouts"):
+                    pick.append(rng.choice(by, len(by)))
+                elif mode == "distinct":
+                    pick.append(np.sort(rng.choice(by, distinct_count(len(by)), replace=False)))
+                elif mode == "tasks":
+                    pick.append(by)
+                else:
+                    raise ValueError(f"unknown calibration mode {mode}")
+        return cat(ref), cat(conf), np.arange(len(self.test))
 
     def fold(self, F, pick):
         ri, ci, ti = pick
@@ -398,6 +441,186 @@ def check_r12(res, list_b, names=R12_NAMES):
                                                   r12=(fu.get("matched") or {}).get("gain"),
                                                   r12_timer_fp=(fu.get("matched") or {}).get("fp"))))
     return dict(ok=bool(ok and rows), rows=rows)
+
+
+# ---- R21b: where the lopsided CIs come from ----------------------------------------------------------
+
+PLAN_B = "docs/r21b_band_ci_diagnostic_plan.md (R21b)"
+VARIANTS = ("full", "test", "calibration", "calibration_rollouts", "calibration_distinct", "calibration_tasks")
+CAL_MODES = dict(calibration="full", calibration_rollouts="rollouts", calibration_distinct="distinct",
+                 calibration_tasks="tasks")
+STATS = ("standalone_gain", "standalone_matched", "fused_gain", "fused_matched", "standalone_fp", "fused_fp",
+         "timer_fp", "standalone_matched_timer_fp", "fused_matched_timer_fp")
+GAINS = ("standalone_gain", "standalone_matched", "fused_gain", "fused_matched")
+SHIFT = 0.02
+
+
+def replicate_values(r):
+    """The saved statistics of one evaluate() result for one timer."""
+    sa, fu = r["standalone"], r["fused"]
+    mfp = lambda p: p["matched"]["timer_fp"] if p.get("matched") else NAN
+    return dict(standalone_gain=sa["gain"], standalone_matched=matched_gain(sa), fused_gain=fu["gain"],
+                fused_matched=matched_gain(fu), standalone_fp=sa["fp"], fused_fp=fu["fp"], timer_fp=r["timer_alone"]["fp"],
+                standalone_matched_timer_fp=mfp(sa), fused_matched_timer_fp=mfp(fu))
+
+
+def spearman(x, y):
+    m = ~(np.isnan(x) | np.isnan(y))
+    if m.sum() < 3 or np.ptp(x[m]) == 0 or np.ptp(y[m]) == 0:
+        return NAN
+    rank = lambda v: np.argsort(np.argsort(v, kind="stable"), kind="stable").astype(float)
+    return float(np.corrcoef(rank(x[m]), rank(y[m]))[0, 1])
+
+
+def describe(point, v):
+    ok = v[~np.isnan(v)]
+    if not len(ok):
+        return dict(point=point, replicates=0)
+    p = np.nanpercentile(v, [2.5, 97.5])
+    return dict(point=point, replicates=int(len(ok)), failed=int(len(v) - len(ok)), mean=float(ok.mean()),
+                median=float(np.median(ok)), ci95=[float(p[0]), float(p[1])], below_zero=float(np.mean(ok < 0)),
+                shift=None if point is None or isinstance(point, float) and math.isnan(point) else float(point - np.median(ok)))
+
+
+def draw_variant(d, rng, variant):
+    if variant == "full":
+        return d.draw(rng)
+    if variant == "test":
+        return d.draw_test(rng)
+    return d.draw_calibration(rng, CAL_MODES[variant])
+
+
+def diagnostic(d, key_ofs, timers, rk, B=BOOT_B, seed=BOOT_SEED, variants=VARIANTS, progress=None):
+    """Per variant, B replicates (one generator per variant, seeded alike) of every head's evaluation.
+    Returns (summary {variant: {timer: {head: {stat: describe}}}}, replicates {same: {stat: array}}, point)."""
+    point = {h: evaluate(d, k, timers, rk) for h, k in key_ofs.items()}
+    reps = {v: {t: {h: {s: np.full(B, NAN) for s in STATS} for h in key_ofs} for t in timers} for v in variants}
+    for v in variants:
+        rng = np.random.default_rng(seed)
+        for b in range(B):
+            pick = draw_variant(d, rng, v)
+            for h, k in key_ofs.items():
+                try:
+                    r = evaluate(d, k, timers, rk, pick=pick)
+                except (ValueError, ZeroDivisionError):
+                    continue
+                for t in timers:
+                    for s, x in replicate_values(r[t]).items():
+                        reps[v][t][h][s][b] = x
+            if progress and (b + 1) % 250 == 0:
+                progress(v, b + 1, B)
+    summary = {}
+    for v in variants:
+        summary[v] = {}
+        for t in timers:
+            summary[v][t] = {}
+            for h in key_ofs:
+                pv = replicate_values(point[h][t])
+                arr = reps[v][t][h]
+                row = {s: describe(pv[s], arr[s]) for s in STATS}
+                row["spearman_fp_vs_matched"] = dict(standalone=spearman(arr["standalone_fp"], arr["standalone_matched"]),
+                                                     fused=spearman(arr["fused_fp"], arr["fused_matched"]))
+                summary[v][t][h] = row
+    return summary, reps, point
+
+
+def check_d0(summary_full, reference, B, tol=TOL):
+    """Gate D0: variant `full` reproduces R21's bootstrap block {timers: {t: {h: {part: ...}}}, samples}."""
+    rows, ok = [], reference is not None and reference.get("samples") == B
+    for t, by_h in (reference or {}).get("timers", {}).items():
+        for h, parts in by_h.items():
+            if "_minus_" in h:
+                continue
+            mine = (summary_full.get(t) or {}).get(h)
+            if mine is None:
+                rows.append(dict(timer=t, head=h, found=False))
+                ok = False
+                continue
+            worst = 0.0
+            for p in PARTS:
+                ref = parts[p]
+                g, m = mine[f"{p}_gain"], mine[f"{p}_matched"]
+                pairs = [(g["point"], ref["gain"]), (m["point"], ref["matched_gain"])]
+                pairs += list(zip(g.get("ci95", [NAN, NAN]), ref["gain_ci95"]))
+                pairs += list(zip(m.get("ci95", [NAN, NAN]), ref["matched_ci95"]))
+                for a, b in pairs:
+                    worst = max(worst, 0.0 if (a is None and b is None) else abs(float(a) - float(b)))
+            ok &= worst <= tol
+            rows.append(dict(timer=t, head=h, found=True, max_abs_diff=worst, ok=worst <= tol))
+    return dict(ok=bool(ok and rows), compared=len(rows), samples=dict(r21=(reference or {}).get("samples"), r21b=B),
+                rows=rows)
+
+
+def diagnose(sides, heads, rk, B=BOOT_B, seed=BOOT_SEED, reference=None, variants=VARIANTS, progress=None):
+    """R21b on one policy: the diagnostic on every side's ensembles. reference: R21's `bootstrap` block
+    {side: ...} for gate D0. Returns (result, replicate arrays {name: array}, problems)."""
+    res = dict(plan=PLAN_B, variants=list(variants), samples=B, seed=seed, sides={}, checks={})
+    arrays, d0 = {}, {}
+    for side, spec in sides.items():
+        key_ofs = {h: by[side][ENSEMBLE] for h, by in heads.items() if side in by and ENSEMBLE in by[side]}
+        say = None if progress is None else (lambda v, b, n, side=side: progress(f"R21b {side} {v}: {b}/{n}"))
+        summary, reps, _ = diagnostic(spec["design"], key_ofs, spec["timers"], rk, B, seed, variants, say)
+        res["sides"][side] = summary
+        for v, by_t in reps.items():
+            for t, by_h in by_t.items():
+                for h, by_s in by_h.items():
+                    for s, a in by_s.items():
+                        arrays[f"{side}/{v}/{t}/{h}/{s}"] = a
+        if "full" in summary:
+            d0[side] = check_d0(summary["full"], (reference or {}).get(side), B)
+    res["checks"]["D0_full_equals_r21_bootstrap"] = dict(ok=bool(d0) and all(v["ok"] for v in d0.values()), by_side=d0)
+    problems = [] if res["checks"]["D0_full_equals_r21_bootstrap"]["ok"] else ["D0"]
+    return res, arrays, problems
+
+
+def save_replicates(path, arrays):
+    """The replicate arrays as one compressed .npz (keys: side__variant__timer__head__stat)."""
+    np.savez_compressed(path, **{k.replace("/", "__"): v for k, v in arrays.items()})
+
+
+def run_diagnostic(args, sides, spec, rk, output, reference_path):
+    """Shared by the two hooks: R21b after R21, with R21's output as the D0 reference."""
+    ref = json.loads(Path(reference_path).read_text())
+    boot = (ref.get("r21") or {}).get("bootstrap")
+    if not boot:
+        raise SystemExit("error: --r21b-reference must be an R21 output with its bootstrap (r21.bootstrap)")
+    res, arrays, problems = diagnose(sides, spec, rk, B=args.r21b_boot, reference=boot,
+                                     progress=lambda m: print(m, flush=True))
+    npz = Path(output).with_name(Path(output).stem + "_r21b_replicates.npz")
+    save_replicates(npz, arrays)
+    res["inputs"] = dict(r21=dict(path=str(Path(reference_path).resolve()), sha256=sha256(reference_path)))
+    res["replicates_file"] = npz.name
+    return res, problems
+
+
+def sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def print_diagnostic(res, label, head="hide_and_seek"):
+    print(f"R21b {label}: {head}'s matched gains per resampling variant: point | median [2.5%, 97.5%] | share < 0 | "
+          f"shift (point - median) | rule false alarms point/median")
+    for side, by_v in res["sides"].items():
+        timers = next(iter(by_v.values())).keys()
+        for t in timers:
+            for part in PARTS:
+                print(f"  {side} {t} {'band alone' if part == 'standalone' else 'band OR timer'}:")
+                for v, by_t in by_v.items():
+                    row = by_t[t].get(head)
+                    if row is None:
+                        continue
+                    m, fp = row[f"{part}_matched"], row[f"{part}_fp"]
+                    if not m.get("replicates"):
+                        print(f"    {v:22s} no replicate")
+                        continue
+                    shift = NAN if m["shift"] is None else m["shift"]
+                    flag = " SHIFT" if shift > SHIFT else ""
+                    print(f"    {v:22s} {m['point']:+.3f} | {m['median']:+.3f} [{m['ci95'][0]:+.3f}, {m['ci95'][1]:+.3f}] | "
+                          f"{m['below_zero']:.2f} | {shift:+.3f}{flag} | {fp['point']:.0f}/{fp['median']:.0f} "
+                          f"(Spearman {row['spearman_fp_vs_matched'][part]:+.2f})")
+    d0 = res["checks"]["D0_full_equals_r21_bootstrap"]
+    print(f"R21b D0: {'OK' if d0['ok'] else 'FAILED'} "
+          + "; ".join(f"{s}: {v['compared']} compared, samples {v['samples']}" for s, v in d0["by_side"].items()))
 
 
 # ---- printing -------------------------------------------------------------------------------------

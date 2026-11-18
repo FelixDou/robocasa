@@ -136,6 +136,59 @@ class R21Test(unittest.TestCase):
                               live=False)
         self.assertIn("R0", problems)
 
+    def test_r21b_draw_variants(self):
+        """R21b: the test variant keeps the calibration, the calibration variants keep the test set; `distinct`
+        has no duplicate and the expected count of distinct rollouts; `tasks` takes each drawn task whole."""
+        rng = np.random.default_rng(1)
+        d = self.unseen
+        ri, ci, ti = d.draw_test(rng)
+        self.assertTrue(np.array_equal(ri, np.arange(len(d.ref))) and np.array_equal(ci, np.arange(len(d.conf))))
+        self.assertEqual(len(ti), len(d.test))
+        for mode in ("full", "rollouts", "distinct", "tasks"):
+            ri, ci, ti = d.draw_calibration(rng, mode)
+            self.assertTrue(np.array_equal(ti, np.arange(len(d.test))))
+            if mode in ("full", "rollouts"):
+                self.assertEqual((len(ri), len(ci)), (len(d.ref), len(d.conf)))
+        ri, ci, _ = d.draw_calibration(rng, "distinct")
+        self.assertEqual(len(set(ri.tolist())), len(ri))
+        for t in TASKS:
+            n = len(d.ref_by[t])
+            self.assertEqual(int(np.sum(d.ref_task[ri] == t)), r21.distinct_count(n))
+        self.assertEqual(r21.distinct_count(5), 3)
+        self.assertEqual(r21.distinct_count(10), 7)
+        ri, ci, _ = d.draw_calibration(rng, "tasks")
+        for t in set(d.ref_task[ri]):
+            k = int(np.sum(d.ref_task[ri] == t))
+            self.assertEqual(k % len(d.ref_by[t]), 0)
+        ri, _, _ = d.draw_calibration(rng, "rollouts")
+        self.assertEqual(set(d.ref_task[ri]), set(TASKS))
+        with self.assertRaises(ValueError):
+            d.draw_calibration(rng, "other")
+
+    def test_r21b_full_variant_replays_r21_bootstrap(self):
+        """Gate D0: variant `full` with R21's seed reproduces R21's bootstrap exactly; a changed reference or a
+        different number of replicates fails."""
+        heads = {"h": {"seen": {r21.ENSEMBLE: lambda F: "h~@seen"}, "unseen": {r21.ENSEMBLE: lambda F: f"h~@{F}"}},
+                 "z": {"seen": {r21.ENSEMBLE: lambda F: "z~@seen"}, "unseen": {r21.ENSEMBLE: lambda F: f"z~@{F}"}}}
+        sides = dict(seen=dict(design=self.seen, timers=("P",)), unseen=dict(design=self.unseen, timers=("G_abs", "G")))
+        ref = {side: r21.bootstrap(s["design"], {h: heads[h][side][r21.ENSEMBLE] for h in heads}, s["timers"], self.rk,
+                                   B=4, contrasts=(("h", "z"),))[0] for side, s in sides.items()}
+        res, arrays, problems = r21.diagnose(sides, heads, self.rk, B=4, reference=ref)
+        self.assertEqual(problems, [], res["checks"])
+        d0 = res["checks"]["D0_full_equals_r21_bootstrap"]
+        self.assertEqual(d0["by_side"]["unseen"]["compared"], 4)          # 2 heads x (E, G); contrasts skipped
+        self.assertEqual(set(res["sides"]["unseen"]), set(r21.VARIANTS))
+        row = res["sides"]["unseen"]["test"]["G_abs"]["h"]
+        self.assertEqual(row["fused_matched"]["replicates"] + row["fused_matched"]["failed"], 4)
+        self.assertIn("spearman_fp_vs_matched", row)
+        self.assertEqual(len(arrays["unseen/calibration_distinct/G/h/fused_matched"]), 4)
+        bad = {s: dict(v) for s, v in ref.items()}
+        bad["seen"] = dict(ref["seen"], timers={"P": {h: {p: dict(v, gain=v["gain"] + 1e-6) for p, v in by.items()}
+                                                      if "_minus_" not in h else by
+                                                      for h, by in ref["seen"]["timers"]["P"].items()}})
+        self.assertIn("D0", r21.diagnose(sides, heads, self.rk, B=4, reference=bad, variants=("full",))[2])
+        self.assertIn("D0", r21.diagnose(sides, heads, self.rk, B=3, reference=ref, variants=("full",))[2])
+
     def test_running_max_gap(self):
         self.assertEqual(r21.running_max_gap(self.te, "h~#0@seen", "h#0@seen"), 0.0)
         self.assertGreater(r21.running_max_gap(self.te, "h~#0@seen", "h#1@seen"), 0.0)

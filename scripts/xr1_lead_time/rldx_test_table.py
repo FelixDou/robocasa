@@ -692,7 +692,12 @@ def r21_rldx(a, parts, held, folds, tasks, rk):
     if not n1["ok"]:
         problems.append("N1")
     res["inputs"] = dict(r19=dict(path=str(Path(a.r21_reference).resolve()), sha256=sha256(a.r21_reference)))
-    return res, problems
+    diag, diag_problems = None, []
+    if a.r21b:
+        if not a.r21b_reference:
+            raise SystemExit("error: --r21b needs --r21b-reference, R21's RLDX-1 output (rldx_e1b_r21.json)")
+        diag, diag_problems = r21.run_diagnostic(a, sides, spec, rk, a.output, a.r21b_reference)
+    return res, problems, diag, diag_problems
 
 
 def run(a):
@@ -878,9 +883,11 @@ def run(a):
             print("\nR20 OK")
     elif a.r20:
         print("R20 FAILED: no R20 rows after a failed gate")
+    if a.r21b and not a.r21:
+        raise SystemExit("error: --r21b runs after R21: give --r21 and its reference too")
     if a.r21 and status == 0:
         import r21_native_bands as r21m
-        r21, problems = r21_rldx(a, parts_new, held, folds, tasks, rk)
+        r21, problems, r21b, problems_b = r21_rldx(a, parts_new, held, folds, tasks, rk)
         result["r21"], result["r21_failures"] = r21, problems
         print()
         r21m.print_summary(r21, "RLDX-1")
@@ -889,6 +896,15 @@ def run(a):
             status = 1
         else:
             print("\nR21 OK")
+        if a.r21b:
+            result["r21b"], result["r21b_failures"] = r21b, problems_b
+            print()
+            r21m.print_diagnostic(r21b, "RLDX-1")
+            if problems_b or problems:
+                print("R21b FAILED (no R21b result is used): " + ", ".join(problems_b + problems))
+                status = 1
+            else:
+                print("\nR21b OK")
     elif a.r21:
         print("R21 FAILED: no R21 result after a failed gate")
     if a.curves and status == 0:
@@ -934,6 +950,9 @@ def main(argv=None):
     r.add_argument("--r21", action="store_true", help="R21: the original alarm rules (r21_native_bands.py)")
     r.add_argument("--r21-reference", help="R21 gate N1: R19's output (rldx_e1b_r19.json)")
     r.add_argument("--r21-boot", type=int, default=1000, help="R21 bootstrap replicates")
+    r.add_argument("--r21b", action="store_true", help="R21b: the band CI diagnostic, after R21")
+    r.add_argument("--r21b-reference", help="R21b gate D0: R21's output (rldx_e1b_r21.json)")
+    r.add_argument("--r21b-boot", type=int, default=1000, help="R21b replicates per variant")
     r.add_argument("--reference-table", help="R17 K0: an earlier run's output whose table2 this run must equal")
     a = p.parse_args(argv)
     return {"ids": ids_cmd, "safe-fold": safe_fold_cmd, "run": run}[a.cmd](a)

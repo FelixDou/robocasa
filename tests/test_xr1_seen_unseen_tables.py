@@ -505,6 +505,20 @@ class RunTests(unittest.TestCase):
             self.assertIn("mean_std_over_seeds", r["heads"][su.HS]["seen"]["P"])
             self.assertIn(f"{su.HS}_minus_{su.SAFE}", r["bootstrap"]["unseen"]["timers"]["G_abs"])
             self.assertEqual(len(r["curves"][su.HS]["unseen"]["mean_std_over_seeds"]), len(r["curve_alphas"]))
+            # R21b after R21 (its own bootstrap skipped): variant `full` replays the R21 output's bootstrap (D0).
+            (root / "tables.json").rename(root / "r21.json")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + r21_args + ["--r21-r12-reference", str(root / "list_b.json"), "--r21-boot", "0",
+                                                    "--r21b", "--r21b-reference", str(root / "r21.json"), "--r21b-boot", "2"])
+            self.assertEqual(status, 0, buf.getvalue())
+            self.assertIn("R21b OK", buf.getvalue())
+            out = json.loads((root / "tables.json").read_text())
+            self.assertEqual(out["r21b_failures"], [])
+            self.assertTrue(out["r21b"]["checks"]["D0_full_equals_r21_bootstrap"]["ok"])
+            self.assertTrue((root / out["r21b"]["replicates_file"]).exists())
+            with np.load(root / out["r21b"]["replicates_file"]) as z:
+                self.assertEqual(len(z[f"unseen__test__G_abs__{su.HS}__fused_matched"]), 2)
 
     def test_r11_rows_and_unchanged_r6_rows(self):
         """R11: ActProbe joins Table II; SAFE-LSTM and ActProbe-T rows come from optional fold dirs; T6

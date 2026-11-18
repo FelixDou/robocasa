@@ -408,6 +408,15 @@ class RldxTestTableTest(unittest.TestCase):
             self.assertEqual(set(by_side["unseen"]), {"G_abs", "G"})
             self.assertIn("mean_std_over_seeds", by_side["unseen"]["G_abs"])
         self.assertIn("hide_and_seek_minus_safe_indep", r["bootstrap"]["seen"]["timers"]["P"])
+        # R21b after R21 (its own bootstrap skipped): variant `full` replays r21.json's bootstrap (D0).
+        status, text, out = self.run_table("r21b.json", extra=["--r21", "--r21-reference", str(self.root / "r19.json"),
+                                                               "--r21-boot", "0", "--r21b", "--r21b-reference",
+                                                               str(self.root / "r21.json"), "--r21b-boot", "2"])
+        self.assertEqual(status, 0, text)
+        self.assertIn("R21b OK", text)
+        self.assertTrue(out["r21b"]["checks"]["D0_full_equals_r21_bootstrap"]["ok"])
+        self.assertEqual(out["r21b"]["checks"]["D0_full_equals_r21_bootstrap"]["by_side"]["unseen"]["compared"], 6)
+        self.assertTrue((self.root / out["r21b"]["replicates_file"]).exists())
         # A changed R19 reference stops R21.
         ref = json.loads((self.root / "r19.json").read_text())
         ref["r19"]["native_bands"]["hide_and_seek"]["seen"]["fused"]["mean_lead"] += 1e-9

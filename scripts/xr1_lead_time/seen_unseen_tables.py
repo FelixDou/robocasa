@@ -509,7 +509,12 @@ def r21_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, seen, rkP):
     res["inputs"] = dict(r19=dict(path=str(Path(args.r21_reference).resolve()), sha256=sha256(args.r21_reference)),
                          r12_list_b=dict(path=str(Path(args.r21_r12_reference).resolve()),
                                          sha256=sha256(args.r21_r12_reference)))
-    return res, problems
+    diag, diag_problems = None, []
+    if args.r21b:
+        if not args.r21b_reference:
+            raise SystemExit("error: --r21b needs --r21b-reference, R21's XR-1 output (seen_unseen_tables_r21.json)")
+        diag, diag_problems = r21.run_diagnostic(args, sides, spec, rkP, args.output, args.r21b_reference)
+    return res, problems, diag, diag_problems
 
 
 # ---- loading ----------------------------------------------------------------------------------
@@ -875,9 +880,11 @@ def run(args):
         if reference is None or "timers_alone" not in (reference.get("r14") or {}):
             raise SystemExit("error: --r20 needs --r20-reference, R14's output (it holds r14.timers_alone)")
         r20, r20_failures = r20m.run(cal, te, held, folds, rkP, reference["r14"]["timers_alone"])
-    r21, r21_failures = None, []
+    r21, r21_failures, r21b, r21b_failures = None, [], None, []
+    if args.r21b and not args.r21:
+        raise SystemExit("error: --r21b runs after R21: give --r21 and its references too")
     if args.r21:
-        r21, r21_failures = r21_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, seen, rkP)
+        r21, r21_failures, r21b, r21b_failures = r21_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, seen, rkP)
     out = dict(base, checks=checks, reproduction_failures=[], table1=table1, table2=table2,
                notes=dict(std="ddof 1 over training seeds 0-2; timers are deterministic",
                           unseen_normalization="pooled over the fold's seen tasks",
@@ -894,6 +901,9 @@ def run(args):
     if args.r21:
         out["r21"] = r21
         out["r21_failures"] = r21_failures
+    if args.r21b:
+        out["r21b"] = r21b
+        out["r21b_failures"] = r21b_failures
     if args.curves:
         out["r18"] = r18
         out["r18_failures"] = r18_failures
@@ -948,6 +958,12 @@ def run(args):
             print("R21 FAILED (no R21 result is used): " + ", ".join(r21_failures))
             return 1
         print("R21 OK")
+    if args.r21b:
+        r21m.print_diagnostic(r21b, "XR-1")
+        if r21b_failures:
+            print("R21b FAILED (no R21b result is used): " + ", ".join(r21b_failures))
+            return 1
+        print("R21b OK")
     if args.curves:
         if r18_failures:
             print("R18 FAILED (no curve is used):\n  " + "\n  ".join(r18_failures))
@@ -992,6 +1008,9 @@ def main(argv=None):
     r.add_argument("--r21-reference", help="R21 gate N1: R19's output (seen_unseen_tables_r19.json)")
     r.add_argument("--r21-r12-reference", help="R21 gate N2: R12's list_b.json")
     r.add_argument("--r21-boot", type=int, default=1000, help="R21 bootstrap replicates")
+    r.add_argument("--r21b", action="store_true", help="R21b: the band CI diagnostic, after R21")
+    r.add_argument("--r21b-reference", help="R21b gate D0: R21's output (seen_unseen_tables_r21.json)")
+    r.add_argument("--r21b-boot", type=int, default=1000, help="R21b replicates per variant")
     r.add_argument("--r6-result", help="R11 gate T6: R6's seen_unseen_tables JSON, reproduced exactly")
     r.add_argument("--output", required=True)
     args = ap.parse_args(argv)
