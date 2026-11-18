@@ -352,6 +352,31 @@ nohup bash $R22A_LOG/a24_score.sh > $R22A_LOG/a24_score.log 2>&1 & echo "A2/A4 s
 **Progress:** `grep -c "rc=0" $R22A_LOG/a24_score.log` reaches 60, then `=== SCORING DONE`. Any other
 `rc` is a stop condition.
 
+### Switch to the newer commit (before the assembly and the gate, in the session that runs them)
+
+A1, A3 and the A2/A4 scoring ran from the worktree at `1b2ffab0` (from `$R22A_LOG/paths.env`). The
+assembly's validation cohorts (`--cohort-group`, `--cohort-ids`) and the gate script came later, so
+those two steps run from a worktree at the newer commit. The scoring code is the same in both, and
+the block below checks that. The running jobs are unaffected: the scoring script recorded its own
+paths when it was written.
+
+```bash
+export R22_SHA=<full SHA of the pushed commit containing this section>
+export R22_REPO=$PROJECT_FS/robocasa_r22_${R22_SHA:0:8}
+git -C $PROJECT_FS/robocasa fetch origin claude/r22-fixed-paths
+test -e $R22_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R22_REPO $R22_SHA
+test "$(git -C $R22_REPO rev-parse HEAD)" = "$R22_SHA" && echo "HEAD OK" || echo "STOP: wrong HEAD"
+git -C $R22_REPO diff --quiet 1b2ffab0 HEAD -- robocasa/recovery/safe/score_seen_checkpoint_external.py \
+  robocasa/recovery/safe/baselines/score_cross_task.py robocasa/recovery/safe/run_offline_detector_baselines.py \
+  && echo "SCORING CODE SAME" || echo "STOP: scoring code differs"
+export FOLDS=$R22_REPO/scripts/xr1_lead_time/cross_task_folds.json
+cd $R22_REPO
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_xr1_cross_task_safe tests.test_r22_stage_a_check \
+  2>&1 | grep -E "^(Ran|OK|FAILED)"
+```
+
+Continue only if `HEAD OK` and `SCORING CODE SAME` print and the tests end with `OK`.
+
 ### A2 + A4 assembly (same GPU session, after scoring; CPU, minutes)
 
 ```bash
