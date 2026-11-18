@@ -233,6 +233,57 @@ class PipelineTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 mod.main(argv)
 
+    def test_r22_extra_validation_cohort(self):
+        """R22: an extra cohort scored as another export group, kept to listed rollouts; the E1 cohorts are
+        written exactly as before; a wrong group or a missing listed rollout is refused."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            spec, held, _, safe_dirs, runs, score_dirs = pipeline(root)
+            tasks = sorted(spec["tasks"])
+            rng = np.random.default_rng(22)
+            aug = [dict(rollout_id=f"aug-{t}-{i}", task_name=t, failed=bool(i % 2), n=int(rng.integers(5, 12)))
+                   for t in tasks for i in range(4)]
+            keep = [r["rollout_id"] for r in aug if not r["rollout_id"].endswith("-3")]
+            (root / "aug_ids.json").write_text(json.dumps(keep))
+            aug_dirs = {}
+            for s in fx.SEEDS:
+                d = root / "score" / "fold_0" / "aug" / f"seed{s}"
+                d.mkdir(parents=True)
+                write_jsonl(d / "scores.jsonl", [dict(rollout_id=r["rollout_id"], task_name=r["task_name"],
+                                                      failed=r["failed"], scores=rng.standard_normal(r["n"]).tolist(),
+                                                      training_task=r["task_name"] not in held["0"]) for r in aug])
+                (d / "provenance.json").write_text(json.dumps(dict(
+                    training_run_dir=str(runs[("0", s)]), checkpoint_sha256=sha(runs[("0", s)] / "model_final.ckpt"),
+                    group="calibration", unseen_tasks="score", cutoff_rule="training",
+                    unseen_task_names=sorted(held["0"]), task_names=tasks, export_dir="/export/aug")))
+                aug_dirs[s] = d
+
+            def argv(out, group="calibration", ids=root / "aug_ids.json"):
+                a = ["assemble", "--fold", "0", "--folds", str(root / "folds.json"), "--runtime-bundle",
+                     str(root / "bundle.json"), "--fold-manifest", str(root / "fold_0.json"), "--output-dir", str(root / out),
+                     "--cohort-group", "august_calibration", group, "--cohort-ids", "august_calibration", str(ids)]
+                for s in fx.SEEDS:
+                    a += ["--training-run", s, str(runs[("0", s)]), "--scores", "august_calibration", s, str(aug_dirs[s])]
+                    for cohort, _ in COHORTS:
+                        a += ["--scores", cohort, s, str(score_dirs[("0", cohort, s)])]
+                return a
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(mod.main(argv("with_aug")), 0)
+            for cohort, _ in COHORTS:
+                self.assertEqual((root / "with_aug" / f"{cohort}_predictions.jsonl").read_text(),
+                                 (safe_dirs["0"] / f"{cohort}_predictions.jsonl").read_text())
+            rows = jsonl(root / "with_aug" / "august_calibration_predictions.jsonl")
+            self.assertEqual(sorted(r["rollout_id"] for r in rows), sorted(keep))
+            self.assertEqual({r["held_out"] for r in rows}, {True, False})
+            meta = json.loads((root / "with_aug" / "scoring.json").read_text())
+            self.assertEqual(meta["cohorts"][-1], "august_calibration")
+            with self.assertRaises(ValueError):
+                mod.main(argv("bad_group", group="prospective_test"))
+            (root / "too_many.json").write_text(json.dumps(keep + ["aug-missing-0"]))
+            with self.assertRaises(ValueError):
+                mod.main(argv("bad_ids", ids=root / "too_many.json"))
+
     def test_wrong_e1_reference_blocks_the_result(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

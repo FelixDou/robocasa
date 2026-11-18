@@ -180,10 +180,11 @@ qrsh -g tga-shinoda -l cpu_80=1 -l h_rt=12:00:00
 module load miniconda
 eval "$(/apps/t4/rhel9/free/miniconda/26.9.3/bin/conda shell.bash hook)"
 conda activate /gs/bs/tga-shinoda/felid/envs/robocasa_openpi
-export STORAGE_BS=/gs/bs/tga-shinoda/felid
+export STORAGE_BS=/gs/bs/tga-shinoda/felid PROJECT_FS=/gs/fs/tga-shinoda/felid
 source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
 source $STORAGE_BS/robocasa_logs/eval/xr1_r11_rows_20261030_220636/paths.env
 source $STORAGE_BS/robocasa_logs/eval/xr1_r14_hk_free_20261106_191531/paths.env
+export SAFE_PY=${SAFE_PY:-$STORAGE_BS/envs/vla_safe/bin/python}
 export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
 export R22_SHA=<full SHA of the pushed commit containing this runbook>
 export R22_REPO=$PROJECT_FS/robocasa_r22_${R22_SHA:0:8}
@@ -261,6 +262,155 @@ echo "== OOD seen per-seed outputs"; ls $OOD_ROOT/seed0/ $OOD_ROOT/seed0/calibra
 echo "== SAFE fold checkpoints"; ls -d $RS_ROOT/train/fold_*/indep_seed* 2>&1 | head -12; ls -d $R11_ROOT/train/fold_*/* 2>&1 | head -16
 ls $RS_ROOT/score/fold_0/ $R11_ROOT/score/fold_0/ 2>&1 | head
 ```
+
+### Discovery result (2026-11-18, r5n7)
+
+- **August SAFE exports:**
+  - `xr1_prospective_matched_fpr_20260815_163700/calibration_collection/official_safe_all_retained`,
+    group `calibration`, 454 rollouts;
+  - `.../prospective_test_collection/official_safe_all_retained`, group `prospective_test`, 1,643
+    rollouts.
+- **OOD caches:** `cache_calibration` (group `calibration`, 454) and `cache_prospective_test`
+  (`prospective_test`, 1,643), equal to `$XR1_PS_INPUTS`'s calibration and event predictions files.
+- **Validation IDs:** 228 (August calibration) and 760 (balanced August test).
+- **A5 needs no job:** the seen-task OOD runs wrote `seed$S/calibrate/calibration_predictions.jsonl`
+  and `seed$S/evaluate/event_predictions.jsonl`.
+- **SAFE checkpoints:** `$RS_ROOT/train/fold_{0..3}/indep_seed{0,1,2}` and
+  `$R11_ROOT/train/fold_{0..3,all}/lstm_seed{0,1,2}`. Fold all of SAFE-MLP is the frozen final refit
+  (`xr1_pooled_39tasks_final_refits_20260814_231508`).
+
+### A3. OOD folds 0–3 on the August cohorts (CPU, the A1 session, minutes)
+
+```bash
+cd $R22_REPO
+cache_of() { "$SAFE_PY" -I -c "import json,sys; m=json.load(open(sys.argv[1])); i=m.get('inputs', m); c=i[sys.argv[2]]; print(c['cache'], c['cache_group'])" $R6_ROOT/ood/fold_0/scoring.json $1; }
+read R6_LCAL_CACHE LCAL_GROUP <<< "$(cache_of cohort_lead_calibration)"
+read R6_TEST_CACHE TEST_GROUP <<< "$(cache_of cohort_confirmatory_test)"
+echo "E1 caches: $R6_LCAL_CACHE ($LCAL_GROUP) | $R6_TEST_CACHE ($TEST_GROUP)"
+for F in 0 1 2 3; do
+  CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 PYTHONPATH=$R22_REPO nohup nice -n 10 \
+    "$SAFE_PY" -u -m robocasa.recovery.safe.run_offline_detector_baselines score-fold \
+    --bundle 0=$R6_ROOT/ood/develop/fold_$F/seed0/baseline_bundle.json \
+    --bundle 1=$R6_ROOT/ood/develop/fold_$F/seed1/baseline_bundle.json \
+    --bundle 2=$R6_ROOT/ood/develop/fold_$F/seed2/baseline_bundle.json --folds $FOLDS \
+    --cohort lead_calibration $E1_OUT/calibration_predictions.jsonl $R6_LCAL_CACHE $LCAL_GROUP \
+    --cohort confirmatory_test $E1_OUT/test_predictions.jsonl $R6_TEST_CACHE $TEST_GROUP \
+    --cohort august_calibration $XR1_PS_INPUTS/calibration_predictions.jsonl $XR1_BASELINE_ROOT/cache_calibration calibration \
+    --cohort august_test $XR1_PS_INPUTS/event_predictions.jsonl $XR1_BASELINE_ROOT/cache_prospective_test prospective_test \
+    --output-dir $R22A_ROOT/ood/fold_$F > $R22A_LOG/a3_fold_$F.log 2>&1 &
+  echo "A3 fold $F PID $!"
+done
+```
+
+Each log ends with four `fold F: scored ...` lines; `Traceback` or `error` is a stop condition.
+
+### A2 + A4. SAFE-MLP and SAFE-LSTM on the August exports (one GPU, a new session)
+
+```bash
+qrsh -g tga-shinoda -l gpu_1=1 -l h_rt=8:00:00
+```
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/26.9.3/bin/conda shell.bash hook)"
+conda activate /gs/bs/tga-shinoda/felid/envs/robocasa_openpi
+export STORAGE_BS=/gs/bs/tga-shinoda/felid PROJECT_FS=/gs/fs/tga-shinoda/felid
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+source $STORAGE_BS/robocasa_logs/eval/xr1_r11_rows_20261030_220636/paths.env
+source $STORAGE_BS/robocasa_logs/eval/xr1_r14_hk_free_20261106_191531/paths.env
+export SAFE_PY=${SAFE_PY:-$STORAGE_BS/envs/vla_safe/bin/python}
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+source $(ls -d $STORAGE_BS/robocasa_logs/eval/r22a_validation_scores_* | tail -n 1)/paths.env
+export FOLDS=$R22_REPO/scripts/xr1_lead_time/cross_task_folds.json
+export XR1_FINAL_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/xr1_pooled_39tasks_final_refits_20260814_231508
+export AUG=$STORAGE_BS/robocasa_rollouts/safe/xr1_prospective_matched_fpr_20260815_163700
+echo "R22A_ROOT=$R22A_ROOT"; nvidia-smi --query-gpu=index,memory.used --format=csv,noheader
+"$SAFE_PY" -I -c "import json,sys; r=json.loads(open(sys.argv[1]).readline()); print('August row keys:', sorted(r))" $XR1_PS_INPUTS/calibration_predictions.jsonl
+cat > $R22A_LOG/a24_score.sh <<EOF
+#!/bin/bash
+cd $R22_REPO
+one() {
+  echo "=== START \$1 fold \$2 seed \$3 \$4 \$(date -Iseconds)"
+  CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$R22_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.score_seen_checkpoint_external \\
+    --export-dir \$5 --safe-repo $SAFE_REPO --training-run-dir \$6 \\
+    --output-dir $R22A_ROOT/score/\$1/fold_\$2/\$4/seed\$3 --group \$4 --device cuda --unseen-tasks score
+  echo "=== END \$1 fold \$2 seed \$3 \$4 rc=\$? \$(date -Iseconds)"
+}
+for S in 0 1 2; do
+  for G in calibration prospective_test; do
+    X=$AUG/\${G}_collection/official_safe_all_retained
+    one safe all \$S \$G \$X $XR1_FINAL_ROOT/indep_seed\$S
+    for F in 0 1 2 3; do one safe \$F \$S \$G \$X $RS_ROOT/train/fold_\$F/indep_seed\$S; done
+    for F in 0 1 2 3 all; do one safe_lstm \$F \$S \$G \$X $R11_ROOT/train/fold_\$F/lstm_seed\$S; done
+  done
+done
+echo "=== SCORING DONE"
+EOF
+nohup bash $R22A_LOG/a24_score.sh > $R22A_LOG/a24_score.log 2>&1 & echo "A2/A4 scoring PID $! on $(hostname)"
+```
+
+**Progress:** `grep -c "rc=0" $R22A_LOG/a24_score.log` reaches 60, then `=== SCORING DONE`. Any other
+`rc` is a stop condition.
+
+### A2 + A4 assembly (same GPU session, after scoring; CPU, minutes)
+
+```bash
+cd $R22_REPO
+AUGX=(--cohort-group august_calibration calibration --cohort-group august_test prospective_test
+      --cohort-ids august_calibration $AMEND2_ROOT/august_calibration_ids.json
+      --cohort-ids august_test $PSEED_ROOT/august_test_balanced_ids.json)
+for F in all 0 1 2 3; do
+  A=(); B=()
+  for S in 0 1 2; do
+    if [ $F = all ]; then RUN=$XR1_FINAL_ROOT/indep_seed$S; else RUN=$RS_ROOT/train/fold_$F/indep_seed$S; fi
+    A+=(--training-run $S $RUN --scores lead_calibration $S $RS_ROOT/score/fold_$F/lead_calibration/seed$S
+        --scores confirmatory_test $S $RS_ROOT/score/fold_$F/confirmatory_test/seed$S
+        --scores august_calibration $S $R22A_ROOT/score/safe/fold_$F/calibration/seed$S
+        --scores august_test $S $R22A_ROOT/score/safe/fold_$F/prospective_test/seed$S)
+    B+=(--training-run $S $R11_ROOT/train/fold_$F/lstm_seed$S
+        --scores lead_calibration $S $R11_ROOT/score/fold_$F/lead_calibration/seed$S
+        --scores confirmatory_test $S $R11_ROOT/score/fold_$F/confirmatory_test/seed$S
+        --scores august_calibration $S $R22A_ROOT/score/safe_lstm/fold_$F/calibration/seed$S
+        --scores august_test $S $R22A_ROOT/score/safe_lstm/fold_$F/prospective_test/seed$S
+        --train-scores $S $R11_ROOT/score/fold_$F/train_export/seed$S)
+  done
+  if [ $F = all ]; then
+    A+=(--reference-predictions lead_calibration $E1_OUT/calibration_predictions.jsonl
+        --reference-predictions confirmatory_test $E1_OUT/test_predictions.jsonl)
+  else
+    A+=(--fold-manifest $RS_ROOT/manifests/fold_$F.json); B+=(--fold-manifest $RS_ROOT/manifests/fold_$F.json)
+  fi
+  PYTHONPATH=$R22_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.cross_task_safe assemble --fold $F --folds $FOLDS \
+    --runtime-bundle $XR1_RUNTIME_BUNDLE "${A[@]}" "${AUGX[@]}" --output-dir $R22A_ROOT/safe/fold_$F 2>&1 | tail -n 4
+  PYTHONPATH=$R22_REPO "$SAFE_PY" -u -m robocasa.recovery.safe.cross_task_safe assemble --fold $F --detector safe_lstm \
+    --folds $FOLDS --runtime-bundle $XR1_RUNTIME_BUNDLE --train-check-tolerance 1e-6 "${B[@]}" "${AUGX[@]}" \
+    --output-dir $R22A_ROOT/safe_lstm/fold_$F 2>&1 | tail -n 4
+done | tee $R22A_LOG/a24_assemble.log
+grep -c "ASSEMBLY OK" $R22A_LOG/a24_assemble.log
+```
+
+All ten assemblies must print `ASSEMBLY OK` (count 10). SAFE-MLP fold all must also print its two E1
+`reference ... -> OK` lines and `bundle normalization ... -> OK`.
+
+### Stage A gate (after A1, A3 and the assembly; CPU, seconds)
+
+```bash
+cd $R22_REPO
+P=()
+for F in 0 1 2 3; do
+  P+=(--pair xt/$F $R22A_ROOT/xt/fold_$F $XT_ROOT/fold_$F --pair ood/$F $R22A_ROOT/ood/fold_$F $R6_ROOT/ood/fold_$F
+      --pair safe/$F $R22A_ROOT/safe/fold_$F $RS_ROOT/folds/fold_$F
+      --pair safe_lstm/$F $R22A_ROOT/safe_lstm/fold_$F $R11_ROOT/safe_lstm/fold_$F)
+done
+P+=(--pair safe/all $R22A_ROOT/safe/fold_all $RS_ROOT/folds/fold_all
+    --pair safe_lstm/all $R22A_ROOT/safe_lstm/fold_all $R11_ROOT/safe_lstm/fold_all)
+"$SAFE_PY" -I scripts/xr1_lead_time/r22_stage_a_check.py "${P[@]}" \
+  --validation august_calibration $AMEND2_ROOT/august_calibration_ids.json $XR1_PS_INPUTS/calibration_predictions.jsonl \
+  --validation august_test $PSEED_ROOT/august_test_balanced_ids.json $XR1_PS_INPUTS/event_predictions.jsonl \
+  --output $R22A_ROOT/stage_a_check.json | tee $R22A_LOG/stage_a_check.log
+```
+
+It must end with `STAGE A OK`, with 18 pairs (16 folds and both folds all) each `-> OK`.
 
 ## Result
 

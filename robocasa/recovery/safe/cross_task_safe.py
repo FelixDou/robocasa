@@ -42,6 +42,7 @@ import subprocess
 import numpy as np
 
 from .analyze_time_safe_hybrid import fit_safe_normalization
+from .baselines.run_baselines import load_rollout_ids
 from .baselines.score_cross_task import pooled_normalization
 
 PLAN = "docs/xr1_review_analyses_plan.md"
@@ -200,8 +201,25 @@ def assemble(args):
         checks["bundle_normalization"] = dict(max_abs_diff=worst, ok=worst <= 1e-12)
 
     names = [c for c, _, _ in args.scores]
-    if sorted(set(names)) != sorted(COHORTS):
-        raise ValueError(f"Scores are needed for exactly the cohorts {COHORTS}")
+    if not set(COHORTS) <= set(names):
+        raise ValueError(f"Scores are needed for at least the cohorts {COHORTS}")
+    # R22 (docs/r22_fixed_paths_plan.md): extra cohorts (the validation set) may be added. Each may name
+    # the export group it was scored as (--cohort-group) and keep only listed rollouts (--cohort-ids).
+    order = list(COHORTS) + [c for c in dict.fromkeys(names) if c not in COHORTS]
+    groups, keep_ids = {}, {}
+    for c, g in getattr(args, "cohort_group", None) or []:
+        if c in groups:
+            raise ValueError(f"Two groups for cohort {c}")
+        groups[c] = g
+    for c, path in getattr(args, "cohort_ids", None) or []:
+        if c in keep_ids:
+            raise ValueError(f"Two ID lists for cohort {c}")
+        keep_ids[c] = set(load_rollout_ids(path))
+    for c in [*groups, *keep_ids]:
+        if c not in order:
+            raise ValueError(f"--cohort-group/--cohort-ids name a cohort without scores: {c}")
+        if c in COHORTS:
+            raise ValueError("The E1 cohorts keep their own group and all their rollouts")
     cohorts = defaultdict(dict)
     provenance = defaultdict(dict)
     for cohort, s, d in args.scores:
@@ -215,19 +233,24 @@ def assemble(args):
             raise ValueError(f"{d} was scored with {prov['training_run_dir']}, not {runs[str(s)]}")
         if prov["checkpoint_sha256"] != sha256(runs[str(s)] / "model_final.ckpt"):
             raise ValueError(f"{d}: checkpoint hash differs from the training run's")
-        if prov["group"] != cohort:
-            raise ValueError(f"{d} is group {prov['group']}, not {cohort}")
+        if prov["group"] != groups.get(cohort, cohort):
+            raise ValueError(f"{d} is group {prov['group']}, not {groups.get(cohort, cohort)}")
         if prov.get("unseen_tasks") != "score" or prov.get("cutoff_rule") != "training":
             raise ValueError(f"{d} was not scored with --unseen-tasks score and the training cutoff rule")
         if set(prov["unseen_task_names"]) != held[F] & set(prov["task_names"]):
             raise ValueError(f"{d}: tasks scored as unseen differ from fold {F}'s held-out tasks")
         rows = {}
         for r in jsonl(d / "scores.jsonl"):
-            rows[str(r["rollout_id"])] = r
+            rid = str(r["rollout_id"])
+            if cohort in keep_ids and rid not in keep_ids[cohort]:
+                continue
+            rows[rid] = r
+        if cohort in keep_ids and set(rows) != keep_ids[cohort]:
+            raise ValueError(f"{d}: {len(keep_ids[cohort] - set(rows))} listed {cohort} rollouts were not scored")
         cohorts[cohort][str(s)] = rows
         provenance[cohort][str(s)] = dict(path=str(d), export_dir=prov["export_dir"],
                                           checkpoint_sha256=prov["checkpoint_sha256"])
-    for cohort in COHORTS:
+    for cohort in order:
         if sorted(cohorts[cohort]) != seeds:
             raise ValueError(f"{cohort}: scores for seeds {sorted(cohorts[cohort])}, training seeds {seeds}")
         ids = {s: set(v) for s, v in cohorts[cohort].items()}
@@ -239,7 +262,7 @@ def assemble(args):
 
     out.mkdir(parents=True, exist_ok=True)
     counts = {}
-    for cohort in COHORTS:
+    for cohort in order:
         n = 0
         with (out / f"{cohort}_predictions.jsonl").open("w") as stream:
             for rid in sorted(cohorts[cohort][seeds[0]]):
@@ -291,11 +314,13 @@ def assemble(args):
     for cohort, path in args.reference_predictions or []:
         if F != ALL:
             raise ValueError("--reference-predictions applies to fold all only")
-        if cohort not in COHORTS:
+        if cohort not in order:
             raise ValueError(f"Unknown cohort {cohort}")
         worst, n = 0.0, 0
         for r in jsonl(path):
             rid = str(r["rollout_id"])
+            if cohort in keep_ids and rid not in keep_ids[cohort]:
+                continue
             got = cohorts[cohort][seeds[0]].get(rid)
             if got is None:
                 raise ValueError(f"{cohort}: reference rollout {rid} was not scored")
@@ -310,7 +335,7 @@ def assemble(args):
         status |= int(not reference[cohort]["ok"])
     if F == ALL and detector == DETECTOR:
         checks["reference_predictions"] = reference
-        if set(reference) != set(COHORTS):
+        if not set(COHORTS) <= set(reference):
             print("fold all needs --reference-predictions for both cohorts")
             status = 1
         bn = checks["bundle_normalization"]
@@ -322,7 +347,10 @@ def assemble(args):
                 detectors=[detector], head=head, seeds=seeds, fold_manifest=manifest_path,
                 training_runs={s: str(r) for s, r in runs.items()},
                 training_checkpoint_sha256={s: sha256(r / "model_final.ckpt") for s, r in runs.items()},
-                scores=provenance, counts=counts, runtime_bundle_sha256=sha256(args.runtime_bundle), checks=checks)
+                scores=provenance, counts=counts, runtime_bundle_sha256=sha256(args.runtime_bundle), checks=checks,
+                cohorts=order, cohort_groups=groups,
+                cohort_ids={c: dict(path=str(Path(p).resolve()), sha256=sha256(p), rollouts=len(keep_ids[c]))
+                            for c, p in (getattr(args, "cohort_ids", None) or [])})
     write_json(out / "scoring.json", meta)
     print(f"fold {F}: " + ", ".join(f"{c} {n}" for c, n in counts.items()) + f", seeds {seeds}")
     print("ASSEMBLY OK" if status == 0 else "REFERENCE MISMATCH: do not analyze this fold")
@@ -546,6 +574,10 @@ def build_parser():
     a.add_argument("--training-run", nargs=2, action="append", required=True, metavar=("SEED", "DIR"))
     a.add_argument("--scores", nargs=3, action="append", required=True, metavar=("COHORT", "SEED", "DIR"))
     a.add_argument("--fold-manifest")
+    a.add_argument("--cohort-group", nargs=2, action="append", metavar=("COHORT", "GROUP"),
+                   help="R22: the export group an extra cohort was scored as (default: its name)")
+    a.add_argument("--cohort-ids", nargs=2, action="append", metavar=("COHORT", "IDS"),
+                   help="R22: keep only these rollouts of an extra cohort")
     a.add_argument("--reference-predictions", nargs=2, action="append", metavar=("COHORT", "PREDICTIONS"))
     a.add_argument("--detector", default=DETECTOR, choices=sorted(HEADS),
                    help="output detector name: safe (frozen MLP, default) or safe_lstm (R11)")
