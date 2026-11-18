@@ -352,13 +352,26 @@ nohup bash $R22A_LOG/a24_score.sh > $R22A_LOG/a24_score.log 2>&1 & echo "A2/A4 s
 **Progress:** `grep -c "rc=0" $R22A_LOG/a24_score.log` reaches 60, then `=== SCORING DONE`. Any other
 `rc` is a stop condition.
 
-### Switch to the newer commit (before the assembly and the gate, in the session that runs them)
+**What happened (2026-11-18).** The first 10 scorings (seed 0, August calibration) finished with
+`rc=0`. The 11th, on the 1,643-rollout August test export, loaded at 2.95 s per rollout. Every
+scoring reloads the whole export, and loading reads each rollout's policy records from disk, so
+the remaining 50 scorings would take about 47 hours, far beyond the 8-hour allocation. The run is
+stopped and its remaining scorings are replaced by `score_seen_checkpoint_batch`. That command loads
+each export once and scores every checkpoint in turn, with the single-checkpoint command's steps and
+outputs. SAFE's loader reads only `feat_name`, `horizon_idx_rel` and `diff_idx_rel` from the
+configuration, and never changes a rollout's features after loading, so one load serves every
+checkpoint. With `--verify-existing`, every scoring that already finished is redone and compared
+with the stored one. The first comparison runs before any output is written, and the others run
+last. A test runs both commands through their own code paths, with SAFE replaced by stand-ins,
+and finds the files byte-identical.
 
-A1, A3 and the A2/A4 scoring ran from the worktree at `1b2ffab0` (from `$R22A_LOG/paths.env`). The
-assembly's validation cohorts (`--cohort-group`, `--cohort-ids`) and the gate script came later, so
-those two steps run from a worktree at the newer commit. The scoring code is the same in both, and
-the block below checks that. The running jobs are unaffected: the scoring script recorded its own
-paths when it was written.
+### Switch to the newer commit (before the load-once scoring, the assembly and the gate)
+
+A1, A3 and the first A2/A4 scorings ran from the worktree at `1b2ffab0` (from
+`$R22A_LOG/paths.env`). The load-once scorer, the assembly's validation cohorts (`--cohort-group`,
+`--cohort-ids`) and the gate script came later, so these steps run from a worktree at the newer
+commit. A1's and A3's scoring code, and the single-checkpoint SAFE scorer, are the same in both,
+and the block below checks that. Run it in each session that runs one of these steps.
 
 ```bash
 export R22_SHA=<full SHA of the pushed commit containing this section>
@@ -372,10 +385,58 @@ git -C $R22_REPO diff --quiet 1b2ffab0 HEAD -- robocasa/recovery/safe/score_seen
 export FOLDS=$R22_REPO/scripts/xr1_lead_time/cross_task_folds.json
 cd $R22_REPO
 CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_xr1_cross_task_safe tests.test_r22_stage_a_check \
-  2>&1 | grep -E "^(Ran|OK|FAILED)"
+  tests.test_safe_score_seen_checkpoint_batch 2>&1 | grep -E "^(Ran|OK|FAILED)"
 ```
 
 Continue only if `HEAD OK` and `SCORING CODE SAME` print and the tests end with `OK`.
+
+### A2 + A4, loading each export once (replaces the rest of the run above; one GPU)
+
+**1. Stop the old run** in the GPU session that started it (the processes live on its node). Check
+the time used first: the load-once run needs about 2 hours (about 82 minutes to load the test
+export, then 30 short scorings), so if less than 2.5 hours of the 8 are left, start a new GPU
+session after stopping and run the A2 + A4 setup lines there, up to the `August row keys` line.
+
+```bash
+date; grep -m1 "=== START" $R22A_LOG/a24_score.log; grep "=== END" $R22A_LOG/a24_score.log | tail -n 2
+pkill -f "bash $R22A_LOG/a24_score.sh"; pkill -f "score_seen_checkpoint_external.*r22a_validation_scores"
+sleep 2; pgrep -af "a24_score|score_seen_checkpoint_external" || echo "STOPPED"
+for d in $R22A_ROOT/score/*/fold_*/*/seed*; do
+  if [ -s $d/provenance.json ]; then echo complete; elif [ -z "$(ls -A $d)" ]; then echo empty; else echo "PARTIAL $d"; fi
+done | sort | uniq -c
+```
+
+Expected: `STOPPED`, then 10 or 11 `complete` (11 if the first test-export scoring had finished) and
+one `empty` (the scoring that was stopped). A `PARTIAL` directory is a stop condition: inspect it
+before going on.
+
+**2. Score**, after the switch block above (in the same shell). The two exports run side by side on
+the one GPU.
+
+```bash
+cd $R22_REPO
+for G in calibration prospective_test; do
+  J=()
+  for S in 0 1 2; do
+    J+=(--job $XR1_FINAL_ROOT/indep_seed$S $R22A_ROOT/score/safe/fold_all/$G/seed$S)
+    for F in 0 1 2 3; do J+=(--job $RS_ROOT/train/fold_$F/indep_seed$S $R22A_ROOT/score/safe/fold_$F/$G/seed$S); done
+    for F in 0 1 2 3 all; do J+=(--job $R11_ROOT/train/fold_$F/lstm_seed$S $R22A_ROOT/score/safe_lstm/fold_$F/$G/seed$S); done
+  done
+  CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$R22_REPO nohup "$SAFE_PY" -u -m robocasa.recovery.safe.score_seen_checkpoint_batch \
+    --export-dir $AUG/${G}_collection/official_safe_all_retained --safe-repo $SAFE_REPO --group $G --device cuda \
+    --unseen-tasks score --verify-existing --tolerance 1e-6 "${J[@]}" > $R22A_LOG/a24_batch_$G.log 2>&1 &
+  echo "A2/A4 batch $G: $(( ${#J[@]} / 3 )) jobs, PID $! on $(hostname)"
+done
+```
+
+**Progress:** `tail -qn 1 $R22A_LOG/a24_batch_*.log` (a loading bar, then one line per checkpoint).
+Each log must end with `BATCH OK: 20 written, 10 verified` (calibration) and `BATCH OK: 29 written,
+1 verified` or `30 written, 0 verified` (test). Every `verified` line must end `-> OK`, and
+`BATCH FAILED` or `MISMATCH` is a stop condition. Then:
+
+```bash
+grep -h "verified\|BATCH" $R22A_LOG/a24_batch_*.log
+```
 
 ### A2 + A4 assembly (same GPU session, after scoring; CPU, minutes)
 
