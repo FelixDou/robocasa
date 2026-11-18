@@ -152,12 +152,35 @@ class ScoreCrossTaskTests(unittest.TestCase):
         self.assertEqual({k: pooled_normalization(only_a, horizons)[k] for k in ("location", "scale")},
                          {k: fit_safe_normalization(only_a, {"a": 10})["a"][k] for k in ("location", "scale")})
 
+    def test_any_fold_reruns_against_its_earlier_run(self):
+        """R22: a held-out fold, rerun, is checked against its stored run; a reference that shares no
+        detector with the run is a mismatch, not a silent pass."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture(root)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(score_cross_task(cross(root, "0", "f0", ["cosine_knn"])), 0)
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    status = score_cross_task(cross(root, "0", "f0b", ["cosine_knn"],
+                                                    "--reference-raw", "calib", str(root / "f0" / "calib_predictions.jsonl")))
+            self.assertEqual(status, 0)
+            self.assertIn("REFERENCE OK", buf.getvalue())
+            meta = json.loads((root / "f0b" / "scoring.json").read_text())
+            self.assertTrue(meta["reference_checks"]["calib/cosine_knn"]["ok"])
+            other = [dict(r, detector="other") for r in rows_of(root / "f0" / "calib_predictions.jsonl")]
+            (root / "other.jsonl").write_text("".join(json.dumps(r) + "\n" for r in other))
+            with contextlib.redirect_stdout(io.StringIO()):
+                status = score_cross_task(cross(root, "0", "f0c", ["cosine_knn"],
+                                                "--reference-raw", "calib", str(root / "other.jsonl")))
+            self.assertEqual(status, 1)
+
     def test_invalid_requests_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fixture(root)
             with self.assertRaises(ValueError):
-                score_cross_task(cross(root, "0", "a", ["cosine_knn"], "--reference-raw", "calib", str(root / "x.jsonl")))
+                score_cross_task(cross(root, "0", "a", ["cosine_knn"], "--reference-raw", "nocohort", str(root / "x.jsonl")))
             with self.assertRaises(ValueError):
                 score_cross_task(cross(root, "1", "b", ["hide_and_seek_task_shuffle"]))
             with self.assertRaises(ValueError):

@@ -107,8 +107,8 @@ def run(args):
     output = Path(args.output_dir).resolve()
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(f"Output directory is not empty: {output}")
-    if args.reference_raw and fold != "all":
-        raise ValueError("--reference-raw only applies to --fold all")
+    # --reference-raw: fold all against the Amendment 2 scoring run; any fold against an earlier run of the
+    # same fold (R22 reruns folds with the validation cohorts added, docs/r22_fixed_paths_plan.md).
     bad = sorted(set(args.detectors) & NEEDS_SEEN_TASK)
     if bad and fold != "all":
         raise ValueError(f"{bad} need training rollouts of the scored task; they are undefined on held-out tasks")
@@ -249,6 +249,11 @@ def run(args):
             raise ValueError(f"--reference-raw names unknown cohort {name}")
         ref = _raw_reference(path)
         now = _raw_reference(output / f"{name}_predictions.jsonl")
+        if not set(ref) & set(now):
+            meta["reference_checks"][f"{name}/none"] = {"reference": str(Path(path).resolve()), "ok": False,
+                                                        "reason": "no detector in common"}
+            print(f"reference {name}: no detector in common with {path} -> MISMATCH", flush=True)
+            status = 1
         for detector_name in sorted(set(ref) & set(now)):
             diffs = []
             for rid, seeds in now[detector_name].items():
@@ -269,7 +274,7 @@ def run(args):
     meta["elapsed_seconds"] = time.time() - started
     _write_json(output / "scoring.json", meta)
     if status:
-        print("REFERENCE MISMATCH: fold all differs from the earlier scoring run")
+        print(f"REFERENCE MISMATCH: fold {fold} differs from the earlier scoring run")
     elif args.reference_raw:
         print("REFERENCE OK")
     return status

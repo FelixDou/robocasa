@@ -166,7 +166,101 @@ cohorts).
 
 ## Runbook
 
-Stage A first; stage B after its gates hold. (Commands to be added with the code.)
+Stage A first; stage B after its gates hold. A1 is the longest job (it retrains the Hide-and-Seek
+family per fold, several hours on CPU) and its inputs are known, so it starts first. The discovery
+block (D) prints what A2–A5 need. A2–A5 commands follow once D's output is back.
+
+### Setup (one CPU allocation with at least 32 cores, for A1's four folds × 8 threads)
+
+```bash
+qrsh -g tga-shinoda -l cpu_80=1 -l h_rt=12:00:00
+```
+
+```bash
+module load miniconda
+eval "$(/apps/t4/rhel9/free/miniconda/26.9.3/bin/conda shell.bash hook)"
+conda activate /gs/bs/tga-shinoda/felid/envs/robocasa_openpi
+export STORAGE_BS=/gs/bs/tga-shinoda/felid
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+source $STORAGE_BS/robocasa_logs/eval/xr1_r11_rows_20261030_220636/paths.env
+source $STORAGE_BS/robocasa_logs/eval/xr1_r14_hk_free_20261106_191531/paths.env
+export WANDB_MODE=disabled WANDB_DISABLED=true WANDB_ENABLED=0
+export R22_SHA=<full SHA of the pushed commit containing this runbook>
+export R22_REPO=$PROJECT_FS/robocasa_r22_${R22_SHA:0:8}
+export R22A_ROOT=$STORAGE_BS/robocasa_checkpoints/safe/r22a_validation_scores_$(date +%Y%m%d_%H%M%S)
+export R22A_LOG=$STORAGE_BS/robocasa_logs/eval/$(basename $R22A_ROOT)
+mkdir -p $R22A_ROOT $R22A_LOG
+git -C $PROJECT_FS/robocasa fetch origin claude/r22-fixed-paths
+test -e $R22_REPO || git -C $PROJECT_FS/robocasa worktree add --detach $R22_REPO $R22_SHA
+test "$(git -C $R22_REPO rev-parse HEAD)" = "$R22_SHA" && echo "HEAD OK" || echo "STOP: wrong HEAD"
+printf 'export %s=%q\n' R22_SHA "$R22_SHA" R22_REPO "$R22_REPO" R22A_ROOT "$R22A_ROOT" R22A_LOG "$R22A_LOG" \
+  > $R22A_LOG/paths.env
+export FOLDS=$R22_REPO/scripts/xr1_lead_time/cross_task_folds.json
+cmp $FOLDS $R14_REPO/scripts/xr1_lead_time/cross_task_folds.json && echo "FOLDS SAME AS R14"
+for f in $E1_OUT/calibration_predictions.jsonl $E1_OUT/test_predictions.jsonl $XR1_RUNTIME_BUNDLE $XR1_TRAIN_IDS \
+         $AMEND2_ROOT/august_calibration_ids.json $PSEED_ROOT/august_test_balanced_ids.json \
+         $XT_ROOT/fold_{0,1,2,3}/lead_calibration_predictions.jsonl $XT_ROOT/fold_{0,1,2,3}/confirmatory_test_predictions.jsonl; do
+  test -s $f && echo "OK $f" || echo "STOP: missing $f"
+done | grep -c '^OK'
+echo "XR1_RAW_DIRS: ${#XR1_RAW_DIRS[@]} directories"
+cd $R22_REPO
+CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_safe_score_cross_task 2>&1 | grep -E "^(Ran|OK|FAILED)"
+nproc; free -g | head -n 2
+```
+
+Continue only if `HEAD OK` and `FOLDS SAME AS R14` print, the count is 14, `XR1_RAW_DIRS` is
+nonempty, and the tests end with `OK`.
+
+### A1. Hide-and-Seek family on the August cohorts, folds 0–3 (CPU, background)
+
+Each fold retrains its three detectors × three seeds exactly as the stored run did (same training-ID
+order, seeds, epochs, 8 threads). It scores the two E1 cohorts and the two August cohorts, and
+checks the E1 cohorts against the stored fold directory (`--reference-raw`, ≤ 1e-12).
+
+```bash
+cd $R22_REPO
+A1_ARGS=(
+  --dataset-dir "${XR1_RAW_DIRS[@]}" $XR1_LCAL_ROOT/merged_all_retained $XR1_CONFIRM_ROOT/confirmatory_collection/merged_all_retained
+  --runtime-bundle $XR1_RUNTIME_BUNDLE --train-ids $XR1_TRAIN_IDS --folds $FOLDS
+  --cohort lead_calibration $E1_OUT/calibration_predictions.jsonl
+  --cohort confirmatory_test $E1_OUT/test_predictions.jsonl
+  --cohort august_calibration $AMEND2_ROOT/august_calibration_ids.json
+  --cohort august_test $PSEED_ROOT/august_test_balanced_ids.json
+  --detectors hide_and_seek hide_and_seek_zero hide_and_seek_first --feature-aggregation last --seeds 0 1 2
+)
+for F in 0 1 2 3; do
+  PYTHONPATH=$R22_REPO CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 nohup nice -n 10 \
+    "$SAFE_PY" -u -m robocasa.recovery.safe.baselines.score_cross_task "${A1_ARGS[@]}" --fold $F \
+    --reference-raw lead_calibration $XT_ROOT/fold_$F/lead_calibration_predictions.jsonl \
+    --reference-raw confirmatory_test $XT_ROOT/fold_$F/confirmatory_test_predictions.jsonl \
+    --output-dir $R22A_ROOT/xt/fold_$F > $R22A_LOG/a1_fold_$F.log 2>&1 &
+  echo "A1 fold $F PID $! on $(hostname)"
+done
+```
+
+**Progress:** `tail -qn 1 $R22A_LOG/a1_fold_*.log`. Each log must end with six
+`reference ... -> OK` lines (two cohorts × three detectors) and `REFERENCE OK`.
+`REFERENCE MISMATCH`, `Traceback` or `error` is a stop condition.
+
+### D. Discovery for A2–A5 (seconds; run while A1 runs, and paste the output back)
+
+```bash
+source $STORAGE_BS/robocasa_logs/eval/xr1_amend2_hide_and_seek_20261022_214209/paths.env
+source $STORAGE_BS/robocasa_logs/eval/xr1_r11_rows_20261030_220636/paths.env
+echo "== envs"; env | grep -E '^(XR1_[A-Z_]*(EXPORT|ROOT|INPUTS)|RS_ROOT|R11_ROOT|R6_ROOT|OOD_ROOT|XR1_BASELINE_ROOT|SAFE_REPO)=' | sort
+echo "== August SAFE scores used by R8"; head -c 600 $XR1_PS_INPUTS/calibration_predictions.jsonl | tr ',' '\n' | grep -E 'rollout_id|task_name|per_seed_raw_safe' | head -3
+wc -l $XR1_PS_INPUTS/calibration_predictions.jsonl $XR1_PS_INPUTS/event_predictions.jsonl
+find $STORAGE_BS/robocasa_rollouts/safe/xr1_prospective_matched_fpr_20260815_163700* $STORAGE_BS/robocasa_checkpoints/safe/xr1_prospective_matched_fpr_20260815_163700* \
+  -maxdepth 4 -name provenance.json 2>/dev/null | head -10
+for p in $(find $STORAGE_BS/robocasa_rollouts/safe/xr1_prospective_matched_fpr_20260815_163700* $STORAGE_BS/robocasa_checkpoints/safe/xr1_prospective_matched_fpr_20260815_163700* -maxdepth 4 -name provenance.json 2>/dev/null | head -6); do
+  echo "-- $p"; grep -oE '"(export_dir|group|training_run_dir)": "[^"]*"' $p | head -4; done
+echo "== OOD caches"; for c in calibration prospective_test; do echo "-- cache_$c"; grep -oE '"(group|n_rollouts|rollouts)": [^,}]*' $XR1_BASELINE_ROOT/cache_$c/provenance.json | head -4; done
+"$SAFE_PY" -I -c "import json,sys; ids=json.load(open(sys.argv[1])); ids=ids.get('rollout_ids', ids) if isinstance(ids, dict) else ids; print('august_test_balanced ids', len(ids))" $PSEED_ROOT/august_test_balanced_ids.json
+"$SAFE_PY" -I -c "import json,sys; ids=json.load(open(sys.argv[1])); ids=ids.get('rollout_ids', ids) if isinstance(ids, dict) else ids; print('august_calibration ids', len(ids))" $AMEND2_ROOT/august_calibration_ids.json
+echo "== OOD seen per-seed outputs"; ls $OOD_ROOT/seed0/ $OOD_ROOT/seed0/calibrate $OOD_ROOT/seed0/evaluate 2>&1 | head -30
+echo "== SAFE fold checkpoints"; ls -d $RS_ROOT/train/fold_*/indep_seed* 2>&1 | head -12; ls -d $R11_ROOT/train/fold_*/* 2>&1 | head -16
+ls $RS_ROOT/score/fold_0/ $R11_ROOT/score/fold_0/ 2>&1 | head
+```
 
 ## Result
 
