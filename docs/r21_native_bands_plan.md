@@ -305,6 +305,9 @@ Run `r21_native_bands_20261118_172324` at b571774b, on 2026-11-18. Evidence is i
   0.013 in [−0.153, 0.076]; RLDX-1 over E: 0.096 in [−0.164, 0.187]). Resampled replicates mostly do
   worse than the real data, which R19's constant-threshold CIs did not show. R21b diagnoses this
   before the paper reports these CIs (`docs/r21b_band_ci_diagnostic_plan.md`).
-- **Reporting:** pending R21b. Under the fixed rules, the point estimates and the single-model values
-  above are what the paper quotes for the original alarm rules. The CI to quote depends on R21b's
-  interpretation rules.
+- **Reporting:** under the fixed rules, the point estimates and the single-model values above are
+  what the paper quotes for the original alarm rules. The CIs follow R21b's interpretation rules
+  (`docs/r21b_band_ci_diagnostic_plan.md`, Result):
+  - Hide-and-Seek's eight unseen-task cells, except RLDX-1's OR E, take R21b's `test` CIs (conditional
+    on the calibration set).
+  - The seen-task cells and RLDX-1's OR E keep the full-pipeline CIs above.

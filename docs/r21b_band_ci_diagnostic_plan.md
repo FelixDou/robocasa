@@ -194,4 +194,80 @@ rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r21b_band_
 
 ## Result
 
-(to be written after the run)
+Run `r21b_band_ci_diagnostic_20261118_183350` at cba5f051, on 2026-11-18. Evidence is in
+`reports/r21b_band_ci_diagnostic_evidence/`:
+- `seen_unseen_tables_r21b.json` (sha256 `34bb3cd8…`) and `rldx_e1b_r21b.json` (`a0c9d8ed…`);
+- the replicate files `seen_unseen_tables_r21b_r21b_replicates.npz` (`f585123f…`) and
+  `rldx_e1b_r21b_r21b_replicates.npz` (`6b8132f4…`);
+- both logs (local only; `*.log` is gitignored).
+
+- **Gates:**
+  - Both logs end with `R21 OK` and `R21b OK`, and the frozen inputs are unchanged.
+  - D0 holds exactly on both policies (seen: 3 heads; unseen: 3 heads × E, G; 1,000 replicates each).
+  - R21's gates hold again. B0 compares 36 values per policy, since R21's own bootstrap was off.
+- **Shifts (point − replicate median) of Hide-and-Seek's matched gains,** with S marking a shift above
+  0.02:
+
+  | Policy, side, comparator, rule | full | test | calibration | rollouts | distinct | tasks | Rule outcome |
+  |---|---|---|---|---|---|---|---|
+  | XR-1 seen P, alone | +0.001 | −0.004 | +0.008 | +0.007 | +0.005 | +0.008 | no shift |
+  | XR-1 seen P, OR | +0.001 | −0.006 | −0.001 | −0.008 | −0.008 | −0.004 | no shift |
+  | XR-1 unseen E, alone | +0.054 S | −0.008 | +0.061 S | +0.039 S | +0.044 S | +0.046 S | artifact |
+  | XR-1 unseen E, OR | +0.032 S | +0.000 | +0.035 S | +0.028 S | +0.027 S | +0.024 S | artifact |
+  | XR-1 unseen G, alone | +0.094 S | +0.010 | +0.095 S | +0.060 S | +0.069 S | +0.074 S | artifact |
+  | XR-1 unseen G, OR | +0.046 S | −0.000 | +0.047 S | +0.030 S | +0.034 S | +0.032 S | artifact |
+  | RLDX-1 seen P, alone | +0.025 S | +0.010 | +0.020 (0.0195) | +0.006 | +0.003 | +0.013 | mixed |
+  | RLDX-1 seen P, OR | +0.020 S (0.0202) | −0.001 | +0.010 | +0.008 | +0.004 | +0.008 | mixed |
+  | RLDX-1 unseen E, alone | +0.034 S | −0.000 | +0.021 S | +0.022 S | +0.022 S | +0.014 | artifact |
+  | RLDX-1 unseen E, OR | +0.030 S | +0.004 | +0.013 | +0.018 | +0.019 | +0.015 | mixed |
+  | RLDX-1 unseen G, alone | +0.070 S | +0.004 | +0.056 S | +0.037 S | +0.032 S | +0.042 S | artifact |
+  | RLDX-1 unseen G, OR | +0.040 S | +0.000 | +0.032 S | +0.026 S | +0.037 S | +0.030 S | artifact |
+
+  - `test` never shifts: its largest shift is 0.010.
+  - `calibration_tasks` never shifts without both rollout-level variants, so the task-mix reading is
+    not isolated in any case.
+  - In the three mixed RLDX-1 cases, `full` shifts by 0.020 to 0.034 while no single component does:
+    the calibration-only shifts are 0.010 to 0.0195, under the 0.02 threshold.
+- **Mechanism:** recalibration on fewer distinct successes raises the band's false alarms. The
+  replicate medians against the point:
+  - XR-1 unseen: band alone 29 → 34 to 39;
+  - RLDX-1 unseen: 40 → 44 to 51.
+
+  `calibration_distinct`, which has no duplicates and no change of task mix, shows it too.
+- **Supporting evidence (Spearman, false alarms against matched gain, variant `calibration`): it did
+  not hold.**
+  - XR-1, E: +0.46 (alone), +0.41 (OR); G: +0.04, −0.04.
+  - RLDX-1, E: +0.54, +0.30; G: −0.19, −0.27.
+  - The correlation is positive or near zero where the artifact rule applies, except RLDX-1's G (weakly
+    negative). The artifact reading therefore rests on the variant pattern alone.
+- **CIs to quote under the rules** (Hide-and-Seek, ensembles, matched gain):
+
+  | Policy | Seen: alone vs P | Seen: OR P | Unseen: alone vs E | Unseen: OR E | Unseen: alone vs G | Unseen: OR G |
+  |---|---|---|---|---|---|---|
+  | XR-1 | +0.047 [−0.038, 0.128] full | +0.066 [−0.020, 0.136] full | +0.147 [0.075, 0.227] test | +0.091 [0.014, 0.163] test | +0.070 [−0.020, 0.153] test | +0.013 [−0.070, 0.098] test |
+  | RLDX-1 | +0.086 [−0.034, 0.166] full | +0.083 [−0.015, 0.135] full | +0.143 [0.011, 0.219] test | +0.096 [−0.164, 0.187] full | +0.019 [−0.102, 0.156] test | −0.016 [−0.105, 0.072] test |
+
+  - **What each interval covers:**
+    - `test` CIs are conditional on the real calibration set, like Table III's seen-task CIs. They
+      leave out calibration uncertainty.
+    - `full` CIs include it, but with a downward bias wherever the artifact rule applies.
+  - **For information, `test` CIs in the full-CI cells:**
+    - XR-1 seen: [−0.024, 0.131] alone, [0.008, 0.144] OR;
+    - RLDX-1 seen: [0.006, 0.153] alone, [0.021, 0.136] OR;
+    - RLDX-1 unseen OR E: [−0.057, 0.160].
+  - **SAFE-MLP:** not covered by the rules, which are Hide-and-Seek's. Its R21 CIs include zero or lie
+    below it, and so do its `test` CIs. On RLDX-1's seen tasks the band alone is below P in both:
+    [−0.232, −0.037] and [−0.234, −0.033].
+- **Expectations:**
+  - **Held:**
+    - D0;
+    - `full` and `calibration` shift on unseen tasks, except RLDX-1's OR E, where `calibration` shifts
+      0.013;
+    - `test` does not shift;
+    - `calibration_distinct` shifts in 7 of the 8 unseen cases.
+  - **Not expected:** the small `full` shifts on RLDX-1's seen tasks, with no single component
+    shifting.
+- **Reading:** under its own band, Hide-and-Seek warns earlier than elapsed time on unseen tasks of
+  both policies, with CIs above zero for the band alone. With the timer, the CI is above zero on XR-1
+  and includes zero on RLDX-1 (a mixed case, so the full CI applies). It does not clearly beat P on
+  seen tasks or G on unseen ones.
