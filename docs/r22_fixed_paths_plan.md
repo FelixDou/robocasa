@@ -620,8 +620,8 @@ rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r22b_fixed
 
 Both runs ended with `R22 OK`, and `INPUTS UNCHANGED`. Evidence is in
 `reports/r22_fixed_paths_evidence/`:
-- `seen_unseen_tables_r22.json`, sha256 `fc776307…`;
-- `rldx_e1b_r22.json`, `76280d1b…`;
+- `seen_unseen_tables_r22.json`, sha256 `76280d1b…`;
+- `rldx_e1b_r22.json`, `fc776307…`;
 - `stage_a_check.json`, `026e9082…`;
 - both logs.
 

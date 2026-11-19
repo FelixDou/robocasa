@@ -88,7 +88,7 @@ CUDA_VISIBLE_DEVICES="" "$SAFE_PY" -W ignore -m unittest tests.test_r22_fixed_pa
 Continue only if all of these hold:
 - `HEAD OK` prints;
 - `FOLDS` ends in `rldx_folds.json`;
-- the hashes are `76280d1b…` (R22's RLDX-1 output) and `bd0aab11…` (E1b);
+- the hashes are `fc776307…` (R22's RLDX-1 output; this line said `76280d1b…`, the XR-1 file's hash, until R23 ran) and `bd0aab11…` (E1b);
 - the tests end with `OK`.
 
 ```bash
@@ -121,6 +121,47 @@ rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r23_h3_h1_
   /Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/.claude/worktrees/r22-fixed-paths/reports/r23_h3_h1_rule_evidence/
 ```
 
-## Result
+## Result (2026-11-19, run `r23_h3_h1_rule_*`, from `e33cfedb`): `R23 OK`
 
-(to be written after the run)
+The run ended with `R23 OK` and `INPUTS UNCHANGED`. Evidence is in `reports/r23_h3_h1_rule_evidence/`:
+- `rldx_e1b_r23.json`, sha256 `48ecc74f…`;
+- the log, gitignored and kept locally.
+
+R23 recorded its inputs as `rldx_e1b_r22.json` `fc776307…` and E1b's `e1b_result.json` `bd0aab11…`. Both
+equal the local evidence files. The runbook's hash check had named `76280d1b…` for R22's RLDX-1 file;
+that is `seen_unseen_tables_r22.json`'s hash, swapped in R22's evidence list. Both lists are now
+corrected. R23 read the right file (K2 below), so this does not affect the result.
+
+**Gates.**
+- **K1:** 19 false alarms and a same-target gain of 0.05354, equal to E1b's registered result
+  (max |diff| 0).
+- **K2:** the false alarms, the gain and Δℓ̄ equal R22's `h3` (max |diff| 0).
+- R20's run gates (G1, G2a–c and the reference rows) passed as before.
+
+**Result.** Hide-and-Seek + P (three-seed ensemble, H3's registered path) on RLDX-1's test set:
+
+| | Point | 95% CI | 97.5% CI |
+| --- | --- | --- | --- |
+| Δℓ̄ (P matched exactly to 19 false alarms) | 0.1108 | [0.0553, 0.1689] | [0.0498, 0.1785] |
+| Same-target gain (P alone, 27 false alarms) | 0.0535 | [−0.0027, 0.1112] | [−0.0095, 0.1207] |
+| Registered (E1b, P matched on a grid) | 0.1126 | | [0.0491, 0.1410] |
+| Registered same-target gain (E1b) | 0.0535 | | [0.0007, 0.1293] |
+
+**Verdict.** Under H1's rule, H3 passes: the 95% CI of Δℓ̄ lies above zero. As expected, Δℓ̄ is
+0.1108.
+
+**One difference from the registered analysis.** The two bootstraps differ:
+- E1b's resamples calibration and test rollouts within task and class, and re-sets the margin in
+  each replicate.
+- R23's resamples tasks, then failures, with the thresholds fixed.
+
+Resampling tasks adds the spread between tasks. The gain comes from atomic tasks (composite:
+−0.036), so the intervals widen. Δℓ̄'s intervals stay above zero either way. The same-target gain's
+lower bound was 0.0007 in E1b and is −0.003 in R23 (95%), so its CI now includes zero. The rule
+adopted before this run uses only Δℓ̄, and the paper no longer reports same-target gains, so the
+verdict stands. The registered test, with its own bootstrap, still passes as registered.
+
+**Paper.** Updated as planned:
+- H3 reads "at matched false alarms";
+- the Metrics paragraph drops H3's separate rule, and the seen-task CI sentence covers both VLAs;
+- Table III, the H3 paragraph, the abstract and the contributions give 0.111 (95% CI [0.055, 0.169]).
