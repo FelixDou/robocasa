@@ -198,6 +198,37 @@ rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r25_band_a
   /Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/.claude/worktrees/r22-fixed-paths/reports/r25_band_ablation_evidence/
 ```
 
-## Result
+## Result (2026-11-19, run `r25_band_ablation_20261119_160232`, from `059535dc`): `R25 OK`
 
-(to be written after the run)
+Both runs ended with `R25 OK`, and `INPUTS UNCHANGED`. Evidence is in
+`reports/r25_band_ablation_evidence/`:
+- `seen_unseen_tables_r25.json`, sha256 `a887c7ff…`;
+- `rldx_e1b_r25.json`, `5b0cdb44…`;
+- logs, gitignored and kept locally.
+
+The recorded inputs are R21's `53599170…` and `8f9dd45c…`, and R21b's replicates `f585123f…` and
+`6b8132f4…`.
+
+**Gates.** G0, G1 and G2 pass on both policies with max |diff| 0, and G3 with at most 6e-17 (float
+rounding). Every one of the 1,000 replicates of the full band against E equals R21b's.
+
+**Result** (unseen tasks; Δ in fractions of H_k; 95% CIs conditional on the fitted bands):
+
+| | XR-1 | RLDX-1 |
+| --- | --- | --- |
+| Full band alone vs. E (R21) | 0.147 [0.075, 0.227], 29 FA (7.6%) | 0.143 [0.011, 0.219], 40 FA (10.0%) |
+| First-step band alone vs. E | −0.084 [−0.166, −0.018], 13 FA (3.4%) | −0.026 [−0.082, 0.018], 15 FA (3.8%) |
+| **Full − first step, common budget** | **+0.273 [0.200, 0.341]** (29 FA each, first step at α 0.10) | **+0.146 [0.061, 0.220]** (40 FA each, α 0.135) |
+| Full − first step, same α | +0.299 [0.230, 0.371] (29 vs 13 FA) | +0.213 [0.130, 0.320] (40 vs 15 FA) |
+| Zero-input band alone vs. E | −0.028 [−0.115, 0.022], 15 FA (3.9%) | +0.054 [−0.026, 0.109], 61 FA (15.3%) |
+| Full − zero input, common budget | +0.193 [0.096, 0.282] (zero input at 27 FA) | +0.183 [0.011, 0.244] (32 FA) |
+
+Each ablation is matched to the full band's false alarms in all 1,000 replicates. Its false alarms
+are not monotone in α on the grid, so the "largest lead within the budget" rule matters. That rule
+favors the ablation.
+
+**Reading (as fixed before the run).** Δ's 95% CI lies above zero on both policies. So the band's
+unseen-task gain needs observations after the first inference: at the full band's false alarms, the
+first-step band leads by 0.053 (XR-1) and 0.094 (RLDX-1), against the full band's 0.326 and 0.240.
+Alone, the first-step band warns no earlier than E (XR-1: later, CI below zero). Zero input agrees:
+its Δ's CI also lies above zero on both policies, so it does not change the reading.
