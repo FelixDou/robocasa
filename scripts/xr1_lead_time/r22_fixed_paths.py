@@ -179,6 +179,54 @@ def frozen_row(pairs, frozen, timer, rk, failed_rows):
     return row, r
 
 
+def same_point(row, ref, tol=TOL):
+    """R24's gate: false alarms, gain, Delta l and the matched timer's false alarms of a recomputed row
+    against a stored one (a missing row, or a matched gain in one only, is inf)."""
+    if row is None or ref is None:
+        return dict(max_abs_diff=math.inf, ok=False, note="row missing")
+    m, rm = row.get("matched") or {}, ref.get("matched") or {}
+    d = max(abs(row["gain"] - ref["gain"]), 0.0 if row["fp"] == ref["fp"] else math.inf,
+            (abs(m["gain"] - rm["gain"]) if m and rm else (0.0 if not m and not rm else math.inf)),
+            0.0 if m.get("timer_fp") == rm.get("timer_fp") else math.inf)
+    return dict(fp=row["fp"], ref_fp=ref["fp"], matched_gain=m.get("gain"), ref_matched_gain=rm.get("gain"),
+                timer_fp=m.get("timer_fp"), ref_timer_fp=rm.get("timer_fp"), max_abs_diff=d, ok=d <= tol)
+
+
+def tree_diff(new, ref, path=""):
+    """(max |diff|, first path at that diff) over every entry of ref; new may hold more keys. A missing key,
+    a changed string, bool or length, or a number against a non-number is inf. NaN equals NaN."""
+    if isinstance(ref, dict):
+        if not isinstance(new, dict):
+            return math.inf, path
+        worst = (0.0, None)
+        for k, v in ref.items():
+            if k not in new:
+                return math.inf, f"{path}/{k}"
+            d = tree_diff(new[k], v, f"{path}/{k}")
+            if d[0] > worst[0]:
+                worst = d
+        return worst
+    if isinstance(ref, list):
+        if not isinstance(new, list) or len(new) != len(ref):
+            return math.inf, path
+        worst = (0.0, None)
+        for i, (x, y) in enumerate(zip(new, ref)):
+            d = tree_diff(x, y, f"{path}/{i}")
+            if d[0] > worst[0]:
+                worst = d
+        return worst
+    if isinstance(ref, bool) or ref is None or isinstance(ref, str):
+        return (0.0, None) if new == ref and type(new) is type(ref) else (math.inf, path)
+    if isinstance(new, bool) or not isinstance(new, (int, float)):
+        return math.inf, path
+    if math.isnan(ref) or math.isnan(new):
+        return (0.0, None) if math.isnan(ref) and math.isnan(new) else (math.inf, path)
+    if math.isinf(ref) or math.isinf(new):
+        return (0.0, None) if new == ref else (math.inf, path)
+    d = abs(float(new) - float(ref))
+    return d, (path if d > 0 else None)
+
+
 def per_type(result, types, spi):
     """Delta l (matched) by task type and per task, from a run_folds(keep=True) result."""
     import r19_extras as rx

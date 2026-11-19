@@ -219,6 +219,58 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(psd.first(p_rows[0]["score"], np.nextafter(15 / 25 - 0.4, 1.0)), 16)
 
 
+class R24GateTests(unittest.TestCase):
+    """R24 on XR-1: R0 (R22's output unchanged) and R1 (added rows equal R22's Table II seed averages)."""
+
+    def setUp(self):
+        sa = lambda fp, g, m, tfp: dict(fp=fp, gain=g, matched=dict(gain=m, timer_fp=tfp))
+        boot = lambda fp, g, m: dict(fp=fp, gain=g, matched_gain=m, matched_ci95=[m - 0.05, m + 0.05], timer_fp=19)
+        self.ref = dict(
+            table2=dict(seen={su.SAFE_LSTM: {"P": {"seed_average": sa(20, 0.01, 0.037, 20)}}},
+                        unseen={n: {"G_abs": {"seed_average": sa(19 + i, -0.01, -0.006 * (i + 1), 19)}}
+                                for i, n in enumerate(su.R24_UNSEEN)}),
+            ensembles_seen={su.HS: dict(fp=23, gain=0.07, matched=dict(gain=0.057, timer_fp=23, ci95=[-0.01, 0.12]))},
+            per_type={}, unseen_bootstrap=dict(samples=2, seed=22, timers=dict(G_abs={su.HS: boot(4, -0.07, 0.002)})),
+            nulls=dict(noise=[0.001, 0.002]), budget_timer=dict(beta=0.02), teaser=None)
+        self.new = json.loads(json.dumps(self.ref))
+        self.new["ensembles_seen"][su.SAFE_LSTM] = dict(fp=20, gain=0.01, matched=dict(gain=0.037, timer_fp=20, ci95=[0.0, 0.08]))
+        for i, n in enumerate(su.R24_UNSEEN):
+            self.new["unseen_bootstrap"]["timers"]["G_abs"][n] = boot(19 + i, -0.01, -0.006 * (i + 1))
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "r22.json"
+        self.path.write_text(json.dumps({"r22": self.ref}))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_r24_passes_and_reports_the_added_rows(self):
+        r, problems = su.r24_xr1(self.new, self.path)
+        self.assertEqual(problems, [], r["checks"])
+        self.assertEqual(set(r["seen"]), set(su.R24_SEEN))
+        self.assertEqual(set(r["unseen"]), set(su.R24_UNSEEN))
+        self.assertEqual(r["unseen"][su.R24_UNSEEN[0]]["matched_timer_fp"], 19)
+        with contextlib.redirect_stdout(io.StringIO()):
+            su.print_r24(r)
+
+    def test_r24_stops_on_a_changed_r22_entry_or_a_different_added_row(self):
+        changed = json.loads(json.dumps(self.new))
+        changed["ensembles_seen"][su.HS]["matched"]["ci95"][0] += 1e-6
+        _, problems = su.r24_xr1(changed, self.path)
+        self.assertEqual(problems, ["R0"])
+        changed = json.loads(json.dumps(self.new))
+        changed["unseen_bootstrap"]["timers"]["G_abs"][su.R24_UNSEEN[1]]["matched_gain"] += 1e-9
+        _, problems = su.r24_xr1(changed, self.path)
+        self.assertEqual(problems, ["R1"])
+        changed = json.loads(json.dumps(self.new))
+        changed["ensembles_seen"][su.SAFE_LSTM]["matched"]["timer_fp"] = 19
+        _, problems = su.r24_xr1(changed, self.path)
+        self.assertEqual(problems, ["R1"])
+        changed = json.loads(json.dumps(self.new))
+        del changed["unseen_bootstrap"]["timers"]["G_abs"][su.R24_UNSEEN[2]]
+        _, problems = su.r24_xr1(changed, self.path)
+        self.assertEqual(problems, ["R1"])
+
+
 class RunTests(unittest.TestCase):
     def test_r18_curves_reproduce_table_one(self):
         """R18: --curves adds calibrated lead-FPR curves; at alpha = 0.05 they equal Table I (C1), and the

@@ -493,6 +493,51 @@ class RldxTestTableTest(unittest.TestCase):
         self.assertIn("R23 FAILED", text)
         self.assertEqual(out["r23_failures"], ["K2"])
 
+    def test_r24_table3_intervals_and_h3_by_type(self):
+        """R24: SAFE-MLP and SAFE-LSTM + P ensembles with intervals (K1 against R22's seed average) and H3 by
+        task type in seconds (K2 against R23's h3)."""
+        status, text, _ = self.run_table("r17.json", extra=["--elapsed-time"])
+        self.assertEqual(status, 0, text)
+        e1 = json.loads((self.root / "e1_result.json").read_text())
+        e1["frozen_paths"] = {"hide_and_seek": {"u": 0.5, "s": 2.0}}
+        e1["results"] = {"hide_and_seek": {"gain": 0.0, "test": {"fp": -1}}}
+        (self.root / "e1_result.json").write_text(json.dumps(e1))
+        r22 = ["--r22", "--r22-reference", str(self.root / "r17.json"), "--r22-boot", "2"]
+        _, _, out = self.run_table("r22_first.json", extra=r22)
+        h3 = out["r22"]["h3"]
+        e1["results"]["hide_and_seek"] = {"gain": h3["gain"], "test": {"fp": h3["fp"]},
+                                          "matched_gain": (h3["matched"] or {}).get("gain")}
+        (self.root / "e1_result.json").write_text(json.dumps(e1))
+        status, text, _ = self.run_table("r22.json", extra=r22)
+        self.assertEqual(status, 0, text)
+        status, text, _ = self.run_table("r23.json", extra=["--r23", "--r23-reference", str(self.root / "r22.json")])
+        self.assertEqual(status, 0, text)
+        r24 = ["--r24", "--r24-reference", str(self.root / "r22.json"), "--r24-r23", str(self.root / "r23.json")]
+        status, text, out = self.run_table("r24.json", extra=r24)
+        self.assertEqual(status, 0, text)
+        self.assertIn("R24 OK", text)
+        r = out["r24"]
+        self.assertEqual(out["r24_failures"], [])
+        self.assertEqual(set(r["seen"]), {"safe_indep", "safe_lstm"})
+        for d, row in r["seen"].items():
+            self.assertTrue(r["checks"][f"K1_{d}_equals_r22"]["ok"])
+            if row["matched"] is not None:
+                self.assertEqual(len(row["matched"]["ci95"]), 2)
+        self.assertTrue(r["checks"]["K2_h3_equals_r23"]["ok"])
+        sec = r["h3"]["by_type"]["seconds"]
+        self.assertIn("all", sec)
+        n = sum(sec[g]["failures"] for g in ("atomic", "composite") if g in sec)
+        self.assertEqual(n, sec["all"]["failures"])
+        # A changed R22 reference stops R24 (K1).
+        ref = json.loads((self.root / "r22.json").read_text())
+        ref["r22"]["table2"]["seen"]["safe_lstm"]["P"]["seed_average"]["gain"] += 1e-9
+        (self.root / "r22_bad.json").write_text(json.dumps(ref))
+        bad = ["--r24", "--r24-reference", str(self.root / "r22_bad.json"), "--r24-r23", str(self.root / "r23.json")]
+        status, text, out = self.run_table("r24_bad.json", extra=bad)
+        self.assertEqual(status, 1)
+        self.assertIn("R24 FAILED", text)
+        self.assertEqual(out["r24_failures"], ["K1"])
+
     def test_r17_needs_the_reference_table(self):
         status, text, _ = self.run_table("table.json")
         self.assertEqual(status, 0, text)

@@ -129,6 +129,35 @@ class R22Test(unittest.TestCase):
         with self.assertRaises(ValueError):
             r22.frozen_row(pairs, run_["_chosen"], "P", self.rk, Fte[:-1])
 
+    def test_same_point_and_tree_diff(self):
+        """R24's gates: same_point against a stored row (JSON round trip), tree_diff over nested results."""
+        import json
+        pairs = {"all": (self.seen(self.cal), self.seen(self.te))}
+        Fte = [r for r in self.te if r["failed"]]
+        row, _ = r22.ensemble_row(pairs, {"all": self.seen(self.val)}, "P", self.rk, Fte)
+        stored = json.loads(json.dumps(r22.strip(row), default=float))
+        self.assertTrue(r22.same_point(row, stored)["ok"])
+        for key, bump in (("gain", 1e-9), ("fp", 1)):
+            bad = json.loads(json.dumps(stored))
+            bad[key] += bump
+            self.assertFalse(r22.same_point(row, bad)["ok"], key)
+        bad = json.loads(json.dumps(stored))
+        bad["matched"]["timer_fp"] += 1
+        self.assertFalse(r22.same_point(row, bad)["ok"])
+        self.assertFalse(r22.same_point(None, stored)["ok"])
+        ref = {"a": [1, 2.5, {"b": float("nan"), "c": None}], "d": "x", "e": True, "f": float("inf")}
+        new = json.loads(json.dumps(dict(ref, extra=3)))
+        self.assertEqual(r22.tree_diff(new, ref), (0.0, None))
+        new["a"][1] = 2.5 + 1e-6
+        d, where = r22.tree_diff(new, ref)
+        self.assertAlmostEqual(d, 1e-6)
+        self.assertEqual(where, "/a/1")
+        for change in (lambda n: n.pop("d"), lambda n: n.__setitem__("e", 1), lambda n: n["a"].pop(),
+                       lambda n: n.__setitem__("f", 1.0), lambda n: n["a"][2].__setitem__("b", 0.0)):
+            n = json.loads(json.dumps(ref))
+            change(n)
+            self.assertEqual(r22.tree_diff(n, ref)[0], math.inf)
+
     def test_k8(self):
         pairs = {"all": (self.seen(self.cal), self.seen(self.te))}
         row, _ = r22.ensemble_row(pairs, {"all": self.seen(self.val)}, "P", self.rk, [r for r in self.te if r["failed"]])

@@ -84,6 +84,9 @@ HS_FAMILY = (HS, ZERO, FIRST)
 ACTPROBE = "actprobe"
 SAFE_LSTM, ACTPROBE_T = "safe_lstm", "actprobe_t"          # R11 rows, from optional fold directories
 OOD = ("mahalanobis", "knn_cosine", "pca_kmeans", "rnd")
+R24_SEEN = (SAFE_LSTM,)                         # R24: Table III rows without an interval in R22
+R24_UNSEEN = ("mahalanobis", FIRST, ZERO)
+R24_KEYS = ("table2", "ensembles_seen", "per_type", "unseen_bootstrap", "nulls", "budget_timer", "teaser")
 TIMERS = ("time_risk", "global_timer", "per_task_timer")
 TABLE1 = OOD + (SAFE, ACTPROBE, HS) + TIMERS
 TABLE2 = OOD + (SAFE, ACTPROBE) + HS_FAMILY + (SHUFFLE,)   # R11 adds ActProbe to Table II
@@ -649,7 +652,8 @@ def r22_xr1(args, D, cal, te, held, folds, tasks, bundle, extra, seen, rkP, type
     # Seen-task ensembles (Table III) and their per-type gains.
     Fte = [r for r in te if r["failed"]]
     ensembles, per_types, runs = {}, {}, {}
-    for name in (SAFE, HS, *OOD, FIRST, ZERO, SHUFFLE):
+    r24 = bool(getattr(args, "r24", False))           # R24 adds rows; every R22 row stays as it was (gate R0)
+    for name in (SAFE, HS, *OOD, FIRST, ZERO, SHUFFLE) + tuple(n for n in R24_SEEN if r24 and n in seen_val):
         row, run_ = r22.ensemble_row(seen_pairs(name)("seed_average"), seen_val_of(name)("seed_average"), "P", rkP, Fte)
         ensembles[name], runs[name] = row, run_
         if name in (SAFE, HS) + OOD:
@@ -657,7 +661,8 @@ def r22_xr1(args, D, cal, te, held, folds, tasks, bundle, extra, seen, rkP, type
     checks["K8_fixed_paths_equal_r8"] = r22.k8(ensembles, r8, {"safe": SAFE, "hide_and_seek": HS})
     # Unseen ensembles: the full-pipeline bootstrap with the paths frozen.
     design = rx.UnseenDesign(cal, te, held, folds)
-    boot_names = [n for n in (HS, SAFE, SAFE_LSTM) if n in unseen_fam]
+    # Replicate draws depend only on the seed (design.draw), so R24's added rows leave R22's intervals unchanged.
+    boot_names = [n for n in (HS, SAFE, SAFE_LSTM) + (R24_UNSEEN if r24 else ()) if n in unseen_fam]
     boot, _ = r22.boot_unseen(design, {n: (lambda F, n=n: f"{n}@{F}") for n in boot_names},
                               lambda n: unseen_val_of(n)("seed_average"), ("G_abs", "G"), rkP, B=args.r22_boot,
                               contrasts=((HS, SAFE),))
@@ -692,6 +697,54 @@ def r22_xr1(args, D, cal, te, held, folds, tasks, bundle, extra, seen, rkP, type
                 inputs=dict(r14=dict(path=str(Path(args.r22_reference).resolve()), sha256=sha256(args.r22_reference)),
                             r8=dict(path=str(Path(args.r22_r8).resolve()), sha256=sha256(args.r22_r8)),
                             scores_dir=str(root.resolve()))), problems
+
+
+def r24_xr1(r22, ref_path):
+    """R24 (docs/r24_table3_ci_seconds_plan.md) on XR-1: R22 rerun with Table III's missing rows added.
+    Gate R0: every entry of R22's output is unchanged (the added rows only add keys). Gate R1: each added
+    row's point estimate equals R22's Table II seed average for the same detector and path."""
+    import r22_fixed_paths as r22m
+    ref = json.loads(Path(ref_path).read_text())["r22"]
+    new = json.loads(json.dumps(r22, default=float))
+    checks = {}
+    d, where = r22m.tree_diff({k: new.get(k) for k in R24_KEYS}, {k: ref.get(k) for k in R24_KEYS})
+    checks["R0_r22_unchanged"] = dict(max_abs_diff=d, first_difference=where, ok=d <= TOL)
+    seen, unseen = {}, {}
+    for name in R24_SEEN:
+        row = new["ensembles_seen"].get(name)
+        ref_row = ((ref["table2"]["seen"].get(name) or {}).get("P") or {}).get("seed_average")
+        checks[f"R1_seen_{name}"] = r22m.same_point(row, ref_row, TOL)
+        seen[name] = row
+    boot = new["unseen_bootstrap"]["timers"]["G_abs"]
+    for name in R24_UNSEEN:
+        b = boot.get(name)
+        sa = ((ref["table2"]["unseen"].get(name) or {}).get("G_abs") or {}).get("seed_average")
+        if b is None or sa is None:
+            checks[f"R1_unseen_{name}"] = dict(max_abs_diff=math.inf, ok=False, note="row missing")
+            continue
+        dd = max(0.0 if b["fp"] == sa["fp"] else math.inf, abs(b["gain"] - sa["gain"]),
+                 abs(b["matched_gain"] - sa["matched"]["gain"]) if b["matched_gain"] is not None and sa["matched"] else math.inf)
+        checks[f"R1_unseen_{name}"] = dict(fp=b["fp"], ref_fp=sa["fp"], matched_gain=b["matched_gain"],
+                                           ref_matched_gain=(sa["matched"] or {}).get("gain"),
+                                           timer_fp=(sa["matched"] or {}).get("timer_fp"), max_abs_diff=dd, ok=dd <= TOL)
+        unseen[name] = dict(b, matched_timer_fp=(sa["matched"] or {}).get("timer_fp"))
+    problems = [k.split("_", 1)[0] for k, v in checks.items() if not v["ok"]]
+    return dict(plan="docs/r24_table3_ci_seconds_plan.md (R24)", checks=checks, seen=seen, unseen=unseen,
+                inputs=dict(r22=dict(path=str(Path(ref_path).resolve()), sha256=sha256(ref_path)))), problems
+
+
+def print_r24(r):
+    print("R24 XR-1: Table III intervals for the rows R22 had without one")
+    for name, row in r["seen"].items():
+        m = (row or {}).get("matched") or {}
+        print(f"  seen + P   {name:20s} FA {(row or {}).get('fp')} (matched P {m.get('timer_fp')})  "
+              f"Delta l {m.get('gain', float('nan')):+.4f} 95% {m.get('ci95')}")
+    for name, b in r["unseen"].items():
+        print(f"  unseen + E {name:20s} FA {b['fp']} (matched E {b.get('matched_timer_fp')})  "
+              f"Delta l {b['matched_gain']:+.4f} 95% {[round(x, 4) for x in b['matched_ci95']]}")
+    for k, v in r["checks"].items():
+        extra = f", first at {v['first_difference']}" if v.get("first_difference") else ""
+        print(f"R24 {k}: {'OK' if v['ok'] else 'FAILED'} (max |diff| {v['max_abs_diff']:.3g}{extra})")
 
 
 def r22_ids(path):
@@ -1082,6 +1135,11 @@ def run(args):
         btypes = bundle.get("task_types") or {}
         types = {r["task_name"]: (r.get("task_type") or btypes.get(r["task_name"])) for r in cal + te}
         r22, r22_failures = r22_xr1(args, D, cal, te, held, folds, tasks, bundle, extra, seen, rkP, types)
+    r24, r24_failures = None, []
+    if getattr(args, "r24", False):
+        if not (args.r22 and args.r24_reference):
+            raise SystemExit("error: --r24 reruns R22 with added rows: give --r22, its inputs and --r24-reference")
+        r24, r24_failures = r24_xr1(r22, args.r24_reference)
     out = dict(base, checks=checks, reproduction_failures=[], table1=table1, table2=table2,
                notes=dict(std="ddof 1 over training seeds 0-2; timers are deterministic",
                           unseen_normalization="pooled over the fold's seen tasks",
@@ -1104,6 +1162,9 @@ def run(args):
     if args.r22:
         out["r22"] = r22
         out["r22_failures"] = r22_failures
+    if getattr(args, "r24", False):
+        out["r24"] = r24
+        out["r24_failures"] = r24_failures
     if args.curves:
         out["r18"] = r18
         out["r18_failures"] = r18_failures
@@ -1171,6 +1232,13 @@ def run(args):
             print("R22 FAILED (no R22 result is used): " + ", ".join(r22_failures))
             return 1
         print("R22 OK")
+    if getattr(args, "r24", False):
+        print()
+        print_r24(r24)
+        if r24_failures:
+            print("R24 FAILED (no R24 result is used): " + ", ".join(r24_failures))
+            return 1
+        print("\nR24 OK")
     if args.curves:
         if r18_failures:
             print("R18 FAILED (no curve is used):\n  " + "\n  ".join(r18_failures))
@@ -1230,6 +1298,8 @@ def main(argv=None):
     r.add_argument("--r22-r8", help="R22 gate K8: R8's fixed_path.json")
     r.add_argument("--r22-boot", type=int, default=1000, help="R22 unseen bootstrap replicates")
     r.add_argument("--r22-null-draws", type=int, default=100, help="R22 null fusions per family")
+    r.add_argument("--r24", action="store_true", help="R24: R22 with Table III's missing intervals added")
+    r.add_argument("--r24-reference", help="R24 gate R0: R22's XR-1 output (seen_unseen_tables_r22.json)")
     r.add_argument("--r6-result", help="R11 gate T6: R6's seen_unseen_tables JSON, reproduced exactly")
     r.add_argument("--output", required=True)
     args = ap.parse_args(argv)

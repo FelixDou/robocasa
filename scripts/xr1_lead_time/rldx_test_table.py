@@ -789,6 +789,59 @@ def print_r23(r):
         print(f"R23 {k.split('_', 1)[0]}: {'OK' if v['ok'] else 'FAILED'} (max |diff| {v['max_abs_diff']:.3g})")
 
 
+R24_SPI = 0.4                                   # RLDX-1: 8 control steps per inference at 20 Hz
+R24_SEEN = ("safe_indep", "safe_lstm")
+
+
+def r24_rldx(a, parts, parts_rec, rk, types):
+    """R24 (docs/r24_table3_ci_seconds_plan.md): Table III's missing RLDX-1 intervals and H3's gain by task type.
+    SAFE-MLP and SAFE-LSTM + P as three-seed ensembles on R22's fixed paths (chosen on the recorded validation
+    rollouts), with the task-then-failure 95% CIs of the XR-1 ensembles; Hide-and-Seek + P on H3's registered
+    path, Delta l by task type in fractions of H_k and in seconds. Gates: K1, each SAFE row's false alarms,
+    matched timer false alarms, gain and Delta l equal R22's seed average; K2, H3 equals R23's h3."""
+    import r22_fixed_paths as r22
+    ref22 = json.loads(Path(a.r24_reference).read_text())["r22"]
+    ref23 = json.loads(Path(a.r24_r23).read_text())["r23"]["h3"]
+    e1b = json.loads(Path(a.e1_result).read_text())
+    val_rows = parts_rec["calibration"] + parts_rec["test"]
+    failed = [r for r in parts["test"] if r["failed"]]
+
+    def pairs(d):
+        return {ALL: (cl.Cohort(cal_rows(parts, "calibration"), f"{d}@all/task"), cl.Cohort(parts["test"], f"{d}@all/task"))}
+
+    checks, seen = {}, {}
+    for d in R24_SEEN:
+        row, _ = r22.ensemble_row(pairs(d), {ALL: cl.Cohort(val_rows, f"{d}@all/task")}, "P", rk, failed)
+        seen[d] = r22.strip(row)
+        checks[f"K1_{d}_equals_r22"] = r22.same_point(row, ref22["table2"]["seen"][d]["P"]["seed_average"], R23_TOL)
+    hs = "hide_and_seek"
+    fp_ = e1b["frozen_paths"][hs]
+    h3, run_ = r22.frozen_row(pairs(hs), {ALL: dict(u=float(fp_["u"]), s=float(fp_["s"]))}, "P", rk, failed)
+    checks["K2_h3_equals_r23"] = r22.same_point(h3, ref23, R23_TOL)
+    by_type = r22.per_type(run_, types, R24_SPI)
+    problems = [k.split("_", 1)[0] for k, v in checks.items() if not v["ok"]]
+    return dict(plan="docs/r24_table3_ci_seconds_plan.md (R24)", checks=checks, seen=seen,
+                h3=dict(fp=h3["fp"], matched=r22.strip(h3)["matched"], by_type=by_type,
+                        tasks={t: sum(1 for k, v in types.items() if v == t) for t in ("atomic", "composite")}),
+                inputs=dict(r22=dict(path=str(Path(a.r24_reference).resolve()), sha256=sha256(a.r24_reference)),
+                            r23=dict(path=str(Path(a.r24_r23).resolve()), sha256=sha256(a.r24_r23)))), problems
+
+
+def print_r24(r):
+    print("R24 RLDX-1: Table III intervals (seen + P) and H3 by task type")
+    for d, row in r["seen"].items():
+        m = row["matched"] or {}
+        print(f"  {d:12s} FA {row['fp']} (matched P {m.get('timer_fp')})  Delta l {m.get('gain', float('nan')):+.4f} "
+              f"95% {m.get('ci95')}")
+    h = r["h3"]
+    print(f"  H3 Hide-and-Seek FA {h['fp']} (matched P {(h['matched'] or {}).get('timer_fp')})  tasks {h['tasks']}")
+    for g, s in ((h["by_type"] or {}).get("seconds") or {}).items():
+        print(f"    {g:9s} failures {s['failures']:3d}  Delta l {s.get('matched_gain_fraction', float('nan')):+.4f} "
+              f"= {s.get('matched_gain_seconds', float('nan')):+.2f} s  (P's lead {s['timer_lead_seconds']:.2f} s)")
+    for k, v in r["checks"].items():
+        print(f"R24 {k}: {'OK' if v['ok'] else 'FAILED'} (max |diff| {v['max_abs_diff']:.3g})")
+
+
 R21_HEADS = ("safe_indep", "safe_lstm", "hide_and_seek")
 
 
@@ -1068,6 +1121,20 @@ def run(a):
             print("\nR23 OK")
     elif a.r23:
         print("R23 FAILED: no R23 result after a failed gate")
+    if a.r24 and status == 0:
+        if not (a.r24_reference and a.r24_r23):
+            raise SystemExit("error: --r24 needs --r24-reference (rldx_e1b_r22.json) and --r24-r23 (rldx_e1b_r23.json)")
+        r24, problems = r24_rldx(a, parts_new, parts_rec, rk, bundle["task_types"])
+        result["r24"], result["r24_failures"] = r24, problems
+        print()
+        print_r24(r24)
+        if problems:
+            print("R24 FAILED (no R24 result is used): " + ", ".join(problems))
+            status = 1
+        else:
+            print("\nR24 OK")
+    elif a.r24:
+        print("R24 FAILED: no R24 result after a failed gate")
     if a.curves and status == 0:
         import seen_unseen_tables as sut
         result["r18"] = rldx_curves(parts_new, held, folds, detectors + [SHUFFLE], rk)
@@ -1119,6 +1186,9 @@ def main(argv=None):
     r.add_argument("--r22-boot", type=int, default=1000, help="R22 unseen bootstrap replicates")
     r.add_argument("--r23", action="store_true", help="R23: the test of H3 under H1's rule (exact matching, 95% CIs)")
     r.add_argument("--r23-reference", help="R23 gate K2: R22's RLDX-1 output (rldx_e1b_r22.json)")
+    r.add_argument("--r24", action="store_true", help="R24: Table III's seen-task intervals and H3 by task type")
+    r.add_argument("--r24-reference", help="R24 gate K1: R22's RLDX-1 output (rldx_e1b_r22.json)")
+    r.add_argument("--r24-r23", help="R24 gate K2: R23's RLDX-1 output (rldx_e1b_r23.json)")
     r.add_argument("--reference-table", help="R17 K0: an earlier run's output whose table2 this run must equal")
     a = p.parse_args(argv)
     return {"ids": ids_cmd, "safe-fold": safe_fold_cmd, "run": run}[a.cmd](a)
