@@ -178,6 +178,47 @@ rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r24_table3
   /Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/.claude/worktrees/r22-fixed-paths/reports/r24_table3_ci_seconds_evidence/
 ```
 
-## Result
+## Result (2026-11-19, run `r24_table3_ci_seconds_20261119_144619`, from `4fbfbeef`): `R24 OK`
 
-(to be written after the run)
+Both runs ended with `R24 OK`, the XR-1 run also with `R22 OK`, and `INPUTS UNCHANGED`. Evidence is
+in `reports/r24_table3_ci_seconds_evidence/`:
+- `seen_unseen_tables_r24.json`, sha256 `ed942e22…`;
+- `rldx_e1b_r24.json`, `7c9e0d9c…`;
+- both logs, gitignored and kept locally.
+
+The recorded inputs are R22's `76280d1b…` (XR-1) and `fc776307…` (RLDX-1), and R23's `48ecc74f…`.
+
+**Gates.**
+- **XR-1, R0:** R22's output is unchanged (max |diff| 0).
+- **XR-1, R1:** all four added rows OK (max |diff| 0).
+- **RLDX-1, K1:** both SAFE rows OK (max |diff| 0).
+- **RLDX-1, K2:** H3 equals R23 (max |diff| 0).
+
+**Table III's missing intervals.** The points are as expected.
+
+| Cell | FA (monitor / matched timer) | Δℓ̄ | 95% CI |
+| --- | --- | --- | --- |
+| XR-1 seen + P, SAFE-LSTM | 20 / 20 | 0.037 | [0.008, 0.073] |
+| XR-1 unseen + E, Mahalanobis | 21 / 20 | −0.013 | [−0.099, 0.014] |
+| XR-1 unseen + E, first step | 19 / 19 | −0.006 | [−0.057, 0.011] |
+| XR-1 unseen + E, zero input | 19 / 19 | −0.006 | [−0.057, 0.011] |
+| RLDX-1 seen + P, SAFE-MLP (score unused) | 27 / 27 | 0.000 | [0.000, 0.000] |
+| RLDX-1 seen + P, SAFE-LSTM | 28 / 28 | 0.024 | [−0.001, 0.056] |
+
+One result is new: **SAFE-LSTM's seen-task gain on XR-1 has a 95% CI above zero**, like SAFE-MLP's
+and Mahalanobis's. It does not repeat on RLDX-1, where the CI touches zero. On unseen tasks, first
+step and zero input equal SAFE-MLP's row: all three paths leave the score unused, or it never fires
+first.
+
+**H3 by task type (RLDX-1, Hide-and-Seek + P, 0.4 s per inference).**
+
+| Tasks | Failures | P's lead | Δℓ̄ | Δℓ̄ (s) |
+| --- | --- | --- | --- | --- |
+| Atomic (14) | 280 | 10.9 s | 0.153 | 5.3 |
+| Composite (6) | 120 | 8.5 s | 0.012 | 0.4 |
+| All (20) | 400 | 10.2 s | 0.111 | 3.9 |
+
+Per task type, the gain is about the same on both VLAs (XR-1, R22: atomic 0.141 = 5.1 s,
+composite 0.026 = −0.1 s). RLDX-1's pooled gain is larger because 14 of its 20 tasks are atomic,
+against 10 of XR-1's 38. At XR-1's mix of 26% atomic tasks, RLDX-1's per-type gains would pool
+to about 0.049.
