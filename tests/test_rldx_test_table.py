@@ -538,6 +538,45 @@ class RldxTestTableTest(unittest.TestCase):
         self.assertIn("R24 FAILED", text)
         self.assertEqual(out["r24_failures"], ["K1"])
 
+    def test_r25_band_ablation(self):
+        """R25: Hide-and-Seek's band against its first-step and zero-input retrainings on unseen tasks; G1 against
+        R21's ensemble, G2 against R21b's `test` replicates; a changed R21 reference stops R25."""
+        status, text, _ = self.run_table("r17.json", extra=["--elapsed-time"])
+        self.assertEqual(status, 0, text)
+        status, text, _ = self.run_table("r19.json", extra=["--r19", "--r19-reference", str(self.root / "r17.json"),
+                                                            "--r19-boot", "2"])
+        self.assertEqual(status, 0, text)
+        status, text, _ = self.run_table("r21.json", extra=["--r21", "--r21-reference", str(self.root / "r19.json"),
+                                                            "--r21-boot", "2"])
+        self.assertEqual(status, 0, text)
+        status, text, out = self.run_table("r21b.json", extra=["--r21", "--r21-reference", str(self.root / "r19.json"),
+                                                               "--r21-boot", "0", "--r21b", "--r21b-reference",
+                                                               str(self.root / "r21.json"), "--r21b-boot", "2"])
+        self.assertEqual(status, 0, text)
+        npz = str(self.root / out["r21b"]["replicates_file"])
+        r25 = ["--r25", "--r25-r21", str(self.root / "r21.json"), "--r25-r21b-replicates", npz, "--r25-boot", "2"]
+        status, text, out = self.run_table("r25.json", extra=r25)
+        self.assertEqual(status, 0, text)
+        self.assertIn("R25 OK", text)
+        r = out["r25"]
+        self.assertEqual(out["r25_failures"], [])
+        for k in ("G0_raw_scores_have_the_table_running_maximum", "G1_full_band_equals_r21",
+                  "G2_replicates_equal_r21b", "G3_precomputed_alarms_equal_evaluate"):
+            self.assertTrue(r["checks"][k]["ok"], (k, r["checks"][k]))
+        self.assertEqual(set(r["heads"]), {"hide_and_seek", "hide_and_seek_first", "hide_and_seek_zero"})
+        p = r["ablations"]["hide_and_seek_first"]["paired"]
+        self.assertIn("delta", p)
+        self.assertIn("same_alpha", p)
+        # A changed R21 reference stops R25 (G1).
+        ref = json.loads((self.root / "r21.json").read_text())
+        ref["r21"]["bootstrap"]["unseen"]["timers"]["G_abs"]["hide_and_seek"]["standalone"]["matched_gain"] += 1e-9
+        (self.root / "r21_bad.json").write_text(json.dumps(ref))
+        bad = ["--r25", "--r25-r21", str(self.root / "r21_bad.json"), "--r25-r21b-replicates", npz, "--r25-boot", "2"]
+        status, text, out = self.run_table("r25_bad.json", extra=bad)
+        self.assertEqual(status, 1)
+        self.assertIn("R25 FAILED", text)
+        self.assertEqual(out["r25_failures"], ["G1"])
+
     def test_r17_needs_the_reference_table(self):
         status, text, _ = self.run_table("table.json")
         self.assertEqual(status, 0, text)

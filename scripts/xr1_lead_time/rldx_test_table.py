@@ -887,10 +887,41 @@ def r21_rldx(a, parts, held, folds, tasks, rk):
     return res, problems, diag, diag_problems
 
 
+def r25_rldx(a, parts, held, folds, tasks, rk):
+    """R25 on RLDX-1 (r25_band_ablation): Hide-and-Seek's band against its first-step and zero-input
+    retrainings on unseen tasks, with R21's and R21b's full-band results as gates G1 and G2."""
+    import r21_native_bands as r21
+    import r25_band_ablation as r25
+    if not (a.r25_r21 and a.r25_r21b_replicates):
+        raise SystemExit("error: --r25 needs --r25-r21 (rldx_e1b_r21.json) and --r25-r21b-replicates "
+                         "(rldx_e1b_r21b_r21b_replicates.npz)")
+    cal, te = parts["calibration"], parts["test"]
+    r0 = {}
+    for h in r25.HEADS:
+        for F in folds:
+            for s in SEEDS:
+                r0[f"{h}/{F}/seed_{s}"] = r21.running_max_gap(cal + te, f"{h}~#{s}@{F}", f"{h}#{s}@{F}")
+    every = set(tasks)
+    d = r21.Design(cal, te, {F: every - held[F] for F in folds}, {F: held[F] for F in folds})
+    key_ofs = {h: (lambda F, h=h: f"{h}~@{F}") for h in r25.HEADS}
+    ref21 = json.loads(Path(a.r25_r21).read_text())["r21"]["bootstrap"]["unseen"]["timers"][r25.TIMER][r25.FULL]
+    res, problems = r25.run(d, key_ofs, rk, ref21=ref21, r21b=r25.r21b_replicates(a.r25_r21b_replicates), r0=r0,
+                            B=a.r25_boot, progress=lambda m: print(m, flush=True))
+    res["inputs"] = dict(r21=dict(path=str(Path(a.r25_r21).resolve()), sha256=sha256(a.r25_r21)),
+                         r21b_replicates=dict(path=str(Path(a.r25_r21b_replicates).resolve()),
+                                              sha256=sha256(a.r25_r21b_replicates)))
+    return res, problems
+
+
+R25_HEADS = ("hide_and_seek", "hide_and_seek_first", "hide_and_seek_zero")
+
+
 def run(a):
     if a.r21:
         ru.KEEP_RAW_SEEDS = R21_HEADS           # R21's single-model bands read each seed's raw score
-    if a.r19 or a.r21:
+    if a.r25:
+        ru.KEEP_RAW_SEEDS = tuple(sorted(set(ru.KEEP_RAW_SEEDS) | set(R25_HEADS)))
+    if a.r19 or a.r21 or a.r25:
         ru.KEEP_RAW = True                      # native bands read the normalized raw score
     out_path = Path(a.output)
     if out_path.exists():
@@ -1135,6 +1166,19 @@ def run(a):
             print("\nR24 OK")
     elif a.r24:
         print("R24 FAILED: no R24 result after a failed gate")
+    if a.r25 and status == 0:
+        import r25_band_ablation as r25m
+        r25, problems = r25_rldx(a, parts_new, held, folds, tasks, rk)
+        result["r25"], result["r25_failures"] = r25, problems
+        print()
+        r25m.print_summary(r25, "RLDX-1")
+        if problems:
+            print("R25 FAILED (no R25 result is used): " + ", ".join(problems))
+            status = 1
+        else:
+            print("\nR25 OK")
+    elif a.r25:
+        print("R25 FAILED: no R25 result after a failed gate")
     if a.curves and status == 0:
         import seen_unseen_tables as sut
         result["r18"] = rldx_curves(parts_new, held, folds, detectors + [SHUFFLE], rk)
@@ -1189,6 +1233,10 @@ def main(argv=None):
     r.add_argument("--r24", action="store_true", help="R24: Table III's seen-task intervals and H3 by task type")
     r.add_argument("--r24-reference", help="R24 gate K1: R22's RLDX-1 output (rldx_e1b_r22.json)")
     r.add_argument("--r24-r23", help="R24 gate K2: R23's RLDX-1 output (rldx_e1b_r23.json)")
+    r.add_argument("--r25", action="store_true", help="R25: Hide-and-Seek's band against its input ablations")
+    r.add_argument("--r25-r21", help="R25 gate G1: R21's RLDX-1 output (rldx_e1b_r21.json)")
+    r.add_argument("--r25-r21b-replicates", help="R25 gate G2: R21b's replicates (rldx_e1b_r21b_r21b_replicates.npz)")
+    r.add_argument("--r25-boot", type=int, default=1000, help="R25 bootstrap replicates (R21b's: 1000)")
     r.add_argument("--reference-table", help="R17 K0: an earlier run's output whose table2 this run must equal")
     a = p.parse_args(argv)
     return {"ids": ids_cmd, "safe-fold": safe_fold_cmd, "run": run}[a.cmd](a)

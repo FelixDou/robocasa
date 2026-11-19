@@ -699,6 +699,43 @@ def r22_xr1(args, D, cal, te, held, folds, tasks, bundle, extra, seen, rkP, type
                             scores_dir=str(root.resolve()))), problems
 
 
+def r25_xr1(args, fam, cal, te, held, folds, tasks, rkP):
+    """R25 on XR-1 (r25_band_ablation): Hide-and-Seek's band against its first-step and zero-input
+    retrainings on unseen tasks, with R21's and R21b's full-band results as gates G1 and G2."""
+    import r21_native_bands as r21
+    import r25_band_ablation as r25
+    if not (args.r25_r21 and args.r25_r21b_replicates):
+        raise SystemExit("error: --r25 needs --r25-r21 (seen_unseen_tables_r21.json) and --r25-r21b-replicates "
+                         "(seen_unseen_tables_r21b_r21b_replicates.npz)")
+    rows = cal + te
+    data = {F: v for F, v in fam["xt"].items() if F != ALL}
+    r0 = {}
+    for h in r25.HEADS:
+        c = trajectories(data, h, cal, ctl.CAL_COHORT, held, "pooled", running_max=False)
+        e = trajectories(data, h, te, ctl.TEST_COHORT, held, "pooled", running_max=False)
+        raw = {F: merge(c[F], e[F]) for F in folds}
+        for r in rows:
+            rid = str(r["rollout_id"])
+            for F in folds:
+                per = raw[F][rid]
+                for s in SEEDS:
+                    r[f"{h}~#{s}@{F}"] = per[s]
+                r[f"{h}~@{F}"] = np.mean([per[s] for s in sorted(per)], axis=0)
+        for F in folds:
+            for s in SEEDS:
+                r0[f"{h}/{F}/seed_{s}"] = r21.running_max_gap(rows, f"{h}~#{s}@{F}", f"{h}#{s}@{F}")
+    every = set(tasks)
+    d = r21.Design(cal, te, {F: every - held[F] for F in folds}, {F: held[F] for F in folds})
+    key_ofs = {h: (lambda F, h=h: f"{h}~@{F}") for h in r25.HEADS}
+    ref21 = json.loads(Path(args.r25_r21).read_text())["r21"]["bootstrap"]["unseen"]["timers"][r25.TIMER][r25.FULL]
+    res, problems = r25.run(d, key_ofs, rkP, ref21=ref21, r21b=r25.r21b_replicates(args.r25_r21b_replicates), r0=r0,
+                            B=args.r25_boot, progress=lambda m: print(m, flush=True))
+    res["inputs"] = dict(r21=dict(path=str(Path(args.r25_r21).resolve()), sha256=sha256(args.r25_r21)),
+                         r21b_replicates=dict(path=str(Path(args.r25_r21b_replicates).resolve()),
+                                              sha256=sha256(args.r25_r21b_replicates)))
+    return res, problems
+
+
 def r24_xr1(r22, ref_path):
     """R24 (docs/r24_table3_ci_seconds_plan.md) on XR-1: R22 rerun with Table III's missing rows added.
     Gate R0: every entry of R22's output is unchanged (the added rows only add keys). Gate R1: each added
@@ -1135,6 +1172,9 @@ def run(args):
         btypes = bundle.get("task_types") or {}
         types = {r["task_name"]: (r.get("task_type") or btypes.get(r["task_name"])) for r in cal + te}
         r22, r22_failures = r22_xr1(args, D, cal, te, held, folds, tasks, bundle, extra, seen, rkP, types)
+    r25, r25_failures = None, []
+    if getattr(args, "r25", False):
+        r25, r25_failures = r25_xr1(args, fam, cal, te, held, folds, tasks, rkP)
     r24, r24_failures = None, []
     if getattr(args, "r24", False):
         if not (args.r22 and args.r24_reference):
@@ -1165,6 +1205,9 @@ def run(args):
     if getattr(args, "r24", False):
         out["r24"] = r24
         out["r24_failures"] = r24_failures
+    if getattr(args, "r25", False):
+        out["r25"] = r25
+        out["r25_failures"] = r25_failures
     if args.curves:
         out["r18"] = r18
         out["r18_failures"] = r18_failures
@@ -1232,6 +1275,14 @@ def run(args):
             print("R22 FAILED (no R22 result is used): " + ", ".join(r22_failures))
             return 1
         print("R22 OK")
+    if getattr(args, "r25", False):
+        import r25_band_ablation as r25m
+        print()
+        r25m.print_summary(r25, "XR-1")
+        if r25_failures:
+            print("R25 FAILED (no R25 result is used): " + ", ".join(r25_failures))
+            return 1
+        print("\nR25 OK")
     if getattr(args, "r24", False):
         print()
         print_r24(r24)
@@ -1300,6 +1351,10 @@ def main(argv=None):
     r.add_argument("--r22-null-draws", type=int, default=100, help="R22 null fusions per family")
     r.add_argument("--r24", action="store_true", help="R24: R22 with Table III's missing intervals added")
     r.add_argument("--r24-reference", help="R24 gate R0: R22's XR-1 output (seen_unseen_tables_r22.json)")
+    r.add_argument("--r25", action="store_true", help="R25: Hide-and-Seek's band against its input ablations")
+    r.add_argument("--r25-r21", help="R25 gate G1: R21's XR-1 output (seen_unseen_tables_r21.json)")
+    r.add_argument("--r25-r21b-replicates", help="R25 gate G2: R21b's replicates (seen_unseen_tables_r21b_r21b_replicates.npz)")
+    r.add_argument("--r25-boot", type=int, default=1000, help="R25 bootstrap replicates (R21b's: 1000)")
     r.add_argument("--r6-result", help="R11 gate T6: R6's seen_unseen_tables JSON, reproduced exactly")
     r.add_argument("--output", required=True)
     args = ap.parse_args(argv)

@@ -571,6 +571,21 @@ class RunTests(unittest.TestCase):
             self.assertTrue((root / out["r21b"]["replicates_file"]).exists())
             with np.load(root / out["r21b"]["replicates_file"]) as z:
                 self.assertEqual(len(z[f"unseen__test__G_abs__{su.HS}__fused_matched"]), 2)
+            # R25: Hide-and-Seek's band against its first-step and zero-input retrainings (G1 against R21's
+            # ensemble, G2 against R21b's `test` replicates).
+            npz = str(root / out["r21b"]["replicates_file"])
+            (root / "tables.json").rename(root / "r21b.json")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + ["--r25", "--r25-r21", str(root / "r21.json"), "--r25-r21b-replicates", npz,
+                                         "--r25-boot", "2"])
+            self.assertEqual(status, 0, buf.getvalue())
+            self.assertIn("R25 OK", buf.getvalue())
+            r = json.loads((root / "tables.json").read_text())["r25"]
+            self.assertEqual(set(r["heads"]), {su.HS, su.FIRST, su.ZERO})
+            for k, v in r["checks"].items():
+                self.assertTrue(v["ok"], (k, v))
+            self.assertIn("delta_ci", r["ablations"][su.FIRST])
 
     def test_r22_fixed_paths(self):
         """R22 on XR-1: validation rows (R8's selection), stage A fold directories with the August cohorts,
