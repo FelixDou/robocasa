@@ -162,3 +162,43 @@ The log must end with `R26 OK`. Then, on the Mac:
 rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r26_alarms_at_limit_*/evidence/' \
   /Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/.claude/worktrees/r22-fixed-paths/reports/r26_alarms_at_limit_evidence/
 ```
+
+## Result (2026-11-22, from `c51b0939`): `R26 OK`
+
+The log ends with `R26 OK`. All three gates hold with max |diff| 0:
+- R0: 59 values against this run's table1;
+- R1: 61 values against R14's table1 and timers_alone;
+- R2: 2 timers against R21's timer_alone.
+
+The local test suites passed too (27 tests). Evidence: `seen_unseen_tables_r26.json` and `r26_xr1.log` in
+`$R26_ROOT/evidence/`. Their copy to `reports/r26_alarms_at_limit_evidence/` and their hashes follow the rsync
+below.
+
+**Result** (XR-1; bACC as printed → with an alarm at the limit as a miss; recall before the limit; alarms at
+the limit per seed; monitors: mean ± std over seeds):
+
+| Row | Seen | Unseen |
+| --- | --- | --- |
+| P | 0.972 → 0.946; 0.947; 20 | – |
+| E | 0.974 → 0.724; 0.500; 190 | 0.975 → 0.725; 0.500; 190 |
+| G | 0.988 → 0.988; 1.000; 0 | 0.988 → 0.988; 1.000; 0 |
+| Mahalanobis | 0.818 → 0.814 ± 0.002; 0.681; 3.0 | 0.726 → 0.726; 0.518; 0 |
+| Cosine k-NN | 0.788 → 0.784; 0.629; 3.0 | 0.729 → 0.729; 0.526; 0 |
+| PCA-KMeans | 0.796 → 0.786 ± 0.002; 0.635; 8.3 | 0.728 → 0.728; 0.523; 0 |
+| RND | 0.793 → 0.788 ± 0.001; 0.640; 3.7 | 0.728 → 0.728; 0.525; 0 |
+| SAFE-MLP | 0.763 → 0.761 ± 0.005; 0.566; 1.0 | 0.713 → 0.712; 0.471; 0.3 |
+| SAFE-LSTM | 0.610 → 0.608 ± 0.013; 0.252; 1.7 | 0.686 → 0.682 ± 0.020; 0.404; 3.3 |
+| Hide-and-Seek | 0.742 → 0.739 ± 0.029; 0.527; 2.0 | 0.790 → 0.786 ± 0.002; 0.633; 3.3 |
+| SAFE-MLP band | 0.713 → 0.713; 0.482; 0 | 0.687 → 0.684 ± 0.005; 0.398; 2.3 |
+| SAFE-LSTM band | 0.601 → 0.600 ± 0.016; 0.262; 0.7 | 0.568 → 0.567 ± 0.010; 0.192; 0.3 |
+| Hide-and-Seek band | 0.751 → 0.751; 0.581; 0 | 0.692 → 0.692; 0.468; 0.3 |
+
+**Against the expectations:** all hold.
+- P, E and G match R19 and the inference for seen E: 190 alarms at the limit, bACC 0.724.
+- The constant-threshold monitors drop by at most 0.010 (PCA-KMeans, seen tasks).
+- The own bands drop by at most 0.003.
+
+**Reporting (as fixed before the run):**
+- Draft v6 (paper commit `26cc63e7`) reports `bacc_before_limit` in Table I, with a one-line note.
+- The learned detectors' seen-task recall before the limit is at most 68% (Mahalanobis 0.681).
+- E's bACC is 0.72.
