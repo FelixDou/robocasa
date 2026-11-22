@@ -586,6 +586,41 @@ class RunTests(unittest.TestCase):
             for k, v in r["checks"].items():
                 self.assertTrue(v["ok"], (k, v))
             self.assertIn("delta_ci", r["ablations"][su.FIRST])
+            # R26: Table I with an alarm at a failure's final inference counted as a miss (R0 this run's table1,
+            # R1 R14's table1 and timers_alone, R2 R21's timers); a changed R14 value stops it.
+            r26_args = ["--r26", "--r26-r14", str(root / "r14.json"), "--r26-r21", str(root / "r21.json")]
+            (root / "tables.json").unlink()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + r26_args)
+            self.assertEqual(status, 0, buf.getvalue())
+            self.assertIn("R26 OK", buf.getvalue())
+            out = json.loads((root / "tables.json").read_text())
+            self.assertEqual(out["r26_failures"], [])
+            r = out["r26"]
+            for k, v in r["checks"].items():
+                self.assertTrue(v["ok"], (k, v))
+                self.assertGreater(v["compared"], 0, k)
+            self.assertTrue({"global_timer", "per_task_timer", "elapsed_timer", su.SAFE, su.HS,
+                             f"{su.HS}_own_band"} <= set(r["rows"]))
+            for name, sides in r["rows"].items():
+                for side, block in (sides or {}).items():
+                    for lab, m in (block or {}).items():
+                        if lab != "mean_std_over_seeds":
+                            self.assertLessEqual(m["bacc_before_limit"], m["bacc"] + 1e-15, (name, side, lab))
+            e = r["rows"]["elapsed_timer"]["unseen"]["seed_average"]
+            r21_out = json.loads((root / "r21.json").read_text())["r21"]
+            self.assertEqual(e["alarms_at_limit"],
+                             r21_out["heads"][su.HS]["unseen"]["G_abs"]["seed_average"]["timer_alone"]["alarms_at_limit"])
+            bad = json.loads((root / "r14.json").read_text())
+            bad["table1"][su.HS]["seen"]["seed_0"]["tpr"] += 0.01
+            (root / "r14_bad.json").write_text(json.dumps(bad))
+            (root / "tables.json").unlink()
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + ["--r26", "--r26-r14", str(root / "r14_bad.json"), "--r26-r21", str(root / "r21.json")])
+            self.assertEqual(status, 1)
+            self.assertIn("R26 FAILED (no R26 result is used): R1", buf.getvalue())
 
     def test_r22_fixed_paths(self):
         """R22 on XR-1: validation rows (R8's selection), stage A fold directories with the August cohorts,

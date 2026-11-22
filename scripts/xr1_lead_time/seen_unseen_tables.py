@@ -736,6 +736,88 @@ def r25_xr1(args, fam, cal, te, held, folds, tasks, rkP):
     return res, problems
 
 
+def r26_xr1(args, cal, te, held, folds, seen, unseen, table1, rkP, extra):
+    """R26 (r26_alarms_at_limit) on XR-1: Table I recounted with an alarm at a failure's final inference as a
+    miss. Every row goes through Table I's own code path (thresholds, P's fit, E's hk_free fit), keeping each
+    failure's hit and lead. Gates R0 (this run's table1), R1 (R14's table1 and timers_alone), R2 (R21's timers)."""
+    import hk_free as hk
+    import r21_native_bands as r21
+    import r26_alarms_at_limit as r26
+    if not (args.r26_r14 and args.r26_r21):
+        raise SystemExit("error: --r26 needs --r26-r14 (seen_unseen_tables_r14.json) and --r26-r21 "
+                         "(seen_unseen_tables_r21.json)")
+    lab = lambda seed: "seed_average" if seed is None else f"seed_{seed}"
+
+    def seen_side(traj, seeds):
+        out = {}
+        for seed in [None, *seeds]:
+            o = outcomes(scored(te, traj, seed), psd.threshold(scored(cal, traj, seed)))
+            out[lab(seed)] = r26.recount(o["hits"], o["leads"], o["fp"], o["n"])
+        return r26.with_seed_summary(out)
+
+    def unseen_side(traj_by_fold, seeds):
+        out = {}
+        for seed in [None, *seeds]:
+            parts = []
+            for F in folds:
+                c = [r for r in cal if r["task_name"] not in held[F]]
+                e = [r for r in te if r["task_name"] in held[F]]
+                parts.append(outcomes(scored(e, traj_by_fold[F], seed), psd.threshold(scored(c, traj_by_fold[F], seed))))
+            o = pool_outcomes(parts)
+            out[lab(seed)] = r26.recount(o["hits"], o["leads"], o["fp"], o["n"])
+        return r26.with_seed_summary(out)
+
+    def timer_alone(parts, timer):
+        """hk_free's timer alone (as r14.timers_alone), pooled over folds."""
+        ps = []
+        for F, (c, e) in sorted(parts.items()):
+            cu, rc = hk.prepared(c, timer, F, None, rkP)
+            eu, re_ = hk.prepared(e, timer, F, None, rkP)
+            ps.append(hk.raw_eval(eu, re_, hk.fit(cu, rc)[0]))
+        p = hk.pool(ps)
+        return r26.recount(p["hit"], p["lead"], p["fp"], p["n"])
+
+    rows = {}
+    for name in OOD + (SAFE, HS) + tuple(n for n in extra if n == SAFE_LSTM):
+        rows[name] = dict(seen=seen_side(seen[name], SEEDS), unseen=unseen_side(unseen[name], SEEDS))
+    timer_traj = {str(r["rollout_id"]): {"det": r["timer"]} for r in cal + te}
+    rows["global_timer"] = dict(seen=seen_side(timer_traj, []), unseen=unseen_side({F: timer_traj for F in folds}, []))
+    calC, teC = cl.Cohort(cal, "timer"), cl.Cohort(te, "timer")
+    tm, _ = cl.fit_fast(calC, rkP)
+    p = ctl.raw_eval(teC, rkP, tm)
+    rows["per_task_timer"] = dict(seen=dict(seed_average=r26.recount(p["hit"], p["lead"], p["fp"], p["n"])), unseen=None)
+    light = lambda rs: cl.Cohort([r21.light(r) for r in rs], r21.LIGHT)
+    e_seen = timer_alone({ALL: (light(cal), light(te))}, "G_abs")
+    e_unseen = timer_alone({F: (light([r for r in cal if r["task_name"] not in held[F]]),
+                                light([r for r in te if r["task_name"] in held[F]])) for F in folds}, "G_abs")
+    rows["elapsed_timer"] = dict(seen=dict(seed_average=e_seen), unseen=dict(seed_average=e_unseen))
+    ref21 = json.loads(Path(args.r26_r21).read_text())["r21"]
+    heads = tuple(h for h in (SAFE, SAFE_LSTM, HS) if h in ref21["heads"])
+    for h, block in r26.bands_from_r21(ref21, heads).items():
+        rows[f"{h}_own_band"] = block
+
+    # R0: this run's table1; R1: R14's table1 and timers_alone (E: no tpr there); R2: R21's timers alone.
+    r0 = r26.compare({k: v for k, v in rows.items() if k in table1}, table1)
+    ref14 = json.loads(Path(args.r26_r14).read_text())
+    r1 = r26.compare({k: v for k, v in rows.items() if k in ref14["table1"]}, ref14["table1"])
+    ta = ref14["r14"]["timers_alone"]
+    for side, mine in (("seen", e_seen), ("unseen", e_unseen)):
+        r1[f"elapsed_timer/{side}/seed_average"] = r26.worst_diff(mine, ta[side]["G_abs"], ("fpr", "mean_lead", "fp"))
+    keys2 = ("fp", "fpr", "tpr", "mean_lead", "alarms_at_limit")
+    r2 = {"per_task_timer/seen": r26.worst_diff(rows["per_task_timer"]["seen"]["seed_average"],
+                                                ref21["heads"][HS]["seen"]["P"]["seed_average"]["timer_alone"], keys2),
+          "elapsed_timer/unseen": r26.worst_diff(e_unseen,
+                                                 ref21["heads"][HS]["unseen"]["G_abs"]["seed_average"]["timer_alone"], keys2)}
+    checks = dict(R0_equals_this_runs_table1=r26.gate("R0", r0), R1_equals_r14=r26.gate("R1", r1),
+                  R2_timers_equal_r21=r26.gate("R2", r2))
+    res = dict(plan=r26.PLAN, rule="an alarm at a failure's final inference (lead 0) counts as a miss; successes, "
+                                   "thresholds, FPR and mean lead unchanged",
+               rows=rows, checks=checks, ok=all(v["ok"] for v in checks.values()),
+               inputs=dict(r14=dict(path=str(Path(args.r26_r14).resolve()), sha256=sha256(args.r26_r14)),
+                           r21=dict(path=str(Path(args.r26_r21).resolve()), sha256=sha256(args.r26_r21))))
+    return res, [k.split("_", 1)[0] for k, v in checks.items() if not v["ok"]]
+
+
 def r24_xr1(r22, ref_path):
     """R24 (docs/r24_table3_ci_seconds_plan.md) on XR-1: R22 rerun with Table III's missing rows added.
     Gate R0: every entry of R22's output is unchanged (the added rows only add keys). Gate R1: each added
@@ -1180,6 +1262,9 @@ def run(args):
         if not (args.r22 and args.r24_reference):
             raise SystemExit("error: --r24 reruns R22 with added rows: give --r22, its inputs and --r24-reference")
         r24, r24_failures = r24_xr1(r22, args.r24_reference)
+    r26, r26_failures = None, []
+    if getattr(args, "r26", False):
+        r26, r26_failures = r26_xr1(args, cal, te, held, folds, seen, unseen, table1, rkP, extra)
     out = dict(base, checks=checks, reproduction_failures=[], table1=table1, table2=table2,
                notes=dict(std="ddof 1 over training seeds 0-2; timers are deterministic",
                           unseen_normalization="pooled over the fold's seen tasks",
@@ -1208,6 +1293,9 @@ def run(args):
     if getattr(args, "r25", False):
         out["r25"] = r25
         out["r25_failures"] = r25_failures
+    if getattr(args, "r26", False):
+        out["r26"] = r26
+        out["r26_failures"] = r26_failures
     if args.curves:
         out["r18"] = r18
         out["r18_failures"] = r18_failures
@@ -1283,6 +1371,13 @@ def run(args):
             print("R25 FAILED (no R25 result is used): " + ", ".join(r25_failures))
             return 1
         print("\nR25 OK")
+    if getattr(args, "r26", False):
+        import r26_alarms_at_limit as r26m
+        print()
+        r26m.print_summary(r26)
+        if r26_failures:
+            print("R26 FAILED (no R26 result is used): " + ", ".join(r26_failures))
+            return 1
     if getattr(args, "r24", False):
         print()
         print_r24(r24)
@@ -1355,6 +1450,9 @@ def main(argv=None):
     r.add_argument("--r25-r21", help="R25 gate G1: R21's XR-1 output (seen_unseen_tables_r21.json)")
     r.add_argument("--r25-r21b-replicates", help="R25 gate G2: R21b's replicates (seen_unseen_tables_r21b_r21b_replicates.npz)")
     r.add_argument("--r25-boot", type=int, default=1000, help="R25 bootstrap replicates (R21b's: 1000)")
+    r.add_argument("--r26", action="store_true", help="R26: Table I with an alarm at the limit counted as a miss")
+    r.add_argument("--r26-r14", help="R26 gate R1: R14's output (seen_unseen_tables_r14.json), Table I's source")
+    r.add_argument("--r26-r21", help="R26: R21's XR-1 output (own bands; gate R2)")
     r.add_argument("--r6-result", help="R11 gate T6: R6's seen_unseen_tables JSON, reproduced exactly")
     r.add_argument("--output", required=True)
     args = ap.parse_args(argv)
