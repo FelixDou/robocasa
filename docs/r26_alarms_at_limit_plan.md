@@ -170,9 +170,9 @@ The log ends with `R26 OK`. All three gates hold with max |diff| 0:
 - R1: 61 values against R14's table1 and timers_alone;
 - R2: 2 timers against R21's timer_alone.
 
-The local test suites passed too (27 tests). Evidence: `seen_unseen_tables_r26.json` and `r26_xr1.log` in
-`$R26_ROOT/evidence/`. Their copy to `reports/r26_alarms_at_limit_evidence/` and their hashes follow the rsync
-below.
+The local test suites passed too (27 tests). Evidence is in `reports/r26_alarms_at_limit_evidence/`:
+- `seen_unseen_tables_r26.json`, sha256 `4700d436…`;
+- `r26_xr1.log`, gitignored and kept locally.
 
 **Result** (XR-1; bACC as printed → with an alarm at the limit as a miss; recall before the limit; alarms at
 the limit per seed; monitors: mean ± std over seeds):

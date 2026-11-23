@@ -194,3 +194,34 @@ Both logs must end with `R27 OK`. Then, on the Mac:
 rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r27_band_split_*/evidence/' \
   /Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/.claude/worktrees/r22-fixed-paths/reports/r27_band_split_evidence/
 ```
+
+## Result (2026-11-24, run `r27_band_split_20261124_015114`, from `afe5cc68`): `R27 OK`, curve reading not met
+
+Both runs ended with `R27 OK` and `INPUTS UNCHANGED`. Gates K0 to K4 pass on both policies (largest difference
+6e-17). Evidence is in `reports/r27_band_split_evidence/`:
+- `seen_unseen_tables_r27.json`, sha256 `431b93c8…`;
+- `rldx_e1b_r27.json`, `52f8b5d4…`;
+- logs, gitignored and kept locally.
+
+**Result** (unseen tasks; fractions of H_k; 30/70: median [min, max] over 20 random assignments):
+
+| | XR-1, fixed 50/50 | XR-1, 30/70 | RLDX-1, fixed 50/50 | RLDX-1, 30/70 |
+| --- | --- | --- | --- | --- |
+| Ensemble FPR | 7.6% | 7.8% [6.1, 10.8] | 10.0% | 10.5% [9.0, 14.2] |
+| Δℓ̄ over matched E | 0.147 | 0.064 [0.023, 0.098] | 0.143 | 0.101 [0.053, 0.148] |
+| Positive | | 20/20 | | 20/20 |
+| Full − first step, matched | 0.273 | 0.178 [0.129, 0.222] | 0.146 | 0.091 [0.035, 0.157] |
+| Positive | | 20/20 | | 20/20 |
+| Last FPR at which the curve is not above E | 4.0% | 6.2% [2.8, 10.3] | none (from 6.3%) | none in 12 of 20; else at most 8.2% |
+
+**Reading (as fixed before the run).**
+- **Matched gain and first-step control hold** on both policies (20 of 20).
+- **The curve does not hold** on either policy: the band is above E at every observed FPR above 7% in 13 of 20
+  assignments on XR-1 and 17 of 20 on RLDX-1 (18 needed).
+- **Correction to the printed count:** the code tests `above_from <= 7%`, which counts a curve that starts above 7%
+  and stays above E as a failure, although the rule as written accepts it. The log prints 16 of 20 for RLDX-1; the
+  rule as written gives 17. The reading does not change.
+- So the claim is reworded as sensitive to the calibration split, and the author and Shinoda sensei are told before
+  the draft is sent.
+- XR-1's fixed 50/50 values (0.147, 0.273) are above all 20 assignments. R27 cannot say whether the 30/70 ratio
+  performs worse or the fixed assignment was favorable: `docs/r27b_split_controls_plan.md` separates the two.
