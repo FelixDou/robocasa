@@ -818,6 +818,36 @@ def r26_xr1(args, cal, te, held, folds, seen, unseen, table1, rkP, extra):
     return res, [k.split("_", 1)[0] for k, v in checks.items() if not v["ok"]]
 
 
+def r27_xr1(args, fam, cal, te, held, folds, tasks, rkP):
+    """R27 on XR-1 (r27_band_split): Hide-and-Seek's own band under the published 30/70 calibration split, with
+    R21's and R25's 50/50 results as gates K0 to K2."""
+    import r27_band_split as r27
+    if not (args.r27_r18 and args.r27_r21 and args.r27_r25):
+        raise SystemExit("error: --r27 needs --r27-r18, --r27-r21 and --r27-r25 (the XR-1 outputs of R18, R21, R25)")
+    rows = cal + te
+    data = {F: v for F, v in fam["xt"].items() if F != ALL}
+    for h in r27.HEADS:
+        c = trajectories(data, h, cal, ctl.CAL_COHORT, held, "pooled", running_max=False)
+        e = trajectories(data, h, te, ctl.TEST_COHORT, held, "pooled", running_max=False)
+        raw = {F: merge(c[F], e[F]) for F in folds}
+        for r in rows:
+            rid = str(r["rollout_id"])
+            for F in folds:
+                per = raw[F][rid]
+                for s in SEEDS:
+                    r[f"{h}~#{s}@{F}"] = per[s]
+                r[f"{h}~@{F}"] = np.mean([per[s] for s in sorted(per)], axis=0)
+    every = set(tasks)
+    refs = {k: json.loads(Path(p).read_text())[k] for k, p in (("r18", args.r27_r18), ("r21", args.r27_r21),
+                                                               ("r25", args.r27_r25))}
+    res, problems = r27.run(cal, te, {F: every - held[F] for F in folds}, {F: held[F] for F in folds}, rkP,
+                            refs["r18"], refs["r21"], refs["r25"], splits=args.r27_splits,
+                            progress=lambda m: print(m, flush=True))
+    res["inputs"] = {k: dict(path=str(Path(p).resolve()), sha256=sha256(p))
+                     for k, p in (("r18", args.r27_r18), ("r21", args.r27_r21), ("r25", args.r27_r25))}
+    return res, problems
+
+
 def r24_xr1(r22, ref_path):
     """R24 (docs/r24_table3_ci_seconds_plan.md) on XR-1: R22 rerun with Table III's missing rows added.
     Gate R0: every entry of R22's output is unchanged (the added rows only add keys). Gate R1: each added
@@ -1262,6 +1292,9 @@ def run(args):
         if not (args.r22 and args.r24_reference):
             raise SystemExit("error: --r24 reruns R22 with added rows: give --r22, its inputs and --r24-reference")
         r24, r24_failures = r24_xr1(r22, args.r24_reference)
+    r27, r27_failures = None, []
+    if getattr(args, "r27", False):
+        r27, r27_failures = r27_xr1(args, fam, cal, te, held, folds, tasks, rkP)
     r26, r26_failures = None, []
     if getattr(args, "r26", False):
         r26, r26_failures = r26_xr1(args, cal, te, held, folds, seen, unseen, table1, rkP, extra)
@@ -1293,6 +1326,9 @@ def run(args):
     if getattr(args, "r25", False):
         out["r25"] = r25
         out["r25_failures"] = r25_failures
+    if getattr(args, "r27", False):
+        out["r27"] = r27
+        out["r27_failures"] = r27_failures
     if getattr(args, "r26", False):
         out["r26"] = r26
         out["r26_failures"] = r26_failures
@@ -1371,6 +1407,14 @@ def run(args):
             print("R25 FAILED (no R25 result is used): " + ", ".join(r25_failures))
             return 1
         print("\nR25 OK")
+    if getattr(args, "r27", False):
+        import r27_band_split as r27m
+        print()
+        r27m.print_summary(r27, "XR-1")
+        if r27_failures:
+            print("R27 FAILED (no R27 result is used): " + ", ".join(r27_failures))
+            return 1
+        print("\nR27 OK")
     if getattr(args, "r26", False):
         import r26_alarms_at_limit as r26m
         print()
@@ -1450,6 +1494,11 @@ def main(argv=None):
     r.add_argument("--r25-r21", help="R25 gate G1: R21's XR-1 output (seen_unseen_tables_r21.json)")
     r.add_argument("--r25-r21b-replicates", help="R25 gate G2: R21b's replicates (seen_unseen_tables_r21b_r21b_replicates.npz)")
     r.add_argument("--r25-boot", type=int, default=1000, help="R25 bootstrap replicates (R21b's: 1000)")
+    r.add_argument("--r27", action="store_true", help="R27: Hide-and-Seek's band under the published 30/70 split")
+    r.add_argument("--r27-r18", help="R27: R18's XR-1 output (E's curve)")
+    r.add_argument("--r27-r21", help="R27 gates K0, K1: R21's XR-1 output")
+    r.add_argument("--r27-r25", help="R27 gate K2: R25's XR-1 output")
+    r.add_argument("--r27-splits", type=int, default=20, help="R27 random 30/70 assignments")
     r.add_argument("--r26", action="store_true", help="R26: Table I with an alarm at the limit counted as a miss")
     r.add_argument("--r26-r14", help="R26 gate R1: R14's output (seen_unseen_tables_r14.json), Table I's source")
     r.add_argument("--r26-r21", help="R26: R21's XR-1 output (own bands; gate R2)")

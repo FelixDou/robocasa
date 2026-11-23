@@ -104,12 +104,13 @@ def running_max_gap(rows, raw_key, score_key):
 class Design:
     """Calibration successes split into halves, test rows, folds, and index maps for the bootstrap."""
 
-    def __init__(self, cal_rows, test_rows, cal_tasks, test_tasks):
-        """cal_tasks, test_tasks: {F: set of tasks} (seen tasks: {"all": every task} for both)."""
+    def __init__(self, cal_rows, test_rows, cal_tasks, test_tasks, split=None):
+        """cal_tasks, test_tasks: {F: set of tasks} (seen tasks: {"all": every task} for both). split(rows) ->
+        (reference, nonconformity): by default R19's halves (R27 passes the published 30/70)."""
         self.folds = sorted(test_tasks)
         self.cal_tasks, self.test_tasks = cal_tasks, test_tasks
         self.cal_rows, self.test = list(cal_rows), list(test_rows)
-        self.ref, self.conf = rab.split_successes(self.cal_rows)      # R19's split and order
+        self.ref, self.conf = (split or rab.split_successes)(self.cal_rows)      # default: R19's split and order
         self.n_ref = len(self.ref)
         task = lambda rows: np.array([r["task_name"] for r in rows])
         self.ref_task, self.conf_task, self.test_task = task(self.ref), task(self.conf), task(self.test)

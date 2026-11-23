@@ -576,6 +576,18 @@ class RldxTestTableTest(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("R25 FAILED", text)
         self.assertEqual(out["r25_failures"], ["G1"])
+        # R27: the band under the published 30/70 split (K0, K1 against R21; K2 against R25; K3 the splits).
+        status, text, _ = self.run_table("r18.json", extra=["--curves"])
+        self.assertEqual(status, 0, text)
+        r27 = ["--r27", "--r27-r18", str(self.root / "r18.json"), "--r27-r21", str(self.root / "r21.json"),
+               "--r27-r25", str(self.root / "r25.json"), "--r27-splits", "2"]
+        status, text, out = self.run_table("r27.json", extra=r27)
+        self.assertEqual(status, 0, text)
+        self.assertIn("R27 OK", text)
+        self.assertEqual(out["r27_failures"], [])
+        for k, v in out["r27"]["checks"].items():
+            self.assertTrue(v["ok"], (k, v))
+        self.assertEqual(out["r27"]["summary"]["splits"], 2)
 
     def test_r17_needs_the_reference_table(self):
         status, text, _ = self.run_table("table.json")

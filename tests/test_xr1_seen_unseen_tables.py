@@ -589,7 +589,7 @@ class RunTests(unittest.TestCase):
             # R26: Table I with an alarm at a failure's final inference counted as a miss (R0 this run's table1,
             # R1 R14's table1 and timers_alone, R2 R21's timers); a changed R14 value stops it.
             r26_args = ["--r26", "--r26-r14", str(root / "r14.json"), "--r26-r21", str(root / "r21.json")]
-            (root / "tables.json").unlink()
+            (root / "tables.json").rename(root / "r25.json")
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 status = su.main(args + r26_args)
@@ -621,6 +621,21 @@ class RunTests(unittest.TestCase):
                 status = su.main(args + ["--r26", "--r26-r14", str(root / "r14_bad.json"), "--r26-r21", str(root / "r21.json")])
             self.assertEqual(status, 1)
             self.assertIn("R26 FAILED (no R26 result is used): R1", buf.getvalue())
+            # R27: the band under the published 30/70 split (K0, K1 against R21; K2 against R25; K3 the splits).
+            (root / "tables.json").unlink()
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(su.main(args + ["--curves"]), 0)
+            (root / "tables.json").rename(root / "r18.json")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + ["--r27", "--r27-r18", str(root / "r18.json"), "--r27-r21", str(root / "r21.json"),
+                                         "--r27-r25", str(root / "r25.json"), "--r27-splits", "2"])
+            self.assertEqual(status, 0, buf.getvalue())
+            self.assertIn("R27 OK", buf.getvalue())
+            r = json.loads((root / "tables.json").read_text())["r27"]
+            for k, v in r["checks"].items():
+                self.assertTrue(v["ok"], (k, v))
+            self.assertEqual(r["summary"]["splits"], 2)
 
     def test_r22_fixed_paths(self):
         """R22 on XR-1: validation rows (R8's selection), stage A fold directories with the August cohorts,
