@@ -848,6 +848,36 @@ def r27_xr1(args, fam, cal, te, held, folds, tasks, rkP):
     return res, problems
 
 
+def r27b_xr1(args, fam, cal, te, held, folds, tasks, rkP):
+    """R27b on XR-1 (r27b_split_controls): random 50/50 controls, each assignment's curve and the example's alarms,
+    with R27's 30/70 rows as gate M1."""
+    import r27_band_split as r27
+    import r27b_split_controls as r27b
+    if not (args.r27b_r18 and args.r27b_r27):
+        raise SystemExit("error: --r27b needs --r27b-r18 and --r27b-r27 (the XR-1 outputs of R18 and R27)")
+    rows = cal + te
+    data = {F: v for F, v in fam["xt"].items() if F != ALL}
+    for h in r27.HEADS:
+        c = trajectories(data, h, cal, ctl.CAL_COHORT, held, "pooled", running_max=False)
+        e = trajectories(data, h, te, ctl.TEST_COHORT, held, "pooled", running_max=False)
+        raw = {F: merge(c[F], e[F]) for F in folds}
+        for r in rows:
+            rid = str(r["rollout_id"])
+            for F in folds:
+                per = raw[F][rid]
+                for s in SEEDS:
+                    r[f"{h}~#{s}@{F}"] = per[s]
+                r[f"{h}~@{F}"] = np.mean([per[s] for s in sorted(per)], axis=0)
+    every = set(tasks)
+    res, problems = r27b.run(cal, te, {F: every - held[F] for F in folds}, {F: held[F] for F in folds}, rkP,
+                             json.loads(Path(args.r27b_r18).read_text())["r18"],
+                             json.loads(Path(args.r27b_r27).read_text())["r27"], splits=args.r27b_splits,
+                             progress=lambda m: print(m, flush=True))
+    res["inputs"] = {k: dict(path=str(Path(p).resolve()), sha256=sha256(p)) for k, p in (("r18", args.r27b_r18),
+                                                                                         ("r27", args.r27b_r27))}
+    return res, problems
+
+
 def r24_xr1(r22, ref_path):
     """R24 (docs/r24_table3_ci_seconds_plan.md) on XR-1: R22 rerun with Table III's missing rows added.
     Gate R0: every entry of R22's output is unchanged (the added rows only add keys). Gate R1: each added
@@ -1295,6 +1325,9 @@ def run(args):
     r27, r27_failures = None, []
     if getattr(args, "r27", False):
         r27, r27_failures = r27_xr1(args, fam, cal, te, held, folds, tasks, rkP)
+    r27b, r27b_failures = None, []
+    if getattr(args, "r27b", False):
+        r27b, r27b_failures = r27b_xr1(args, fam, cal, te, held, folds, tasks, rkP)
     r26, r26_failures = None, []
     if getattr(args, "r26", False):
         r26, r26_failures = r26_xr1(args, cal, te, held, folds, seen, unseen, table1, rkP, extra)
@@ -1329,6 +1362,9 @@ def run(args):
     if getattr(args, "r27", False):
         out["r27"] = r27
         out["r27_failures"] = r27_failures
+    if getattr(args, "r27b", False):
+        out["r27b"] = r27b
+        out["r27b_failures"] = r27b_failures
     if getattr(args, "r26", False):
         out["r26"] = r26
         out["r26_failures"] = r26_failures
@@ -1415,6 +1451,14 @@ def run(args):
             print("R27 FAILED (no R27 result is used): " + ", ".join(r27_failures))
             return 1
         print("\nR27 OK")
+    if getattr(args, "r27b", False):
+        import r27b_split_controls as r27bm
+        print()
+        r27bm.print_summary(r27b, "XR-1")
+        if r27b_failures:
+            print("R27b FAILED (no R27b result is used): " + ", ".join(r27b_failures))
+            return 1
+        print("\nR27b OK")
     if getattr(args, "r26", False):
         import r26_alarms_at_limit as r26m
         print()
@@ -1494,6 +1538,10 @@ def main(argv=None):
     r.add_argument("--r25-r21", help="R25 gate G1: R21's XR-1 output (seen_unseen_tables_r21.json)")
     r.add_argument("--r25-r21b-replicates", help="R25 gate G2: R21b's replicates (seen_unseen_tables_r21b_r21b_replicates.npz)")
     r.add_argument("--r25-boot", type=int, default=1000, help="R25 bootstrap replicates (R21b's: 1000)")
+    r.add_argument("--r27b", action="store_true", help="R27b: random 50/50 controls, curves and the example's alarms")
+    r.add_argument("--r27b-r18", help="R27b: R18's XR-1 output (E's curve)")
+    r.add_argument("--r27b-r27", help="R27b gate M1: R27's XR-1 output")
+    r.add_argument("--r27b-splits", type=int, default=20, help="R27b random assignments of each kind")
     r.add_argument("--r27", action="store_true", help="R27: Hide-and-Seek's band under the published 30/70 split")
     r.add_argument("--r27-r18", help="R27: R18's XR-1 output (E's curve)")
     r.add_argument("--r27-r21", help="R27 gates K0, K1: R21's XR-1 output")

@@ -636,6 +636,19 @@ class RunTests(unittest.TestCase):
             for k, v in r["checks"].items():
                 self.assertTrue(v["ok"], (k, v))
             self.assertEqual(r["summary"]["splits"], 2)
+            # R27b: random 50/50 controls and the example's alarms (M1 against R27's 30/70 rows).
+            (root / "tables.json").rename(root / "r27.json")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                status = su.main(args + ["--r27b", "--r27b-r18", str(root / "r18.json"), "--r27b-r27", str(root / "r27.json"),
+                                         "--r27b-splits", "2"])
+            self.assertEqual(status, 0, buf.getvalue())
+            self.assertIn("R27b OK", buf.getvalue())
+            r = json.loads((root / "tables.json").read_text())["r27b"]
+            for k, v in r["checks"].items():
+                self.assertTrue(v["ok"], (k, v))
+            self.assertEqual(len(r["half"]), 2)
+            self.assertTrue(r["published"][0]["mean_curve"])
 
     def test_r22_fixed_paths(self):
         """R22 on XR-1: validation rows (R8's selection), stage A fold directories with the August cohorts,

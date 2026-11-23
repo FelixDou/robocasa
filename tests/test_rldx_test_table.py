@@ -588,6 +588,15 @@ class RldxTestTableTest(unittest.TestCase):
         for k, v in out["r27"]["checks"].items():
             self.assertTrue(v["ok"], (k, v))
         self.assertEqual(out["r27"]["summary"]["splits"], 2)
+        # R27b: random 50/50 controls and the example's alarms (M1 against R27's 30/70 rows).
+        r27b = ["--r27b", "--r27b-r18", str(self.root / "r18.json"), "--r27b-r27", str(self.root / "r27.json"),
+                "--r27b-splits", "2"]
+        status, text, out = self.run_table("r27b.json", extra=r27b)
+        self.assertEqual(status, 0, text)
+        self.assertIn("R27b OK", text)
+        self.assertEqual(out["r27b_failures"], [])
+        for k, v in out["r27b"]["checks"].items():
+            self.assertTrue(v["ok"], (k, v))
 
     def test_r17_needs_the_reference_table(self):
         status, text, _ = self.run_table("table.json")
