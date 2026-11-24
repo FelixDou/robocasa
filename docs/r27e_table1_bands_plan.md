@@ -152,3 +152,30 @@ The log must end with `R27e OK`. Then, on the Mac:
 rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r27e_table1_bands_*/evidence/' \
   /Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/.claude/worktrees/r22-fixed-paths/reports/r27e_table1_bands_evidence/
 ```
+
+## Result (2026-11-24, run `r27e_table1_bands_*` from `d193302e`): `R27e OK`; Table I's own-band rows move to the 30/70 splits
+
+The run ended with `R27e OK` and `INPUTS UNCHANGED`. Gates E0 to E2 pass with max |diff| 0.0. Evidence is in
+`reports/r27e_table1_bands_evidence/`: `seen_unseen_tables_r27e.json`, sha256 `a14fe354…`; the log is gitignored and
+kept locally.
+
+**Result** (XR-1; median over the 20 assignments of the mean ± std over the three models; fixed 50/50 = Table I now):
+
+| Own band | Side | bACC (limit = miss) | Lead | Recall before limit | FPR | Fixed 50/50: bACC, lead |
+| --- | --- | --- | --- | --- | --- | --- |
+| SAFE-MLP | seen | 0.716 ± 0.006 | 0.192 ± 0.018 | 0.475 | 4.7% | 0.713, 0.214 |
+| SAFE-MLP | unseen | 0.691 ± 0.007 | 0.115 ± 0.003 | 0.419 | 3.9% | 0.684, 0.097 |
+| SAFE-LSTM | seen | 0.598 ± 0.016 | 0.139 ± 0.015 | 0.235 | 4.4% | 0.600, 0.159 |
+| SAFE-LSTM | unseen | 0.553 ± 0.022 | 0.112 ± 0.020 | 0.164 | 5.7% | 0.567, 0.126 |
+| Hide-and-Seek | seen | 0.730 ± 0.035 | 0.241 ± 0.014 | 0.510 | 5.0% | 0.751, 0.303 |
+| Hide-and-Seek | unseen | 0.624 ± 0.022 | 0.197 ± 0.025 | 0.330 | 8.0% | 0.692, 0.263 |
+
+The lead cells equal Fig. 2's own-band dots (R27d's target points), as E1 implies.
+
+**Reading** (rules fixed above):
+1. Table I's own-band rows become the cells above, with the caption note. Bold / underline recomputed: on both sides
+   the best lead is now the constant-threshold Hide-and-Seek (0.246, 0.251) and the second its own band (0.241,
+   0.197); the bACC marks do not change.
+2. "Learned detectors catch at most 68% … against at most 0.81" stays: the largest own-band recall before the limit
+   on seen tasks is 0.510 (Hide-and-Seek) and the largest own-band bACC 0.730, below Mahalanobis's 0.681 and 0.814.
+3. Sec. IV-A points to "(Figs. 1 and 2, Tables I and II)"; the fixed 50/50 split appears nowhere in the paper.
