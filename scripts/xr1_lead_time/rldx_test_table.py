@@ -948,12 +948,29 @@ def r27b_rldx(a, parts, held, folds, tasks, rk):
     return res, problems
 
 
+def r27c_rldx(a, parts, held, folds, tasks, rk):
+    """R27c on RLDX-1 (r27c_split_all_bands): every head's own band on R27's 30/70 assignments, against E and G
+    (unseen) and P (seen), with R21's fixed-split points (Q0) and R27's rows (Q1). Scores as R21's (r21_rldx)."""
+    import r27c_split_all_bands as r27c
+    if not (a.r27c_r21 and a.r27c_r27):
+        raise SystemExit("error: --r27c needs --r27c-r21 and --r27c-r27 (the RLDX-1 outputs of R21 and R27)")
+    every = set(tasks)
+    keys = {d: dict(unseen=lambda F, d=d: f"{d}~@{F}", seen=lambda F, d=d: f"{d}~@all/task") for d in R21_HEADS}
+    res, problems = r27c.run(parts["calibration"], parts["test"], {F: every - held[F] for F in folds},
+                             {F: held[F] for F in folds}, rk, keys, json.loads(Path(a.r27c_r21).read_text())["r21"],
+                             json.loads(Path(a.r27c_r27).read_text())["r27"], splits=a.r27c_splits,
+                             progress=lambda m: print(m, flush=True))
+    res["inputs"] = {k: dict(path=str(Path(p).resolve()), sha256=sha256(p)) for k, p in (("r21", a.r27c_r21),
+                                                                                         ("r27", a.r27c_r27))}
+    return res, problems
+
+
 def run(a):
     if a.r21:
         ru.KEEP_RAW_SEEDS = R21_HEADS           # R21's single-model bands read each seed's raw score
     if a.r25 or a.r27 or a.r27b:
         ru.KEEP_RAW_SEEDS = tuple(sorted(set(ru.KEEP_RAW_SEEDS) | set(R25_HEADS)))
-    if a.r19 or a.r21 or a.r25 or a.r27 or a.r27b:
+    if a.r19 or a.r21 or a.r25 or a.r27 or a.r27b or a.r27c:
         ru.KEEP_RAW = True                      # native bands read the normalized raw score
     out_path = Path(a.output)
     if out_path.exists():
@@ -1237,6 +1254,19 @@ def run(a):
             print("\nR27b OK")
     elif a.r27b:
         print("R27b FAILED: no R27b result after a failed gate")
+    if a.r27c and status == 0:
+        import r27c_split_all_bands as r27cm
+        r27c, problems = r27c_rldx(a, parts_new, held, folds, tasks, rk)
+        result["r27c"], result["r27c_failures"] = r27c, problems
+        print()
+        r27cm.print_summary(r27c, "RLDX-1")
+        if problems:
+            print("R27c FAILED (no R27c result is used): " + ", ".join(problems))
+            status = 1
+        else:
+            print("\nR27c OK")
+    elif a.r27c:
+        print("R27c FAILED: no R27c result after a failed gate")
     if a.curves and status == 0:
         import seen_unseen_tables as sut
         result["r18"] = rldx_curves(parts_new, held, folds, detectors + [SHUFFLE], rk)
@@ -1295,6 +1325,10 @@ def main(argv=None):
     r.add_argument("--r27b-r18", help="R27b: R18's RLDX-1 output (E's curve)")
     r.add_argument("--r27b-r27", help="R27b gate M1: R27's RLDX-1 output")
     r.add_argument("--r27b-splits", type=int, default=20, help="R27b random assignments of each kind")
+    r.add_argument("--r27c", action="store_true", help="R27c: every own band on R27's 30/70 assignments vs E, G and P")
+    r.add_argument("--r27c-r21", help="R27c gate Q0: R21's RLDX-1 output")
+    r.add_argument("--r27c-r27", help="R27c gate Q1: R27's RLDX-1 output")
+    r.add_argument("--r27c-splits", type=int, default=20, help="R27c random 30/70 assignments (R27's seeds)")
     r.add_argument("--r27", action="store_true", help="R27: Hide-and-Seek's band under the published 30/70 split")
     r.add_argument("--r27-r18", help="R27: R18's RLDX-1 output (E's curve)")
     r.add_argument("--r27-r21", help="R27 gates K0, K1: R21's RLDX-1 output")

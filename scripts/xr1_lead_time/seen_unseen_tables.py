@@ -878,6 +878,51 @@ def r27b_xr1(args, fam, cal, te, held, folds, tasks, rkP):
     return res, problems
 
 
+def r27c_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, rkP):
+    """R27c on XR-1 (r27c_split_all_bands): SAFE-MLP's, SAFE-LSTM's and Hide-and-Seek's own bands on R27's 30/70
+    assignments, against E and G (unseen) and P (seen), with R21's fixed-split points (Q0) and R27's rows (Q1). The
+    scores are R21's (r21_xr1): seen per task, unseen pooled per fold, three-seed average of the normalized raw score."""
+    import r27c_split_all_bands as r27c
+    if not (args.r27c_r21 and args.r27c_r27):
+        raise SystemExit("error: --r27c needs --r27c-r21 and --r27c-r27 (the XR-1 outputs of R21 and R27)")
+    if SAFE_LSTM not in extra:
+        raise SystemExit("error: --r27c needs --safe-lstm-fold-dirs (SAFE-LSTM's band)")
+    rows = cal + te
+    need = {str(r["rollout_id"]) for r in rows}
+    heads = (SAFE, SAFE_LSTM, HS)
+    a_all = {ALL: fam[SAFE_LSTM][ALL]}
+    seen_raw = {SAFE: seen_safe_raw(rows, bundle),
+                HS: seen_amend2_raw(args.amend2_scores, args.amend2_normalizations, HS, need),
+                SAFE_LSTM: merge(
+                    trajectories(a_all, SAFE_LSTM, cal, ctl.CAL_COHORT, held, "per_task", running_max=False)[ALL],
+                    trajectories(a_all, SAFE_LSTM, te, ctl.TEST_COHORT, held, "per_task", running_max=False)[ALL])}
+
+    def unseen_raw(family, det):
+        data = {F: v for F, v in fam[family].items() if F != ALL}
+        c = trajectories(data, det, cal, ctl.CAL_COHORT, held, "pooled", running_max=False)
+        e = trajectories(data, det, te, ctl.TEST_COHORT, held, "pooled", running_max=False)
+        return {F: merge(c[F], e[F]) for F in folds}
+
+    raw_unseen = {SAFE: unseen_raw("safe", "safe"), HS: unseen_raw("xt", HS), SAFE_LSTM: unseen_raw(SAFE_LSTM, SAFE_LSTM)}
+    for h in heads:
+        for r in rows:
+            rid = str(r["rollout_id"])
+            per = seen_raw[h][rid]
+            r[f"{h}~@seen"] = np.mean([per[s] for s in SEEDS], axis=0)
+            for F in folds:
+                per = raw_unseen[h][F][rid]
+                r[f"{h}~@{F}"] = np.mean([per[s] for s in sorted(per)], axis=0)
+    every = set(tasks)
+    keys = {h: dict(unseen=lambda F, h=h: f"{h}~@{F}", seen=lambda F, h=h: f"{h}~@seen") for h in heads}
+    res, problems = r27c.run(cal, te, {F: every - held[F] for F in folds}, {F: held[F] for F in folds}, rkP, keys,
+                             json.loads(Path(args.r27c_r21).read_text())["r21"],
+                             json.loads(Path(args.r27c_r27).read_text())["r27"], splits=args.r27c_splits,
+                             progress=lambda m: print(m, flush=True))
+    res["inputs"] = {k: dict(path=str(Path(p).resolve()), sha256=sha256(p)) for k, p in (("r21", args.r27c_r21),
+                                                                                         ("r27", args.r27c_r27))}
+    return res, problems
+
+
 def r24_xr1(r22, ref_path):
     """R24 (docs/r24_table3_ci_seconds_plan.md) on XR-1: R22 rerun with Table III's missing rows added.
     Gate R0: every entry of R22's output is unchanged (the added rows only add keys). Gate R1: each added
@@ -1328,6 +1373,9 @@ def run(args):
     r27b, r27b_failures = None, []
     if getattr(args, "r27b", False):
         r27b, r27b_failures = r27b_xr1(args, fam, cal, te, held, folds, tasks, rkP)
+    r27c, r27c_failures = None, []
+    if getattr(args, "r27c", False):
+        r27c, r27c_failures = r27c_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, rkP)
     r26, r26_failures = None, []
     if getattr(args, "r26", False):
         r26, r26_failures = r26_xr1(args, cal, te, held, folds, seen, unseen, table1, rkP, extra)
@@ -1365,6 +1413,9 @@ def run(args):
     if getattr(args, "r27b", False):
         out["r27b"] = r27b
         out["r27b_failures"] = r27b_failures
+    if getattr(args, "r27c", False):
+        out["r27c"] = r27c
+        out["r27c_failures"] = r27c_failures
     if getattr(args, "r26", False):
         out["r26"] = r26
         out["r26_failures"] = r26_failures
@@ -1459,6 +1510,14 @@ def run(args):
             print("R27b FAILED (no R27b result is used): " + ", ".join(r27b_failures))
             return 1
         print("\nR27b OK")
+    if getattr(args, "r27c", False):
+        import r27c_split_all_bands as r27cm
+        print()
+        r27cm.print_summary(r27c, "XR-1")
+        if r27c_failures:
+            print("R27c FAILED (no R27c result is used): " + ", ".join(r27c_failures))
+            return 1
+        print("\nR27c OK")
     if getattr(args, "r26", False):
         import r26_alarms_at_limit as r26m
         print()
@@ -1542,6 +1601,10 @@ def main(argv=None):
     r.add_argument("--r27b-r18", help="R27b: R18's XR-1 output (E's curve)")
     r.add_argument("--r27b-r27", help="R27b gate M1: R27's XR-1 output")
     r.add_argument("--r27b-splits", type=int, default=20, help="R27b random assignments of each kind")
+    r.add_argument("--r27c", action="store_true", help="R27c: every own band on R27's 30/70 assignments vs E, G and P")
+    r.add_argument("--r27c-r21", help="R27c gate Q0: R21's XR-1 output")
+    r.add_argument("--r27c-r27", help="R27c gate Q1: R27's XR-1 output")
+    r.add_argument("--r27c-splits", type=int, default=20, help="R27c random 30/70 assignments (R27's seeds)")
     r.add_argument("--r27", action="store_true", help="R27: Hide-and-Seek's band under the published 30/70 split")
     r.add_argument("--r27-r18", help="R27: R18's XR-1 output (E's curve)")
     r.add_argument("--r27-r21", help="R27 gates K0, K1: R21's XR-1 output")
