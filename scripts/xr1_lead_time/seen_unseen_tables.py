@@ -923,15 +923,12 @@ def r27c_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, rkP):
     return res, problems
 
 
-def r27d_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, rkP):
-    """R27d on XR-1 (r27d_split_curves): Fig. 2's own-band curves (each single model, mean over the three at each
-    target) for SAFE-MLP, SAFE-LSTM and Hide-and-Seek on R27's 30/70 assignments, seen and unseen tasks, with R21's
-    fixed-split curves (D0) and R27b's Hide-and-Seek curves (D1). The scores are R21's (r21_xr1)."""
-    import r27d_split_curves as r27d
-    if not (args.r27d_r18 and args.r27d_r21 and args.r27d_r27b):
-        raise SystemExit("error: --r27d needs --r27d-r18, --r27d-r21 and --r27d-r27b (the XR-1 outputs of R18, R21, R27b)")
+def own_band_seed_keys(args, fam, cal, te, held, folds, bundle, extra):
+    """Each single model's normalized raw score (R21's, r21_xr1) of SAFE-MLP, SAFE-LSTM and Hide-and-Seek, attached
+    to the rows as {head}~#{seed}@seen and {head}~#{seed}@{fold}; returns {head: {side: {seed label: key_of}}}.
+    Shared by R27d and R27e."""
     if SAFE_LSTM not in extra:
-        raise SystemExit("error: --r27d needs --safe-lstm-fold-dirs (SAFE-LSTM's band)")
+        raise SystemExit("error: the own bands need --safe-lstm-fold-dirs (SAFE-LSTM's band)")
     rows = cal + te
     need = {str(r["rollout_id"]) for r in rows}
     heads = (SAFE, SAFE_LSTM, HS)
@@ -959,10 +956,20 @@ def r27d_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, rkP):
                 per = raw_unseen[h][F][rid]
                 for s in SEEDS:
                     r[f"{h}~#{s}@{F}"] = per[s]
-    every = set(tasks)
     at = dict(seen=lambda F: "seen", unseen=lambda F: F)
-    keys = {h: {side: {f"seed_{s}": (lambda F, h=h, s=s, at=at[side]: f"{h}~#{s}@{at(F)}") for s in SEEDS}
+    return {h: {side: {f"seed_{s}": (lambda F, h=h, s=s, at=at[side]: f"{h}~#{s}@{at(F)}") for s in SEEDS}
                 for side in at} for h in heads}
+
+
+def r27d_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, rkP):
+    """R27d on XR-1 (r27d_split_curves): Fig. 2's own-band curves (each single model, mean over the three at each
+    target) for SAFE-MLP, SAFE-LSTM and Hide-and-Seek on R27's 30/70 assignments, seen and unseen tasks, with R21's
+    fixed-split curves (D0) and R27b's Hide-and-Seek curves (D1). The scores are R21's (r21_xr1)."""
+    import r27d_split_curves as r27d
+    if not (args.r27d_r18 and args.r27d_r21 and args.r27d_r27b):
+        raise SystemExit("error: --r27d needs --r27d-r18, --r27d-r21 and --r27d-r27b (the XR-1 outputs of R18, R21, R27b)")
+    keys = own_band_seed_keys(args, fam, cal, te, held, folds, bundle, extra)
+    every = set(tasks)
     res, problems = r27d.run(cal, te, {F: every - held[F] for F in folds}, {F: held[F] for F in folds}, rkP, keys,
                              json.loads(Path(args.r27d_r18).read_text())["r18"],
                              json.loads(Path(args.r27d_r21).read_text())["r21"],
@@ -970,6 +977,23 @@ def r27d_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, rkP):
                              progress=lambda m: print(m, flush=True))
     res["inputs"] = {k: dict(path=str(Path(p).resolve()), sha256=sha256(p))
                      for k, p in (("r18", args.r27d_r18), ("r21", args.r27d_r21), ("r27b", args.r27d_r27b))}
+    return res, problems
+
+
+def r27e_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra):
+    """R27e on XR-1 (r27e_table1_bands): Table I's own-band rows (each single model at alpha = 0.05, recounted as R26
+    does) on R27's 30/70 assignments, with R26's rows (E0) and R27d's curves (E1) as gates."""
+    import r27e_table1_bands as r27e
+    if not (args.r27e_r26 and args.r27e_r27d):
+        raise SystemExit("error: --r27e needs --r27e-r26 and --r27e-r27d (the XR-1 outputs of R26 and R27d)")
+    keys = own_band_seed_keys(args, fam, cal, te, held, folds, bundle, extra)
+    every = set(tasks)
+    res, problems = r27e.run(cal, te, {F: every - held[F] for F in folds}, {F: held[F] for F in folds}, keys,
+                             json.loads(Path(args.r27e_r26).read_text())["r26"],
+                             json.loads(Path(args.r27e_r27d).read_text())["r27d"], splits=args.r27e_splits,
+                             progress=lambda m: print(m, flush=True))
+    res["inputs"] = {k: dict(path=str(Path(p).resolve()), sha256=sha256(p))
+                     for k, p in (("r26", args.r27e_r26), ("r27d", args.r27e_r27d))}
     return res, problems
 
 
@@ -1429,6 +1453,9 @@ def run(args):
     r27d, r27d_failures = None, []
     if getattr(args, "r27d", False):
         r27d, r27d_failures = r27d_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, rkP)
+    r27e, r27e_failures = None, []
+    if getattr(args, "r27e", False):
+        r27e, r27e_failures = r27e_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra)
     r26, r26_failures = None, []
     if getattr(args, "r26", False):
         r26, r26_failures = r26_xr1(args, cal, te, held, folds, seen, unseen, table1, rkP, extra)
@@ -1472,6 +1499,9 @@ def run(args):
     if getattr(args, "r27d", False):
         out["r27d"] = r27d
         out["r27d_failures"] = r27d_failures
+    if getattr(args, "r27e", False):
+        out["r27e"] = r27e
+        out["r27e_failures"] = r27e_failures
     if getattr(args, "r26", False):
         out["r26"] = r26
         out["r26_failures"] = r26_failures
@@ -1582,6 +1612,14 @@ def run(args):
             print("R27d FAILED (no R27d result is used): " + ", ".join(r27d_failures))
             return 1
         print("\nR27d OK")
+    if getattr(args, "r27e", False):
+        import r27e_table1_bands as r27em
+        print()
+        r27em.print_summary(r27e, "XR-1")
+        if r27e_failures:
+            print("R27e FAILED (no R27e result is used): " + ", ".join(r27e_failures))
+            return 1
+        print("\nR27e OK")
     if getattr(args, "r26", False):
         import r26_alarms_at_limit as r26m
         print()
@@ -1674,6 +1712,10 @@ def main(argv=None):
     r.add_argument("--r27d-r21", help="R27d gate D0: R21's XR-1 output")
     r.add_argument("--r27d-r27b", help="R27d gate D1: R27b's XR-1 output")
     r.add_argument("--r27d-splits", type=int, default=20, help="R27d random 30/70 assignments (R27's seeds)")
+    r.add_argument("--r27e", action="store_true", help="R27e: Table I's own-band rows on R27's 30/70 assignments")
+    r.add_argument("--r27e-r26", help="R27e gate E0: R26's XR-1 output (Table I's rows)")
+    r.add_argument("--r27e-r27d", help="R27e gate E1: R27d's XR-1 output")
+    r.add_argument("--r27e-splits", type=int, default=20, help="R27e random 30/70 assignments (R27's seeds)")
     r.add_argument("--r27", action="store_true", help="R27: Hide-and-Seek's band under the published 30/70 split")
     r.add_argument("--r27-r18", help="R27: R18's XR-1 output (E's curve)")
     r.add_argument("--r27-r21", help="R27 gates K0, K1: R21's XR-1 output")
