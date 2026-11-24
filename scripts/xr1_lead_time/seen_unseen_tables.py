@@ -923,6 +923,56 @@ def r27c_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, rkP):
     return res, problems
 
 
+def r27d_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, rkP):
+    """R27d on XR-1 (r27d_split_curves): Fig. 2's own-band curves (each single model, mean over the three at each
+    target) for SAFE-MLP, SAFE-LSTM and Hide-and-Seek on R27's 30/70 assignments, seen and unseen tasks, with R21's
+    fixed-split curves (D0) and R27b's Hide-and-Seek curves (D1). The scores are R21's (r21_xr1)."""
+    import r27d_split_curves as r27d
+    if not (args.r27d_r18 and args.r27d_r21 and args.r27d_r27b):
+        raise SystemExit("error: --r27d needs --r27d-r18, --r27d-r21 and --r27d-r27b (the XR-1 outputs of R18, R21, R27b)")
+    if SAFE_LSTM not in extra:
+        raise SystemExit("error: --r27d needs --safe-lstm-fold-dirs (SAFE-LSTM's band)")
+    rows = cal + te
+    need = {str(r["rollout_id"]) for r in rows}
+    heads = (SAFE, SAFE_LSTM, HS)
+    a_all = {ALL: fam[SAFE_LSTM][ALL]}
+    seen_raw = {SAFE: seen_safe_raw(rows, bundle),
+                HS: seen_amend2_raw(args.amend2_scores, args.amend2_normalizations, HS, need),
+                SAFE_LSTM: merge(
+                    trajectories(a_all, SAFE_LSTM, cal, ctl.CAL_COHORT, held, "per_task", running_max=False)[ALL],
+                    trajectories(a_all, SAFE_LSTM, te, ctl.TEST_COHORT, held, "per_task", running_max=False)[ALL])}
+
+    def unseen_raw(family, det):
+        data = {F: v for F, v in fam[family].items() if F != ALL}
+        c = trajectories(data, det, cal, ctl.CAL_COHORT, held, "pooled", running_max=False)
+        e = trajectories(data, det, te, ctl.TEST_COHORT, held, "pooled", running_max=False)
+        return {F: merge(c[F], e[F]) for F in folds}
+
+    raw_unseen = {SAFE: unseen_raw("safe", "safe"), HS: unseen_raw("xt", HS), SAFE_LSTM: unseen_raw(SAFE_LSTM, SAFE_LSTM)}
+    for h in heads:
+        for r in rows:
+            rid = str(r["rollout_id"])
+            per = seen_raw[h][rid]
+            for s in SEEDS:
+                r[f"{h}~#{s}@seen"] = per[s]
+            for F in folds:
+                per = raw_unseen[h][F][rid]
+                for s in SEEDS:
+                    r[f"{h}~#{s}@{F}"] = per[s]
+    every = set(tasks)
+    at = dict(seen=lambda F: "seen", unseen=lambda F: F)
+    keys = {h: {side: {f"seed_{s}": (lambda F, h=h, s=s, at=at[side]: f"{h}~#{s}@{at(F)}") for s in SEEDS}
+                for side in at} for h in heads}
+    res, problems = r27d.run(cal, te, {F: every - held[F] for F in folds}, {F: held[F] for F in folds}, rkP, keys,
+                             json.loads(Path(args.r27d_r18).read_text())["r18"],
+                             json.loads(Path(args.r27d_r21).read_text())["r21"],
+                             json.loads(Path(args.r27d_r27b).read_text())["r27b"], splits=args.r27d_splits,
+                             progress=lambda m: print(m, flush=True))
+    res["inputs"] = {k: dict(path=str(Path(p).resolve()), sha256=sha256(p))
+                     for k, p in (("r18", args.r27d_r18), ("r21", args.r27d_r21), ("r27b", args.r27d_r27b))}
+    return res, problems
+
+
 def r24_xr1(r22, ref_path):
     """R24 (docs/r24_table3_ci_seconds_plan.md) on XR-1: R22 rerun with Table III's missing rows added.
     Gate R0: every entry of R22's output is unchanged (the added rows only add keys). Gate R1: each added
@@ -1376,6 +1426,9 @@ def run(args):
     r27c, r27c_failures = None, []
     if getattr(args, "r27c", False):
         r27c, r27c_failures = r27c_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, rkP)
+    r27d, r27d_failures = None, []
+    if getattr(args, "r27d", False):
+        r27d, r27d_failures = r27d_xr1(args, fam, cal, te, held, folds, tasks, bundle, extra, rkP)
     r26, r26_failures = None, []
     if getattr(args, "r26", False):
         r26, r26_failures = r26_xr1(args, cal, te, held, folds, seen, unseen, table1, rkP, extra)
@@ -1416,6 +1469,9 @@ def run(args):
     if getattr(args, "r27c", False):
         out["r27c"] = r27c
         out["r27c_failures"] = r27c_failures
+    if getattr(args, "r27d", False):
+        out["r27d"] = r27d
+        out["r27d_failures"] = r27d_failures
     if getattr(args, "r26", False):
         out["r26"] = r26
         out["r26_failures"] = r26_failures
@@ -1518,6 +1574,14 @@ def run(args):
             print("R27c FAILED (no R27c result is used): " + ", ".join(r27c_failures))
             return 1
         print("\nR27c OK")
+    if getattr(args, "r27d", False):
+        import r27d_split_curves as r27dm
+        print()
+        r27dm.print_summary(r27d, "XR-1")
+        if r27d_failures:
+            print("R27d FAILED (no R27d result is used): " + ", ".join(r27d_failures))
+            return 1
+        print("\nR27d OK")
     if getattr(args, "r26", False):
         import r26_alarms_at_limit as r26m
         print()
@@ -1605,6 +1669,11 @@ def main(argv=None):
     r.add_argument("--r27c-r21", help="R27c gate Q0: R21's XR-1 output")
     r.add_argument("--r27c-r27", help="R27c gate Q1: R27's XR-1 output")
     r.add_argument("--r27c-splits", type=int, default=20, help="R27c random 30/70 assignments (R27's seeds)")
+    r.add_argument("--r27d", action="store_true", help="R27d: Fig. 2's own-band curves on R27's 30/70 assignments")
+    r.add_argument("--r27d-r18", help="R27d: R18's XR-1 output (the timers' curves)")
+    r.add_argument("--r27d-r21", help="R27d gate D0: R21's XR-1 output")
+    r.add_argument("--r27d-r27b", help="R27d gate D1: R27b's XR-1 output")
+    r.add_argument("--r27d-splits", type=int, default=20, help="R27d random 30/70 assignments (R27's seeds)")
     r.add_argument("--r27", action="store_true", help="R27: Hide-and-Seek's band under the published 30/70 split")
     r.add_argument("--r27-r18", help="R27: R18's XR-1 output (E's curve)")
     r.add_argument("--r27-r21", help="R27 gates K0, K1: R21's XR-1 output")
