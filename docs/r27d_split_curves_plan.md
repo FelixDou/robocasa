@@ -175,3 +175,51 @@ Both logs must end with `R27d OK`. Then, on the Mac:
 rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r27d_split_curves_*/evidence/' \
   /Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/.claude/worktrees/r22-fixed-paths/reports/r27d_split_curves_evidence/
 ```
+
+## Result (2026-11-24, run `r27d_split_curves_20261124_174901`, from `d64bed13`): `R27d OK`; Fig. 2's description holds on the 30/70 splits
+
+Both runs ended with `R27d OK` and `INPUTS UNCHANGED`. Gates D0 to D2 pass on both policies with max |diff| 0.0.
+Evidence is in `reports/r27d_split_curves_evidence/`:
+- `seen_unseen_tables_r27d.json`, sha256 `11abe1ab…`;
+- `rldx_e1b_r27d.json`, `64d33238…`;
+- logs, gitignored and kept locally.
+
+**Result** (median curve over the 20 assignments, where at least 15 reach the FPR; gap = band minus timer, in
+fractions of H_k, on the overlap up to 15% FPR; fixed 50/50 for reference):
+
+| Policy | Head | Side, timer | 30/70 median: gap [min, max] | above from | Fixed 50/50: gap [min, max] |
+| --- | --- | --- | --- | --- | --- |
+| XR-1 | SAFE-MLP | seen, P | [−0.142, −0.001] | never | [−0.137, −0.016] |
+| XR-1 | SAFE-MLP | unseen, E | [−0.009, +0.016] | 12.5% | [−0.010, +0.014] |
+| XR-1 | SAFE-LSTM | seen, P | [−0.123, −0.024] | never | [−0.127, −0.024] |
+| XR-1 | SAFE-LSTM | unseen, E | [−0.037, +0.041] | 11.6% | [−0.044, +0.049] |
+| XR-1 | Hide-and-Seek | seen, P | [−0.015, +0.051] | — | [−0.020, +0.036] |
+| XR-1 | Hide-and-Seek | unseen, E | [−0.032, +0.150] | 6.2% | [−0.027, +0.178] |
+| XR-1 | Hide-and-Seek | unseen, G | [−0.114, −0.003] | never | [−0.098, +0.025] |
+| RLDX-1 | SAFE-MLP | seen, P | [−0.143, −0.063] | never | [−0.126, −0.036] |
+| RLDX-1 | SAFE-MLP | unseen, E | [−0.005, +0.011] | 5.6% | [−0.008, +0.017] |
+| RLDX-1 | SAFE-LSTM | seen, P | [−0.042, −0.012] | never | [−0.040, +0.021] |
+| RLDX-1 | SAFE-LSTM | unseen, E | [−0.024, +0.109] | 5.0% | [−0.010, +0.106] |
+| RLDX-1 | Hide-and-Seek | seen, P | [−0.004, +0.067] | — | [−0.005, +0.069] |
+| RLDX-1 | Hide-and-Seek | unseen, E | [+0.015, +0.160] | 7.0% | [+0.011, +0.186] |
+| RLDX-1 | Hide-and-Seek | unseen, G | [−0.085, −0.029] | never | [−0.078, −0.003] |
+
+("never": the curve is not above the timer at 15% FPR; "—": above in places but not at 15%.) The SAFE bands stay below
+G on unseen tasks except SAFE-MLP on XR-1, whose median curve is up to 0.028 above G at low FPR (also on the fixed
+split). 5% target points (median FPR, lead): XR-1 SAFE-MLP 4.7%, 0.192 (seen) and 3.9%, 0.115 (unseen); SAFE-LSTM 4.4%,
+0.139 and 5.7%, 0.112; Hide-and-Seek 5.0%, 0.241 and 8.0%, 0.197. RLDX-1 SAFE-MLP 5.8%, 0.113 and 7.1%, 0.078;
+SAFE-LSTM 7.5%, 0.249 and 6.6%, 0.103; Hide-and-Seek 5.6%, 0.298 and 10.4%, 0.170.
+
+**Reading** (rules fixed above):
+1. Fig. 2's own bands become the 30/70 medians with the median target dots; the caption and Sec. IV-A drop the fixed
+   50/50 split, which remains only in Sec. VI-B's favorable-draw clause.
+2. Sec. VI-B's description stays: on seen tasks the SAFE bands' median curves never rise above P's (at most −0.001)
+   and Hide-and-Seek's rises up to 0.051 and 0.067 above it; on unseen tasks SAFE-MLP's stays within 0.02 of E's
+   (−0.009 to +0.016 and −0.005 to +0.011).
+3. Fig. 1 is unchanged (D1). Its text agrees with the new Fig. 2: Hide-and-Seek's median curve is above E from 6.2% and
+   7.0% FPR and below G throughout.
+
+**Correction to the rationale above.** The parenthetical under "Reading" quoted the fixed-split gaps from a local check
+that wrongly averaged the ensemble curve with the three single models. The fixed-split values above are the correct
+ones: SAFE-MLP against E −0.010 to +0.014 and −0.008 to +0.017, and SAFE-LSTM on RLDX-1 up to +0.021 above P (not
++0.018). The 0.02 rule itself was fixed before the run and is applied unchanged.
