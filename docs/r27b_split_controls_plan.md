@@ -165,3 +165,31 @@ Both logs must end with `R27b OK`. Then, on the Mac:
 rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r27b_split_controls_*/evidence/' \
   /Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/.claude/worktrees/r22-fixed-paths/reports/r27b_split_controls_evidence/
 ```
+
+## Result (2026-11-24, run `r27b_split_controls_20261124_020457`, from `b103e21e`): `R27b OK`, the fixed assignment was favorable
+
+Both runs ended with `R27b OK` and `INPUTS UNCHANGED`. Gates M1 to M3 pass on both policies. Evidence is in
+`reports/r27b_split_controls_evidence/`:
+- `seen_unseen_tables_r27b.json`, sha256 `c0f430d1…`;
+- `rldx_e1b_r27b.json`, `31d82f21…`;
+- logs, gitignored and kept locally.
+
+**Result** (unseen tasks; fractions of H_k; random splits: median [min, max] over 20 assignments):
+
+| | Fixed 50/50 | Random 50/50 | Published 30/70 |
+| --- | --- | --- | --- |
+| XR-1, gain over matched E | 0.147 | 0.094 [0.027, 0.142] | 0.064 [0.023, 0.098] |
+| RLDX-1, gain over matched E | 0.143 | 0.106 [0.043, 0.155] | 0.101 [0.053, 0.148] |
+| XR-1, full − first step | 0.273 | 0.213 [0.135, 0.272] | 0.178 [0.129, 0.222] |
+| RLDX-1, full − first step | 0.146 | 0.095 [0.035, 0.157] | 0.091 [0.035, 0.157] |
+
+**Reading.** The fixed assignment was favorable for both quantities on both policies: it is above 20 of 20 random
+50/50 assignments on XR-1 and 18 of 20 on RLDX-1 (the rule needs at least 18). The direction is robust: the gain and
+the first-step difference are positive in all 80 random assignments. On XR-1 the 30/70 ratio also lowers the medians
+(0.094 to 0.064 and 0.213 to 0.178). On RLDX-1 the two ratios are close.
+
+**Example.** The representative 30/70 assignment is 6 on XR-1 (gain 0.0646) and 2 on RLDX-1 (0.1015). Fig. 1 uses XR-1's
+failed DeliverStraw rollout `74717434c269675fe5e00a6f` under assignment 6: band alarm at inference 64, E at 127, limit
+160, 0.8 s per inference, so warnings of 76.8 s and 26.4 s, a difference of 50.4 s. It was chosen for illustration.
+
+**Reporting.** As fixed above, the paper's headline is now the published 30/70 split, and Fig. 1 shows its curves.
