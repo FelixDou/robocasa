@@ -174,3 +174,54 @@ Both logs must end with `R27c OK`. Then, on the Mac:
 rsync -av 'tsubame:/gs/bs/tga-shinoda/felid/robocasa_checkpoints/safe/r27c_split_all_bands_*/evidence/' \
   /Users/felixdoublet/Desktop/PhD/Shinoda_lab/Code/robocasa/.claude/worktrees/r22-fixed-paths/reports/r27c_split_all_bands_evidence/
 ```
+
+## Result (2026-11-24, run `r27c_split_all_bands_20261124_165652`, from `4a4b289b`): `R27c OK`; SAFE shows no clear gain, Hide-and-Seek is earlier than P on seen tasks but not than G
+
+Both runs ended with `R27c OK` and `INPUTS UNCHANGED`. Gates Q0 to Q2 pass on both policies with max |diff| 0.0.
+Evidence is in `reports/r27c_split_all_bands_evidence/`:
+- `seen_unseen_tables_r27c.json`, sha256 `3c33f64f…`;
+- `rldx_e1b_r27c.json`, `6225710a…`;
+- logs, gitignored and kept locally.
+
+**Result** (gain in mean lead over the matched timer, fractions of H_k; median [min, max] over the 20 assignments;
+positive / negative assignments; fixed 50/50 for reference):
+
+| Policy | Head | Side, timer | Gain | + / − | Band FPR | Fixed 50/50 |
+| --- | --- | --- | --- | --- | --- | --- |
+| XR-1 | SAFE-MLP | unseen, E | −0.004 [−0.016, 0.011] | 6 / 14 | 3.4% | −0.012 |
+| XR-1 | SAFE-MLP | unseen, G | −0.069 [−0.111, −0.019] | 0 / 20 | 3.4% | −0.075 |
+| XR-1 | SAFE-MLP | seen, P | −0.002 [−0.058, 0.007] | 8 / 12 | 5.1% | −0.016 |
+| XR-1 | SAFE-LSTM | unseen, E | −0.028 [−0.054, 0.005] | 2 / 18 | 5.8% | −0.021 |
+| XR-1 | SAFE-LSTM | unseen, G | −0.109 [−0.134, −0.078] | 0 / 20 | 5.8% | −0.090 |
+| XR-1 | SAFE-LSTM | seen, P | −0.041 [−0.058, −0.019] | 0 / 20 | 3.2% | −0.016 |
+| XR-1 | Hide-and-Seek | unseen, E | 0.064 [0.023, 0.098] | 20 / 0 | 7.8% | 0.147 |
+| XR-1 | Hide-and-Seek | unseen, G | −0.035 [−0.082, 0.021] | 3 / 17 | 7.8% | 0.070 |
+| XR-1 | Hide-and-Seek | seen, P | 0.054 [0.032, 0.072] | 20 / 0 | 4.7% | 0.047 |
+| RLDX-1 | SAFE-MLP | unseen, E | −0.001 [−0.009, 0.008] | 7 / 13 | 7.5% | 0.004 |
+| RLDX-1 | SAFE-MLP | unseen, G | −0.117 [−0.137, −0.092] | 0 / 20 | 7.5% | −0.119 |
+| RLDX-1 | SAFE-MLP | seen, P | −0.130 [−0.188, −0.096] | 0 / 20 | 5.2% | −0.126 |
+| RLDX-1 | SAFE-LSTM | unseen, E | 0.024 [−0.023, 0.050] | 17 / 3 | 6.9% | 0.033 |
+| RLDX-1 | SAFE-LSTM | unseen, G | −0.084 [−0.119, −0.048] | 0 / 20 | 6.9% | −0.075 |
+| RLDX-1 | SAFE-LSTM | seen, P | −0.027 [−0.057, −0.021] | 0 / 20 | 8.0% | −0.021 |
+| RLDX-1 | Hide-and-Seek | unseen, E | 0.101 [0.053, 0.148] | 20 / 0 | 10.5% | 0.143 |
+| RLDX-1 | Hide-and-Seek | unseen, G | −0.043 [−0.119, 0.019] | 5 / 15 | 10.5% | 0.019 |
+| RLDX-1 | Hide-and-Seek | seen, P | 0.067 [0.040, 0.095] | 20 / 0 | 5.5% | 0.086 |
+
+Median false alarms (band / matched E) on unseen tasks: XR-1 SAFE-MLP 13 / 13, SAFE-LSTM 22 / 22, Hide-and-Seek
+29.5 / 29; RLDX-1 SAFE-MLP 30 / 29, SAFE-LSTM 27.5 / 25, Hide-and-Seek 42 / 41.
+
+**Reading** (rules fixed above):
+1. Table II's SAFE rows become the 30/70 median [range], FPR and false alarms above.
+2. "SAFE's bands show no clear gain over the timers" stays: no SAFE gain over E or P is positive in 18 of 20
+   assignments (the most is SAFE-LSTM on RLDX-1's unseen tasks, 17 of 20, median 0.024).
+3. Hide-and-Seek against G: "not clearly earlier" stays, and the medians are now negative (G is ahead in 17 and
+   15 of 20). Against P on seen tasks the gain is positive in all 20 assignments on both policies, so the paper says
+   that Hide-and-Seek's band warns earlier than P on seen tasks, and the conclusion's "no monitor alone clearly beats
+   a timer told the limit" is narrowed to G on unseen tasks.
+4. SAFE-MLP on RLDX-1's seen tasks warns later than P in all 20 assignments (−0.130): the sentence stays with the
+   new numbers. SAFE-LSTM also trails P in all 20 on both policies, and E on XR-1's unseen tasks in 18 of 20.
+5. The fixed 50/50 split remains only in Fig. 2's own-band curves and in one clause of Sec. VI-B.
+
+**Scope.** The counts describe sensitivity to the calibration assignment, with the test rollouts held fixed; no
+test-rollout bootstrap was run. At the fixed 50/50 split, R21b's seen-task CIs for Hide-and-Seek against P included
+zero.
