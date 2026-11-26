@@ -294,6 +294,33 @@ demo folders are found without the dataset registry, whose import needs
 robosuite: by the one dated `v1.0/target/composite/<Task>/*/lerobot` folder,
 recorded in `input_match.json`.
 
+*Loss check (26 November 2026, descriptive).* Released weights, 32 held-out
+samples per task (8 episodes × 4 frames), the same noise and t for both
+columns. Mean loss with the sample's own actions against actions from another
+held-out episode of the same task (`loss_check_20261126_163933`):
+
+| Task | Own | Other episode | Ratio | Own lower |
+|---|---:|---:|---:|---:|
+| ArrangeBreadBasket | 0.460 | 1.430 | 3.1 | 31/32 |
+| ArrangeTea | 0.424 | 0.935 | 2.2 | 31/32 |
+| BreadSelection | 0.392 | 0.830 | 2.1 | 25/32 |
+| CuttingToolSelection | 0.302 | 1.182 | 3.9 | 32/32 |
+| GarnishPancake | 0.508 | 1.444 | 2.8 | 28/32 |
+
+The demos as built here read as the model's own inputs: with a wrong image
+orientation, state field or action order, the own loss would sit near the
+other-episode loss. This covers the gap the gate leaves, indirectly.
+
+*Negligible-update run (26 November 2026).* 20 steps at learning rate 1e-12,
+batch 4, one GPU: loss 0.25–0.75 (MSE 0.03–0.19), gradient norm 12–24 before
+clipping, peak GPU memory 22.2 GB. Saved to
+`robocasa_checkpoints/xr1_finetune/negligible_20261126_163933/checkpoints/step_000020`.
+After the first step (10 s, including data-worker start), 76 samples took
+4.5 s (about 17 samples per second), all from the workers' first buffers, so
+whether video decoding keeps up over a long run is not measured yet. Open:
+the weight diff against the template, and the paired rollouts (they need two
+GPUs: the ladder script keeps the simulator and the server apart).
+
 ## Phase A: recoverability at the Hide-and-Seek + P alarm (no new parents)
 
 **A0 (CPU, offline).** Score the 76 ladder v2 parents with the frozen
