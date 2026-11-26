@@ -348,6 +348,14 @@ if its pooled success rate over all pairs is within 0.10 of the base's and no
 task differs by more than 0.25 (5 of 20). The weights differ by at most
 2.9e-11, so a failure points at the serving path, not at training.
 
+*Step 7 launched (26 November 2026, 23:11, node r9n7, at commit bf05db7).*
+Both runs share GPU pair 0:1 (simulator on 0, both servers on 1), one shard
+each: base on port 10460 into `robocasa_rollouts/recovery/xr1_step0_naturals_base`,
+negligible folder on port 10470 into
+`robocasa_rollouts/recovery/xr1_step0_naturals_negligible`. Logs in
+`robocasa_logs/eval`: `xr1_step0_naturals_base_shard0_20261126_231110.log` and
+`xr1_step0_naturals_negligible_shard0_20261126_231116.log`.
+
 ## Phase A: recoverability at the Hide-and-Seek + P alarm (no new parents)
 
 **A0 (CPU, offline).** Score the 76 ladder v2 parents with the frozen
