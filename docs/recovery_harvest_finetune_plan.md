@@ -317,9 +317,24 @@ clipping, peak GPU memory 22.2 GB. Saved to
 `robocasa_checkpoints/xr1_finetune/negligible_20261126_163933/checkpoints/step_000020`.
 After the first step (10 s, including data-worker start), 76 samples took
 4.5 s (about 17 samples per second), all from the workers' first buffers, so
-whether video decoding keeps up over a long run is not measured yet. Open:
-the weight diff against the template, and the paired rollouts (they need two
-GPUs: the ladder script keeps the simulator and the server apart).
+whether video decoding keeps up over a long run is not measured yet.
+`diff-weights` against the template: the same 1,120 weight names, the VLM's
+713 tensors unchanged, and 50 tensors of the action expert changed by at most
+2.9e-11 (bfloat16 resolves such steps only for weights near zero). Only the
+trainable modules moved, and saving writes what was trained.
+
+*Smoke training, step 8 (26 November 2026).* 300 steps, batch 8, one GPU, the
+released schedule (learning rate 1.2e-5 at step 300):
+`smoke_20261126_164734`. From step 25 to 300 every 25 steps took 7.9–8.0 s:
+about 25 samples (3.1 steps) per second, with data loading keeping up over
+2,400 samples (the workers' first buffers hold 192). Peak memory 22.2 GB, as
+at batch 4. Loss 0.23–0.72 without drift, gradient norm 6–11 before
+clipping. The released recipe's 480,000 samples (10,000 steps × 48) would take
+about 5.3 h on one GPU.
+
+Open for Step 0: the paired rollouts of step 7 (20 natural rollouts per task,
+base and saved folder on the same seeds). They need two GPUs: the ladder
+script keeps the simulator and the server apart.
 
 ## Phase A: recoverability at the Hide-and-Seek + P alarm (no new parents)
 
