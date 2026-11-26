@@ -102,6 +102,43 @@ class LeRobotFolderTest(unittest.TestCase):
             xf._overrides(args)
 
 
+class PairedRolloutTest(unittest.TestCase):
+    @staticmethod
+    def rows(successes, task="ArrangeTea", seed0=560007):
+        return [{"task_name": task, "environment_seed": seed0 + i, "success": s} for i, s in enumerate(successes)]
+
+    def test_identical_runs_pass(self):
+        base = self.rows([True, False] * 10) + self.rows([False] * 20, task="GarnishPancake")
+        result = xf.pair_rollouts(base, [dict(r) for r in base])
+        self.assertTrue(result["passed"])
+        self.assertEqual((result["pairs"], result["pooled_difference"]), (40, 0.0))
+        self.assertEqual(result["per_task"]["ArrangeTea"]["both"], 10)
+
+    def test_a_task_off_by_more_than_a_quarter_fails(self):
+        base = self.rows([True] * 10 + [False] * 10) + self.rows([True] * 10 + [False] * 10, task="BreadSelection")
+        candidate = self.rows([True] * 4 + [False] * 16) + self.rows([True] * 16 + [False] * 4, task="BreadSelection")
+        result = xf.pair_rollouts(base, candidate)
+        self.assertEqual(result["pooled_difference"], 0.0)          # pooled looks fine...
+        self.assertAlmostEqual(result["per_task"]["ArrangeTea"]["difference"], -0.3)
+        self.assertFalse(result["passed"])                           # ...but one task moved by 6 of 20
+
+    def test_only_matching_seeds_are_paired_and_duplicates_refused(self):
+        base = self.rows([True, True, False])
+        candidate = self.rows([True, False], seed0=560008)
+        result = xf.pair_rollouts(base, candidate)
+        self.assertEqual((result["pairs"], result["unpaired_base"], result["unpaired_candidate"]), (2, 1, 0))
+        with self.assertRaises(ValueError):
+            xf.pair_rollouts(base + base[:1], candidate)
+
+    def test_reads_every_shard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for shard, rows in enumerate((self.rows([True]), self.rows([False], seed0=1))):
+                (Path(tmp) / f"shard{shard}").mkdir()
+                (Path(tmp) / f"shard{shard}" / "parents.jsonl").write_text(
+                    "".join(json.dumps(r) + "\n" for r in rows))
+            self.assertEqual(len(xf.read_parents(tmp)), 2)
+
+
 class CliTest(unittest.TestCase):
     def test_parser(self):
         args = xf.build_parser().parse_args(["train", "--model-dir", "m", "--dataset-base", "d",

@@ -549,6 +549,69 @@ def run_diff_weights(args):
     return 0 if not reference else 1
 
 
+# ---- step 7: paired natural rollouts ------------------------------------------------------------
+
+# Frozen with this code (26 November 2026, before any paired rollout): the saved folder passes the
+# sanity check if, over all paired seeds, its success rate is within 0.10 of the base checkpoint's,
+# and on no task by more than 0.25 (5 of 20).
+SANITY_MAX_POOLED_DIFF = 0.10
+SANITY_MAX_TASK_DIFF = 0.25
+
+
+def read_parents(run_root):
+    rows = []
+    for path in sorted(Path(run_root).glob("shard*/parents.jsonl")):
+        with path.open() as stream:
+            rows.extend(json.loads(line) for line in stream if line.strip())
+    return rows
+
+
+def pair_rollouts(base, candidate):
+    """Pair two natural runs by (task, environment seed); duplicates in a run are an error."""
+    def index(rows, name):
+        out = {}
+        for row in rows:
+            key = (row["task_name"], int(row["environment_seed"]))
+            if key in out:
+                raise ValueError(f"{name}: duplicate rollout {key}")
+            out[key] = bool(row["success"])
+        return out
+
+    a, b = index(base, "base"), index(candidate, "candidate")
+    keys = sorted(set(a) & set(b))
+    per_task = {}
+    for task, seed in keys:
+        stats = per_task.setdefault(task, {"pairs": 0, "base_successes": 0, "candidate_successes": 0,
+                                           "both": 0, "base_only": 0, "candidate_only": 0})
+        stats["pairs"] += 1
+        stats["base_successes"] += a[(task, seed)]
+        stats["candidate_successes"] += b[(task, seed)]
+        stats["both"] += a[(task, seed)] and b[(task, seed)]
+        stats["base_only"] += a[(task, seed)] and not b[(task, seed)]
+        stats["candidate_only"] += b[(task, seed)] and not a[(task, seed)]
+    for stats in per_task.values():
+        stats["difference"] = (stats["candidate_successes"] - stats["base_successes"]) / stats["pairs"]
+    pairs = sum(s["pairs"] for s in per_task.values())
+    pooled = (sum(s["candidate_successes"] - s["base_successes"] for s in per_task.values()) / pairs
+              if pairs else None)
+    passed = bool(pairs) and abs(pooled) <= SANITY_MAX_POOLED_DIFF and all(
+        abs(s["difference"]) <= SANITY_MAX_TASK_DIFF for s in per_task.values())
+    return {"pairs": pairs, "unpaired_base": len(set(a) - set(b)), "unpaired_candidate": len(set(b) - set(a)),
+            "pooled_difference": pooled, "per_task": per_task, "passed": passed,
+            "rule": f"|pooled difference| <= {SANITY_MAX_POOLED_DIFF} and every task within "
+                    f"{SANITY_MAX_TASK_DIFF}"}
+
+
+def run_compare_rollouts(args):
+    result = pair_rollouts(read_parents(args.base), read_parents(args.candidate))
+    result.update({"kind": "xr1_paired_naturals", "base": str(args.base), "candidate": str(args.candidate),
+                   "git_commit": _git_commit(), "created_at": _utc_now()})
+    if args.output:
+        Path(args.output).write_text(json.dumps(result, indent=2))
+    print(json.dumps(result, indent=2))
+    return 0 if result["passed"] else 1
+
+
 # ---- CLI ----------------------------------------------------------------------------------------
 
 def build_parser():
@@ -601,6 +664,12 @@ def build_parser():
     p.add_argument("--a", type=Path, required=True)
     p.add_argument("--b", type=Path, required=True)
     p.set_defaults(func=run_diff_weights)
+
+    p = sub.add_parser("compare-rollouts", help="step 7: pair two ladder naturals runs by task and seed")
+    p.add_argument("--base", type=Path, required=True, help="LADDER_ROOT of the base checkpoint's run")
+    p.add_argument("--candidate", type=Path, required=True, help="LADDER_ROOT of the saved folder's run")
+    p.add_argument("--output", type=Path, default=None)
+    p.set_defaults(func=run_compare_rollouts)
     return parser
 
 

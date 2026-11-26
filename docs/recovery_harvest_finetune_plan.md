@@ -336,6 +336,18 @@ Open for Step 0: the paired rollouts of step 7 (20 natural rollouts per task,
 base and saved folder on the same seeds). They need two GPUs: the ladder
 script keeps the simulator and the server apart.
 
+*Step 7 design (26 November 2026, before any paired rollout).* The ladder
+script's `naturals` mode with the pilot config (five tasks, pretrain split),
+20 natural rollouts per task, base seed 560007 (environment seeds
+560007–560026, sampling seeds derived from them as in every ladder run), once
+with the SAFE-patched base checkpoint and once with the negligible-update
+folder `negligible_20261126_163933/checkpoints/step_000020`, both served by the
+same patched server. `xr1_finetune compare-rollouts` pairs the two runs by task
+and environment seed. **Rule (frozen with that code):** the saved folder passes
+if its pooled success rate over all pairs is within 0.10 of the base's and no
+task differs by more than 0.25 (5 of 20). The weights differ by at most
+2.9e-11, so a failure points at the serving path, not at training.
+
 ## Phase A: recoverability at the Hide-and-Seek + P alarm (no new parents)
 
 **A0 (CPU, offline).** Score the 76 ladder v2 parents with the frozen
