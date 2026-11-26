@@ -377,8 +377,19 @@ non-release stage that is false in R0's live predicates at the alarm
 (`live_predicates_at_alarm`). On the current audit this changes only
 `cf428856`, which gets `strawberry_on_pancake` (now 6 class-2 states); the
 other `all_latched` states get the same stage either way. `coverage` reports
-the class-2 states by stage source (`alarm`, `undone`, `live`, `none`). The
-amended R1 decision has not been run yet.
+the class-2 states by stage source (`alarm`, `undone`, `live`, `none`).
+
+**Amended R1 run (26 November 2026, commit `2c665401`).** `decide` was rerun
+with the annotated review sheet (`r0_audit/review_20261126.csv`): 0 manual
+overrides, the same 26 class 2 and 3 class 3, Gate R0 passed. `r1` then gave
+**`segment_replay`**: all 26 class-2 states have a stage (23 from the alarm,
+2 undone, 1 live), and no stuck stage fails the amended rule. So Amendment 1
+fixed both object-rule failures (`correct_tool_on_cutting_board`,
+`basket_on_dining_counter`), and Amendment 2 left no unstaged state. The
+first report is kept in `r1_segments/coverage_before_amend2/`; the amended
+one, with the per-stage table, is in `r1_segments/coverage/`. R1's source for
+R2 is segment replay for every stuck stage. The R2 gaps listed below still
+apply, since R1 only checks that enough consistent demo segments exist.
 
 **R2: generation at the alarm states.** From each class-2 state at `a`:
 an optional release-and-retreat prefix (open the gripper, lift, return to a
@@ -767,4 +778,5 @@ Runs go from a pinned worktree if other recovery runs share the checkout.
 - R1 answers: whether the composite human demos for the five tasks include
   replayable states or object poses (answered: yes, per-frame simulator
   states in the LeRobot `extras/`), and which subtasks the class-2 states
-  are stuck on (from `r1`).
+  are stuck on (answered 26 November: nine stages across the five tasks, all
+  with enough segments; `r1_coverage.md`).
