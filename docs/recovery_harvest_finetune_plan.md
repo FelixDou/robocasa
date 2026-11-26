@@ -283,6 +283,17 @@ environment gives the policy (image orientation, colour, the state fields).
 The loss check shows it indirectly; a replay comparison is added if the loss
 check looks wrong.
 
+*Input-match gate (26 November 2026, commit `d2159376`): passed.* On the
+cluster the tests passed with PyTorch (18), and `input-match` (output under
+`robocasa_rollouts/recovery/xr1_step0/input_match_*`) found 20 of 20 samples
+identical on each of the five tasks. Both the builder and the client give the
+processor pre-sampled frames without video metadata, so the processor writes
+its frame timestamps at its default 24 fps (it warns) in serving and in
+training alike; training sees the same timestamp text as the server. The
+demo folders are found without the dataset registry, whose import needs
+robosuite: by the one dated `v1.0/target/composite/<Task>/*/lerobot` folder,
+recorded in `input_match.json`.
+
 ## Phase A: recoverability at the Hide-and-Seek + P alarm (no new parents)
 
 **A0 (CPU, offline).** Score the 76 ladder v2 parents with the frozen
