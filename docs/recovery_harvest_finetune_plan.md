@@ -112,6 +112,67 @@ but the XR-1 pipeline has to be set up first:
   OpenPI, whose fine-tuning is known to work here. It needs Hide-and-Seek
   retrained on π0 rollouts with failure labels first.
 
+**Step 0 findings (26 November 2026, before any training code).** The cluster
+checkout is pinned at `4da1db0`, the 2026-08-03 release commit that added the
+post-training code. File contents were read from that commit on GitHub and
+from the released RoboCasa365 checkpoint on Hugging Face.
+
+- *Entry point.* `xr1/scripts/train.sh` runs `torchrun xr1/tools/train.py`
+  with Hydra configs in `xr1/configs/` (`data/load_washer.yaml`,
+  `model/posttrain.yaml`, `trainer/deepspeed.yaml`): PyTorch Lightning with
+  DeepSpeed, bf16-mixed, FusedAdam, 500 warmup steps to a peak learning rate
+  of 2e-5, 10,000 steps, batch 48. No option freezes part of the model. It
+  logs to W&B, which is disabled here.
+- *Starting checkpoint.* The trainer loads only a `.pt` state dict
+  (`{"module": ...}`). `xr1/tools/weight_convert.py` converts the released
+  RoboCasa365 folder into one. There is no converter back, and every
+  collector here serves the Hugging Face folder through `deploy/server.py`,
+  so a reverse converter is needed: strip the `model.` prefix, load the
+  weights into the RoboCasa365 model, and save a derived folder with the
+  SAFE-patched `modeling_mibot.py`.
+- *Environment.* The server environment has no DeepSpeed, Lightning, Hydra or
+  W&B. Training gets its own environment, so the serving one stays unchanged.
+- *Data: the released trainer does not reproduce the RoboCasa365 inputs.* Its
+  only dataset type (`json_dataset.py`, written for Xiaomi's two-arm robot)
+  gives one still frame per camera, a one-step state scaled to [-1, 1] by
+  q01/q99, and a 30-step action chunk z-scored with dataset statistics, in a
+  left/right-arm layout. The RoboCasa365 checkpoint, as served and evaluated
+  here, receives:
+  - each of the three cameras as a four-frame video (frames t−6, t−4, t−2, t;
+    0.95 centre crop; no resize and no colour jitter);
+  - a four-step 14-d state (end-effector position and axis-angle, gripper,
+    base position and axis-angle), zero-padded to 60 and not normalized
+    (`state_length: 4` in its config);
+  - a 16-step chunk whose dims 0–11 are RoboCasa's own 12-d action, with
+    identity statistics (mean 0, std 1 on dims 0–11). The processor's
+    `action_config` has one robot type, `robocasa365`.
+
+  Fine-tuning through the released dataset type would train the checkpoint on
+  inputs it never saw. A RoboCasa365 dataset class that builds each sample
+  exactly as the eval client and the processor do is required. Whether the
+  training model (`xr1/mibot/models/VLA/XR1.py`) and its collate accept video
+  inputs and a four-step state is not yet known. Read by eye and still to
+  confirm on the cluster: the shape of `action_config`, how
+  `chat_template.jinja` inserts the state, and the second half of
+  `modeling_mibot.py`.
+
+Step 0 from here, in order:
+
+1. Read `XR1.py` and `custom_collate.py` at `4da1db0`: video inputs,
+   `state_length`, and the training loss.
+2. Training environment, and weight conversion in both directions.
+3. The RoboCasa365 dataset class, fed with observations as the policy
+   receives them (Phase B records exactly these).
+4. *Input-match check, before any update.* With the released weights and
+   fixed flow noise, the training code path must predict the same action
+   chunk as the served model on the same inputs, within bf16 rounding
+   (tolerance fixed with the code), on at least 20 samples per pilot task.
+5. The negligible-update sanity check above.
+
+If step 1 shows that the training model cannot take these inputs without
+being rewritten, or step 4 has not passed by 15 January 2027, Step 0 fails
+and the fallback above applies (the roadmap also lists RLDX-1 before π0).
+
 ## Phase A: recoverability at the Hide-and-Seek + P alarm (no new parents)
 
 **A0 (CPU, offline).** Score the 76 ladder v2 parents with the frozen
@@ -769,8 +830,10 @@ Runs go from a pinned worktree if other recovery runs share the checkout.
 
 ## Open items
 
-- Step 0 answers: XR-1 fine-tuning entry point, data format, run time and the
-  sanity-check result.
+- Step 0 answers: XR-1 fine-tuning entry point and data format (answered 26
+  November, see Step 0 findings); whether the training model takes the
+  RoboCasa365 inputs, the input-match check, run time and the sanity-check
+  result (open).
 - Exact recovery-prompt text and the replay mixing ratio, frozen with the
   training code.
 - Whether ladder v2 snapshots on `/gs/bs` are complete for all 76 parents
