@@ -495,7 +495,17 @@ def load_r0(audit_dir, allow_provisional=False):
         if stage == ALL_LATCHED:
             # Amendment 1: every stage had latched, so the stage to redo is the one undone at the alarm.
             undone = [n for n in (row.get("regressed_at_alarm") or []) if n in req]
-            stage, source = (undone[0], "undone") if undone else (ALL_LATCHED, "none")
+            # Amendment 2: the undone list reads predicates only at saved snapshots, so a stage that latched
+            # and came undone between two of them is missed. Then take the first required, non-release
+            # stage that is false in the live predicates at the alarm.
+            live = row.get("live_predicates_at_alarm") or {}
+            live_false = [n for n in req if live.get(n) is False and not ladder.is_release_predicate(n)]
+            if undone:
+                stage, source = undone[0], "undone"
+            elif live_false:
+                stage, source = live_false[0], "live"
+            else:
+                stage, source = ALL_LATCHED, "none"
         out.append({"parent_id": row["parent_id"], "task_name": row["task_name"], "stage": stage,
                     "stage_source": source, "class": cls, "class_source": "final" if final else "provisional"})
     return out, required
@@ -673,10 +683,16 @@ def write_coverage_md(result, path):
               "segments, and an `all_latched` state is assigned the stage undone at its alarm. Under the original "
               f"rule: **{result['decision_original_rule']}** "
               f"(failing: {', '.join(result['stuck_stages_failing_original_rule']) or 'none'}).", ""]
+    lines += ["Amendment 2 (26 November 2026, after the R0 image review): an `all_latched` state with nothing "
+              "recorded as undone takes the first required, non-release stage that is false in the live "
+              "predicates at its alarm. Class-2 states by stage source: "
+              + (", ".join(f"{k}: {n}" for k, n in sorted(result["class2_states_by_stage_source"].items()))
+                 or "none") + ".", ""]
     if result["stuck_stages_failing"]:
         lines += ["Stuck stages without enough segments: " + ", ".join(result["stuck_stages_failing"]), ""]
     if result["unstaged_states"]:
-        lines += ["Class-2 states with every stage latched and nothing undone (no stage to replay): "
+        lines += ["Class-2 states with every stage latched and nothing undone or false at the alarm "
+                  "(no stage to replay): "
                   + ", ".join(f"{s['task_name']} `{s['parent_id']}`" for s in result["unstaged_states"]), ""]
     lines += ["## Demo health", "", "| Task | Demos | Clean | Success | Labeler flagged | Row mismatch | "
               "Agreement with published labels | Errors |", "|---|---:|---:|---:|---:|---:|---:|---:|"]

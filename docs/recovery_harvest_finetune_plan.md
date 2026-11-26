@@ -300,7 +300,7 @@ stages. `expert_segments coverage` applies this to the R0 classes and writes
 **R0 decision (11 November 2026).** Gate R0 passed: 26 of the 29
 never-recovered states are class 2 (threshold 10), 3 are class 3. All 40
 scene checks matched and there were 0 errors. `decide` ran without manual
-overrides; the review images still need checking before R2.
+overrides; the review images were checked on 26 November (below).
 
 **First R1 coverage run (11 November 2026).** The index replayed 100 demos
 per task with 0 errors. All 500 demos succeed and none is flagged by
@@ -346,6 +346,39 @@ modal instruction sequence with object names as `{object_key}` (for example
 are candidates for the stage instructions of later experiments (re-prompt,
 the recovery-mode prompt). They are not used in R1's decision, and the
 finished re-prompt trials keep the instructions they ran with.
+
+**R0 image review (26 November 2026, after the first R1 run and before any R2
+code).** All 29 never-recovered states were checked against their alarm and
+final images and the simulator poses. No class changed: 26 class 2 and 3
+class 3, so Gate R0 stands. `review.csv` keeps `manual_class` empty and has a
+note per state. Findings:
+
+- The policy's cameras show the task objects in about half of the states; at
+  the alarm the robot often faces a cabinet or the fridge. The other states
+  rest on the simulator poses.
+- The three class-3 states have their objects on the floor (the kettle is
+  visible in `b9268e5b`; basket and bread are at z ≤ 0.06 m in the other two).
+- Two GarnishPancake states are uncertain and stay class 2: `863712cc`
+  (strawberry in no camera, at 0.83 m, 16 cm below the pancake and 0.29 m
+  from it) and `1e18b02a` (strawberry at 0.40 m, probably still in the
+  fridge; on the floor by the end of the episode).
+- `cf428856`, the unstaged state of Amendment 1, has a stage: the strawberry
+  lies on the plate 8 cm from the pancake's centre and `strawberry_on_pancake`
+  is false at the alarm. R0's undone list reads predicates only at saved
+  snapshots, and this stage latched and came undone between two of them.
+- The `tipped` flag carries no information for bread, croissants, knives and
+  strawberries, which have no upright pose. It matters for the mug, kettle,
+  jam and basket.
+
+**Amendment 2 (26 November 2026, after the image review and before any R1
+rerun or R2 code).** An `all_latched` class-2 state takes the stage undone at
+its alarm (Amendment 1). If none is recorded, it takes the first required,
+non-release stage that is false in R0's live predicates at the alarm
+(`live_predicates_at_alarm`). On the current audit this changes only
+`cf428856`, which gets `strawberry_on_pancake` (now 6 class-2 states); the
+other `all_latched` states get the same stage either way. `coverage` reports
+the class-2 states by stage source (`alarm`, `undone`, `live`, `none`). The
+amended R1 decision has not been run yet.
 
 **R2: generation at the alarm states.** From each class-2 state at `a`:
 an optional release-and-retreat prefix (open the gripper, lift, return to a
@@ -445,7 +478,25 @@ Open before the code:
   the same category; the pretrain-transfer check measures it, and a failing
   category falls back to a scripted top-down grasp on the object's bounding
   box;
-- the GarnishPancake state `cf428856ba92f99d9d7d` (no stage to replay).
+- the GarnishPancake state `cf428856ba92f99d9d7d`: resolved by Amendment 2
+  (stage `strawberry_on_pancake`);
+- *removing the wrong tool*: in 4 of the 5 CuttingToolSelection class-2
+  states the wrong tool lies on the cutting board
+  (`wrong_tool_not_on_cutting_board` undone), for example the knife next to
+  the carrot while the peeler is still in the drawer. Success needs it off the
+  board, and no human demo has that step, since demonstrators never put the
+  wrong tool there. R2 needs a pick from the board and a place on the counter
+  for it, from pick segments of the same tool category or a script;
+- *non-task objects in the gripper*: R0's `holding` lists task objects only.
+  In `9aaa49f0` the robot holds a piece of ham from the fridge at the alarm
+  (and in `4e582d6b` it grasps a coconut later). The release-and-retreat test
+  must read the gripper itself (fingers closed on any body), not `holding`;
+- *mugs on the tray's edge*: in 4 of the 7 ArrangeTea class-2 states the mug
+  rests on the tray's rim (`mug_on_tray` false), and in one it stands on the
+  counter beside the tray. The stage's demo segments pick the mug from a
+  cabinet, so the pick must transfer to a mug on the counter or the tray. The
+  pretrain-transfer check does not test this start, because its runs reach
+  the stage with the mug still in the cabinet.
 
 **What changes downstream.**
 

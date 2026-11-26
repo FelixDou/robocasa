@@ -76,6 +76,8 @@ def write_audit(audit_dir, stuck, decided=True):
         regressed = list(item[2]) if len(item) > 2 else []
         row = {"parent_id": f"p{i}", "task_name": "ArrangeTea", "required_subtasks": REQUIRED,
                "stage_at_alarm": stage, "provisional_class": cls, "regressed_at_alarm": regressed}
+        if len(item) > 3:
+            row["live_predicates_at_alarm"] = dict(item[3])
         ladder.append_jsonl(audit_dir / "states.jsonl", row)
         if decided:
             ladder.append_jsonl(audit_dir / "r0_states.jsonl", {"parent_id": f"p{i}", "final_class": cls})
@@ -241,6 +243,25 @@ class CoverageTest(unittest.TestCase):
             result = es.coverage(index, audit2, Path(tmp, "r1b"))
             self.assertEqual(result["decision"], "segment_replay_except_unstaged_states")
             self.assertEqual(result["stuck_stages_failing"], [])
+
+    def test_all_latched_states_fall_back_to_the_live_predicates(self):
+        # Amendment 2: nothing recorded as undone (the stage came undone between snapshots), but the live
+        # predicates at the alarm show which stage is false. Release predicates are skipped.
+        live = {"kettle_on_tray": True, "mug_on_tray": False, "cabinet_closed": False, "gripper_released": False}
+        with tempfile.TemporaryDirectory() as tmp:
+            index, audit = Path(tmp, "index"), Path(tmp, "audit")
+            for ep in range(12):
+                write_demo(index, ep)
+            write_audit(audit, [("all_latched", "recoverable", [], live),
+                                ("all_latched", "recoverable", ["cabinet_closed"], live),
+                                ("all_latched", "recoverable", [], {"gripper_released": False})])
+            states, _ = es.load_r0(audit)
+            self.assertEqual([(s["stage"], s["stage_source"]) for s in states],
+                             [("mug_on_tray", "live"), ("cabinet_closed", "undone"), ("all_latched", "none")])
+            result = es.coverage(index, audit, Path(tmp, "r1"))
+            self.assertEqual(result["class2_states_by_stage_source"], {"live": 1, "undone": 1, "none": 1})
+            self.assertEqual(result["unstaged_states"], [{"parent_id": "p2", "task_name": "ArrangeTea"}])
+            self.assertIn("Amendment 2", (Path(tmp, "r1") / "r1_coverage.md").read_text())
 
     def test_targets_follow_the_instruction_and_may_vary_by_scene(self):
         def row(episode, langs, moved, object_lang):
