@@ -156,7 +156,8 @@ from the released RoboCasa365 checkpoint on Hugging Face.
   `chat_template.jinja` inserts the state, and the second half of
   `modeling_mibot.py`.
 
-Step 0 from here, in order:
+Step 0 from here, in order (steps 2–5 superseded on 26 November by decision A
+below):
 
 1. Read `XR1.py` and `custom_collate.py` at `4da1db0`: video inputs,
    `state_length`, and the training loss.
@@ -172,6 +173,77 @@ Step 0 from here, in order:
 If step 1 shows that the training model cannot take these inputs without
 being rewritten, or step 4 has not passed by 15 January 2027, Step 0 fails
 and the fallback above applies (the roadmap also lists RLDX-1 before π0).
+
+**Step 1 result (26 November 2026).** `XR1.py` and `custom_collate.py` at
+`4da1db0` were read in full, and so was the checkpoint's `modeling_mibot.py`.
+The cluster confirmed the versions (torch 2.8.0 and transformers 4.57.1 in the
+server environment, as `xr1/assets/requirements.txt` pins), `action_config`
+of shape 16 × 60, and that the checkpoint's chat template never mentions the
+state. The released training model is not the model the RoboCasa365
+checkpoint is served with:
+
+- *Extra heads and losses.* Training adds choice and score heads
+  (`state_projector_choice`, `action_projector_choice`,
+  `score_projector_choice`) and two VLM embeddings (`action_embed`,
+  `score_embed`), with losses on them next to the flow-matching loss. The
+  checkpoint's weight index appears to have none of them (to confirm on the
+  cluster), so `weight_convert.py`'s output would fail the trainer's strict
+  load.
+- *State.* Training also gives the state to the VLM as `<state>` tokens. The
+  served model gives it only to the DiT.
+- *DiT positions.* Training shifts the action tokens' positions by +10; the
+  served model does not.
+- *Video.* The VLM accepts video inputs, but the collate forwards only image
+  tensors and computes positions for images only, so video items would be
+  dropped without an error.
+
+Shared by both: the modules the served model uses (`vlm`, `dit`,
+`state_projector`, `action_projector`, `action_output_layer`, `t_embedder`,
+`t_projector`, `sink`) and the flow-matching formulation (t ~ Beta(1.5, 1),
+x_t = (1 − t)·noise + t·action, target action − noise).
+
+Under the rule above this is "cannot take these inputs without being
+rewritten". Two options were left: (A) a training forward on the served model
+itself, or (B) the fallback now. (B) would redo the alarm, Gate A, R0 and R1
+on a new policy before any recovery data exists.
+
+**Decision (26 November 2026, author): (A).** Step 0 continues with our own
+training forward on the served model, replacing steps 2–5 above:
+
+2. *Reference sources.* Copy the served checkpoint's Python and config files
+   and Xiaomi's eval client (`eval_robocasa365/entry.py`, `deploy/client.py`)
+   next to the code, so the trainer is written against the exact files the
+   server runs.
+3. *Training forward* (a new module under `robocasa/recovery/`). Load the
+   RoboCasa365 folder with `AutoModel`, as the server does. Run the VLM as the
+   served forward does, without gradients. Sample t ~ Beta(1.5, 1) and noise,
+   and call the model's own `dit_forward` on x_t. The loss is the MSE between
+   its output and action − noise, over the valid steps and the active action
+   dims (0–11). The VLM is frozen and the DiT and its projectors are trained;
+   the trainable set and the optimizer are fixed with the code. Checkpoints
+   are saved as a derived Hugging Face folder (the trained weights plus the
+   SAFE-patched `modeling_mibot.py`), so every collector serves them
+   unchanged and no `.pt` conversion is needed.
+4. *Sample builder.* One builder for every training source. It turns recorded
+   camera frames, state and actions into the exact processor call that
+   `entry.py` makes: three four-frame videos (t−6, t−4, t−2, t, 0.95 crop), the
+   same text, a four-step 14-d state padded to 60, and a 16 × 60 action target
+   with dims 0–11 active. For Step 0 the source is the RoboCasa365 human
+   demos of the five pilot tasks, which R1 already replays.
+5. *Input-match check (gate).* On recorded frames, the sample builder and
+   Xiaomi's client code must give identical processor outputs (token ids,
+   video tensors and grids, state, action mask) on at least 20 samples per
+   pilot task.
+6. *Loss check (descriptive).* The released weights' loss on held-out demos,
+   next to the same loss with actions taken from another episode, to show
+   that the loss reads the task.
+7. *Negligible-update sanity check*, as above, through the saved derived
+   folder and the normal server.
+8. *Smoke training:* steps per hour, GPU memory and the projected time for
+   about 1,000 episodes.
+
+The fail rule is unchanged: if step 5 or step 7 has not passed by 15 January
+2027, Step 0 fails and the fallback applies.
 
 ## Phase A: recoverability at the Hide-and-Seek + P alarm (no new parents)
 
