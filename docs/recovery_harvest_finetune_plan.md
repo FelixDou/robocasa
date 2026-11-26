@@ -217,10 +217,11 @@ training forward on the served model, replacing steps 2–5 above:
 3. *Training forward* (a new module under `robocasa/recovery/`). Load the
    RoboCasa365 folder with `AutoModel`, as the server does. Run the VLM as the
    served forward does, without gradients. Sample t ~ Beta(1.5, 1) and noise,
-   and call the model's own `dit_forward` on x_t. The loss is the MSE between
-   its output and action − noise, over the valid steps and the active action
-   dims (0–11). The VLM is frozen and the DiT and its projectors are trained;
-   the trainable set and the optimizer are fixed with the code. Checkpoints
+   and call the model's own `dit_forward` on x_t. The loss is the
+   flow-matching part of the released loss (0.5 · MSE + 1.0 · FFT magnitude)
+   between its output and action − noise, over the active action dims (0–11).
+   The VLM is frozen and the DiT and its projectors are trained; the
+   trainable set and the optimizer are fixed with the code. Checkpoints
    are saved as a derived Hugging Face folder (the trained weights plus the
    SAFE-patched `modeling_mibot.py`), so every collector serves them
    unchanged and no `.pt` conversion is needed.
@@ -244,6 +245,43 @@ training forward on the served model, replacing steps 2–5 above:
 
 The fail rule is unchanged: if step 5 or step 7 has not passed by 15 January
 2027, Step 0 fails and the fallback applies.
+
+*Code (26 November 2026, before any run).* `robocasa/recovery/xr1_samples.py`
+(sample builder, LeRobot reading, the gate's comparison) and
+`robocasa/recovery/xr1_finetune.py` (subcommands `input-match`, `loss-check`,
+`train`, `diff-weights`), with simulator-free tests (`tests/test_xr1_samples.py`;
+`tests/test_xr1_finetune.py`, whose loss and optimizer tests need PyTorch).
+Choices fixed with this code:
+
+- The reference for the gate is our deployed client,
+  `XiaomiRobotics1Policy._make_request`, which every collector here uses and
+  which reproduces Xiaomi's `entry.py` line for line. The gate feeds it the
+  episode's observations frame by frame and compares its processor outputs
+  with the builder's, tensor for tensor (`input_ids`, `attention_mask`,
+  `pixel_values_videos`, `video_grid_thw`, `state`, `action_mask`): 5 held-out
+  episodes × 4 frames per task, all identical.
+- Demo actions are reordered from the LeRobot layout (base motion first,
+  `meta/modality.json`) to the environment's 12-d layout that the model
+  outputs and `convert_action` executes. States go through the client's own
+  `observation_to_state`.
+- A sample needs a full 16-step future, so the last 15 frames of an episode
+  are never a sample's first frame and nothing is padded.
+- Held-out demos: 10% of episodes, chosen by a hash of task and episode, never
+  by frame.
+- Training: the action expert (`dit`, `state_projector`, `action_projector`,
+  `action_output_layer`, `t_embedder`, `t_projector`, `sink`), parameters in
+  bfloat16 as served with float32 master weights; AdamW with the released
+  schedule (warmup over 500 steps from 5e-7 to 2e-5, cosine to 5e-6), betas
+  (0.9, 0.95), weight decay 0.1 on matrices, gradient clipping at 1.0.
+  Gradients are averaged across GPUs; no DeepSpeed, Lightning or Hydra.
+- Saved checkpoints copy every non-weight file from a template folder (the
+  SAFE-patched checkpoint), and saving fails if the weight key set differs from
+  the template's.
+
+Not covered by the gate: whether the demo videos and states equal what the
+environment gives the policy (image orientation, colour, the state fields).
+The loss check shows it indirectly; a replay comparison is added if the loss
+check looks wrong.
 
 ## Phase A: recoverability at the Hide-and-Seek + P alarm (no new parents)
 
