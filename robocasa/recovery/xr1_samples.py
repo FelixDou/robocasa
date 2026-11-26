@@ -321,6 +321,21 @@ def lerobot_episodes(lerobot):
     return sorted(int(p.stem.split("_")[1]) for p in (Path(lerobot) / "data").rglob("episode_*.parquet"))
 
 
+def read_lerobot_arrays(lerobot, episode):
+    """(named states, environment-order actions) of one LeRobot episode, without its videos."""
+    import pyarrow.parquet as pq
+
+    lerobot = Path(lerobot)
+    info = _read_json(lerobot / "meta" / "info.json")
+    layout = lerobot_layout(_read_json(lerobot / "meta" / "modality.json"))
+    chunk = int(episode) // int(info.get("chunks_size", 1000))
+    table = pq.read_table(lerobot / info["data_path"].format(episode_chunk=chunk, episode_index=int(episode)),
+                          columns=["observation.state", "action"])
+    states = np.stack([np.asarray(x, dtype=np.float32) for x in table.column("observation.state").to_pylist()])
+    actions = np.stack([np.asarray(x, dtype=np.float32) for x in table.column("action").to_pylist()])
+    return named_states(states, layout), env_actions(actions, layout)
+
+
 def read_lerobot_episode(lerobot, episode, task_name, decode=decode_video):
     import pyarrow.parquet as pq
 

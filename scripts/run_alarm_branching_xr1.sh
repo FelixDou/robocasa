@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase A of docs/recovery_harvest_finetune_plan.md: recoverability at the Hide-and-Seek + P alarm.
 #   export | score | plan | start | resume | status | analyze | audit | decide | segments | segments-status | r1
-#   r2-probe | r2-self-replay | r2-transfer | r2-gate | r2-status | r2-analyze
+#   r2-probe | r2-self-replay | r2-transfer | r2-gate | r2-status | r2-analyze | r2-export
 # audit/decide are step R0 of the redesign (failure audit; simulator only, no policy server).
 # segments/r1 are step R1 (human-demo expert segments; CPU simulator replay, then a join with R0).
 # r2-* are step R2 (expert recoveries): control probe and the two executor checks (simulator only),
@@ -11,8 +11,8 @@
 set -euo pipefail
 action=${1:-status}
 case "$action" in export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1|\
-  r2-probe|r2-self-replay|r2-transfer|r2-gate|r2-status|r2-analyze) ;; *)
-  echo "Usage: $0 {export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1|r2-probe|r2-self-replay|r2-transfer|r2-gate|r2-status|r2-analyze}"; exit 1 ;; esac
+  r2-probe|r2-self-replay|r2-transfer|r2-gate|r2-status|r2-analyze|r2-export) ;; *)
+  echo "Usage: $0 {export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1|r2-probe|r2-self-replay|r2-transfer|r2-gate|r2-status|r2-analyze|r2-export}"; exit 1 ;; esac
 
 export STORAGE_BS=${STORAGE_BS:-/gs/bs/tga-shinoda/felid}
 export ROBOCASA_REPO=${ROBOCASA_REPO:-/gs/fs/tga-shinoda/felid/robocasa}
@@ -210,6 +210,15 @@ if [[ "$action" == r2-analyze ]]; then
   [[ ! -e "$r2_dir/transfer/transfer.jsonl" ]] || args+=(--transfer "$r2_dir/transfer")
   [[ ! -d "$r2_dir/gate_r" ]] || args+=(--gate-r "$r2_dir/gate_r" --audit-dir "$audit_dir")
   exec "$py" -m robocasa.recovery.expert_recovery analyze "${args[@]}"
+fi
+if [[ "$action" == r2-export ]]; then
+  # CPU only: the recorded Gate R attempts (successes by default, R2_EXPORT_INCLUDE=all for every
+  # attempt) as one LeRobot folder per task, readable by the XR-1 Step 0 sample builder.
+  out=${R2_EXPORT_DIR:-$STORAGE_BS/robocasa_failure_datasets/r2_recoveries_$(date +%Y%m%d_%H%M%S)}
+  PYTHONPATH="$ROBOCASA_REPO" "$py" -u -m robocasa.recovery.expert_recovery export-lerobot \
+    --gate-r "$r2_dir/gate_r" --output-dir "$out" --include "${R2_EXPORT_INCLUDE:-success}"
+  echo "out=$out"
+  exit 0
 fi
 if [[ "$action" == r2-gate ]]; then
   # Gate R: one ladder worker (simulator GPU + XR-1 server GPU + port) per pair, a task shard each.

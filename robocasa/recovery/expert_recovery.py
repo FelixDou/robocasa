@@ -395,10 +395,9 @@ class SourceLibrary:
             if self._reader is not None:
                 named, actions = self._reader(task, episode)
             else:
-                from robocasa.recovery.xr1_samples import read_lerobot_episode
+                from robocasa.recovery.xr1_samples import read_lerobot_arrays
 
-                ep = read_lerobot_episode(self.lerobots[task], episode, task, decode=lambda path: None)
-                named, actions = ep.named, ep.actions
+                named, actions = read_lerobot_arrays(self.lerobots[task], episode)
             path = self.index_dir / es.EPISODES_DIR / task / f"episode_{int(episode):06d}.npz"
             with np.load(path, allow_pickle=False) as data:
                 arrays = {k: data[k] for k in ("object_names", "object_pos", "object_quat")}
@@ -865,6 +864,215 @@ def gate_r(attempts, states, *, threshold=GATE_R_MIN_SHARE):
     }
 
 
+# ---- recording attempts as training data (simulator-free) --------------------------------------
+
+RECORD_FPS = 20               # the environment's control rate, as the LeRobot demos
+RECORD_QUALITY = 8            # imageio/ffmpeg quality (0-10)
+PHASES = ("expert", "policy")
+ENV_ACTION_KEYS = ("action.end_effector_position", "action.end_effector_rotation", "action.gripper_close",
+                   "action.base_motion", "action.control_mode")
+BINARY_DIMS = (6, 11)         # gripper and control mode: stored as -1/1, the demos' raw robosuite convention
+MODALITY_PATH = Path(__file__).resolve().parents[1] / "models/assets/groot_dataset_assets/PandaOmron_modality.json"
+RECORDING_NAME = "frames.npz"
+ATTEMPT_META = "attempt.json"
+
+
+def executed_action(action):
+    """12-d environment-order action from a policy dict or vector, binary dims as the env executes them."""
+    if isinstance(action, dict):
+        vec = np.concatenate([np.asarray(action[k], dtype=float).reshape(-1) for k in ENV_ACTION_KEYS])
+    else:
+        vec = np.asarray(action, dtype=float).reshape(-1).copy()
+    if vec.shape != (12,):
+        raise ValueError(f"expected a 12-d action, got {vec.shape}")
+    for i in BINARY_DIMS:
+        vec[i] = 1.0 if vec[i] >= 0.5 else -1.0
+    return vec
+
+
+def _imageio_writer(path, fps):
+    import imageio
+
+    return imageio.get_writer(str(path), fps=fps, quality=RECORD_QUALITY)
+
+
+class AttemptRecorder:
+    """Writes one attempt as XR-1 saw it: per-camera videos, named states, executed actions, phases.
+
+    Frame t is the observation before action t. The folder is written as ``<name>.partial`` and
+    renamed on ``finish``; a partial folder left by a crash is replaced.
+    """
+
+    def __init__(self, folder, *, writer_factory=_imageio_writer, fps=RECORD_FPS):
+        import shutil
+
+        from robocasa.recovery.xr1_samples import STATE_KEYS
+        from robocasa.recovery.xiaomi_robotics_1_policy import CAMERA_KEYS
+
+        self.folder = Path(folder)
+        self.partial = self.folder.with_name(self.folder.name + ".partial")
+        if self.folder.exists():
+            raise FileExistsError(f"{self.folder} is already recorded")
+        if self.partial.exists():
+            shutil.rmtree(self.partial)
+        self.partial.mkdir(parents=True)
+        self.camera_keys, self.state_keys = tuple(CAMERA_KEYS), tuple(STATE_KEYS)
+        self.writers = {k: writer_factory(self.partial / f"{k}.mp4", fps) for k in self.camera_keys}
+        self.states = {k: [] for k in self.state_keys}
+        self.actions, self.phases = [], []
+        self.suspect_frames = 0
+
+    def add(self, obs, action, phase):
+        if phase not in PHASES:
+            raise ValueError(f"phase must be one of {PHASES}")
+        for key in self.camera_keys:
+            frame = np.ascontiguousarray(np.asarray(obs[key])[..., :3], dtype=np.uint8)
+            self.writers[key].append_data(frame)
+        for key in self.state_keys:
+            self.states[key].append(np.asarray(obs[f"state.{key}"], dtype=np.float32).reshape(-1))
+        self.actions.append(executed_action(action).astype(np.float32))
+        self.phases.append(PHASES.index(phase))
+
+    def __len__(self):
+        return len(self.actions)
+
+    def _close(self):
+        for writer in self.writers.values():
+            try:
+                writer.close()
+            except Exception:
+                pass
+
+    def finish(self, meta):
+        self._close()
+        n = len(self.actions)
+        np.savez_compressed(self.partial / RECORDING_NAME, actions=np.stack(self.actions) if n else np.zeros((0, 12)),
+                            phase=np.asarray(self.phases, dtype=np.int8),
+                            **{f"state.{k}": np.stack(v) if n else np.zeros((0, 0)) for k, v in self.states.items()})
+        counts = Counter(PHASES[i] for i in self.phases)
+        ladder.atomic_write_json(self.partial / ATTEMPT_META, {
+            **meta, "frames": n, "frames_by_phase": {p: counts.get(p, 0) for p in PHASES},
+            "camera_keys": list(self.camera_keys), "fps": RECORD_FPS, "binary_dims_convention": "-1/1",
+            "created_at": ladder.utc_now()})
+        self.partial.rename(self.folder)
+        return n
+
+    def abort(self):
+        import shutil
+
+        self._close()
+        shutil.rmtree(self.partial, ignore_errors=True)
+
+
+def recorded_attempts(gate_root, *, include="success"):
+    """(attempt record, recording folder) pairs from every shard's attempts.jsonl."""
+    out = []
+    for path in sorted(Path(gate_root).glob("**/attempts.jsonl")):
+        for row in ladder.read_jsonl(path):
+            if not row.get("recording") or row.get("error"):
+                continue
+            if include == "success" and not row.get("success"):
+                continue
+            folder = path.parent / row["recording"]
+            if (folder / ATTEMPT_META).exists():
+                out.append((row, folder))
+    return sorted(out, key=lambda x: (x[0]["task_name"], x[0]["parent_id"], int(x[0]["k"])))
+
+
+def export_lerobot(gate_root, output_dir, *, include="success", copy=True, log=print):
+    """Recorded attempts -> one LeRobot folder per task, readable by the Step 0 sample builder.
+
+    Columns: ``observation.state`` and ``action`` in the demos' layout (meta/modality.json is the
+    PandaOmron one the demos ship), the instruction index, frame/episode indices, and
+    ``annotation.r2.phase`` (0 expert, 1 policy) so training can filter frames.
+    """
+    import shutil
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from robocasa.recovery import xr1_samples as xs
+
+    output_dir = Path(output_dir)
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise FileExistsError(f"{output_dir} is not empty")
+    modality = json.loads(MODALITY_PATH.read_text())
+    layout = xs.lerobot_layout(modality)
+    state_dim = max(hi for _, hi in layout["state"].values())
+    by_task = defaultdict(list)
+    for row, folder in recorded_attempts(gate_root, include=include):
+        by_task[row["task_name"]].append((row, folder))
+    info_paths = {"data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+                  "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4"}
+    summary = {}
+    for task, items in sorted(by_task.items()):
+        root = output_dir / task / "lerobot"
+        (root / "meta").mkdir(parents=True)
+        tasks, episodes, index = {}, [], 0
+        for ep, (row, folder) in enumerate(items):
+            meta = json.loads((folder / ATTEMPT_META).read_text())
+            with np.load(folder / RECORDING_NAME, allow_pickle=False) as data:
+                actions = data["actions"]
+                phase = data["phase"]
+                named = {k: data[f"state.{k}"] for k in xs.STATE_KEYS}
+            n = len(actions)
+            if n != meta["frames"] or any(len(v) != n for v in named.values()):
+                raise ValueError(f"{folder}: frame counts differ")
+            states = np.zeros((n, state_dim), dtype=np.float32)
+            for key in xs.STATE_KEYS:
+                states[:, slice(*layout["state"][key])] = named[key]
+            lerobot_actions = np.zeros((n, 12), dtype=np.float32)
+            start = 0
+            for key, width in xs.ENV_ACTION_ORDER:
+                lerobot_actions[:, slice(*layout["action"][key])] = actions[:, start:start + width]
+                start += width
+            instruction = meta["instruction"]
+            task_index = tasks.setdefault(instruction, len(tasks))
+            chunk = ep // 1000
+            data_path = root / info_paths["data_path"].format(episode_chunk=chunk, episode_index=ep)
+            data_path.parent.mkdir(parents=True, exist_ok=True)
+            pq.write_table(pa.table({
+                "observation.state": [list(map(float, r)) for r in states],
+                "action": [list(map(float, r)) for r in lerobot_actions],
+                "annotation.human.task_description": [task_index] * n,
+                "task_index": [task_index] * n,
+                "annotation.r2.phase": phase.astype(np.int64).tolist(),
+                "timestamp": (np.arange(n) / RECORD_FPS).tolist(),
+                "frame_index": list(range(n)),
+                "episode_index": [ep] * n,
+                "index": list(range(index, index + n)),
+            }), data_path)
+            index += n
+            for key in meta["camera_keys"]:
+                dst = root / info_paths["video_path"].format(episode_chunk=chunk, video_key=layout["video"][key],
+                                                             episode_index=ep)
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                (shutil.copy2 if copy else os_link)(folder / f"{key}.mp4", dst)
+            episodes.append({"episode_index": ep, "tasks": [instruction], "length": n,
+                             "r2": {k: row.get(k) for k in ("parent_id", "k", "stage", "source", "success",
+                                                             "stage_completed", "expert_steps", "policy_steps")},
+                             "frames_by_phase": meta["frames_by_phase"]})
+        (root / "meta" / "modality.json").write_text(json.dumps(modality, indent=2))
+        (root / "meta" / "tasks.jsonl").write_text(
+            "".join(json.dumps({"task_index": i, "task": t}) + "\n" for t, i in sorted(tasks.items(), key=lambda x: x[1])))
+        (root / "meta" / "episodes.jsonl").write_text("".join(json.dumps(e) + "\n" for e in episodes))
+        ladder.atomic_write_json(root / "meta" / "info.json", {
+            "fps": RECORD_FPS, "chunks_size": 1000, **info_paths, "total_episodes": len(episodes),
+            "total_frames": index, "source": "r2_gate_r_recordings", "include": include})
+        summary[task] = {"episodes": len(episodes), "frames": index, "folder": str(root)}
+        log(f"[export] {task}: {len(episodes)} episodes, {index} frames -> {root}")
+    ladder.atomic_write_json(output_dir / "export.json", {
+        "kind": "r2_lerobot_export", "gate_root": str(Path(gate_root).resolve()), "include": include,
+        "tasks": summary, "git_commit": ladder.current_git_commit(), "created_at": ladder.utc_now()})
+    return summary
+
+
+def os_link(src, dst):
+    import os
+
+    os.link(src, dst)
+
+
 # ---- simulator side -----------------------------------------------------------------------------
 
 def _kitchen(env):
@@ -944,11 +1152,12 @@ def slide_to(goal, fixture_xy, target_xy):
 class SimWorld:
     """World adapter on a RoboCasa gym env: poses in the observation's convention, 12-d actions."""
 
-    def __init__(self, env):
+    def __init__(self, env, recorder=None):
         self.env = env
         self.kitchen = _kitchen(env)
         self.obs = ladder.live_observation(env)
         self.info = {}
+        self.recorder = recorder
 
     def observe(self):
         o = self.obs
@@ -970,6 +1179,8 @@ class SimWorld:
         from robocasa.recovery.recovery_rollout import _is_task_success, _step_env
         from robocasa.recovery.subtask_eval import get_subtask_eval
 
+        if self.recorder is not None:
+            self.recorder.add(self.obs, action, "expert")
         self.obs, reward, done, info = _step_env(self.env, _convert_action(action))
         payload = (info or {}).get("subtask_eval") or get_subtask_eval(self.env) or {}
         predicates = {k: bool((v or {}).get("value")) for k, v in (payload.get("predicates") or {}).items()}
@@ -1278,16 +1489,18 @@ def run_transfer(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, dat
     return summary
 
 
-def continue_with_policy(env, policy, world, *, instruction, budget_left, seed, required):
+def continue_with_policy(env, policy, world, *, instruction, budget_left, seed, required, recorder=None):
     """XR-1 from the expert's end state: task instruction, context reset, until success or the budget."""
     from robocasa.recovery.recovery_rollout import _is_task_success, _step_env, call_policy, set_observation_instruction
 
     ladder.reset_policy(policy)
     ladder.seed_policy(policy, seed)
-    obs = ladder.live_observation(env)
+    obs = world.obs
     success, steps = False, 0
     for step in range(max(0, int(budget_left))):
         action = call_policy(policy, set_observation_instruction(obs, instruction), instruction=instruction)
+        if recorder is not None:
+            recorder.add(obs, action, "policy")
         obs, reward, done, info = _step_env(env, action)
         steps = step + 1
         if _is_task_success(info, reward=reward, env=env):
@@ -1301,7 +1514,7 @@ def continue_with_policy(env, policy, world, *, instruction, budget_left, seed, 
 
 def run_gate_r(source_runs, alarms_path, audit_dir, index_dir, output_dir, gains_path, *, dataset_base=None,
                lerobot_overrides=None, attempts=ATTEMPTS_PER_STATE, host=None, port=None, scene_tolerance=1e-6,
-               policy_args=None, shard_index=0, num_shards=1, resume=False, max_errors=20, log=print):
+               policy_args=None, shard_index=0, num_shards=1, record=True, resume=False, max_errors=20, log=print):
     from robocasa.recovery import alarm_branching as ab
 
     output_dir = Path(output_dir)
@@ -1329,12 +1542,12 @@ def run_gate_r(source_runs, alarms_path, audit_dir, index_dir, output_dir, gains
         "source_runs": [str(Path(d).resolve()) for d in source_runs], "alarms": str(Path(alarms_path).resolve()),
         "audit_dir": str(Path(audit_dir).resolve()), "index_dir": str(Path(index_dir).resolve()),
         "gains": json.loads(Path(gains_path).read_text())["gains"], "attempts": int(attempts),
-        "budget_fraction": BUDGET_FRACTION, "threshold": GATE_R_MIN_SHARE,
+        "budget_fraction": BUDGET_FRACTION, "threshold": GATE_R_MIN_SHARE, "record": bool(record),
         "states": [s["parent_id"] for s in class2], "git_commit": ladder.current_git_commit(),
         "created_at": ladder.utc_now()}
     if plan_path.exists():
         previous = json.loads(plan_path.read_text())
-        frozen = ("source_runs", "alarms", "audit_dir", "index_dir", "gains", "attempts", "states")
+        frozen = ("source_runs", "alarms", "audit_dir", "index_dir", "gains", "attempts", "states", "record")
         diffs = sorted(k for k in frozen if previous.get(k) != plan[k])
         if diffs:
             raise ValueError(f"resume differs from the registered Gate R plan in {diffs}")
@@ -1389,10 +1602,18 @@ def run_gate_r(source_runs, alarms_path, audit_dir, index_dir, output_dir, gains
                               "alarm_step": int(snap["step"]), "budget_steps": int(budget),
                               "created_at": ladder.utc_now()}
                     started = time.time()
+                    recorder = None
                     try:
                         ladder.restore_world(env, snap)
                         ladder._refresh_sim_visuals(env, num_forwards=3)
-                        world = SimWorld(env)
+                        if record:
+                            rel = Path("recordings") / pid / f"k{k:02d}"
+                            if (output_dir / rel).exists():   # recorded, but the run stopped before logging it
+                                import shutil
+
+                                shutil.rmtree(output_dir / rel)
+                            recorder = AttemptRecorder(output_dir / rel)
+                        world = SimWorld(env, recorder=recorder)
                         facts = world.facts(task)
                         if programs is None:
                             programs = plan_attempts(task, state["stage"], facts, library, n=int(attempts))
@@ -1406,14 +1627,26 @@ def run_gate_r(source_runs, alarms_path, audit_dir, index_dir, output_dir, gains
                         if result["task_success"]:
                             record.update({"policy_steps": 0, "success": True})
                         else:
+                            world.recorder = None   # the continuation records its own frames
                             record.update(continue_with_policy(
                                 env, policy, world, instruction=instruction, budget_left=budget - result["expert_steps"],
-                                seed=ladder.stable_seed(pid, "r2", k), required=rollout["required_subtasks"]))
+                                seed=ladder.stable_seed(pid, "r2", k), required=rollout["required_subtasks"],
+                                recorder=recorder))
                         record["steps_used"] = record["expert_steps"] + record["policy_steps"]
+                        if recorder is not None:
+                            record["recorded_frames"] = recorder.finish({
+                                "parent_id": pid, "task_name": task, "stage": state["stage"], "k": k,
+                                "instruction": instruction, "source": record.get("source"),
+                                "success": record["success"], "stage_completed": record["stage_completed"],
+                                "expert_steps": record["expert_steps"], "policy_steps": record["policy_steps"],
+                                "git_commit": ladder.current_git_commit()})
+                            record["recording"] = str(rel)
                     except KeyboardInterrupt:
                         raise
                     except Exception:
                         errors += 1
+                        if recorder is not None:
+                            recorder.abort()
                         record.update({"error": traceback.format_exc(), "success": False,
                                        "stage_completed": False})
                     record["wall_seconds"] = time.time() - started
@@ -1484,6 +1717,12 @@ def build_parser():
     p.add_argument("--policy-arg", action="append", default=[], help="key=value passed to the policy factory")
     p.add_argument("--shard-index", type=int, default=0)
     p.add_argument("--num-shards", type=int, default=1)
+    p.add_argument("--no-record", action="store_true", help="outcomes only, no videos or frames")
+    p = sub.add_parser("export-lerobot", help="recorded Gate R attempts -> LeRobot folders per task (no simulator)")
+    p.add_argument("--gate-r", required=True, type=Path)
+    p.add_argument("--output-dir", required=True, type=Path)
+    p.add_argument("--include", choices=("success", "all"), default="success")
+    p.add_argument("--link", action="store_true", help="hard-link the videos instead of copying")
     p = sub.add_parser("analyze", help="recompute the summaries from the records (no simulator)")
     p.add_argument("--self-replay", type=Path)
     p.add_argument("--transfer", type=Path)
@@ -1501,6 +1740,10 @@ def main(argv=None):
             run_probe(env, args.output)
         finally:
             ladder._close(env, None)
+        return
+    if args.command == "export-lerobot":
+        print(json.dumps(export_lerobot(args.gate_r, args.output_dir, include=args.include, copy=not args.link),
+                         indent=2))
         return
     if args.command == "analyze":
         out = {}
@@ -1529,7 +1772,7 @@ def main(argv=None):
         run_gate_r(args.source_runs, args.alarms, args.audit_dir, args.index_dir, args.output_dir, args.gains,
                    attempts=args.attempts, host=args.host, port=args.port,
                    policy_args=ladder._parse_policy_args(args.policy_arg), shard_index=args.shard_index,
-                   num_shards=args.num_shards, **common)
+                   num_shards=args.num_shards, record=not args.no_record, **common)
 
 
 if __name__ == "__main__":

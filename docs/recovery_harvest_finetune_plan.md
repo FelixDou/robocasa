@@ -823,8 +823,21 @@ choice open, the code fixes it as follows:
 - *Pretrain-transfer seeds.* 710007–710026; Phase B must not use them. A
   transfer run tries stages in the ladder's order and stops at the first that
   fails. Reset *i* uses the *i*-th ranked source.
-- Observations are not recorded yet. Gate R needs only outcomes; recording
-  comes with Phase B (code item 3).
+- *Recording (27 November 2026).* Gate R records every attempt as XR-1 saw it,
+  unless `--no-record` is passed. Frame *t* is the observation before action
+  *t*, and each attempt keeps:
+  - the three camera videos (mp4, 20 fps);
+  - the named states and the executed 12-d actions, with gripper and control
+    mode stored as −1/1 (the demos' raw robosuite convention, whatever the
+    executor or XR-1 emitted);
+  - a phase per frame (expert or policy).
+  `export-lerobot` turns the recorded attempts (successes by default) into one
+  LeRobot folder per task. The folder uses the demos' modality layout and adds
+  an `annotation.r2.phase` column, so the Step 0 sample builder and trainer
+  read it unchanged (`--lerobot-dir TASK=PATH`). Which frames train which
+  model is decided in Phase C. Recording Gate R attempts does not make them
+  training data. They are Phase A states, and whether they may be used is a
+  Phase C decision.
 
 The same commit fixes `stage_segments.jsonl`. Each segment's own `stage` key
 (upstream's pick/place label) overwrote the predicate name in the row, so
@@ -946,7 +959,9 @@ sampling-seed schedule, as in the re-prompt trials:
    D reuse it. Re-prompt branches are not supported yet: the saved
    snapshots do not record regressed predicates.
 3. Ladder `record_branch_trajectories`: per-branch observation/action files,
-   and a converter to the XR-1 training format from Step 0. The ladder now
+   and a converter to the XR-1 training format from Step 0. **Done for R2**
+   (`AttemptRecorder` and `export-lerobot` in `expert_recovery.py`); Phase B's
+   own-branch resamples can reuse the recorder. The ladder now
    accepts `policy_feature_dtype` (`float16` by default, `float32` for new
    runs).
 4. Harvest dataset builder with the health checks above.
@@ -1089,7 +1104,9 @@ Outputs are under `$ALARM_ROOT/r2/`:
 - `self-replay/self_replay_summary.json`;
 - `transfer/transfer_summary.json`;
 - `gate_r/shard*/`, with `gate_r.{json,md}` per shard. `r2-analyze` pools the
-  shards.
+  shards. Recordings are in `gate_r/shard*/recordings/<state>/k<NN>/`.
+  `r2-export` writes the LeRobot folders under
+  `$STORAGE_BS/robocasa_failure_datasets/r2_recoveries_<stamp>/`.
 
 Outputs:
 - the spec under `$STORAGE_BS/robocasa_checkpoints/safe/hs_p_alarm_spec_*`;

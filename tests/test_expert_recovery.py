@@ -468,5 +468,153 @@ class GateTest(unittest.TestCase):
             np.testing.assert_allclose(er.load_gains(path).arm_pos, TRUE_GAINS.arm_pos)
 
 
+class NpyWriter:
+    """Stand-in for an imageio video writer: the frames, exactly, as a .npy file at the .mp4 path."""
+
+    def __init__(self, path, fps):
+        self.path, self.frames = Path(path), []
+
+    def append_data(self, frame):
+        self.frames.append(np.asarray(frame).copy())
+
+    def close(self):
+        with self.path.open("wb") as stream:
+            np.save(stream, np.stack(self.frames))
+
+
+def read_npy(path):
+    with Path(path).open("rb") as stream:
+        return np.load(stream)
+
+
+def fake_obs(t, rng):
+    from robocasa.recovery.xiaomi_robotics_1_policy import CAMERA_KEYS
+
+    obs = {key: rng.integers(0, 256, size=(8, 8, 3), dtype=np.uint8) for key in CAMERA_KEYS}
+    obs.update({"state.base_position": np.array([t, 0.0, 0.3]), "state.base_rotation": np.array([0, 0, 0, 1.0]),
+                "state.end_effector_position_relative": np.array([0.5, 0.0, t / 10]),
+                "state.end_effector_rotation_relative": np.array([1.0, 0, 0, 0]),
+                "state.gripper_qpos": np.array([0.04, -0.04])})
+    return obs
+
+
+class RecorderTest(unittest.TestCase):
+    def test_executed_actions_use_the_demo_convention(self):
+        vec = er.executed_action(er.action_vector(arm_pos=[0.1, 0, 0], gripper=er.GRIPPER_CLOSE, mode=er.ARM_MODE))
+        self.assertEqual((vec[6], vec[11], vec[0]), (1.0, -1.0, 0.1))
+        policy = {"action.end_effector_position": [0, 0, 0.2], "action.end_effector_rotation": [0, 0, 0],
+                  "action.gripper_close": [0.3], "action.base_motion": [0, 0, 0, 0], "action.control_mode": [0.9]}
+        vec = er.executed_action(policy)
+        self.assertEqual((vec[2], vec[6], vec[11]), (0.2, -1.0, 1.0))
+        with self.assertRaises(ValueError):
+            er.executed_action(np.zeros(7))
+
+    def record(self, folder, n_expert, n_policy, seed=0):
+        rng = np.random.default_rng(seed)
+        rec = er.AttemptRecorder(folder, writer_factory=NpyWriter)
+        observations, actions = [], []
+        for t in range(n_expert + n_policy):
+            obs, action = fake_obs(t, rng), rng.uniform(-1, 1, size=12)
+            rec.add(obs, action, "expert" if t < n_expert else "policy")
+            observations.append(obs)
+            actions.append(er.executed_action(action))
+        return rec, observations, np.stack(actions)
+
+    def test_recorder_writes_and_renames(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "recordings" / "p0" / "k00"
+            rec, _, _ = self.record(folder, 3, 2)
+            self.assertTrue(rec.partial.exists() and not folder.exists())
+            self.assertEqual(rec.finish({"instruction": "make tea"}), 5)
+            meta = json.loads((folder / er.ATTEMPT_META).read_text())
+            self.assertEqual((meta["frames"], meta["frames_by_phase"]), (5, {"expert": 3, "policy": 2}))
+            with self.assertRaises(FileExistsError):
+                er.AttemptRecorder(folder, writer_factory=NpyWriter)
+            other = Path(tmp) / "recordings" / "p0" / "k01"
+            rec, _, _ = self.record(other, 1, 0)
+            rec.abort()
+            self.assertFalse(rec.partial.exists() or other.exists())
+
+    def test_the_continuation_records_what_the_policy_saw(self):
+        rng = np.random.default_rng(3)
+
+        class Env:
+            def __init__(self):
+                self.t = 0
+
+            def step(self, action):
+                self.t += 1
+                return fake_obs(self.t, rng), float(self.t == 4), False, False, {"success": self.t == 4}
+
+        class Policy:
+            def __init__(self):
+                self.seen = []
+
+            def __call__(self, obs, instruction=None):
+                self.seen.append(obs["state.base_position"][0])
+                return {"action.end_effector_position": np.zeros(3), "action.end_effector_rotation": np.zeros(3),
+                        "action.gripper_close": np.array([1.0]), "action.base_motion": np.zeros(4),
+                        "action.control_mode": np.array([0.0])}
+
+        class World:
+            obs = fake_obs(0, rng)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rec = er.AttemptRecorder(Path(tmp) / "a", writer_factory=NpyWriter)
+            policy = Policy()
+            out = er.continue_with_policy(Env(), policy, World(), instruction="go", budget_left=10, seed=1,
+                                          required=[], recorder=rec)
+            self.assertEqual(out, {"policy_steps": 4, "success": True})
+            self.assertEqual(len(rec), 4)
+            self.assertEqual(rec.phases, [1] * 4)
+            self.assertEqual([s[0] for s in rec.states["base_position"]], policy.seen)   # frame t = obs before action t
+            self.assertEqual(rec.actions[0][6], 1.0)
+
+    def test_export_round_trips_through_the_step0_reader(self):
+        from robocasa.recovery import xr1_samples as xs
+        from robocasa.recovery.xiaomi_robotics_1_policy import CAMERA_KEYS
+
+        with tempfile.TemporaryDirectory() as tmp:
+            gate = Path(tmp) / "gate_r" / "shard0"
+            recorded = {}
+            rows = []
+            for k, success in enumerate((True, False, True)):
+                rel = Path("recordings") / "p0" / f"k{k:02d}"
+                rec, observations, actions = self.record(gate / rel, 4, 3 + k, seed=k)
+                rec.finish({"instruction": "arrange the tea", "parent_id": "p0", "k": k})
+                recorded[k] = (observations, actions)
+                rows.append({"parent_id": "p0", "task_name": "ArrangeTea", "k": k, "success": success,
+                             "recording": str(rel), "stage": "mug_on_tray"})
+            rows.append({"parent_id": "p1", "task_name": "ArrangeTea", "k": 0, "success": True,
+                         "error": "Traceback ..."})
+            (gate / "attempts.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            out = Path(tmp) / "export"
+            summary = er.export_lerobot(gate.parent, out)
+            self.assertEqual(summary["ArrangeTea"]["episodes"], 2)            # successes only, no errors
+            root = out / "ArrangeTea" / "lerobot"
+            self.assertEqual(xs.lerobot_episodes(root), [0, 1])
+            for ep, k in ((0, 0), (1, 2)):
+                observations, actions = recorded[k]
+                episode = xs.read_lerobot_episode(root, ep, "ArrangeTea", decode=read_npy)
+                self.assertEqual(episode.instruction, "arrange the tea")
+                np.testing.assert_allclose(episode.actions, actions, atol=1e-6)
+                for key in xs.STATE_KEYS:
+                    np.testing.assert_allclose(episode.named[key], np.stack([o[f"state.{key}"] for o in observations]),
+                                               atol=1e-6)
+                for key in CAMERA_KEYS:
+                    np.testing.assert_array_equal(episode.frames[key], np.stack([o[key] for o in observations]))
+                named, acts = xs.read_lerobot_arrays(root, ep)
+                np.testing.assert_allclose(acts, actions, atol=1e-6)
+                sample = xs.sample_arrays(episode, 0, chunk=4)
+                self.assertEqual(sample[2].shape, (1, 4, 60))
+            import pyarrow.parquet as pq
+
+            phase = pq.read_table(root / "data/chunk-000/episode_000001.parquet").column("annotation.r2.phase")
+            self.assertEqual(phase.to_pylist(), [0] * 4 + [1] * 5)
+            self.assertEqual(len(er.recorded_attempts(gate.parent, include="all")), 3)
+            with self.assertRaises(FileExistsError):
+                er.export_lerobot(gate.parent, out)
+
+
 if __name__ == "__main__":
     unittest.main()
