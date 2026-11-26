@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # Phase A of docs/recovery_harvest_finetune_plan.md: recoverability at the Hide-and-Seek + P alarm.
 #   export | score | plan | start | resume | status | analyze | audit | decide | segments | segments-status | r1
+#   r2-probe | r2-self-replay | r2-transfer | r2-gate | r2-status | r2-analyze
 # audit/decide are step R0 of the redesign (failure audit; simulator only, no policy server).
 # segments/r1 are step R1 (human-demo expert segments; CPU simulator replay, then a join with R0).
+# r2-* are step R2 (expert recoveries): control probe and the two executor checks (simulator only),
+# then Gate R (ladder workers: simulator GPU + XR-1 server GPU + port each).
 # export and score are CPU-only (SAFE env). start/resume reuse the ladder worker
 # (one XR-1 server GPU + one simulator GPU + one port per worker).
 set -euo pipefail
 action=${1:-status}
-case "$action" in export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1) ;; *)
-  echo "Usage: $0 {export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1}"; exit 1 ;; esac
+case "$action" in export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1|\
+  r2-probe|r2-self-replay|r2-transfer|r2-gate|r2-status|r2-analyze) ;; *)
+  echo "Usage: $0 {export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1|r2-probe|r2-self-replay|r2-transfer|r2-gate|r2-status|r2-analyze}"; exit 1 ;; esac
 
 export STORAGE_BS=${STORAGE_BS:-/gs/bs/tga-shinoda/felid}
 export ROBOCASA_REPO=${ROBOCASA_REPO:-/gs/fs/tga-shinoda/felid/robocasa}
@@ -160,6 +164,79 @@ if [[ "$action" == r1 ]]; then
   [[ -z "${R1_ALLOW_PROVISIONAL:-}" ]] || provisional=(--allow-provisional)
   exec "$py" -m robocasa.recovery.expert_segments coverage --index-dir "$segments_dir/index" \
     --audit-dir "$audit_dir" --output-dir "$segments_dir/coverage" "${provisional[@]}"
+fi
+
+r2_dir="$ALARM_ROOT/r2"
+gains="$r2_dir/control_probe.json"
+export ROBOCASA_DATASET_BASE=${ROBOCASA_DATASET_BASE:-$STORAGE_BS/robocasa_datasets}
+if [[ "$action" == r2-probe ]]; then
+  # One simulator GPU (rendering), no policy server; a few minutes.
+  gpu=${R2_GPU:-0}
+  mkdir -p "$r2_dir"
+  CUDA_VISIBLE_DEVICES="$gpu" MUJOCO_EGL_DEVICE_ID="$gpu" PYTHONPATH="$ROBOCASA_REPO" \
+    "$py" -u -m robocasa.recovery.expert_recovery probe-controls --output "$gains" \
+    2>&1 | tee "$log_dir/$(basename "$ALARM_ROOT")_r2_probe_$(date +%Y%m%d_%H%M%S).log"
+  exit 0
+fi
+if [[ "$action" == r2-self-replay || "$action" == r2-transfer ]]; then
+  # One simulator GPU (rendering), no policy server; runs in the background.
+  test -f "$gains" || { echo "Missing $gains (run r2-probe first)"; exit 1; }
+  gpu=${R2_GPU:-0}
+  command=${action#r2-}
+  out="$r2_dir/$command"
+  resume=()
+  [[ ! -e "$out/${command//-/_}.jsonl" ]] || resume=(--resume)
+  mkdir -p "$out"
+  git -C "$ROBOCASA_REPO" rev-parse HEAD > "$out/git_commit.txt"
+  log="$log_dir/$(basename "$ALARM_ROOT")_r2_${command}_$(date +%Y%m%d_%H%M%S).log"
+  CUDA_VISIBLE_DEVICES="$gpu" MUJOCO_EGL_DEVICE_ID="$gpu" PYTHONPATH="$ROBOCASA_REPO" nohup "$py" -u \
+    -m robocasa.recovery.expert_recovery "$command" --index-dir "$segments_dir/index" \
+    --dataset-base "$ROBOCASA_DATASET_BASE" --gains "$gains" --output-dir "$out" "${resume[@]}" > "$log" 2>&1 &
+  echo "$command pid=$! gpu=$gpu log=$log out=$out"
+  exit 0
+fi
+if [[ "$action" == r2-status ]]; then
+  echo "self-replay records: $(cat "$r2_dir/self-replay/self_replay.jsonl" 2>/dev/null | wc -l)"
+  echo "transfer records: $(cat "$r2_dir/transfer/transfer.jsonl" 2>/dev/null | wc -l)"
+  echo "gate-r attempts: $(cat "$r2_dir"/gate_r/shard*/attempts.jsonl 2>/dev/null | wc -l)"
+  for shard in "$r2_dir"/gate_r/shard*; do
+    test -f "$shard/worker_failure.json" && { echo "WORKER FAILED ($shard):"; cat "$shard/worker_failure.json"; }
+  done
+  exit 0
+fi
+if [[ "$action" == r2-analyze ]]; then
+  args=()
+  [[ ! -e "$r2_dir/self-replay/self_replay.jsonl" ]] || args+=(--self-replay "$r2_dir/self-replay")
+  [[ ! -e "$r2_dir/transfer/transfer.jsonl" ]] || args+=(--transfer "$r2_dir/transfer")
+  [[ ! -d "$r2_dir/gate_r" ]] || args+=(--gate-r "$r2_dir/gate_r" --audit-dir "$audit_dir")
+  exec "$py" -m robocasa.recovery.expert_recovery analyze "${args[@]}"
+fi
+if [[ "$action" == r2-gate ]]; then
+  # Gate R: one ladder worker (simulator GPU + XR-1 server GPU + port) per pair, a task shard each.
+  test -f "$gains" || { echo "Missing $gains (run r2-probe first)"; exit 1; }
+  grep -q '"passed": true' "$r2_dir/self-replay/self_replay_summary.json" 2>/dev/null \
+    && grep -q '"passed": true' "$r2_dir/transfer/transfer_summary.json" 2>/dev/null \
+    || [[ -n "${R2_SKIP_CHECKS:-}" ]] || { echo "The executor checks have not passed (plan: R2 part 3)"; exit 1; }
+  gate_root="$r2_dir/gate_r"
+  extra=(--source-runs "${sources[@]}" --alarms "$alarms" --audit-dir "$audit_dir" --index-dir "$segments_dir/index"
+         --dataset-base "$ROBOCASA_DATASET_BASE" --gains "$gains")
+  [[ ! -d "$gate_root" ]] || extra+=(--resume)
+  mkdir -p "$gate_root"
+  git -C "$ROBOCASA_REPO" rev-parse HEAD > "$gate_root/git_commit.txt"
+  export LADDER_ROOT="$gate_root" LADDER_WORKER_KIND=r2_gate
+  # shellcheck disable=SC2206
+  pairs=(${R2_GPU_PAIRS:-$LADDER_GPU_PAIRS})
+  for shard in "${!pairs[@]}"; do
+    rm -f "$gate_root/shard$shard/worker_failure.json"
+    gpu=${pairs[$shard]%%:*}; server_gpu=${pairs[$shard]##*:}
+    [[ "$gpu" != "$server_gpu" ]] || { echo "Use separate simulator and server GPUs ($gpu)"; exit 1; }
+    port=$((${R2_PORT_BASE:-10480} + shard))
+    export LADDER_WORKER_LOG="$log_dir/$(basename "$ALARM_ROOT")_r2_gate_shard${shard}_$(date +%Y%m%d_%H%M%S).log"
+    nohup bash "$ROBOCASA_REPO/scripts/run_recoverability_ladder_xr1.sh" worker \
+      "$shard" "${#pairs[@]}" "$gpu" "$server_gpu" "$port" "${extra[@]}" > "$LADDER_WORKER_LOG" 2>&1 &
+    echo "shard=$shard pid=$! sim_gpu=$gpu server_gpu=$server_gpu port=$port log=$LADDER_WORKER_LOG"
+  done
+  exit 0
 fi
 
 # start | resume: one ladder worker per GPU pair, writing to $branch_root/shard<i>.

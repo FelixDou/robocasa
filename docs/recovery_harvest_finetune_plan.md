@@ -753,6 +753,75 @@ Open before the code:
   pretrain-transfer check does not test this start, because its runs reach
   the stage with the mug still in the cabinet.
 
+**R2 code (27 November 2026, before any R2 output; this makes the design
+binding).** `robocasa/recovery/expert_recovery.py` implements R2a–R2b, the two
+executor checks and Gate R with the thresholds above. Where the draft left a
+choice open, the code fixes it as follows:
+
+- *Facts at the alarm.* R2a reads them from the restored alarm snapshot, not
+  from the R0 records, because R0 stores no orientations, no base pose and
+  only task-object grasps. "Holds something" means both finger pads touch the
+  same non-robot body, so the ham in `9aaa49f0` triggers the release.
+- *Stage table.* For each (task, stage) the code lists the moved object and
+  the reference, taken from the predicates. Two cases are special:
+  - The correct and wrong tool come from the scene's food (`_CUTTING_MAP`).
+  - Fixture stages (`cabinet_open`, `cabinet_closed`, `drawer_open`,
+    `fridge_open`) navigate to the fixture first, then replay relative to the
+    robot base.
+  A stage stuck at `gripper_released` gets only the release.
+- *Reference frames.* Each step is replayed in a frame that keeps a
+  reference's position and heading and ignores its tilt:
+  - pick: the target object;
+  - place on an object: the receptacle;
+  - place on a fixture (dining counter) or a fixture step: the robot base,
+    after navigation.
+- *Controller.* `probe-controls` measures the gains: the motion per step for
+  each unit action, fitted by least squares for the arm in the base frame and
+  for the base in its own frame. A passing probe has R² ≥ 0.9, condition
+  number < 20 and no motion leaking between arm and base mode; the executor
+  refuses gains from a probe that did not pass. This replaces reading the
+  composite controller's config. All poses come from the observation's state
+  keys, which the policy and the LeRobot demos share. Self-replay checks that
+  shared convention at every segment start (difference ≤ 1e-3, otherwise the
+  demo is reported as a mismatch). This settles the first open item above.
+- *Ranking and navigation.* Sources are ranked by d = the distance between
+  the first executed step's reference positions in the base frame, plus
+  0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
+  the robot first drives to the fixture that holds that reference. The
+  navigation controller:
+  - is a holonomic proportional controller, limited to 0.02 m and 0.05 rad
+    per step;
+  - drives on to 5 cm and 0.05 rad, or stops at 300 steps;
+  - reports the NavigateKitchen test (0.20 m, cos ≥ 0.98).
+- *Tracking.* The arm approaches a step's first pose at most 1 cm and
+  0.05 rad per step, then plays the source frames, holding each frame until
+  the end effector is within 2 cm of it. The expert cap counts the executed
+  source frames (scripted release and set-aside count as 60 each) and adds
+  50%. Navigation is capped separately, per phase.
+- *Wrong tool on the board (gap 1).* The wrong tool is picked with the pick
+  step of a demo whose correct tool it was. It is then lifted 15 cm, moved
+  30 cm sideways away from the board, lowered 10 cm and released. This
+  happens before the correct tool's pick, or after its place if it is
+  already held.
+- *Mug on the tray's edge (gap 3).* There is no special code: the pick is
+  object-relative, so it starts wherever the mug is. Gate R records each
+  object's pose in the base frame, so results can be split by where the mug
+  started.
+- *Gate R statistic.* Gate R is the share of class-2 states with at least one
+  attempt ending in full-task success, threshold 0.5. "Gate R uses this one"
+  above means the full outcome decides, not the expert one. The expert rate
+  and full rate per attempt are reported but not gated.
+- *Pretrain-transfer seeds.* 710007–710026; Phase B must not use them. A
+  transfer run tries stages in the ladder's order and stops at the first that
+  fails. Reset *i* uses the *i*-th ranked source.
+- Observations are not recorded yet. Gate R needs only outcomes; recording
+  comes with Phase B (code item 3).
+
+The same commit fixes `stage_segments.jsonl`. Each segment's own `stage` key
+(upstream's pick/place label) overwrote the predicate name in the row, so
+rows written before 27 November carry the upstream label. The label is now
+`upstream_stage`. R2 reads the index directly, not that file.
+
 **What changes downstream.**
 
 - Phase B keeps its parent collection (fresh seeds until 30 alarmed failed
@@ -891,12 +960,21 @@ sampling-seed schedule, as in the re-prompt trials:
    decision rule. Demo health in the report: clean demos, labeler flags,
    frame/row mismatches and agreement with the labels upstream published in
    the parquet `subtask_idx` column.
+9. **Written (R2):** `robocasa/recovery/expert_recovery.py`. Commands:
+   - `probe-controls`: measures the action gains;
+   - `self-replay` and `transfer`: the executor checks (simulator, no
+     policy);
+   - `gate-r`: expert plus XR-1 at the class-2 alarm states (simulator and
+     policy server);
+   - `analyze`: recomputes the summaries.
+   The executor runs on a world adapter. Its tests run it on a kinematic
+   stand-in with a source recorded in another scene and rotated gains.
 
 Tests (simulator- and PyTorch-free; the detector save/load test runs only
 where PyTorch is installed):
 
 ```bash
-python -m unittest tests.test_hs_p_alarm tests.test_alarm_branching tests.test_failure_audit tests.test_recoverability_ladder tests.test_expert_segments
+python -m unittest tests.test_hs_p_alarm tests.test_alarm_branching tests.test_failure_audit tests.test_recoverability_ladder tests.test_expert_segments tests.test_expert_recovery
 ```
 
 ### Phase A runbook (cluster)
@@ -981,6 +1059,28 @@ bash scripts/run_alarm_branching_xr1.sh r1
 demo-health table first: errors 0, row mismatches 0, and agreement with the
 published labels near 1 (a low value means the replay differs from
 upstream's).
+
+R2 runs in order and does not move past a step that fails. The probe, the
+self-replay and the transfer check each use one GPU for rendering and no
+policy server (`R2_GPU`, default 0). Gate R uses ladder workers
+(`R2_GPU_PAIRS`, ports from `R2_PORT_BASE`, default 10480). It refuses to
+start until both executor checks have passed.
+
+```bash
+bash scripts/run_alarm_branching_xr1.sh r2-probe          # must print "ok": true
+bash scripts/run_alarm_branching_xr1.sh r2-self-replay
+bash scripts/run_alarm_branching_xr1.sh r2-transfer
+bash scripts/run_alarm_branching_xr1.sh r2-status
+bash scripts/run_alarm_branching_xr1.sh r2-analyze
+bash scripts/run_alarm_branching_xr1.sh r2-gate
+```
+
+Outputs are under `$ALARM_ROOT/r2/`:
+- `control_probe.json`;
+- `self-replay/self_replay_summary.json`;
+- `transfer/transfer_summary.json`;
+- `gate_r/shard*/`, with `gate_r.{json,md}` per shard. `r2-analyze` pools the
+  shards.
 
 Outputs:
 - the spec under `$STORAGE_BS/robocasa_checkpoints/safe/hs_p_alarm_spec_*`;

@@ -663,8 +663,12 @@ def coverage(index_dir, audit_dir, output_dir, *, allow_provisional=False, min_s
             for stage, event in sorted(row["stage_events"].items()):
                 if event["segment"]:
                     target, source = target_object(event["segment"], row.get("object_lang"))
+                    # The segment's own "stage" is upstream's step label (pick, place, ...); written after
+                    # the segment it overwrote the predicate until 26 November 2026, so it is renamed.
+                    segment = dict(event["segment"])
+                    segment["upstream_stage"] = segment.pop("stage")
                     stream.write(json.dumps({"task_name": row["task_name"], "episode": row["episode"],
-                                             "stage": stage, **event["segment"], "target_object": target,
+                                             **segment, "stage": stage, "target_object": target,
                                              "target_source": source}) + "\n")
     write_coverage_md(result, output_dir / "r1_coverage.md")
     return result
