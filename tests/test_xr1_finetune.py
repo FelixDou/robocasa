@@ -13,6 +13,7 @@ install_lightweight_robocasa_packages()
 from robocasa.recovery import xr1_finetune as xf  # noqa: E402
 
 HAS_TORCH = importlib.util.find_spec("torch") is not None
+HAS_ROBOSUITE = importlib.util.find_spec("robosuite") is not None
 
 
 class ScheduleTest(unittest.TestCase):
@@ -71,6 +72,34 @@ class DerivedFolderTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 xf.save_derived_folder(self.FakeModel(["dit.a"]), template, root / "step_1", {})
             self.assertFalse((root / "step_1").exists())
+
+
+class LeRobotFolderTest(unittest.TestCase):
+    def test_falls_back_to_the_one_dated_folder_without_robosuite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            folder = base / "v1.0/target/composite/ArrangeTea/20250812/lerobot"
+            folder.mkdir(parents=True)
+            if HAS_ROBOSUITE:
+                self.skipTest("the registry is importable here, so no fallback is needed")
+            self.assertEqual(xf.find_lerobot_dir("ArrangeTea", base), folder)
+            (base / "v1.0/target/composite/ArrangeTea/20250901/lerobot").mkdir(parents=True)
+            with self.assertRaises(FileNotFoundError):
+                xf.find_lerobot_dir("ArrangeTea", base)
+            with self.assertRaises(FileNotFoundError):
+                xf.find_lerobot_dir("GarnishPancake", base)
+
+    def test_an_override_wins(self):
+        self.assertEqual(xf.find_lerobot_dir("ArrangeTea", "/nowhere", {"ArrangeTea": "/data/tea"}),
+                         Path("/data/tea"))
+
+    def test_override_parsing(self):
+        args = xf.build_parser().parse_args(["input-match", "--model-dir", "m", "--dataset-base", "d",
+                                             "--output-dir", "o", "--lerobot-dir", "ArrangeTea=/data/tea"])
+        self.assertEqual(xf._overrides(args), {"ArrangeTea": "/data/tea"})
+        args.lerobot_dir = ["ArrangeTea"]
+        with self.assertRaises(ValueError):
+            xf._overrides(args)
 
 
 class CliTest(unittest.TestCase):

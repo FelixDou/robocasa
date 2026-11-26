@@ -58,6 +58,7 @@ BETAS, WEIGHT_DECAY, EPS, GRAD_CLIP = (0.9, 0.95), 0.1, 1e-8, 1.0
 WEIGHT_FILE_SUFFIXES = (".safetensors",)
 WEIGHT_INDEX = "model.safetensors.index.json"
 MANIFEST = "xr1_finetune_manifest.json"
+COMPOSITE_TARGET_GLOB = "v1.0/target/composite/{task}/*/lerobot"   # registry layout: .../<Task>/<date>/lerobot
 
 
 def _git_commit():
@@ -278,11 +279,32 @@ def save_derived_folder(model, template_dir, out_dir, manifest):
 
 # ---- data ---------------------------------------------------------------------------------------
 
+def find_lerobot_dir(task, dataset_base, overrides=None):
+    """The task's target-split human demos: an override, the dataset registry, or the one dated folder.
+
+    The registry (``robocasa.utils.dataset_registry``) imports robosuite through
+    ``robocasa/utils/__init__.py``, which the XR-1 server and training environments do not have. There
+    the folder is found on disk instead, and exactly one dated version must exist.
+    """
+    overrides = overrides or {}
+    if task in overrides:
+        return Path(overrides[task])
+    try:
+        return lerobot_dir(task, dataset_base)
+    except ImportError:
+        pass
+    matches = sorted(Path(dataset_base).glob(COMPOSITE_TARGET_GLOB.format(task=task)))
+    if len(matches) != 1:
+        raise FileNotFoundError(f"{task}: expected one {COMPOSITE_TARGET_GLOB.format(task=task)} under "
+                                f"{dataset_base}, found {[str(m) for m in matches]}; pass --lerobot-dir {task}=PATH")
+    return matches[0]
+
+
 def episode_list(tasks, dataset_base, split, max_episodes_per_task=None, lerobot_overrides=None):
     """(task, LeRobot folder, episode) for the demos of ``split`` ("train" or "heldout")."""
     out = []
     for task in tasks:
-        folder = lerobot_dir(task, dataset_base, lerobot_overrides)
+        folder = find_lerobot_dir(task, dataset_base, lerobot_overrides)
         episodes = [e for e in xs.lerobot_episodes(folder) if xs.episode_split(task, e) == split]
         if max_episodes_per_task is not None:
             episodes = episodes[: int(max_episodes_per_task)]
@@ -323,7 +345,8 @@ def run_input_match(args):
     processor = load_processor(args.model_dir)
     rng = np.random.default_rng(args.seed)
     rows, per_task = [], {}
-    for task, folder, episode in _pick(episode_list(args.tasks, args.dataset_base, "heldout"), args, rng):
+    heldout = episode_list(args.tasks, args.dataset_base, "heldout", lerobot_overrides=_overrides(args))
+    for task, folder, episode in _pick(heldout, args, rng):
         ep = xs.read_lerobot_episode(folder, episode, task)
         times = list(xs.valid_times(ep.num_frames))
         for t in sorted(rng.choice(times, size=min(args.frames_per_episode, len(times)), replace=False)):
@@ -335,11 +358,26 @@ def run_input_match(args):
     passed = all(s["samples"] >= args.min_samples_per_task and s["identical"] == s["samples"]
                  for s in per_task.values()) and set(per_task) == set(args.tasks)
     result = {"kind": "xr1_input_match", "model_dir": str(args.model_dir), "passed": passed,
+              "lerobot_dirs": _folders(heldout),
               "rule": f"every sample identical, at least {args.min_samples_per_task} per task",
               "per_task": per_task, "git_commit": _git_commit(), "created_at": _utc_now()}
     _write_result(args.output_dir, "input_match", result, rows)
     print(json.dumps({"passed": passed, "per_task": per_task}, indent=2))
     return 0 if passed else 1
+
+
+def _overrides(args):
+    out = {}
+    for item in getattr(args, "lerobot_dir", None) or []:
+        task, sep, path = item.partition("=")
+        if not sep or not task or not path:
+            raise ValueError(f"--lerobot-dir expects TASK=PATH, got {item!r}")
+        out[task] = path
+    return out
+
+
+def _folders(episodes):
+    return {task: folder for task, folder, _ in episodes}
 
 
 def _pick(episodes, args, rng):
@@ -371,7 +409,8 @@ def run_loss_check(args):
     processor = load_processor(args.model_dir)
     pad = processor.tokenizer.pad_token_id
     rng = np.random.default_rng(args.seed)
-    picked = _pick(episode_list(args.tasks, args.dataset_base, "heldout"), args, rng)
+    heldout = episode_list(args.tasks, args.dataset_base, "heldout", lerobot_overrides=_overrides(args))
+    picked = _pick(heldout, args, rng)
     episodes = {}
     for task, folder, episode in picked:
         episodes.setdefault(task, []).append(xs.read_lerobot_episode(folder, episode, task))
@@ -405,6 +444,7 @@ def run_loss_check(args):
             "own_below_other_share": float(np.mean([r["loss_own"] < r["loss_other"] for r in task_rows])),
         }
     result = {"kind": "xr1_loss_check", "model_dir": str(args.model_dir), "descriptive_only": True,
+              "lerobot_dirs": _folders(heldout),
               "per_task": per_task, "git_commit": _git_commit(), "created_at": _utc_now()}
     _write_result(args.output_dir, "loss_check", result, rows)
     print(json.dumps(per_task, indent=2))
@@ -432,7 +472,8 @@ def run_train(args):
     params = prepare_trainable(model)
     optimizer = MasterAdamW(params, weight_decay=args.weight_decay)
     processor = load_processor(args.model_dir)
-    episodes = episode_list(args.tasks, args.dataset_base, "train", args.max_episodes_per_task)
+    episodes = episode_list(args.tasks, args.dataset_base, "train", args.max_episodes_per_task,
+                            lerobot_overrides=_overrides(args))
     stream = make_stream(episodes, args.model_dir, samples_per_episode=args.samples_per_episode,
                          buffer_size=args.buffer_size, seed=args.seed, rank=rank)
     loader = torch.utils.data.DataLoader(
@@ -440,6 +481,7 @@ def run_train(args):
         collate_fn=lambda samples: collate(samples, processor.tokenizer.pad_token_id),
         persistent_workers=args.num_workers > 0, prefetch_factor=2 if args.num_workers > 0 else None)
     manifest = {"kind": "xr1_finetune", "source_model_dir": str(args.model_dir), "tasks": list(args.tasks),
+                "lerobot_dirs": _folders(episodes),
                 "trainable_modules": list(TRAINABLE_MODULES), "world_size": world,
                 "trainable_parameters": int(sum(p.numel() for p in params)), "episodes": len(episodes),
                 "args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items() if k != "func"},
@@ -519,6 +561,8 @@ def build_parser():
         p.add_argument("--tasks", nargs="+", default=list(PILOT_TASKS))
         p.add_argument("--output-dir", type=Path, required=True)
         p.add_argument("--seed", type=int, default=0)
+        p.add_argument("--lerobot-dir", action="append", default=[], metavar="TASK=PATH",
+                       help="demo folder for a task (default: dataset registry, else the one dated folder)")
 
     p = sub.add_parser("input-match", help="Step 0 gate: builder vs deployed client on held-out demo frames")
     data_args(p)
