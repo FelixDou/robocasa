@@ -62,6 +62,9 @@ RANK_YAW_WEIGHT = 0.1         # m per rad in the source ranking distance
 APPROACH_POS_STEP, APPROACH_ROT_STEP = 0.01, 0.05   # m, rad per step toward a step's first pose
 SETTLE_TOL, SETTLE_STEPS = 0.01, 20
 TRACK_TOL = 0.02              # m: a source frame is held until the end effector is this close
+TRACK_YAW_TOL = 0.05          # rad: ... and, in the source's base-mode frames, the base this close in heading
+TORSO_TOL = 0.01              # m: the torso follows the source's base height beyond this
+TORSO_MIN_GAIN = 1e-4         # m per step per unit action: below this the probe found no torso motion
 RELEASE_OPEN_STEPS, RELEASE_LIFT, RELEASE_BACKOFF = 10, 0.10, 0.10
 SET_ASIDE_LIFT, SET_ASIDE_SIDE, SET_ASIDE_LOWER = 0.15, 0.30, 0.10
 SELF_REPLAY_DEMOS, SELF_REPLAY_MIN = 20, 0.9
@@ -205,18 +208,32 @@ def interpolate(start, end, pos_step=APPROACH_POS_STEP, rot_step=APPROACH_ROT_ST
 
 @dataclass
 class Gains:
-    """Motion per step per unit action: arm in the robot-base frame, base in the mobile-base frame."""
+    """Motion per step per unit action: arm in the robot-base frame, base in the mobile-base frame.
+
+    ``torso`` is the robot-base height change per unit torso action (action dim 10) in ``torso_mode``
+    (``ARM_MODE`` or ``BASE_MODE``); 0 when the probe found none, and the torso is then left alone.
+    """
 
     arm_pos: np.ndarray
     arm_rot: np.ndarray
     base: np.ndarray
+    torso: float = 0.0
+    torso_mode: float = ARM_MODE
 
     @classmethod
     def from_json(cls, data):
-        return cls(*(np.asarray(data[k], dtype=float).reshape(3, 3) for k in ("arm_pos", "arm_rot", "base")))
+        mats = (np.asarray(data[k], dtype=float).reshape(3, 3) for k in ("arm_pos", "arm_rot", "base"))
+        return cls(*mats, torso=float(data.get("torso", 0.0)), torso_mode=float(data.get("torso_mode", ARM_MODE)))
 
     def to_json(self):
-        return {"arm_pos": self.arm_pos.tolist(), "arm_rot": self.arm_rot.tolist(), "base": self.base.tolist()}
+        return {"arm_pos": self.arm_pos.tolist(), "arm_rot": self.arm_rot.tolist(), "base": self.base.tolist(),
+                "torso": float(self.torso), "torso_mode": float(self.torso_mode)}
+
+    def torso_command(self, dz, mode):
+        """Torso action toward a base-height error ``dz`` in the given control mode (0 if unusable)."""
+        if abs(self.torso) < TORSO_MIN_GAIN or mode != self.torso_mode or abs(dz) <= TORSO_TOL:
+            return 0.0
+        return float(np.clip(dz / self.torso, -1, 1))
 
 
 def action_vector(*, arm_pos=None, arm_rot=None, gripper=GRIPPER_OPEN, base=None, mode=ARM_MODE):
@@ -239,7 +256,7 @@ def arm_command(base_T, eef_T, target_T, gains, gripper):
     return action_vector(arm_pos=a_pos, arm_rot=a_rot, gripper=gripper, mode=ARM_MODE)
 
 
-def base_command(mobile, goal, gains, gripper=GRIPPER_OPEN):
+def base_command(mobile, goal, gains, gripper=GRIPPER_OPEN, torso=0.0):
     """Base action toward ``goal`` = (x, y, yaw) from ``mobile`` = (x, y, yaw), holonomic P-control."""
     x, y, yaw = mobile
     d_world = np.array([goal[0] - x, goal[1] - y])
@@ -249,7 +266,9 @@ def base_command(mobile, goal, gains, gripper=GRIPPER_OPEN):
         d_body = d_body * (NAV_STEP_POS / norm)
     d_yaw = float(np.clip(wrap(goal[2] - yaw), -NAV_STEP_YAW, NAV_STEP_YAW))
     a = np.clip(np.linalg.solve(gains.base, np.array([d_body[0], d_body[1], d_yaw])), -1, 1)
-    return action_vector(gripper=gripper, base=a, mode=BASE_MODE)
+    out = action_vector(gripper=gripper, base=a, mode=BASE_MODE)
+    out[10] = torso
+    return out
 
 
 def navigation_done(mobile, goal, pos_tol=NAV_POS_TOL, cos_tol=NAV_COS_TOL):
@@ -294,6 +313,10 @@ class Source:
     base: np.ndarray           # (N, 4, 4) world, robot base
     gripper: np.ndarray        # (N,)
     objects: dict = field(default_factory=dict)   # name -> (N, 4, 4) world
+    mode: np.ndarray | None = None                # (N,) the demo's control mode (>= 0.5: base motion)
+
+    def base_mode(self, frame):
+        return self.mode is not None and float(self.mode[self.at(frame)]) >= 0.5
 
     def at(self, frame):
         i = int(frame) - self.start
@@ -339,7 +362,8 @@ def build_source(row, predicate, *, named, actions, object_names, object_pos, ob
                for j, name in enumerate(object_names)}
     return Source(task_name=row["task_name"], episode=int(row["episode"]), predicate=predicate, target=target,
                   start=int(seg["start"]), end=int(seg["end"]), steps=source_steps(row, seg), eef=eef, base=base,
-                  gripper=np.asarray(actions[frames, 6], dtype=float), objects=objects)
+                  gripper=np.asarray(actions[frames, 6], dtype=float), objects=objects,
+                  mode=np.asarray(actions[frames, 11], dtype=float))
 
 
 def usable_rows(rows, task_name, predicate):
@@ -587,6 +611,14 @@ def program_cap(program, library_sources):
 
 # ---- R2b: the executor (world adapter: real simulator or a test stand-in) -----------------------
 
+def toward_base(obs):
+    """Horizontal unit vector from the end effector back toward the robot base."""
+    d = obs["base"][:3, 3] - obs["eef"][:3, 3]
+    d[2] = 0.0
+    n = float(np.linalg.norm(d))
+    return d / n if n > 1e-6 else -obs["base"][:3, 0] * np.array([1.0, 1.0, 0.0])
+
+
 class StageWatch:
     """True once ``predicate`` has held for ``HOLD_STEPS`` consecutive steps."""
 
@@ -617,6 +649,8 @@ class ExpertRun:
             raise ExpertStop("cap")
         info = self.world.step(action)
         self.steps += 1
+        if info.get("done"):
+            raise ExpertStop("env_done")
         if navigating:
             self.nav_steps += 1
         self.success = bool(info.get("task_success"))
@@ -652,7 +686,7 @@ class ExpertRun:
         self.move_to(up, GRIPPER_OPEN)
         obs = self.world.observe()
         back = obs["eef"].copy()
-        back[:3, 3] -= obs["base"][:3, 0] * RELEASE_BACKOFF
+        back[:3, 3] += toward_base(obs) * RELEASE_BACKOFF
         self.move_to(back, GRIPPER_OPEN)
 
     def navigate(self, reference, if_needed):
@@ -682,18 +716,42 @@ class ExpertRun:
         else:
             src_ref, here_ref = yaw_frame(source.base[i0]), yaw_frame(obs["base"])
         transform = here_ref @ inverse(src_ref)
-        targets = [transform @ source.eef[source.at(f)] for f in range(step.start, step.end)]
-        grippers = [float(source.gripper[source.at(f)]) for f in range(step.start, step.end)]
-        start = self.steps
-        self.move_to(targets[0], grippers[0])
+        frames = range(step.start, step.end)
+        targets = [transform @ source.eef[source.at(f)] for f in frames]
+        bases = [transform @ source.base[source.at(f)] for f in frames]
+        grippers = [float(source.gripper[source.at(f)]) for f in frames]
+        driving = [source.base_mode(f) for f in frames]
+        start, base_frames = self.steps, 0
         i = 0
         while i < len(targets):
             obs = self.world.observe()
-            self.act(arm_command(obs["base"], obs["eef"], targets[i], self.gains, grippers[i]))
+            dz = bases[i][2, 3] - obs["base"][2, 3]
+            if driving[i]:
+                # The demonstrator moved the base here: move the robot base by the same planar offset.
+                d = bases[i][:3, 3] - obs["base"][:3, 3]
+                d_yaw = wrap(yaw_of(bases[i][:3, :3]) - yaw_of(obs["base"][:3, :3]))
+                m = obs["mobile"]
+                goal = (m[0] + d[0], m[1] + d[1], m[2] + d_yaw)
+                self.act(base_command(m, goal, self.gains, grippers[i],
+                                      torso=self.gains.torso_command(dz, BASE_MODE)))
+                base_frames += 1
+                obs = self.world.observe()
+                d = bases[i][:3, 3] - obs["base"][:3, 3]
+                d_yaw = wrap(yaw_of(bases[i][:3, :3]) - yaw_of(obs["base"][:3, :3]))
+                if math.hypot(d[0], d[1]) < TRACK_TOL and abs(d_yaw) < TRACK_YAW_TOL:
+                    i += 1
+                continue
+            if (i == 0 or driving[i - 1]) and pose_error(obs["eef"], targets[i])[0] >= TRACK_TOL:
+                self.move_to(targets[i], grippers[i])   # approach the first arm frame of a run
+                obs = self.world.observe()
+            action = arm_command(obs["base"], obs["eef"], targets[i], self.gains, grippers[i])
+            action[10] = self.gains.torso_command(dz, ARM_MODE)
+            self.act(action)
             obs = self.world.observe()
             if pose_error(obs["eef"], targets[i])[0] < TRACK_TOL:
                 i += 1
-        return {"phase": "track", "kind": step.kind, "steps": self.steps - start, "frames": len(targets)}
+        return {"phase": "track", "kind": step.kind, "steps": self.steps - start, "frames": len(targets),
+                "base_mode_steps": base_frames}
 
     def set_aside(self, tool, board):
         obs = self.world.observe()
@@ -701,10 +759,11 @@ class ExpertRun:
         up[2, 3] += SET_ASIDE_LIFT
         self.move_to(up, GRIPPER_CLOSE)
         obs = self.world.observe()
-        base_y = obs["base"][:3, 1]
-        away = np.sign(float(base_y @ (obs["eef"][:3, 3] - obs["objects"][board][:3, 3]))) or 1.0
+        back = toward_base(obs)
+        lateral = np.array([-back[1], back[0], 0.0])   # horizontal, perpendicular to the reach
+        away = np.sign(float(lateral @ (obs["eef"][:3, 3] - obs["objects"][board][:3, 3]))) or 1.0
         side = obs["eef"].copy()
-        side[:3, 3] += away * base_y * SET_ASIDE_SIDE
+        side[:3, 3] += away * lateral * SET_ASIDE_SIDE
         self.move_to(side, GRIPPER_CLOSE)
         down = side.copy()
         down[2, 3] -= SET_ASIDE_LOWER
@@ -835,14 +894,23 @@ def gripper_holds_any(kitchen):
 
 
 def fixture_holding(kitchen, position):
-    """Smallest fixture containing the point (3D first, then footprint); None if none."""
+    """The fixture an object is in or on.
+
+    First the smallest fixture whose box contains the point (fridge, cabinet, drawer, microwave),
+    else the smallest ground fixture under it (counter, stove, housing cabinet, fridge), the same
+    kinds ``compute_robot_base_placement_pose`` stands the robot in front of. None if neither.
+    """
+    from robocasa.models.fixtures import Counter, Fridge, HousingCabinet, Stove, Stovetop
     from robocasa.utils import object_utils as OU
 
-    best = []
+    ground = (Counter, Stove, Stovetop, HousingCabinet, Fridge)
     for only_2d in (False, True):
+        best = []
         for fxtr in kitchen.fixtures.values():
             name = str(getattr(fxtr, "name", "")).lower()
-            if "wall" in name or "floor" in name:
+            if any(word in name for word in ("wall", "floor", "accessor")):
+                continue
+            if only_2d and not isinstance(fxtr, ground):
                 continue
             try:
                 inside = OU.point_in_fixture(point=position, fixture=fxtr, only_2d=only_2d)
@@ -854,6 +922,23 @@ def fixture_holding(kitchen, position):
         if best:
             return min(best, key=lambda x: x[0])[1]
     return None
+
+
+def slide_to(goal, fixture_xy, target_xy):
+    """Move a placement goal sideways (parallel to the fixture front) until it faces ``target_xy``.
+
+    ``compute_robot_base_placement_pose`` without a reference object centres the robot on the
+    fixture; with one it uses the object's initial placement, not where it is now.
+    """
+    x, y, yaw = goal
+    facing = np.asarray(fixture_xy, dtype=float) - np.array([x, y])
+    n = float(np.linalg.norm(facing))
+    if n < 1e-6:
+        return goal
+    facing /= n
+    lateral = np.array([-facing[1], facing[0]])
+    t = float(lateral @ (np.asarray(target_xy, dtype=float) - np.array([x, y])))
+    return (x + t * lateral[0], y + t * lateral[1], yaw)
 
 
 class SimWorld:
@@ -902,20 +987,20 @@ class SimWorld:
         from robocasa.utils.env_utils import compute_robot_base_placement_pose
 
         kind, name = reference
-        ref_object = None
+        target = None
         if kind == "fixture":
             fxtr = getattr(self.kitchen, name, None)
         else:
             bid = self.kitchen.obj_body_id[name]
-            fxtr = fixture_holding(self.kitchen, np.asarray(self.kitchen.sim.data.body_xpos[bid]))
-            ref_object = name
+            target = np.asarray(self.kitchen.sim.data.body_xpos[bid], dtype=float)
+            fxtr = fixture_holding(self.kitchen, target)
         if fxtr is None:
             return None
-        try:
-            pos, ori = compute_robot_base_placement_pose(self.kitchen, fxtr, ref_object=ref_object)
-        except Exception:
-            pos, ori = compute_robot_base_placement_pose(self.kitchen, fxtr)
-        return (float(pos[0]), float(pos[1]), float(ori[2]))
+        pos, ori = compute_robot_base_placement_pose(self.kitchen, fxtr)
+        goal = (float(pos[0]), float(pos[1]), float(ori[2]))
+        if target is not None:
+            goal = slide_to(goal, np.asarray(fxtr.pos, dtype=float)[:2], target[:2])
+        return goal
 
     def facts(self, task_name):
         from robocasa.utils import object_utils as OU
@@ -1011,21 +1096,39 @@ def run_probe(env, output, *, log=print):
                         rel_after = inverse(after["base"]) @ after["eef"]
                         leaks["base_moves_arm"] = max(leaks["base_moves_arm"],
                                                       float(np.linalg.norm(rel_after[:3, 3] - rel_before[:3, 3])))
+    torso = {}
+    for mode in (ARM_MODE, BASE_MODE):
+        rates = []
+        for sign in (1.0, -1.0):
+            ladder.restore_world(env, snap)
+            world.obs = ladder.live_observation(env)
+            a = np.zeros(12)
+            a[10], a[11] = sign * PROBE_AMPLITUDES[-1], mode
+            for t in range(PROBE_STEPS):
+                before = world.observe()
+                world.step(a)
+                if t:
+                    rates.append((world.observe()["base"][2, 3] - before["base"][2, 3]) / (sign * PROBE_AMPLITUDES[-1]))
+        torso[mode] = float(np.mean(rates))
+    torso_mode = max(torso, key=lambda m: abs(torso[m]))
     ladder.restore_world(env, snap)
     M_pos, r2_pos = estimate_gains(arm_pos)
     M_rot, r2_rot = estimate_gains(arm_rot)
     M_base, r2_base = estimate_gains(base)
-    gains = Gains(M_pos, M_rot, M_base)
+    torso_gain = torso[torso_mode] if abs(torso[torso_mode]) >= TORSO_MIN_GAIN else 0.0
+    gains = Gains(M_pos, M_rot, M_base, torso=torso_gain, torso_mode=torso_mode)
     conds = {k: float(np.linalg.cond(m)) for k, m in (("arm_pos", M_pos), ("arm_rot", M_rot), ("base", M_base))}
     ok = min(r2_pos, r2_rot, r2_base) >= 0.9 and max(conds.values()) < 20 and leaks["arm_moves_base"] < 1e-3 \
         and leaks["base_moves_arm"] < 5e-3
     result = {"kind": "r2_control_probe", "gains": gains.to_json(),
               "r2": {"arm_pos": r2_pos, "arm_rot": r2_rot, "base": r2_base}, "condition_numbers": conds,
-              "mode_leaks": leaks, "amplitudes": list(PROBE_AMPLITUDES), "steps": PROBE_STEPS, "ok": bool(ok),
+              "mode_leaks": leaks, "torso_by_mode": {"arm": torso[ARM_MODE], "base": torso[BASE_MODE]},
+              "amplitudes": list(PROBE_AMPLITUDES), "steps": PROBE_STEPS, "ok": bool(ok),
               "git_commit": ladder.current_git_commit(), "created_at": ladder.utc_now()}
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     ladder.atomic_write_json(output, result)
-    log(json.dumps({k: result[k] for k in ("ok", "r2", "condition_numbers", "mode_leaks")}, indent=2))
+    log(json.dumps({k: result[k] for k in ("ok", "r2", "condition_numbers", "mode_leaks", "torso_by_mode")},
+                   indent=2))
     return result
 
 
@@ -1073,6 +1176,7 @@ def run_self_replay(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, 
                     try:
                         if env is None:
                             env = _make_env(task, "target", 0)
+                            env.reset()   # gymnasium refuses step() before the outer reset()
                         states, ep_meta, model_xml = es.load_episode(library.lerobots[task], src.episode)
                         ladder._env_method(env, "reset_to")({"model": model_xml, "states": states[src.start],
                                                              "ep_meta": json.dumps(ep_meta)})

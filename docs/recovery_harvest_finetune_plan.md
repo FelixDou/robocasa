@@ -779,7 +779,8 @@ choice open, the code fixes it as follows:
   each unit action, fitted by least squares for the arm in the base frame and
   for the base in its own frame. A passing probe has R² ≥ 0.9, condition
   number < 20 and no motion leaking between arm and base mode; the executor
-  refuses gains from a probe that did not pass. This replaces reading the
+  refuses gains from a probe that did not pass. The probe also measures the
+  torso's effect on the base height, in both modes. This replaces reading the
   composite controller's config. All poses come from the observation's state
   keys, which the policy and the LeRobot demos share. Self-replay checks that
   shared convention at every segment start (difference ≤ 1e-3, otherwise the
@@ -787,15 +788,23 @@ choice open, the code fixes it as follows:
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
-  the robot first drives to the fixture that holds that reference. The
-  navigation controller:
+  the robot first drives to the fixture that holds that reference. The goal is
+  that fixture's `compute_robot_base_placement_pose` without a reference
+  object, slid along the fixture's front until the robot faces the object's
+  current position. With a reference object, the helper uses the object's
+  initial placement instead. The navigation controller:
   - is a holonomic proportional controller, limited to 0.02 m and 0.05 rad
     per step;
   - drives on to 5 cm and 0.05 rad, or stops at 300 steps;
   - reports the NavigateKitchen test (0.20 m, cos ≥ 0.98).
 - *Tracking.* The arm approaches a step's first pose at most 1 cm and
   0.05 rad per step, then plays the source frames, holding each frame until
-  the end effector is within 2 cm of it. The expert cap counts the executed
+  the end effector is within 2 cm of it. Frames where the demonstrator
+  switched to base mode inside a step are replayed on the base: the demo's
+  base pose, moved through the step's reference frame, within 2 cm and
+  0.05 rad. The torso follows the demo's base height relative to the
+  reference (beyond 1 cm), in whichever mode the probe found it moves, and
+  is left alone if the probe found none. The expert cap counts the executed
   source frames (scripted release and set-aside count as 60 each) and adds
   50%. Navigation is capped separately, per phase.
 - *Wrong tool on the board (gap 1).* The wrong tool is picked with the pick

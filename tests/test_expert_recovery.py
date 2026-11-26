@@ -371,6 +371,47 @@ class ExecutorTest(unittest.TestCase):
         self.assertAlmostEqual(moved[1], er.SET_ASIDE_SIDE, delta=0.03)      # away from the board (+y here)
         self.assertAlmostEqual(moved[2], er.SET_ASIDE_LIFT - er.SET_ASIDE_LOWER, delta=0.03)
 
+    def test_base_motion_inside_a_step_is_replayed_on_the_base(self):
+        """The demonstrator drives 0.3 m toward the mug during the pick; the scene is the demo moved rigidly."""
+        G = world_pose(2.0, 1.0, 0.0, yaw=0.8)
+        base0 = world_pose(0, 0, 0.3)
+        drive = [world_pose(0.3 * s, 0, 0.3) for s in np.linspace(0, 1, 15)]
+        mug, tray = world_pose(0.9, 0.0, 0.9), world_pose(0.9, -0.4, 0.9)
+        rest = demo_source(mug, tray, drive[-1])
+        rel0 = er.inverse(drive[-1]) @ rest.eef[0]
+        n = 15 + len(rest.gripper)
+        src = er.Source(task_name="ArrangeTea", episode=7, predicate="mug_on_tray", target="obj", start=0, end=n,
+                        steps=[er.SourceStep("PickPlace", er.PICK, 0, 35), er.SourceStep("PickPlace", er.PLACE, 35, n)],
+                        eef=np.concatenate([np.stack([b @ rel0 for b in drive]), rest.eef]),
+                        base=np.concatenate([np.stack(drive), rest.base]),
+                        gripper=np.concatenate([np.zeros(15), rest.gripper]),
+                        objects={"obj": np.stack([mug] * n), "container": np.stack([tray] * n)},
+                        mode=np.concatenate([np.ones(15), np.zeros(len(rest.gripper))]))
+        b = G @ base0
+        world = FakeWorld(mobile=(b[0, 3], b[1, 3], er.yaw_of(b[:3, :3])), predicate=mug_on_tray)
+        world.eef = G @ src.eef[0]
+        world.objects = {"obj": G @ mug, "container": G @ tray}
+        program = er.plan_attempts("ArrangeTea", "mug_on_tray", facts_of(world), FakeLibrary([src]), n=1)[0]
+        self.assertEqual(program["phases"][0]["phase"], "track")       # relative pose matches: no navigation
+        result = self.run_program(world, program, [src])
+        self.assertTrue(result["stage_completed"], result)
+        self.assertGreaterEqual(result["phases"][0]["base_mode_steps"], 14)
+        np.testing.assert_allclose(world.base_T()[:2, 3], (G @ drive[-1])[:2, 3], atol=0.03)
+
+    def test_slide_to_faces_the_object(self):
+        goal = er.slide_to((0.0, 0.0, 0.3), fixture_xy=(1.0, 0.0), target_xy=(1.0, 0.7))
+        np.testing.assert_allclose(goal, (0.0, 0.7, 0.3), atol=1e-9)    # same standoff, shifted along the front
+
+    def test_torso_follows_only_with_a_measured_gain(self):
+        g = er.Gains(TRUE_GAINS.arm_pos, TRUE_GAINS.arm_rot, TRUE_GAINS.base, torso=0.01, torso_mode=er.ARM_MODE)
+        self.assertEqual(g.torso_command(0.05, er.ARM_MODE), 1.0)
+        self.assertAlmostEqual(g.torso_command(-0.015, er.ARM_MODE), -1.0)        # clipped
+        self.assertAlmostEqual(er.Gains(g.arm_pos, g.arm_rot, g.base, torso=0.02).torso_command(0.015, er.ARM_MODE), 0.75)
+        self.assertEqual(g.torso_command(0.005, er.ARM_MODE), 0.0)          # within tolerance
+        self.assertEqual(g.torso_command(0.05, er.BASE_MODE), 0.0)          # other mode
+        self.assertEqual(TRUE_GAINS.torso_command(0.05, er.ARM_MODE), 0.0)   # no torso found
+        self.assertEqual(er.Gains.from_json(g.to_json()).torso, 0.01)
+
     def test_navigation_controller_converges(self):
         world = FakeWorld(mobile=(0.0, 0.0, 0.0))
         goal = (2.0, -1.5, -2.8)
