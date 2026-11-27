@@ -33,6 +33,34 @@ class GeometryTest(unittest.TestCase):
         self.assertTrue(bp.point_in_polygon([0, 0], rotated))
 
 
+class GeomCornersTest(unittest.TestCase):
+    def test_box_turned_a_quarter_about_z(self):
+        R = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1.0]])
+        c = bp.geom_corners(bp.GEOM_BOX, [0.4, 0.02, 0.3], [1.0, 2.0, 0.5], R.ravel())
+        np.testing.assert_allclose(c.min(axis=0), [0.98, 1.6, 0.2])
+        np.testing.assert_allclose(c.max(axis=0), [1.02, 2.4, 0.8])
+
+    def test_capsule_cylinder_mesh_and_fallback(self):
+        I = np.eye(3).ravel()
+        np.testing.assert_allclose(bp.geom_corners(bp.GEOM_CAPSULE, [0.1, 0.5, 0], [0, 0, 0], I).max(axis=0),
+                                   [0.1, 0.1, 0.6])
+        np.testing.assert_allclose(bp.geom_corners(bp.GEOM_CYLINDER, [0.1, 0.5, 0], [0, 0, 0], I).max(axis=0),
+                                   [0.1, 0.1, 0.5])
+        mesh = bp.geom_corners(bp.GEOM_MESH, [0, 0, 0], [1, 0, 0], I, aabb=[0.2, 0, 0, 0.1, 0.3, 0.4])
+        np.testing.assert_allclose(mesh.min(axis=0), [1.1, -0.3, -0.4])
+        np.testing.assert_allclose(bp.geom_corners(bp.GEOM_MESH, [0, 0, 0], [0, 0, 0], I, rbound=0.2).max(axis=0),
+                                   [0.2, 0.2, 0.2])
+
+    def test_an_open_door_blocks_the_straight_way_out(self):
+        counter = bp.footprint(box(-1.0, 1.0, 0.0, 0.6))
+        door = bp.footprint(bp.geom_corners(bp.GEOM_BOX, [0.02, 0.4, 0.4], [1.0, -0.4, 0.45], np.eye(3).ravel()))
+        start, goal = (0.6, -0.45), (3.0, -0.45)
+        grid = bp.NavGrid([counter, door], extra_points=[start, goal])
+        points = grid.plan(start, goal)
+        self.assertIsNotNone(points)
+        self.assertLess(min(p[1] for p in points), -0.8 - bp.HARD_CLEARANCE + 1e-9)   # around the door's end
+
+
 class PlanTest(unittest.TestCase):
     def check_path(self, grid, points, start, goal):
         np.testing.assert_allclose(points[0], start[:2])

@@ -666,6 +666,15 @@ class BaseFrameEstimatorTest(unittest.TestCase):
         self.assertAlmostEqual(est.update(obs, a, (0.0, 0.03, 0.5), TRUE_GAINS), math.pi / 2)
 
 
+class TaskSuccessTest(unittest.TestCase):
+    def test_a_last_stage_succeeding_with_the_task_counts(self):
+        for holds, completed in ((True, True), (False, False)):
+            world = FakeWorld(predicate=lambda w, h=holds: {"cabinet_closed": h and w.steps >= 2,
+                                                            "task_success": w.steps >= 2})
+            result = er.ExpertRun(world, TRUE_GAINS, {}, "cabinet_closed", cap=10 ** 5, budget=10 ** 5).run([])
+            self.assertEqual((result["stop"], result["stage_completed"]), ("task_success", completed))
+
+
 class GateTest(unittest.TestCase):
     def test_gate_r_counts_states_with_a_full_success(self):
         states = [{"parent_id": f"p{i}", "task_name": "ArrangeTea", "stage": "mug_on_tray"} for i in range(4)]

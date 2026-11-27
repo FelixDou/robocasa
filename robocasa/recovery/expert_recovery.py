@@ -810,10 +810,14 @@ class ExpertRun:
         if navigating:
             self.nav_steps += 1
         self.success = bool(info.get("task_success"))
-        if self.watch is not None and self.watch.update(info.get("predicates") or {}):
+        predicates = info.get("predicates") or {}
+        if self.watch is not None and self.watch.update(predicates):
             self.completed = True
             raise ExpertStop("stage")
         if self.success:
+            # The task's last stage can succeed with the task before HOLD_STEPS have passed.
+            if self.watch is not None and predicates.get(self.watch.predicate):
+                self.completed = True
             raise ExpertStop("task_success")
         return info
 
@@ -1436,6 +1440,31 @@ class SimWorld:
             poly = bp.footprint(corners)
             if poly is not None:
                 out.append((str(name), poly))
+        return out + self.door_obstacles()
+
+    def door_obstacles(self):
+        """(body, footprint) of every door body's collision geoms, where the doors are now.
+
+        Fixture boxes cover the closed fixture; an open fridge or cabinet door stands outside it
+        (the diagnostic self-replay pinned the base on open doors, 27 November 2026).
+        """
+        model, data = self.kitchen.sim.model, self.kitchen.sim.data
+        aabb = getattr(model, "geom_aabb", None)
+        corners = defaultdict(list)
+        for g in range(int(model.ngeom)):
+            if not (int(model.geom_contype[g]) or int(model.geom_conaffinity[g])):
+                continue
+            body = model.body_id2name(int(model.geom_bodyid[g])) or ""
+            if "door" not in body.lower():
+                continue
+            corners[body].append(bp.geom_corners(
+                int(model.geom_type[g]), model.geom_size[g], data.geom_xpos[g], data.geom_xmat[g],
+                float(model.geom_rbound[g]), None if aabb is None else aabb[g]))
+        out = []
+        for body, pts in corners.items():
+            poly = bp.footprint(np.concatenate(pts, axis=0))
+            if poly is not None:
+                out.append((body, poly))
         return out
 
     def base_in_contact(self):

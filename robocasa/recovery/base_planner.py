@@ -82,6 +82,35 @@ def footprint(corners, max_z=OBSTACLE_MAX_Z, min_z=OBSTACLE_MIN_Z):
     return hull if len(hull) >= 3 else None
 
 
+GEOM_SPHERE, GEOM_CAPSULE, GEOM_ELLIPSOID, GEOM_CYLINDER, GEOM_BOX, GEOM_MESH = 2, 3, 4, 5, 6, 7  # mjtGeom
+
+
+def geom_corners(geom_type, size, xpos, xmat, rbound=0.0, aabb=None):
+    """World corners of a MuJoCo geom's local bounding box (8 x 3).
+
+    Boxes, ellipsoids, spheres, cylinders and capsules from ``size``; meshes from ``aabb``
+    (centre and half sizes in the geom frame, MuJoCo's ``geom_aabb``), else a cube of ``rbound``.
+    """
+    size = np.asarray(size, dtype=float).reshape(-1)
+    centre = np.zeros(3)
+    if geom_type in (GEOM_BOX, GEOM_ELLIPSOID):
+        half = size[:3]
+    elif geom_type == GEOM_SPHERE:
+        half = np.full(3, size[0])
+    elif geom_type == GEOM_CYLINDER:
+        half = np.array([size[0], size[0], size[1]])
+    elif geom_type == GEOM_CAPSULE:
+        half = np.array([size[0], size[0], size[1] + size[0]])
+    elif geom_type == GEOM_MESH and aabb is not None:
+        aabb = np.asarray(aabb, dtype=float).reshape(-1)
+        centre, half = aabb[:3], aabb[3:6]
+    else:
+        half = np.full(3, float(rbound))
+    signs = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)], dtype=float)
+    R = np.asarray(xmat, dtype=float).reshape(3, 3)
+    return np.asarray(xpos, dtype=float).reshape(1, 3) + (centre + signs * half) @ R.T
+
+
 class NavGrid:
     """Clearance grid over obstacle polygons; ``plan`` returns a list of (x, y) points or None."""
 

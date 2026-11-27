@@ -1140,6 +1140,45 @@ choice open, the code fixes it as follows:
   heading, a drive with a half turn arrives, and the offset reaches π. With
   the filter off, the same drive misses. A world matching its model keeps a
   zero offset.
+
+  *Targeted reruns (27 November 2026).* diag3 ran on commit cacf4df (planned
+  path, extended sources), diag4 on 54f5313 (plus the measured frame). Stages
+  completed by the executor / by the demo's actions, 5 demos each:
+
+  | Stage | diag3 | diag4 |
+  | --- | --- | --- |
+  | bread_in_basket | 3 / 5 | |
+  | basket_on_dining_counter | 1 / 5 | 3 / 5 |
+  | cabinet_closed | 0 / 5 (4 task_success) | |
+  | jam_on_cutting_board | 5 / 4 | |
+  | strawberry_on_pancake | 0 / 4 | 2 / 4 |
+
+  - *Extended sources work.* The demo actions now complete cabinet_closed
+    5/5 (2/5 before) and jam 4/5. The executor completes jam 5/5.
+  - *Counting bug.* cabinet_closed is ArrangeTea's last stage. In 4 runs the
+    task succeeded with it, and the executor stopped on `task_success`
+    before the 5-step hold, so the stage was not counted. A stage whose
+    predicate is true when the task succeeds now counts as completed.
+  - *The measured frame works.* With it, navigation reached the goal in 6 of
+    10 drives (0 of 10 in diag3). The final offsets were −1.71, −3.07, 2.81,
+    −3.03, 1.51 and −1.46 rad, which matches body-frame commands, as the
+    recordings showed.
+  - *All four remaining navigation failures were open doors.* The base
+    pressed on `fridge_main_group_fridge_door` (strawberry episodes 0 and 4,
+    424 of 429 steps) or on a cabinet's door (basket episode 1, strawberry
+    episode 2). The previous stage had opened them. Fixture boxes cover the
+    closed fixture, not a door standing open.
+
+  *Amendment: door obstacles.* Navigation obstacles now also include each
+  body with "door" in its name: the bounding boxes of its collision geoms at
+  their current pose, projected to the floor. Boxes, spheres, cylinders,
+  capsules and ellipsoids come from the geom sizes, meshes from MuJoCo's
+  `geom_aabb`. The same height band applies (bottom below 0.60 m).
+
+  Still open, executor-side: bread_in_basket episodes 0 and 1 and basket
+  episode 4. The demo actions complete them; the executor reaches the place
+  step and does not complete it. One pick ended without a grasp despite
+  closing 3.7 mm from the demo pose. Their videos come next.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
