@@ -1227,6 +1227,21 @@ choice open, the code fixes it as follows:
   fixture. The old search jumped across the door; the new one leaves down
   the pocket. Whether this was the cause of the two door misses is not yet
   confirmed; their traces were not inspected.
+
+  *Second self-replay (27 November 2026, commit ce40259, 20 demos per
+  stage): failed on two stages.* No errors; every convention residual is
+  below 2e-7. Nine stages pass:
+  - 20 / 20: bread_in_basket, kettle_on_tray, mug_on_tray,
+    croissant_on_cutting_board, jam_on_cutting_board;
+  - 19 / 20: cabinet_open, cabinet_closed, correct_tool_on_cutting_board,
+    fridge_open.
+
+  Two fail: basket_on_dining_counter 12 / 20 (0.60) and
+  strawberry_on_pancake 11 / 20 (0.55). All nine strawberry failures stop
+  at the expert cap (1.5 x the executed source frames, navigation apart),
+  not at a wrong stage end. Feedforward tracking fixed the bread drops
+  (3 / 5 in diag5, 20 / 20 here). The phase breakdown of the two failing
+  stages comes next.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
