@@ -52,6 +52,8 @@ ATTEMPTS_PER_STATE = 10       # Gate R: attempts per class-2 state, from distinc
 GATE_R_MIN_SHARE = 0.5        # class-2 states with >= 1 full-task success among their attempts
 BUDGET_FRACTION = 0.5         # fixed budget from the alarm, expert time included (as Phase A)
 HOLD_STEPS = 5                # the expert stops once the stage predicate holds this long
+TAIL_STEPS = es.BOUNDARY_TOLERANCE + HOLD_STEPS   # hold still after the program: a demo's predicate may
+                              # turn true up to BOUNDARY_TOLERANCE frames after its segment ends
 SEGMENT_SLACK = 0.5           # expert cap: executed source frames x (1 + slack), navigation apart
 NAVIGATE_MAX_STEPS = 300
 NAV_POS_TOL, NAV_COS_TOL = 0.20, 0.98        # NavigateKitchen's success test
@@ -325,6 +327,8 @@ class Source:
     gripper: np.ndarray        # (N,)
     objects: dict = field(default_factory=dict)   # name -> (N, 4, 4) world
     mode: np.ndarray | None = None                # (N,) the demo's control mode (>= 0.5: base motion)
+    actions: np.ndarray | None = None             # (N, 12) the demo's own actions (self-replay control)
+    first_true: int | None = None                 # demo frame from which the predicate holds
 
     def base_mode(self, frame):
         return self.mode is not None and float(self.mode[self.at(frame)]) >= 0.5
@@ -374,7 +378,8 @@ def build_source(row, predicate, *, named, actions, object_names, object_pos, ob
     return Source(task_name=row["task_name"], episode=int(row["episode"]), predicate=predicate, target=target,
                   start=int(seg["start"]), end=int(seg["end"]), steps=source_steps(row, seg), eef=eef, base=base,
                   gripper=np.asarray(actions[frames, 6], dtype=float), objects=objects,
-                  mode=np.asarray(actions[frames, 11], dtype=float))
+                  mode=np.asarray(actions[frames, 11], dtype=float), actions=np.asarray(actions[frames], dtype=float),
+                  first_true=event.get("first_true"))
 
 
 def usable_rows(rows, task_name, predicate):
@@ -640,8 +645,64 @@ class StageWatch:
         return self.run >= self.hold
 
 
+class TrackDiag:
+    """Per track phase: how far the hand trails the source frames, and where the gripper closes."""
+
+    def __init__(self):
+        self.pos, self.rot, self.closes = [], [], []
+        self.per_frame = Counter()
+
+    def step(self, i):
+        self.per_frame[i] += 1
+
+    def advance(self, err):
+        self.pos.append(err[0])
+        self.rot.append(err[1])
+
+    def close(self, frame, err):
+        self.closes.append({"frame": int(frame), "pos": round(err[0], 4), "rot": round(err[1], 4)})
+
+    def summary(self):
+        q = lambda v, f: round(float(f(v)), 4) if v else None  # noqa: E731
+        return {"pos_lag_median": q(self.pos, np.median), "pos_lag_max": q(self.pos, np.max),
+                "rot_err_median": q(self.rot, np.median), "rot_err_max": q(self.rot, np.max),
+                "stalled_frames": sum(1 for n in self.per_frame.values() if n > 1),
+                "max_steps_on_frame": max(self.per_frame.values(), default=0), "closes": self.closes}
+
+
+def replay_actions(world, source, predicate, *, tail=TAIL_STEPS):
+    """Self-replay control: the demo's own actions, open loop, then ``tail`` steps holding still."""
+    watch = StageWatch(predicate)
+    actions = [np.asarray(a, dtype=float) for a in source.actions]
+    actions += [hold_action(float(actions[-1][6]) if actions else GRIPPER_OPEN)] * int(tail)
+    stop, k = "end", 0
+    for k, a in enumerate(actions, start=1):
+        info = world.step(a)
+        if watch.update(info.get("predicates") or {}):
+            stop = "stage"
+            break
+        if info.get("done"):
+            stop = "env_done"
+            break
+    return {"stage_completed": stop == "stage", "stop": stop, "steps": k, "segment_frames": len(source.actions)}
+
+
 class ExpertStop(Exception):
     pass
+
+
+def world_holding(world):
+    """The world's grasp check as a bool (``SimWorld.holding`` also returns the held bodies)."""
+    holding = getattr(world, "holding", None)
+    if holding is None:
+        return False
+    out = holding()
+    return bool(out[0] if isinstance(out, tuple) else out)
+
+
+def hold_action(gripper):
+    """Arm-mode zero motion: the arm holds its pose (achieved-mode goal), the gripper as given."""
+    return action_vector(gripper=gripper, mode=ARM_MODE)
 
 
 class ExpertRun:
@@ -653,9 +714,8 @@ class ExpertRun:
         self.cap, self.budget = int(cap), int(budget)
         self.steps, self.nav_steps, self.completed, self.success = 0, 0, False, False
         self.log = []
-        holding = getattr(world, "holding", None)
         # Navigation keeps the gripper as it is: closed if the run starts holding something.
-        self.gripper = GRIPPER_CLOSE if holding is not None and holding() else GRIPPER_OPEN
+        self.gripper = GRIPPER_CLOSE if world_holding(world) else GRIPPER_OPEN
 
     def act(self, action, navigating=False):
         if self.steps >= self.budget or (not navigating and self.steps - self.nav_steps >= self.cap):
@@ -710,7 +770,9 @@ class ExpertRun:
         mobile = self.world.observe()["mobile"]
         if if_needed and navigation_done(mobile, goal):
             return {"phase": "navigate", "skipped": "already_there"}
-        start = self.steps
+        start, contact_steps = self.steps, 0
+        start_dist = math.hypot(goal[0] - mobile[0], goal[1] - mobile[1])
+        contact = getattr(self.world, "base_in_contact", None)
         for _ in range(NAVIGATE_MAX_STEPS):
             obs = self.world.observe()
             mobile = obs["mobile"]
@@ -718,9 +780,12 @@ class ExpertRun:
                 break
             self.act(base_command(mobile, goal, self.gains, self.gripper,
                                   frame_yaw=obs.get("command_frame_yaw", 0.0)), navigating=True)
+            contact_steps += int(bool(contact())) if contact is not None else 0
         mobile = self.world.observe()["mobile"]
         return {"phase": "navigate", "steps": self.steps - start, "reached": navigation_done(mobile, goal),
-                "goal": [float(v) for v in goal]}
+                "goal": [float(v) for v in goal], "start_distance": round(start_dist, 4),
+                "final_distance": round(math.hypot(goal[0] - mobile[0], goal[1] - mobile[1]), 4),
+                "final_yaw_error": round(abs(wrap(goal[2] - mobile[2])), 4), "contact_steps": contact_steps}
 
     def track(self, source, step_index, reference):
         step = source.steps[step_index]
@@ -738,9 +803,11 @@ class ExpertRun:
         grippers = [float(source.gripper[source.at(f)]) for f in frames]
         driving = [source.base_mode(f) for f in frames]
         start, base_frames = self.steps, 0
+        diag = TrackDiag()
         i = 0
         while i < len(targets):
             obs = self.world.observe()
+            diag.step(i)
             dz = bases[i][2, 3] - obs["base"][2, 3]
             if driving[i]:
                 # The demonstrator moved the base here: move the robot base by the same planar offset.
@@ -761,14 +828,21 @@ class ExpertRun:
             if (i == 0 or driving[i - 1]) and pose_error(obs["eef"], targets[i])[0] >= TRACK_TOL:
                 self.move_to(targets[i], grippers[i])   # approach the first arm frame of a run
                 obs = self.world.observe()
+            if grippers[i] >= 0.5 and (i == 0 or grippers[i - 1] < 0.5):
+                diag.close(frames[i], pose_error(obs["eef"], targets[i]))
             action = arm_command(obs["base"], obs["eef"], targets[i], self.gains, grippers[i])
             action[10] = self.gains.torso_command(dz, ARM_MODE)
             self.act(action)
             obs = self.world.observe()
-            if pose_error(obs["eef"], targets[i])[0] < TRACK_TOL:
+            err = pose_error(obs["eef"], targets[i])
+            if err[0] < TRACK_TOL:
+                diag.advance(err)
                 i += 1
-        return {"phase": "track", "kind": step.kind, "steps": self.steps - start, "frames": len(targets),
-                "base_mode_steps": base_frames}
+        out = {"phase": "track", "kind": step.kind, "steps": self.steps - start, "frames": len(targets),
+               "base_mode_steps": base_frames, **diag.summary()}
+        if step.kind == PICK:
+            out["holding_after"] = world_holding(self.world)
+        return out
 
     def set_aside(self, tool, board):
         obs = self.world.observe()
@@ -788,6 +862,12 @@ class ExpertRun:
         self.release()
         return {"phase": "set_aside", "object": tool}
 
+    def tail(self, steps=TAIL_STEPS):
+        """Hold still after the last phase so a predicate turning true at the end can register."""
+        self.cap += int(steps)
+        for _ in range(int(steps)):
+            self.act(hold_action(self.gripper))
+
     def run(self, phases):
         stop = None
         try:
@@ -803,6 +883,7 @@ class ExpertRun:
                     self.log.append(self.set_aside(ph["object"], ph["board"]))
                 else:
                     raise ValueError(f"unknown phase {ph['phase']}")
+            self.tail()
             stop = "program_end"
         except ExpertStop as exc:
             stop = str(exc)
@@ -1204,7 +1285,7 @@ class SimWorld:
         return wrap(yaw_of(np.asarray(current).reshape(3, 3)) - yaw_of(np.asarray(ctrl.init_ori).reshape(3, 3)))
 
     def holding(self):
-        return gripper_holds_any(self.kitchen)
+        return gripper_holds_any(self.kitchen)[0]
 
     def base_in_contact(self):
         """The mobile base touches anything but the robot and the floor (the world body)."""
@@ -1744,8 +1825,14 @@ def convention_residual(world_obs, named):
 
 
 def run_self_replay(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, dataset_base=None,
-                    lerobot_overrides=None, demos=SELF_REPLAY_DEMOS, resume=False, log=print):
-    """Each stage's own demos from their own state at the segment start (target kitchens)."""
+                    lerobot_overrides=None, demos=SELF_REPLAY_DEMOS, resume=False, stages=None,
+                    action_replay=False, record=0, log=print):
+    """Each stage's own demos from their own state at the segment start (target kitchens).
+
+    ``stages``: only these ``TASK:predicate`` stages. ``action_replay``: also replay the demo's own
+    actions open loop from the same restore (a control: it separates restore and executor problems).
+    ``record``: videos of the first ``record`` demos per stage under ``videos/``.
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     gains = load_gains(gains_path)
@@ -1754,39 +1841,53 @@ def run_self_replay(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, 
     done = {(r["task_name"], r["predicate"], r["episode"]) for r in ladder.read_jsonl(out_path)} if resume else set()
     if out_path.exists() and not resume:
         raise FileExistsError(f"{out_path} exists; pass --resume")
+    wanted = None if not stages else {tuple(s.split(":", 1)) for s in stages}
     for task in tasks:
         env = None
         try:
             for (t, predicate), spec in STAGE_SPECS.items():
-                if t != task or spec["kind"] == "set_aside":
+                if t != task or spec["kind"] == "set_aside" or (wanted is not None and (t, predicate) not in wanted):
                     continue
-                for src in library.sources(task, predicate)[: int(demos)]:
+                for n, src in enumerate(library.sources(task, predicate)[: int(demos)]):
                     if (task, predicate, src.episode) in done:
                         continue
                     record = {"task_name": task, "predicate": predicate, "episode": src.episode,
-                              "target": src.target, "created_at": ladder.utc_now()}
+                              "target": src.target, "created_at": ladder.utc_now(),
+                              "segment_frames": src.end - src.start,
+                              "first_true_after_end": None if src.first_true is None else int(src.first_true - src.end)}
+                    video = output_dir / "videos" / task / predicate / f"episode_{int(src.episode):06d}"
                     try:
                         if env is None:
                             env = _make_env(task, "target", 0)
                             env.reset()   # gymnasium refuses step() before the outer reset()
                         states, ep_meta, model_xml = es.load_episode(library.lerobots[task], src.episode)
-                        ladder._env_method(env, "reset_to")({"model": model_xml, "states": states[src.start],
-                                                             "ep_meta": json.dumps(ep_meta)})
-                        world = SimWorld(env)
+
+                        def restore(name):
+                            ladder._env_method(env, "reset_to")({"model": model_xml, "states": states[src.start],
+                                                                 "ep_meta": json.dumps(ep_meta)})
+                            rec = None
+                            if n < int(record) and not video.with_name(video.name + name).exists():
+                                rec = AttemptRecorder(video.with_name(video.name + name))
+                            return SimWorld(env, recorder=rec)
+
+                        world = restore("")
                         record["convention_residual"] = convention_residual(
                             world.obs, library.named_state(task, src.episode, src.start))
                         if record["convention_residual"] > CONVENTION_TOL:
                             record["error"] = "convention_mismatch"
                         else:
                             facts = world.facts(task)
-                            target = src.target
-                            phases = stage_phases(src, spec, target, 0, navigate_to_fixture=False)
+                            phases = stage_phases(src, spec, src.target, 0, navigate_to_fixture=False)
                             program = {"phases": phases}
-                            sources = {src.key: src}
-                            run = ExpertRun(world, gains, sources, predicate, cap=program_cap(program, sources),
-                                            budget=10 ** 6)
+                            run = ExpertRun(world, gains, {src.key: src}, predicate,
+                                            cap=program_cap(program, {src.key: src}), budget=10 ** 6)
                             record.update(run.run(phases))
                             record["facts"] = facts_record(facts)
+                            _finish_recording(world, record, video, "")
+                            if action_replay:
+                                world = restore("_actions")
+                                record["action_replay"] = replay_actions(world, src, predicate)
+                                _finish_recording(world, record["action_replay"], video, "_actions")
                     except Exception:
                         record["error"] = traceback.format_exc()
                         record.setdefault("stage_completed", False)
@@ -1794,7 +1895,10 @@ def run_self_replay(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, 
                         env = None
                     record.setdefault("stage_completed", False)
                     ladder.append_jsonl(out_path, record)
+                    replayed = record.get("action_replay")
                     log(f"[self-replay] {task}:{predicate} ep {src.episode} completed={record['stage_completed']}"
+                        f" stop={record.get('stop')}"
+                        f"{'' if replayed is None else ' actions=' + str(replayed['stage_completed'])}"
                         f"{' ERROR ' + record['error'].splitlines()[-1] if record.get('error') else ''}")
         finally:
             ladder._close(env, None)
@@ -1802,6 +1906,13 @@ def run_self_replay(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, 
     ladder.atomic_write_json(output_dir / "self_replay_summary.json", summary)
     log(json.dumps({k: summary[k] for k in ("passed", "failing")}, indent=2))
     return summary
+
+
+def _finish_recording(world, record, video, suffix):
+    if world.recorder is not None:
+        world.recorder.finish({"stage_completed": record.get("stage_completed"), "stop": record.get("stop")})
+        record["recording"] = str(video.with_name(video.name + suffix))
+        world.recorder = None
 
 
 def transfer_stages(task_name, required):
@@ -2088,6 +2199,9 @@ def build_parser():
     data_args(p)
     p.add_argument("--tasks", nargs="*", default=list(es.PILOT_TASKS))
     p.add_argument("--demos", type=int, default=SELF_REPLAY_DEMOS)
+    p.add_argument("--stages", nargs="*", default=None, help="only these TASK:predicate stages")
+    p.add_argument("--action-replay", action="store_true", help="also replay the demo's own actions (control)")
+    p.add_argument("--record", type=int, default=0, help="videos of the first N demos per stage")
     p = sub.add_parser("transfer", help="executor check 2: fresh pretrain-split resets (simulator)")
     data_args(p)
     p.add_argument("--tasks", nargs="*", default=list(es.PILOT_TASKS))
@@ -2151,7 +2265,8 @@ def main(argv=None):
     if args.dataset_base is None and not args.lerobot:
         raise SystemExit("pass --dataset-base or --lerobot TASK=PATH")
     if args.command == "self-replay":
-        run_self_replay(args.index_dir, args.output_dir, args.gains, tasks=args.tasks, demos=args.demos, **common)
+        run_self_replay(args.index_dir, args.output_dir, args.gains, tasks=args.tasks, demos=args.demos,
+                        stages=args.stages, action_replay=args.action_replay, record=args.record, **common)
     elif args.command == "transfer":
         run_transfer(args.index_dir, args.output_dir, args.gains, tasks=args.tasks, resets=args.resets, **common)
     else:

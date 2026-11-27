@@ -955,6 +955,64 @@ choice open, the code fixes it as follows:
   heading change, which navigation corrects in closed loop. Self-replay
   started at 10:33 on r9n7, GPU 0
   (`..._r2_self-replay_20261127_103314.log`).
+
+  *First self-replay (27 November 2026, commit 1503bdf): failed.* It ran
+  11 stages × 20 demos with no errors. The convention residual was at most
+  1.8e-7. Stages completed out of 20:
+
+  | Stage | Done | Stops |
+  | --- | --- | --- |
+  | ArrangeBreadBasket cabinet_open | 12 | 8 program_end |
+  | ArrangeBreadBasket bread_in_basket | 14 | 6 program_end |
+  | ArrangeBreadBasket basket_on_dining_counter | 2 | 16 program_end, 2 cap |
+  | ArrangeTea kettle_on_tray | 20 | |
+  | ArrangeTea mug_on_tray | 19 | 1 cap |
+  | ArrangeTea cabinet_closed | 0 | 18 program_end, 2 cap |
+  | BreadSelection croissant_on_cutting_board | 6 | 14 program_end |
+  | BreadSelection jam_on_cutting_board | 7 | 13 program_end |
+  | CuttingToolSelection correct_tool_on_cutting_board | 15 | 5 program_end |
+  | GarnishPancake fridge_open | 10 | 6 program_end, 4 cap |
+  | GarnishPancake strawberry_on_pancake | 0 | 20 cap |
+
+  Only kettle_on_tray reaches the 0.9 bar. In strawberry_on_pancake episode 0,
+  the pick tracked all 264 frames at one step each but ended without a grasp.
+  The navigation to the pancake then drove 300 steps toward a goal 4 m away
+  and did not reach it.
+
+  The records cannot say why a stage failed, so nothing was changed on a
+  guess. The findings and changes from reading the code:
+  - *Bug: the grasp check was read as always true.* `SimWorld.holding`
+    returned `gripper_holds_any`'s (bool, bodies) tuple, which is always
+    truthy. Every simulator run therefore started navigation with the
+    gripper commanded closed. It now returns the bool. A test covers a check
+    that returns the bodies.
+  - *Amendment: a tail hold.* A stage segment ends with its subtask, but
+    R1 matches a predicate that turns true up to `BOUNDARY_TOLERANCE` = 10
+    frames after a boundary to the earlier segment. The executor needs the
+    predicate for 5 steps. A replay that ends with the segment can therefore
+    miss a stage the demo completed. After the last phase, the executor now
+    holds still for 15 steps (`TAIL_STEPS`, counted beyond the cap) and
+    watches the predicate. This applies to transfer and Gate R too.
+  - *Diagnostics.*
+    - Each record now stores how many frames after the segment end the demo's
+      predicate became stable (`first_true_after_end`).
+    - Track phases log the hand's lag when each frame is passed (median and
+      maximum position and rotation error), frames that needed more than one
+      step, the pose error at each gripper close, and whether a pick ends
+      holding something.
+    - Navigation logs its start and final distance, its final heading error,
+      and steps with base contact.
+  - *Control: the demo's own actions.* `self-replay --action-replay`
+    restores the same state again and replays the demo's recorded actions
+    open loop, plus the same tail. If those complete the stage, the restore
+    is sound and the executor is at fault. If they do not, the restore or
+    the stage segment is.
+  - `--record N` writes videos of the first N demos per stage (executor and
+    action replay). `--stages` limits the run.
+
+  Next: `r2-self-replay-diag` (5 demos per stage, the action-replay control,
+  2 videos per stage). The full 20-demo self-replay reruns after the
+  executor fixes that the diagnostics point to.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
@@ -1263,6 +1321,7 @@ start until both executor checks have passed.
 ```bash
 bash scripts/run_alarm_branching_xr1.sh r2-probe          # must print "ok": true
 bash scripts/run_alarm_branching_xr1.sh r2-self-replay
+bash scripts/run_alarm_branching_xr1.sh r2-self-replay-diag   # diagnostic: control + videos (R2_DEMOS, R2_RECORD, R2_STAGES)
 bash scripts/run_alarm_branching_xr1.sh r2-transfer
 bash scripts/run_alarm_branching_xr1.sh r2-status
 bash scripts/run_alarm_branching_xr1.sh r2-analyze

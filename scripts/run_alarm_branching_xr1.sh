@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase A of docs/recovery_harvest_finetune_plan.md: recoverability at the Hide-and-Seek + P alarm.
 #   export | score | plan | start | resume | status | analyze | audit | decide | segments | segments-status | r1
-#   r2-probe | r2-probe-restore | r2-self-replay | r2-transfer | r2-gate | r2-status | r2-analyze | r2-export
+#   r2-probe | r2-probe-restore | r2-self-replay | r2-self-replay-diag | r2-transfer | r2-gate | r2-status | r2-analyze | r2-export
 # audit/decide are step R0 of the redesign (failure audit; simulator only, no policy server).
 # segments/r1 are step R1 (human-demo expert segments; CPU simulator replay, then a join with R0).
 # r2-* are step R2 (expert recoveries): control probe and the two executor checks (simulator only),
@@ -11,8 +11,8 @@
 set -euo pipefail
 action=${1:-status}
 case "$action" in export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1|\
-  r2-probe|r2-probe-restore|r2-self-replay|r2-transfer|r2-gate|r2-status|r2-analyze|r2-export) ;; *)
-  echo "Usage: $0 {export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1|r2-probe|r2-probe-restore|r2-self-replay|r2-transfer|r2-gate|r2-status|r2-analyze|r2-export}"; exit 1 ;; esac
+  r2-probe|r2-probe-restore|r2-self-replay|r2-self-replay-diag|r2-transfer|r2-gate|r2-status|r2-analyze|r2-export) ;; *)
+  echo "Usage: $0 {export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1|r2-probe|r2-probe-restore|r2-self-replay|r2-self-replay-diag|r2-transfer|r2-gate|r2-status|r2-analyze|r2-export}"; exit 1 ;; esac
 
 export STORAGE_BS=${STORAGE_BS:-/gs/bs/tga-shinoda/felid}
 export ROBOCASA_REPO=${ROBOCASA_REPO:-/gs/fs/tga-shinoda/felid/robocasa}
@@ -185,6 +185,27 @@ if [[ "$action" == r2-probe-restore ]]; then
   CUDA_VISIBLE_DEVICES="$gpu" MUJOCO_EGL_DEVICE_ID="$gpu" PYTHONPATH="$ROBOCASA_REPO" \
     "$py" -u -m robocasa.recovery.expert_recovery probe-restore --output "$r2_dir/restore_probe.json" \
     2>&1 | tee "$log_dir/$(basename "$ALARM_ROOT")_r2_probe_restore_$(date +%Y%m%d_%H%M%S).log"
+  exit 0
+fi
+if [[ "$action" == r2-self-replay-diag ]]; then
+  # Diagnostic self-replay, one simulator GPU, background: the executor and the demo's own actions
+  # from the same restore, R2_DEMOS demos per stage (default 5), videos of the first R2_RECORD (default 2).
+  # R2_STAGES="TASK:predicate ..." limits the stages; R2_DIAG_NAME names the output folder.
+  test -f "$gains" || { echo "Missing $gains (run r2-probe first)"; exit 1; }
+  gpu=${R2_GPU:-0}
+  out="$r2_dir/${R2_DIAG_NAME:-self-replay-diag}"
+  resume=()
+  [[ ! -e "$out/self_replay.jsonl" ]] || resume=(--resume)
+  stages=()
+  [[ -z "${R2_STAGES:-}" ]] || stages=(--stages $R2_STAGES)
+  mkdir -p "$out"
+  git -C "$ROBOCASA_REPO" rev-parse HEAD > "$out/git_commit.txt"
+  log="$log_dir/$(basename "$ALARM_ROOT")_r2_$(basename "$out")_$(date +%Y%m%d_%H%M%S).log"
+  CUDA_VISIBLE_DEVICES="$gpu" MUJOCO_EGL_DEVICE_ID="$gpu" PYTHONPATH="$ROBOCASA_REPO" nohup "$py" -u \
+    -m robocasa.recovery.expert_recovery self-replay --index-dir "$segments_dir/index" \
+    --dataset-base "$ROBOCASA_DATASET_BASE" --gains "$gains" --output-dir "$out" \
+    --demos "${R2_DEMOS:-5}" --action-replay --record "${R2_RECORD:-2}" "${stages[@]}" "${resume[@]}" > "$log" 2>&1 &
+  echo "self-replay-diag pid=$! gpu=$gpu log=$log out=$out"
   exit 0
 fi
 if [[ "$action" == r2-self-replay || "$action" == r2-transfer ]]; then

@@ -454,6 +454,53 @@ class ExecutorTest(unittest.TestCase):
         self.assertTrue(er.navigation_done(world.observe()["mobile"], goal))
 
 
+class DiagnosticsTest(unittest.TestCase):
+    def test_the_tail_catches_a_predicate_that_turns_true_just_after_the_program(self):
+        for turns_true, expected in ((3, "stage"), (er.TAIL_STEPS - er.HOLD_STEPS + 2, "program_end")):
+            world = FakeWorld(predicate=lambda w, k=turns_true: {"late": w.steps >= k})
+            result = er.ExpertRun(world, TRUE_GAINS, {}, "late", cap=10 ** 5, budget=10 ** 5).run([])
+            self.assertEqual(result["stop"], expected, turns_true)
+        self.assertEqual(result["expert_steps"], er.TAIL_STEPS)
+
+    def test_tracking_reports_the_lag_the_close_and_the_grasp(self):
+        demo = demo_source(world_pose(0.55, 0.05, 0.9), world_pose(0.6, -0.4, 0.9), world_pose(0, 0, 0.3))
+        world = FakeWorld(objects={"obj": world_pose(0.55, 0.05, 0.9), "container": world_pose(0.6, -0.4, 0.9)},
+                          predicate=mug_on_tray)
+        program = er.plan_attempts("ArrangeTea", "mug_on_tray", facts_of(world), FakeLibrary([demo]), n=1)[0]
+        result = ExecutorTest.run_program(None, world, program, [demo])
+        pick = result["phases"][0]
+        self.assertLess(pick["pos_lag_max"], er.TRACK_TOL)
+        self.assertEqual([c["frame"] for c in pick["closes"]], [10])
+        self.assertLess(pick["closes"][0]["pos"], 0.02)
+        self.assertTrue(pick["holding_after"])
+
+    def test_a_grasp_check_returning_the_bodies_is_read_as_a_bool(self):
+        for out, gripper in (((False, []), er.GRIPPER_OPEN), ((True, ["mug"]), er.GRIPPER_CLOSE)):
+            world = FakeWorld()
+            world.holding = lambda out=out: out
+            self.assertEqual(er.ExpertRun(world, TRUE_GAINS, {}, None, cap=1, budget=1).gripper, gripper)
+            self.assertEqual(er.world_holding(world), out[0])
+
+    def test_action_replay_sends_the_demo_actions_then_holds_still(self):
+        n = 10
+        actions = np.zeros((n, 12))
+        actions[:, 0] = 1.0
+        actions[:, 6] = -1.0
+        src = er.Source(task_name="ArrangeTea", episode=0, predicate="moved", target=None, start=0, end=n,
+                        steps=[], eef=np.stack([np.eye(4)] * n), base=np.stack([np.eye(4)] * n),
+                        gripper=actions[:, 6].copy(), actions=actions)
+        world = FakeWorld()
+        x0 = world.eef[0, 3]
+        moved = lambda w: {"moved": w.eef[0, 3] - x0 >= n * TRUE_GAINS.arm_pos[0, 0] - 1e-9}  # noqa: E731
+        world.predicate = moved
+        out = er.replay_actions(world, src, "moved")
+        self.assertEqual((out["stage_completed"], out["stop"], out["steps"]), (True, "stage", n + er.HOLD_STEPS - 1))
+        self.assertAlmostEqual(world.eef[0, 3] - x0, n * TRUE_GAINS.arm_pos[0, 0])
+        world = FakeWorld(predicate=lambda w: {})
+        out = er.replay_actions(world, src, "moved")
+        self.assertEqual((out["stage_completed"], out["stop"], out["steps"]), (False, "end", n + er.TAIL_STEPS))
+
+
 class GateTest(unittest.TestCase):
     def test_gate_r_counts_states_with_a_full_success(self):
         states = [{"parent_id": f"p{i}", "task_name": "ArrangeTea", "stage": "mug_on_tray"} for i in range(4)]
