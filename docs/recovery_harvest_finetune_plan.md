@@ -1370,8 +1370,30 @@ choice open, the code fixes it as follows:
   episode 6. In episodes 8, 12 and 18 it slid 2.5 to 12.5 cm to clear a
   distractor object on the counter (`dstr_dining2`). The other ten kept the
   centred pose. The
-  full 20-demo self-replay of all eleven stages reruns next, since the box
+  full 20-demo self-replay of all eleven stages reran next, since the box
   planner and the place spot change every stage that drives.
+
+  *Third self-replay (commit 0750d99, 220 records, 27 November 2026):
+  passed, all eleven stages at or above 0.9.* Errors 0; the largest
+  convention residual was 1.8e-7.
+
+  | Task | Stage | Completed / 20 |
+  | --- | --- | --- |
+  | ArrangeBreadBasket | basket_on_dining_counter | 20 |
+  | ArrangeBreadBasket | bread_in_basket | 20 |
+  | ArrangeBreadBasket | cabinet_open | 19 |
+  | ArrangeTea | cabinet_closed | 19 |
+  | ArrangeTea | kettle_on_tray | 20 |
+  | ArrangeTea | mug_on_tray | 20 |
+  | BreadSelection | croissant_on_cutting_board | 20 |
+  | BreadSelection | jam_on_cutting_board | 20 |
+  | CuttingToolSelection | correct_tool_on_cutting_board | 19 |
+  | GarnishPancake | fridge_open | 19 |
+  | GarnishPancake | strawberry_on_pancake | 18 |
+
+  strawberry_on_pancake sits exactly at the threshold, as in diag7 (18 / 20).
+  One of its two misses, episode 6, stopped at the cap. Executor
+  check 1 is passed; the pretrain-transfer check (check 2) runs next.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
