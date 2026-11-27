@@ -77,6 +77,11 @@ PLACE_EDGE_MARGIN = 0.08      # m: a place on a fixture lands at least this far 
 PLACE_FIXTURE_MARGIN = 0.12   # m: ... this far from any other fixture at the top's height (a sink),
 PLACE_OBJECT_MARGIN = 0.15    # m: ... and this far from objects standing there
 PLACE_SLIDE_STEP = 0.025      # m between candidate base positions along the fixture's front
+ALIGN_SHIFT_MAX = 0.20        # m: an aligned base pose inside an obstacle moves at most this far out
+ALIGN_SHIFT_STEP = 0.025      # m between the candidate shifts
+DOOR_MISMATCH = 1.0           # rank penalty: another door type or hinge side than the source's
+DOOR_ROLE_MISMATCH = 0.1      # rank penalty: another door of the fixture (left/right, freezer)
+DOOR_SOURCES_MAX = 40         # fixture sources measured per stage (episode order); the rest rank last
 SELF_REPLAY_DEMOS, SELF_REPLAY_MIN = 20, 0.9
 TRANSFER_RESETS, TRANSFER_MIN = 20, 0.7
 TRANSFER_BASE_SEED = 710007   # fresh pretrain-split seeds 710007-710026; Phase A/B and Step 0 do not use them
@@ -360,6 +365,7 @@ class Source:
     actions: np.ndarray | None = None             # (N, 12) the demo's own actions (self-replay control)
     first_true: int | None = None                 # demo frame from which the predicate holds
     segment_end: int | None = None                # R1's segment end; ``end`` runs on to the predicate's settle
+    door: dict | None = None                      # fixture stages: the door it opened (``door_reference``)
 
     def base_mode(self, frame):
         return self.mode is not None and float(self.mode[self.at(frame)]) >= 0.5
@@ -445,6 +451,7 @@ class SourceLibrary:
         self._reader = reader
         self._cache = {}
         self._episodes = {}
+        self.doors = {}    # source key -> the door it opened (``measure_source_doors``)
 
     def _episode(self, task, episode):
         key = (task, int(episode))
@@ -476,6 +483,7 @@ class SourceLibrary:
                 self._cache[key] = build_source(row, predicate, named=named, actions=actions,
                                                 object_names=[str(n) for n in arrays["object_names"]],
                                                 object_pos=arrays["object_pos"], object_quat=arrays["object_quat"])
+            self._cache[key].door = self.doors.get(key, self._cache[key].door)
             out.append(self._cache[key])
         return out
 
@@ -504,7 +512,10 @@ def resolve_object(key, facts):
 
 
 def step_reference(kind, spec, target):
-    """Frame a step's poses are replayed in: the target for a pick, the receptacle for a place, else the base."""
+    """Frame a step's poses are replayed in: the target for a pick, the receptacle for a place, the
+    door for a fixture stage, else the base."""
+    if spec.get("kind") == "fixture":
+        return ("door", spec["fixture"])
     if kind == PICK and target is not None:
         return ("object", target)
     if kind == PLACE and spec.get("reference", (None,))[0] == "object":
@@ -532,6 +543,83 @@ def rank_distance(src_rel, alarm_rel, yaw_weight=RANK_YAW_WEIGHT):
     return float(np.linalg.norm(np.asarray(p1) - np.asarray(p2)) + yaw_weight * abs(wrap(y1 - y2)))
 
 
+# ---- base alignment and door frames (simulator-free) --------------------------------------------
+
+def align_goal(transform, source_base, base, mobile):
+    """Mobile pose (x, y, yaw) that puts the robot base at ``transform @ source_base``.
+
+    The robot base rides on the mobile base at a fixed planar offset, read from the current
+    ``base`` and ``mobile`` poses; height and tilt are left to the torso and the arm.
+    """
+    M = pose([mobile[0], mobile[1], 0.0], rot_z(mobile[2]))
+    goal = yaw_frame(transform @ source_base) @ inverse(yaw_frame(base)) @ M
+    return float(goal[0, 3]), float(goal[1, 3]), yaw_of(goal[:3, :3])
+
+
+def axis_rotation(axis, angle):
+    """Rotation by ``angle`` about the unit vector ``axis`` (Rodrigues)."""
+    u = np.asarray(axis, dtype=float)
+    u = u / max(np.linalg.norm(u), 1e-12)
+    K = np.array([[0.0, -u[2], u[1]], [u[2], 0.0, -u[0]], [-u[1], u[0], 0.0]])
+    return np.eye(3) + math.sin(angle) * K + (1 - math.cos(angle)) * (K @ K)
+
+
+def door_reference(role, jtype, handle, anchor, axis, q, joint_range=(0.0, 1.0)):
+    """A door's (or drawer's) replay frame, at its closed configuration (joint at 0).
+
+    The frame sits on the handle with x along the handle's horizontal opening direction, which
+    points out of the fixture's front whichever side the hinge is on. ``side`` is the hinge's
+    side seen in that frame (+1 / -1; 0 for drawers and doors that do not swing sideways).
+    """
+    handle, anchor = np.asarray(handle, dtype=float), np.asarray(anchor, dtype=float)
+    u = np.asarray(axis, dtype=float)
+    u = u / max(np.linalg.norm(u), 1e-12)
+    lo, hi = (float(v) for v in joint_range)
+    open_sign = 1.0 if abs(hi) >= abs(lo) else -1.0
+    if jtype == "hinge":
+        closed = anchor + axis_rotation(u, -float(q)) @ (handle - anchor)
+        out = open_sign * np.cross(u, closed - anchor)
+    else:
+        closed = handle - float(q) * u
+        out = open_sign * u
+    out = np.array([out[0], out[1], 0.0])
+    yaw = math.atan2(out[1], out[0]) if np.linalg.norm(out) > 1e-9 else 0.0
+    frame = pose(closed, rot_z(yaw))
+    local = rot_z(yaw).T @ (anchor - closed)
+    swings = jtype == "hinge" and abs(u[2]) > 0.7
+    return {"role": str(role), "type": str(jtype), "frame": frame, "q": float(q), "open_sign": open_sign,
+            "range": [lo, hi], "side": int(np.sign(local[1])) if swings else 0,
+            "radius": float(np.hypot(*(closed - anchor)[:2])) if jtype == "hinge" else 0.0,
+            "height": float(closed[2])}
+
+
+def door_distance(a, b):
+    """How unlike two doors are for replaying one's demo on the other (m-like units)."""
+    d = abs(a["radius"] - b["radius"]) + abs(a["height"] - b["height"])
+    if a["type"] != b["type"] or a["side"] != b["side"]:
+        d += DOOR_MISMATCH
+    if a["role"] != b["role"]:
+        d += DOOR_ROLE_MISMATCH
+    return float(d)
+
+
+def match_door(source_door, doors):
+    """(door, distance): the door here most like the one the source opened; (None, inf) if none."""
+    if not source_door or not doors:
+        return None, float("inf")
+    return min(((d, door_distance(source_door, d)) for d in doors), key=lambda x: x[1])
+
+
+def door_record(door):
+    """JSON-safe door reference."""
+    return {**{k: v for k, v in door.items() if k != "frame"},
+            "frame": [round(float(v), 6) for v in np.asarray(door["frame"]).reshape(-1)]}
+
+
+def door_from_record(rec):
+    return {**rec, "frame": np.asarray(rec["frame"], dtype=float).reshape(4, 4)}
+
+
 def first_step_index(source, held):
     """0, or the step after the pick when the target is already held."""
     if not held:
@@ -547,6 +635,9 @@ def rank_sources(sources, facts, start_of, reference_of):
         i0 = start_of(src)
         manip = [s for s in src.steps[i0:] if s.kind != NAVIGATE]
         ref = reference_of(manip[0]) if manip else BASE_REF
+        if ref[0] == "door":
+            scored.append((match_door(src.door, (facts.get("doors") or {}).get(ref[1]))[1], src))
+            continue
         if ref[0] != "object" or ref[1] not in src.objects or ref[1] not in facts["objects"]:
             scored.append((float("inf"), src))
             continue
@@ -734,19 +825,32 @@ def program_cap(program, library_sources):
 
 # ---- R2b: the executor (world adapter: real simulator or a test stand-in) -----------------------
 
-def plan_navigation(obstacles, mobile, goal, shape=None):
+def shift_candidates(max_shift=ALIGN_SHIFT_MAX, step=ALIGN_SHIFT_STEP):
+    """Planar offsets within ``max_shift`` on a ``step`` grid, nearest first (the zero offset first)."""
+    n = int(round(max_shift / step))
+    out = [(i * step, j * step) for i in range(-n, n + 1) for j in range(-n, n + 1)
+           if math.hypot(i, j) * step <= max_shift + 1e-9]
+    return sorted(out, key=lambda d: (math.hypot(*d), d))
+
+
+def plan_navigation(obstacles, mobile, goal, shape=None, *, free_goal=False):
     """(PathFollower or None, log) for a drive from ``mobile`` to ``goal`` among named footprints.
 
     The planner moves the base's collision box (``shape``, a ``bp.BaseShape``; robosuite's
     Omron base by default) over position and heading. Footprints named like doors are thin.
     A footprint containing the start or the goal is dropped and logged: the base cannot stand
     inside a real obstacle, so such a box is not one (a room-sized or mis-registered fixture).
+
+    ``free_goal``: the goal is a computed pose that may lie in an obstacle (base alignment), so
+    only footprints containing the start are dropped, and a goal the box does not fit at moves
+    to the nearest pose it fits at (``shift_candidates``, in the goal's frame, same heading).
+    The log then carries ``free_goal`` and ``goal_shift``, or ``goal_blocked`` if none fits.
     """
     shape = shape if shape is not None else bp.BaseShape()
     start, end = np.asarray(mobile[:2], dtype=float), np.asarray(goal[:2], dtype=float)
     kept, thin, dropped = [], [], []
     for name, poly in obstacles:
-        if bp.point_in_polygon(start, poly) or bp.point_in_polygon(end, poly):
+        if bp.point_in_polygon(start, poly) or (not free_goal and bp.point_in_polygon(end, poly)):
             dropped.append(str(name))
         else:
             kept.append(poly)
@@ -757,6 +861,21 @@ def plan_navigation(obstacles, mobile, goal, shape=None):
         return None, log
     grid = bp.NavGrid(kept, extra_points=[start, end], thin=thin, shape=shape)
     log.update({"start_clearance": round(grid.clearance(mobile), 3), "goal_clearance": round(grid.clearance(goal), 3)})
+    if free_goal:
+        c, s_ = math.cos(goal[2]), math.sin(goal[2])
+        free = None
+        for dx, dy in shift_candidates():
+            cand = (goal[0] + c * dx - s_ * dy, goal[1] + s_ * dx + c * dy, goal[2])
+            if grid.clearance(cand) >= bp.HARD_GAP:
+                free = cand
+                break
+        if free is None:
+            log["goal_blocked"] = True
+            return None, log
+        if free != tuple(goal):
+            log.update({"free_goal": [float(v) for v in free],
+                        "goal_shift": round(math.hypot(free[0] - goal[0], free[1] - goal[1]), 4)})
+        goal = free
     points = grid.plan(mobile, goal)
     if points is None:
         return None, log
@@ -890,8 +1009,10 @@ def hold_action(gripper):
 class ExpertRun:
     """Runs a program's phases on ``world``; stops at the stage, the step cap or the budget."""
 
-    def __init__(self, world, gains, sources, predicate, *, cap, budget):
+    def __init__(self, world, gains, sources, predicate, *, cap, budget, align=True):
         self.world, self.gains, self.sources = world, gains, sources
+        self.align_base = bool(align)   # drive to the source's base pose relative to each step's reference
+        self.progress = None            # the running track phase, logged if a stop interrupts it
         self.watch = StageWatch(predicate) if predicate else None
         self.cap, self.budget = int(cap), int(budget)
         self.steps, self.nav_steps, self.completed, self.success = 0, 0, False, False
@@ -971,6 +1092,27 @@ class ExpertRun:
         mobile = self.world.observe()["mobile"]
         if if_needed and navigation_done(mobile, goal):
             return {"phase": "navigate", "skipped": "already_there", **place_log}
+        return {"phase": "navigate", **self.drive_to(goal), **place_log}
+
+    def align(self, goal):
+        """Drive so the base stands where the source's stood relative to the step's reference.
+
+        A goal inside an obstacle moves to the nearest free pose within ``ALIGN_SHIFT_MAX``; with
+        none, the base stays where it is.
+        """
+        mobile = self.world.observe()["mobile"]
+        out = {"goal": [round(float(v), 4) for v in goal],
+               "offset": round(math.hypot(goal[0] - mobile[0], goal[1] - mobile[1]), 4),
+               "yaw_offset": round(abs(wrap(goal[2] - mobile[2])), 4)}
+        if navigation_done(mobile, goal, NAV_FINE_POS, math.cos(NAV_FINE_YAW)):
+            return {**out, "skipped": "aligned"}
+        drive = self.drive_to(goal, free_goal=True)
+        drive.pop("trace_every_10", None)
+        return {**out, **drive}
+
+    def drive_to(self, goal, *, free_goal=False):
+        """Planned (or straight) base drive to the mobile pose ``goal``; returns the log."""
+        mobile = self.world.observe()["mobile"]
         start, contact_steps = self.steps, 0
         start_dist = math.hypot(goal[0] - mobile[0], goal[1] - mobile[1])
         obstacles = getattr(self.world, "obstacles", None)
@@ -978,7 +1120,11 @@ class ExpertRun:
         max_steps = NAVIGATE_MAX_STEPS
         if obstacles is not None:
             shape = getattr(self.world, "base_shape", None)
-            follower, plan = plan_navigation(obstacles(), mobile, goal, shape() if shape is not None else None)
+            follower, plan = plan_navigation(obstacles(), mobile, goal, shape() if shape is not None else None,
+                                             free_goal=free_goal)
+            if plan.get("goal_blocked"):
+                return {"skipped": "goal_blocked", **plan}
+            goal = tuple(plan.get("free_goal") or goal)
             if follower is not None:
                 drive = plan["planned_length"] / NAV_STEP_POS + plan["planned_turn"] / NAV_STEP_YAW
                 max_steps = int(min(NAV_PLANNED_MAX_STEPS, max(NAVIGATE_MAX_STEPS, math.ceil(1.5 * drive))))
@@ -1009,26 +1155,44 @@ class ExpertRun:
             if k % 10 == 0:
                 trace.append([round(float(v), 3) for v in (*mobile, frame_yaw)] + [int(touching)])
         mobile = self.world.observe()["mobile"]
-        return {"phase": "navigate", "steps": self.steps - start, "reached": navigation_done(mobile, goal),
+        return {"steps": self.steps - start, "reached": navigation_done(mobile, goal),
                 "goal": [float(v) for v in goal], "start_distance": round(start_dist, 4),
                 "final_distance": round(math.hypot(goal[0] - mobile[0], goal[1] - mobile[1]), 4),
                 "final_yaw_error": round(abs(wrap(goal[2] - mobile[2])), 4), "contact_steps": contact_steps,
                 "path_length": round(path, 4), "max_steps": max_steps, **plan, **self.frame.summary(frame_since),
                 "contact_bodies": dict(touched.most_common(5)),
                 "heading_cos_median": round(float(np.median(cosines)), 3) if cosines else None,
-                "heading_cos_below_half": sum(c < 0.5 for c in cosines), **place_log,
-                "trace_every_10": trace}
+                "heading_cos_below_half": sum(c < 0.5 for c in cosines), "trace_every_10": trace}
+
+    def replay_transform(self, source, i0, reference, obs):
+        """(transform, log): source world poses -> here, through the step's reference frame.
+
+        A door reference without a measured door (here or in the source) falls back to the base.
+        """
+        if reference[0] == "object":
+            return yaw_frame(obs["objects"][reference[1]]) @ inverse(yaw_frame(source.objects[reference[1]][i0])), {}
+        if reference[0] == "door":
+            doors = getattr(self.world, "doors", None)
+            door, dist = match_door(source.door, doors(reference[1]) if doors is not None else [])
+            if door is not None:
+                return door["frame"] @ inverse(source.door["frame"]), {
+                    "door": door["role"], "source_door": source.door["role"], "door_distance": round(dist, 4)}
+            log = {"door": None, "door_fallback": "base"}
+        else:
+            log = {}
+        return yaw_frame(obs["base"]) @ inverse(yaw_frame(source.base[i0])), log
 
     def track(self, source, step_index, reference):
         step = source.steps[step_index]
         i0 = source.at(step.start)
         obs = self.world.observe()
-        if reference[0] == "object":
-            src_ref = yaw_frame(source.objects[reference[1]][i0])
-            here_ref = yaw_frame(obs["objects"][reference[1]])
-        else:
-            src_ref, here_ref = yaw_frame(source.base[i0]), yaw_frame(obs["base"])
-        transform = here_ref @ inverse(src_ref)
+        transform, ref_log = self.replay_transform(source, i0, reference, obs)
+        align_log = None
+        if self.align_base and (reference[0] == "object" or ref_log.get("door")):
+            self.progress = {"phase": "track", "kind": step.kind, "aligning": True, "_start": self.steps, **ref_log}
+            align_log = self.align(align_goal(transform, source.base[i0], obs["base"], obs["mobile"]))
+            obs = self.world.observe()
+            transform, ref_log = self.replay_transform(source, i0, reference, obs)
         frames = range(step.start, step.end)
         targets = [transform @ source.eef[source.at(f)] for f in frames]
         bases = [transform @ source.base[source.at(f)] for f in frames]
@@ -1038,7 +1202,12 @@ class ExpertRun:
         frame_since = len(self.frame.samples)
         diag = TrackDiag()
         i, sent = 0, False
+        self.progress = {"phase": "track", "kind": step.kind, "frames": len(targets), "frame_reached": 0,
+                         "_start": start, "_diag": diag, **ref_log}
+        if align_log is not None:
+            self.progress["align"] = align_log
         while i < len(targets):
+            self.progress["frame_reached"], self.progress["_target"] = i, targets[i]
             obs = self.world.observe()
             diag.step(i)
             dz = bases[i][2, 3] - obs["base"][2, 3]
@@ -1095,8 +1264,11 @@ class ExpertRun:
                     diag.advance(err)
                 i += 1
                 sent = False
+        self.progress = None
         out = {"phase": "track", "kind": step.kind, "steps": self.steps - start, "frames": len(targets),
-               "base_mode_steps": base_frames, **diag.summary()}
+               "base_mode_steps": base_frames, **diag.summary(), **ref_log}
+        if align_log is not None:
+            out["align"] = align_log
         if base_frames:
             out.update(self.frame.summary(frame_since))
         if step.kind == PICK:
@@ -1120,6 +1292,21 @@ class ExpertRun:
         self.move_to(down, GRIPPER_CLOSE)
         self.release()
         return {"phase": "set_aside", "object": tool}
+
+    def stopped_phase(self, stop):
+        """The log of the phase a stop interrupted: how far it got and how far the hand was off."""
+        p = dict(self.progress)
+        self.progress = None
+        diag, target = p.pop("_diag", None), p.pop("_target", None)
+        out = {**p, "steps": self.steps - p.pop("_start", self.steps), "stopped": stop}
+        if diag is not None:
+            out.update(diag.summary())
+        if target is not None:
+            pos, rot = pose_error(self.world.observe()["eef"], target)
+            out.update({"error_at_stop": round(float(pos), 4), "rot_error_at_stop": round(float(rot), 4)})
+        if out.get("kind") == PICK:
+            out["holding_after"] = world_holding(self.world)
+        return out
 
     def tail(self, steps=TAIL_STEPS):
         """Hold still after the last phase so a predicate turning true at the end can register."""
@@ -1146,22 +1333,35 @@ class ExpertRun:
             stop = "program_end"
         except ExpertStop as exc:
             stop = str(exc)
+            if self.progress is not None:
+                self.log.append(self.stopped_phase(stop))
         return {"stop": stop, "expert_steps": self.steps, "navigation_steps": self.nav_steps,
                 "stage_completed": self.completed, "task_success": self.success, "phases": self.log}
 
 
 # ---- checks and Gate R (simulator-free) ---------------------------------------------------------
 
-def self_replay_summary(records, *, min_demos=SELF_REPLAY_DEMOS, threshold=SELF_REPLAY_MIN):
+def self_replay_stages(tasks):
+    """Every stage self-replay checks for ``tasks``: all R2 stages but the scripted set-aside."""
+    return [k for k, spec in STAGE_SPECS.items() if k[0] in set(tasks) and spec["kind"] != "set_aside"]
+
+
+def self_replay_summary(records, *, min_demos=SELF_REPLAY_DEMOS, threshold=SELF_REPLAY_MIN, expected=None):
+    """Per stage: completion over its demos. ``expected`` stages without records fail (no demos);
+    by default every R2 stage of the tasks in ``records``."""
     by = defaultdict(list)
     for r in records:
         by[(r["task_name"], r["predicate"])].append(r)
+    if expected is None:
+        expected = self_replay_stages({r["task_name"] for r in records})
+    for key in expected:
+        by.setdefault(tuple(key), [])
     stages, failing = [], []
     for (task, pred), rows in sorted(by.items()):
         done = sum(bool(r["stage_completed"]) for r in rows)
         conv = [r["convention_residual"] for r in rows if r.get("convention_residual") is not None]
         row = {"task_name": task, "predicate": pred, "demos": len(rows), "completed": done,
-               "rate": round(done / len(rows), 3), "enough_demos": len(rows) >= min_demos,
+               "rate": round(done / len(rows), 3) if rows else 0.0, "enough_demos": len(rows) >= min_demos,
                "max_convention_residual": max(conv) if conv else None,
                "errors": sum(bool(r.get("error")) for r in rows)}
         row["passed"] = row["enough_demos"] and row["rate"] >= threshold
@@ -1630,6 +1830,48 @@ class SimWorld:
                 out.append((body, poly))
         return out
 
+    def doors(self, fixture):
+        """``door_reference`` of every door joint (hinge or slide) of the kitchen fixture ``fixture``.
+
+        The handle is the mean position of the geoms named (or on bodies named) like a handle
+        below the joint's body; the body origin if there are none.
+        """
+        fxtr = getattr(self.kitchen, fixture, None)
+        if fxtr is None:
+            return []
+        model, data = self.kitchen.sim.model, self.kitchen.sim.data
+        prefix = str(getattr(fxtr, "name", fixture))
+        try:   # the joints RoboCasa's is_open reads; else every joint named for the fixture
+            wanted = set(fxtr.door_joint_names or [])
+        except Exception:
+            wanted = set()
+        parent = np.asarray(model.body_parentid)
+        handles = []
+        for g in range(int(model.ngeom)):
+            body = int(model.geom_bodyid[g])
+            if "handle" in (model.geom_id2name(g) or "").lower() or "handle" in (model.body_id2name(body) or "").lower():
+                handles.append((g, body))
+        out = []
+        for j in range(int(model.njnt)):
+            name = model.joint_id2name(j) or ""
+            jt = int(model.jnt_type[j])
+            if jt not in (2, 3) or not (name in wanted if wanted else name.startswith(prefix)):   # slide, hinge
+                continue
+            b = int(model.jnt_bodyid[j])
+            pts = []
+            for g, body in handles:
+                while body not in (b, 0):
+                    body = int(parent[body])
+                if body == b:
+                    pts.append(np.asarray(data.geom_xpos[g], dtype=float))
+            handle = np.mean(pts, axis=0) if pts else np.asarray(data.body_xpos[b], dtype=float)
+            door = door_reference(name[len(prefix):].lstrip("_"), "hinge" if jt == 3 else "slide", handle,
+                                  data.xanchor[j], data.xaxis[j], float(data.qpos[int(model.jnt_qposadr[j])]),
+                                  model.jnt_range[j])
+            door["handle_geoms"] = len(pts)
+            out.append(door)
+        return out
+
     def base_in_contact(self):
         """The mobile base touches anything but the robot and the floor (the world body).
 
@@ -1744,8 +1986,10 @@ class SimWorld:
             except Exception:
                 pass
         held_any, bodies = gripper_holds_any(self.kitchen)
+        doors = {spec["fixture"]: self.doors(spec["fixture"]) for (t, _), spec in STAGE_SPECS.items()
+                 if t == task_name and spec["kind"] == "fixture"}
         facts = {**obs, "held_task": held_task, "held_any": bool(held_any or held_task), "held_bodies": bodies,
-                 "predicates": self.predicates(), "correct_tool": None}
+                 "predicates": self.predicates(), "correct_tool": None, "doors": doors}
         if task_name == "CuttingToolSelection":
             facts["correct_tool"] = self.kitchen._CUTTING_MAP[self.kitchen.food]
         return facts
@@ -1757,6 +2001,7 @@ def facts_record(facts):
     return {"held_task": facts["held_task"], "held_any": facts["held_any"], "held_bodies": facts["held_bodies"],
             "correct_tool": facts["correct_tool"], "predicates": facts["predicates"],
             "mobile": [round(v, 4) for v in facts["mobile"]],
+            "doors": {k: [door_record(d) for d in v] for k, v in (facts.get("doors") or {}).items()},
             "objects_in_base_frame": {k: [round(float(x), 4) for x in p] + [round(y, 4)] for k, (p, y) in rel.items()}}
 
 
@@ -2292,7 +2537,8 @@ def run_self_replay(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, 
                         f"{' ERROR ' + record['error'].splitlines()[-1] if record.get('error') else ''}")
         finally:
             ladder._close(env, None)
-    summary = self_replay_summary(ladder.read_jsonl(out_path))
+    expected = [k for k in self_replay_stages(tasks) if wanted is None or k in wanted]
+    summary = self_replay_summary(ladder.read_jsonl(out_path), expected=expected)
     ladder.atomic_write_json(output_dir / "self_replay_summary.json", summary)
     log(json.dumps({k: summary[k] for k in ("passed", "failing")}, indent=2))
     return summary
@@ -2305,13 +2551,72 @@ def _finish_recording(world, record, video, suffix):
         world.recorder = None
 
 
+def source_door(world, fixture, restore_end):
+    """(door, log) of the door a restored source opens: the fixture joint that moves most between
+    the restored step start and ``restore_end()`` (which restores the segment's end)."""
+    before = {d["role"]: d for d in world.doors(fixture)}
+    restore_end()
+    after = {d["role"]: d for d in world.doors(fixture)}
+    moved = {r: abs(after[r]["q"] - d["q"]) for r, d in before.items() if r in after}
+    if not moved:
+        return None, {"error": f"no hinge or slide joints on {fixture}"}
+    role = max(moved, key=moved.get)
+    return before[role], {"moved": round(moved[role], 4), "q_end": round(after[role]["q"], 4),
+                          "doors": sorted(before)}
+
+
+def measure_source_doors(library, task, cache_path, *, make_env=None, max_sources=DOOR_SOURCES_MAX, log=print):
+    """The door each fixture-stage source of ``task`` opened, from its demo restored once (cached).
+
+    The first ``max_sources`` sources per stage are measured; the others have no door and rank
+    last. Rows go to ``cache_path`` (JSONL) and into ``library.doors``; rows already there are reused.
+    The door is read at the source's first manipulation step, at its closed configuration.
+    """
+    cache_path = Path(cache_path)
+    have = {(r["task_name"], int(r["episode"]), r["predicate"]): r for r in ladder.read_jsonl(cache_path)}
+    library.doors.update({k: door_from_record(r["door"]) for k, r in have.items() if r.get("door")})
+    todo = [(src, spec) for (t, predicate), spec in STAGE_SPECS.items() if t == task and spec["kind"] == "fixture"
+            for src in library.sources(task, predicate)[: int(max_sources)] if src.key not in have]
+    if not todo:
+        return
+    env = None
+    try:
+        env = (make_env or (lambda: _make_env(task, "target", 0)))()
+        env.reset()   # gymnasium refuses step() before the outer reset()
+        reset_to = ladder._env_method(env, "reset_to")
+        for src, spec in todo:
+            rec = {"task_name": task, "episode": int(src.episode), "predicate": src.predicate,
+                   "fixture": spec["fixture"], "created_at": ladder.utc_now()}
+            try:
+                states, ep_meta, model_xml = es.load_episode(library.lerobots[task], src.episode)
+                first = next((st for st in src.steps if st.kind != NAVIGATE), src.steps[0])
+                reset_to({"model": model_xml, "states": states[first.start], "ep_meta": json.dumps(ep_meta)})
+                end = min(int(src.segment_end or src.end), len(states)) - 1
+                door, info = source_door(SimWorld(env, reset=False), spec["fixture"],
+                                         lambda: reset_to({"states": states[end]}))
+                rec.update(info)
+                if door is not None:
+                    rec["door"] = door_record(door)
+                    library.doors[src.key] = door
+                    src.door = door
+            except Exception:
+                rec["error"] = traceback.format_exc()
+            ladder.append_jsonl(cache_path, rec)
+            log(f"[doors] {task}:{src.predicate} ep {src.episode} "
+                + (f"{rec['door']['role']} {rec['door']['type']} side={rec['door']['side']} "
+                   f"r={rec['door']['radius']:.3f} moved={rec['moved']}" if rec.get("door")
+                   else "ERROR " + rec["error"].strip().splitlines()[-1]))
+    finally:
+        ladder._close(env, None)
+
+
 def transfer_stages(task_name, required):
     return [p for p in required if (task_name, p) in STAGE_SPECS and (task_name, p) != WRONG_TOOL_STAGE]
 
 
 def run_transfer(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, dataset_base=None,
                  lerobot_overrides=None, resets=TRANSFER_RESETS, base_seed=TRANSFER_BASE_SEED, split="pretrain",
-                 resume=False, log=print):
+                 resume=False, doors_path=None, log=print):
     """Every stage in order from fresh pretrain-split resets, sources from the target demos."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -2322,6 +2627,7 @@ def run_transfer(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, dat
         raise FileExistsError(f"{out_path} exists; pass --resume")
     done = {(r["task_name"], int(r["environment_seed"])) for r in ladder.read_jsonl(out_path)}
     for task in tasks:
+        measure_source_doors(library, task, doors_path or output_dir / "source_doors.jsonl", log=log)
         env = None
         try:
             for i in range(int(resets)):
@@ -2396,7 +2702,8 @@ def continue_with_policy(env, policy, world, *, instruction, budget_left, seed, 
 
 def run_gate_r(source_runs, alarms_path, audit_dir, index_dir, output_dir, gains_path, *, dataset_base=None,
                lerobot_overrides=None, attempts=ATTEMPTS_PER_STATE, host=None, port=None, scene_tolerance=1e-6,
-               policy_args=None, shard_index=0, num_shards=1, record=True, resume=False, max_errors=20, log=print):
+               policy_args=None, shard_index=0, num_shards=1, record=True, resume=False, max_errors=20,
+               doors_path=None, log=print):
     from robocasa.recovery import alarm_branching as ab
 
     output_dir = Path(output_dir)
@@ -2439,6 +2746,7 @@ def run_gate_r(source_runs, alarms_path, audit_dir, index_dir, output_dir, gains
     errors = 0
     base_seed, protocol = int(config["base_seed"]), config["seed_protocol"]
     for task in tasks:
+        measure_source_doors(library, task, doors_path or output_dir / "source_doors.jsonl", log=log)
         wanted = {}
         for s in class2:
             if s["task_name"] != task:
@@ -2596,12 +2904,14 @@ def build_parser():
     data_args(p)
     p.add_argument("--tasks", nargs="*", default=list(es.PILOT_TASKS))
     p.add_argument("--resets", type=int, default=TRANSFER_RESETS)
+    p.add_argument("--doors", type=Path, help="cache of the doors fixture sources open (default: in --output-dir)")
     p = sub.add_parser("gate-r", help="expert + XR-1 at the class-2 alarm states (simulator + policy server)")
     data_args(p)
     p.add_argument("--source-runs", nargs="+", required=True, type=Path)
     p.add_argument("--alarms", required=True, type=Path, help="hs_p_alarm score-ladder rows")
     p.add_argument("--audit-dir", required=True, type=Path, help="R0 audit (decide has run)")
     p.add_argument("--attempts", type=int, default=ATTEMPTS_PER_STATE)
+    p.add_argument("--doors", type=Path, help="cache of the doors fixture sources open (default: in --output-dir)")
     p.add_argument("--host", default=None)
     p.add_argument("--port", type=int, default=None)
     p.add_argument("--policy-arg", action="append", default=[], help="key=value passed to the policy factory")
@@ -2658,12 +2968,13 @@ def main(argv=None):
         run_self_replay(args.index_dir, args.output_dir, args.gains, tasks=args.tasks, demos=args.demos,
                         stages=args.stages, action_replay=args.action_replay, videos=args.record, **common)
     elif args.command == "transfer":
-        run_transfer(args.index_dir, args.output_dir, args.gains, tasks=args.tasks, resets=args.resets, **common)
+        run_transfer(args.index_dir, args.output_dir, args.gains, tasks=args.tasks, resets=args.resets,
+                     doors_path=args.doors, **common)
     else:
         run_gate_r(args.source_runs, args.alarms, args.audit_dir, args.index_dir, args.output_dir, args.gains,
                    attempts=args.attempts, host=args.host, port=args.port,
                    policy_args=ladder._parse_policy_args(args.policy_arg), shard_index=args.shard_index,
-                   num_shards=args.num_shards, record=not args.no_record, **common)
+                   num_shards=args.num_shards, record=not args.no_record, doors_path=args.doors, **common)
 
 
 if __name__ == "__main__":

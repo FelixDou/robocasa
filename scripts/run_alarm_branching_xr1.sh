@@ -216,6 +216,8 @@ if [[ "$action" == r2-self-replay || "$action" == r2-transfer ]]; then
   out="$r2_dir/$command"
   resume=()
   [[ ! -e "$out/${command//-/_}.jsonl" ]] || resume=(--resume)
+  # Doors the fixture sources open, measured once from their restored demos (shared with Gate R).
+  [[ "$command" != transfer ]] || resume+=(--doors "$r2_dir/source_doors.jsonl")
   mkdir -p "$out"
   git -C "$ROBOCASA_REPO" rev-parse HEAD > "$out/git_commit.txt"
   log="$log_dir/$(basename "$ALARM_ROOT")_r2_${command}_$(date +%Y%m%d_%H%M%S).log"
@@ -258,7 +260,7 @@ if [[ "$action" == r2-gate ]]; then
     || [[ -n "${R2_SKIP_CHECKS:-}" ]] || { echo "The executor checks have not passed (plan: R2 part 3)"; exit 1; }
   gate_root="$r2_dir/gate_r"
   extra=(--source-runs "${sources[@]}" --alarms "$alarms" --audit-dir "$audit_dir" --index-dir "$segments_dir/index"
-         --dataset-base "$ROBOCASA_DATASET_BASE" --gains "$gains")
+         --dataset-base "$ROBOCASA_DATASET_BASE" --gains "$gains" --doors "$r2_dir/source_doors.jsonl")
   [[ ! -d "$gate_root" ]] || extra+=(--resume)
   mkdir -p "$gate_root"
   git -C "$ROBOCASA_REPO" rev-parse HEAD > "$gate_root/git_commit.txt"

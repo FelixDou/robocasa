@@ -1428,6 +1428,43 @@ choice open, the code fixes it as follows:
     `drawer_open` had none.
   - Self-replay restores each demo's own state, so none of these could show
     there.
+
+  *Amendment: base alignment and door frames (28 November 2026, before the
+  second transfer run).* It replaces the rule above that fixture stages replay
+  relative to the robot base.
+  - *Base alignment.* Before each step replayed relative to an object or a
+    door, the base drives (box planner) to the source's base pose at the step's
+    start, carried through the same transform as the hand path. The hand path
+    is then the demo's own in the base frame. The goal is the mobile pose that
+    puts the robot base there; the planar offset between the two is read live.
+    If the box does not fit at the goal, the goal moves to the nearest pose
+    within 0.20 m (2.5 cm grid, same heading) where it does. If none fits, the
+    base stays put and the log says `goal_blocked`. The drive counts as
+    navigation, not against the step cap. Self-replay is unchanged: there the
+    transform is the identity, so alignment is skipped.
+  - *Door frames.* A fixture stage's steps replay relative to the door the
+    source opened. That door is the fixture joint (RoboCasa's
+    `door_joint_names`) that moves most over the source's segment, read once
+    from the restored demo and cached in `r2/source_doors.jsonl`. The first 40
+    sources per stage (episode order) are measured; the rest rank last.
+    - The frame sits on the handle (mean of the handle geoms below the joint's
+      body) at the joint's zero, so a partly open door gives the same frame.
+    - Its x axis is the handle's horizontal opening direction, which points
+      out of the fixture's front for either hinge side.
+    - Sources rank by how unlike the door is: 1.0 for another type or hinge
+      side, plus the difference in hinge radius and handle height, plus 0.1 for
+      another door of the fixture.
+    - Without a measured door (here or in the source), the step falls back to
+      the base frame and is not aligned.
+  - *Logs.* A stop inside a step now logs that step: the frame it reached, the
+    hand's error then, and the grasp after a pick.
+  - *Self-replay summary.* Every R2 stage of the tasks run is listed. A stage
+    with fewer than 20 demos, none included, fails. Under this rule the third
+    self-replay fails on `CuttingToolSelection:drawer_open` (0 demos).
+  - *drawer_open is open.* RoboCasa's `is_open` asks for 90% of the drawer's
+    travel (0.55 × its depth). In all 100 clean CuttingToolSelection demos the
+    predicate is never true, so R1 links no segment to it. A completion rule
+    the demos reach is needed before that task can transfer.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

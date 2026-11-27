@@ -299,7 +299,7 @@ class PlanTest(unittest.TestCase):
         src = self.near[0]
         phases = er.stage_phases(src, er.STAGE_SPECS[("ArrangeTea", "cabinet_closed")], None, 0)
         self.assertEqual(phases[0], {"phase": "navigate", "reference": ["fixture", "cab"], "if_needed": True})
-        self.assertTrue(all(ph["reference"] == list(er.BASE_REF) for ph in phases[1:]))
+        self.assertTrue(all(ph["reference"] == ["door", "cab"] for ph in phases[1:]))
         own = er.stage_phases(src, er.STAGE_SPECS[("ArrangeTea", "cabinet_closed")], None, 0,
                               navigate_to_fixture=False)
         self.assertEqual([ph["phase"] for ph in own], ["track", "track"])
@@ -343,7 +343,9 @@ class ExecutorTest(unittest.TestCase):
         result = self.run_program(world, program, [demo])
         self.assertTrue(result["stage_completed"], result)
         self.assertEqual(result["stop"], "stage")
-        self.assertEqual([p["kind"] for p in result["phases"]], [er.PICK])   # stopped inside the place step
+        self.assertEqual([p["kind"] for p in result["phases"]], [er.PICK, er.PLACE])
+        self.assertEqual(result["phases"][1]["stopped"], "stage")            # stopped inside the place step
+        self.assertTrue(result["phases"][0]["align"]["reached"], result["phases"][0]["align"])
 
     def test_navigation_then_pick_and_place(self):
         demo = demo_source(world_pose(0.6, 0.0, 0.9), world_pose(0.6, -0.4, 0.9), world_pose(0, 0, 0.3))
@@ -863,8 +865,11 @@ class GateTest(unittest.TestCase):
         rows = [{"task_name": "ArrangeTea", "predicate": "mug_on_tray", "stage_completed": i < 18,
                  "convention_residual": 1e-5} for i in range(20)]
         rows += [{"task_name": "ArrangeTea", "predicate": "kettle_on_tray", "stage_completed": True}] * 5
-        s = er.self_replay_summary(rows)
+        s = er.self_replay_summary(rows, expected=[("ArrangeTea", "mug_on_tray")])
         self.assertEqual(s["failing"], ["ArrangeTea:kettle_on_tray"])           # too few demos
+        every = er.self_replay_summary(rows)                                     # every ArrangeTea stage
+        self.assertEqual(every["failing"], ["ArrangeTea:cabinet_closed", "ArrangeTea:kettle_on_tray"])
+        self.assertEqual(next(x for x in every["stages"] if x["predicate"] == "cabinet_closed")["demos"], 0)
         self.assertTrue(next(x for x in s["stages"] if x["predicate"] == "mug_on_tray")["passed"])
         runs = [{"task_name": "ArrangeTea", "stages": [{"predicate": "kettle_on_tray", "stage_completed": True},
                                                        {"predicate": "mug_on_tray", "stage_completed": i < 6}]}
@@ -1355,3 +1360,140 @@ class RecorderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DoorWorld(FakeWorld):
+    """FakeWorld with one measured door on the fixture ``cab``."""
+
+    def __init__(self, door, **kw):
+        super().__init__(**kw)
+        self.door = door
+
+    def doors(self, fixture):
+        return [self.door] if fixture == "cab" else []
+
+
+def door_demo(door_frame, base_T, *, episode=0):
+    """A demo that reaches the handle (frames 0-14), closes, and pulls 0.2 m out (15-29)."""
+    R = door_frame[:3, :3] @ er.rot_z(math.pi) @ R_DOWN       # facing the door
+    handle = door_frame[:3, 3]
+    out = door_frame[:3, 0]
+    start = handle + 0.25 * out + np.array([0, 0, 0.1])
+    path = ([start + (handle - start) * s for s in np.linspace(0, 1, 15)]
+            + [handle + 0.2 * out * s for s in np.linspace(0, 1, 15)])
+    n = len(path)
+    door = {"role": "door_hinge", "type": "hinge", "frame": door_frame, "q": 0.0, "open_sign": 1.0,
+            "range": [0.0, 1.6], "side": 1, "radius": 0.4, "height": float(handle[2])}
+    return er.Source(task_name="ArrangeTea", episode=episode, predicate="cabinet_closed", target=None, start=0,
+                     end=n, steps=[er.SourceStep("OpenCabinet", er.EXECUTE, 0, n)],
+                     eef=np.stack([er.pose(p, R) for p in path]), base=np.stack([base_T] * n),
+                     gripper=np.array([0.0] * 15 + [1.0] * 15), door=door)
+
+
+class AlignmentTest(unittest.TestCase):
+    def test_align_goal_puts_the_base_where_the_source_stood(self):
+        src_base = world_pose(0.2, -0.1, 0.3, yaw=0.4)
+        transform = world_pose(1.0, 2.0, 0.0, yaw=0.7)
+        world = FakeWorld(mobile=(-1.0, 0.5, 2.0))
+        obs = world.observe()
+        goal = er.align_goal(transform, src_base, obs["base"], obs["mobile"])
+        world.mobile = np.array(goal)
+        np.testing.assert_allclose(er.yaw_frame(world.base_T()), er.yaw_frame(transform @ src_base), atol=1e-9)
+
+    def test_door_reference_is_read_at_the_closed_door_on_either_hinge_side(self):
+        a1, a2 = np.array([0.0, 0.0, 0.0]), np.array([0.8, 0.0, 0.0])
+        h1 = a1 + er.rot_z(0.5) @ np.array([0.4, 0.0, 0.9])           # left door, opened 0.5 rad
+        left = er.door_reference("left_door", "hinge", h1, a1, [0, 0, 1], 0.5, (0.0, 1.6))
+        right = er.door_reference("right_door", "hinge", [0.4, 0.0, 0.9], a2, [0, 0, 1], 0.0, (-1.6, 0.0))
+        for door in (left, right):
+            np.testing.assert_allclose(door["frame"][:3, 3], [0.4, 0.0, 0.9], atol=1e-9)
+            self.assertAlmostEqual(er.yaw_of(door["frame"][:3, :3]), math.pi / 2)   # out of the front (+y)
+            self.assertAlmostEqual(door["radius"], 0.4)
+        self.assertEqual((left["side"], right["side"]), (1, -1))
+        drawer = er.door_reference("slidejoint", "slide", [1.0, 0.1, 0.5], [9, 9, 9], [0, -1, 0], -0.1, (-0.3, 0.0))
+        np.testing.assert_allclose(drawer["frame"][:3, 3], [1.0, 0.0, 0.5], atol=1e-9)
+        self.assertAlmostEqual(er.yaw_of(drawer["frame"][:3, :3]), math.pi / 2)
+        self.assertEqual(drawer["side"], 0)
+        back = er.door_from_record(json.loads(json.dumps(er.door_record(left))))
+        np.testing.assert_allclose(back["frame"], left["frame"], atol=1e-6)
+
+    def test_doors_are_matched_by_type_side_size_and_role(self):
+        src = er.door_reference("left_door", "hinge", [0.4, 0, 0.9], [0, 0, 0], [0, 0, 1], 0.0, (0.0, 1.6))
+        mirror = er.door_reference("right_door", "hinge", [0.4, 0, 0.9], [0.8, 0, 0], [0, 0, 1], 0.0, (-1.6, 0.0))
+        wider = er.door_reference("door", "hinge", [0.5, 0, 0.9], [0, 0, 0], [0, 0, 1], 0.0, (0.0, 1.6))
+        door, d = er.match_door(src, [mirror, wider])
+        self.assertIs(door, wider)
+        self.assertAlmostEqual(d, 0.1 + er.DOOR_ROLE_MISMATCH)
+        self.assertEqual(er.match_door(None, [wider])[0], None)
+        world = FakeWorld()
+        facts = {**facts_of(world), "doors": {"cab": [wider]}}
+        near = door_demo(wider["frame"], world_pose(0, 0, 0.3), episode=1)
+        far = door_demo(mirror["frame"], world_pose(0, 0, 0.3), episode=2)
+        near.door, far.door = wider, mirror
+        ranked = er.rank_sources([far, near], facts, lambda s: 0, lambda st: ("door", "cab"))
+        self.assertEqual([s.episode for _, s in ranked], [1, 2])
+
+    def test_a_door_step_replays_relative_to_the_door_after_aligning_the_base(self):
+        demo_door = er.pose([0.7, 0.0, 0.8], er.rot_z(math.pi))      # handle ahead, front facing the robot
+        demo = door_demo(demo_door, world_pose(0.0, 0.0, 0.3))
+        here_frame = er.pose([3.0, 2.0, 0.8], er.rot_z(math.pi + 0.6))
+        here = {**demo.door, "frame": here_frame}
+        world = DoorWorld(here, mobile=(2.5, 1.0, -0.4))
+        run = er.ExpertRun(world, TRUE_GAINS, {demo.key: demo}, None, cap=10 ** 5, budget=10 ** 5)
+        out = run.run([{"phase": "track", "source": list(demo.key), "step": 0, "kind": er.EXECUTE,
+                        "reference": ["door", "cab"]}])
+        phase = out["phases"][0]
+        self.assertEqual(phase["door"], "door_hinge")
+        transform = here_frame @ er.inverse(demo_door)
+        want = er.yaw_frame(transform @ demo.base[0])
+        np.testing.assert_allclose(er.yaw_frame(world.base_T())[:2, 3], want[:2, 3], atol=er.NAV_FINE_POS)
+        np.testing.assert_allclose(world.eef[:3, 3], (transform @ demo.eef[-1])[:3, 3], atol=er.TRACK_TOL)
+        self.assertLess(phase["closes"][0]["pos"], er.TRACK_TOL)        # closes on the handle here
+        no_door = DoorWorld(None, mobile=(2.5, 1.0, -0.4))
+        no_door.doors = lambda fixture: []
+        run = er.ExpertRun(no_door, TRUE_GAINS, {demo.key: demo}, None, cap=10 ** 5, budget=10 ** 5)
+        phase = run.run([{"phase": "track", "source": list(demo.key), "step": 0, "kind": er.EXECUTE,
+                          "reference": ["door", "cab"]}])["phases"][0]
+        self.assertEqual(phase["door_fallback"], "base")                # base-relative, no alignment
+        self.assertNotIn("align", phase)
+
+    def test_the_door_a_restored_source_opens_is_the_joint_that_moved(self):
+        class Restored:
+            def __init__(self):
+                self.q = {"left_door": 0.0, "right_door": 0.0}
+
+            def doors(self, fixture):
+                return [er.door_reference(r, "hinge", [0.4, 0, 0.9], [0, 0, 0], [0, 0, 1], q, (0.0, 1.6))
+                        for r, q in self.q.items()]
+
+        world = Restored()
+        door, info = er.source_door(world, "cab", lambda: world.q.update(right_door=1.2))
+        self.assertEqual((door["role"], door["q"], info["moved"]), ("right_door", 0.0, 1.2))
+
+    def test_a_blocked_aligned_goal_moves_to_the_nearest_free_pose_or_is_refused(self):
+        counter = np.array([[1.0, -1.0], [3.0, -1.0], [3.0, 1.0], [1.0, 1.0]])
+        goal = (0.95, 0.0, 0.0)           # the box reaches 0.15 m ahead of the origin: 10 cm into the counter
+        _, log = er.plan_navigation([("counter", counter)], (-1.5, 0.0, 0.0), goal, free_goal=True)
+        self.assertIn("free_goal", log)
+        self.assertLessEqual(log["goal_shift"], er.ALIGN_SHIFT_MAX + 1e-9)
+        self.assertLess(log["free_goal"][0], goal[0])                   # backed off the counter
+        self.assertEqual(log["plan"], "planned")
+        room = np.array([[0.0, -2.0], [2.0, -2.0], [2.0, 2.0], [0.0, 2.0]])
+        _, log = er.plan_navigation([("island", room)], (-1.5, 0.0, 0.0), (1.0, 0.0, 0.0), free_goal=True)
+        self.assertTrue(log["goal_blocked"])
+        _, log = er.plan_navigation([("island", room)], (-1.5, 0.0, 0.0), (1.0, 0.0, 0.0))
+        self.assertEqual(log["dropped_obstacles"], ["island"])           # a plain drive still drops it
+
+    def test_a_stop_inside_a_step_logs_how_far_it_got(self):
+        demo = demo_source(world_pose(0.6, 0.0, 0.9), world_pose(0.6, -0.4, 0.9), world_pose(0, 0, 0.3))
+        world = FakeWorld(objects={"obj": world_pose(0.6, 0.0, 0.9), "container": world_pose(0.6, -0.4, 0.9)},
+                          predicate=mug_on_tray)
+        program = er.plan_attempts("ArrangeTea", "mug_on_tray", facts_of(world), FakeLibrary([demo]), n=1)[0]
+        run = er.ExpertRun(world, TRUE_GAINS, {demo.key: demo}, "mug_on_tray", cap=30, budget=10 ** 5)
+        out = run.run(program["phases"])
+        last = out["phases"][-1]
+        self.assertEqual((out["stop"], last["stopped"], last["kind"]), ("cap", "cap", er.PICK))
+        self.assertGreater(last["frame_reached"], 0)
+        self.assertLess(last["frame_reached"], last["frames"])
+        self.assertIn("error_at_stop", last)
+        self.assertIsInstance(last["holding_after"], bool)
