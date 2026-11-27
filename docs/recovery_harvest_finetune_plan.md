@@ -356,6 +356,29 @@ negligible folder on port 10470 into
 `robocasa_logs/eval`: `xr1_step0_naturals_base_shard0_20261126_231110.log` and
 `xr1_step0_naturals_negligible_shard0_20261126_231116.log`.
 
+*Step 7 result (27 November 2026): passed.* `compare-rollouts` (written at
+`robocasa_rollouts/recovery/xr1_step0_naturals_negligible/paired_comparison.json`)
+paired all 100 rollouts, with none unpaired on either side. The two folders
+succeeded on exactly the same pairs: no pair succeeded with only one of them.
+
+| Task | Pairs | Base | Negligible folder | Difference |
+|---|---:|---:|---:|---:|
+| ArrangeBreadBasket | 20 | 11 | 11 | 0 |
+| ArrangeTea | 20 | 12 | 12 | 0 |
+| BreadSelection | 20 | 9 | 9 | 0 |
+| CuttingToolSelection | 20 | 9 | 9 | 0 |
+| GarnishPancake | 20 | 12 | 12 | 0 |
+| Pooled | 100 | 53 | 53 | 0 |
+
+Identical outcomes on every pair are what weights 2.9e-11 apart should give,
+so the derived folder is served exactly like the base checkpoint. The base's
+53/100 on these seeds is a separate, descriptive number for the pretrain split.
+
+**Step 0 passed (27 November 2026).** Both gates (step 5, input match; step 7,
+paired rollouts) passed before the 15 January 2027 deadline. XR-1 stays the
+policy and the fallback is not used. Next: R2's checks on the cluster
+(`probe-controls`, then self-replay and transfer), then Gate R.
+
 ## Phase A: recoverability at the Hide-and-Seek + P alarm (no new parents)
 
 **A0 (CPU, offline).** Score the 76 ladder v2 parents with the frozen
@@ -1142,7 +1165,7 @@ Runs go from a pinned worktree if other recovery runs share the checkout.
 - Step 0 answers: XR-1 fine-tuning entry point and data format (answered 26
   November, see Step 0 findings); whether the training model takes the
   RoboCasa365 inputs, the input-match check, run time and the sanity-check
-  result (open).
+  result (answered 27 November: Step 0 passed).
 - Exact recovery-prompt text and the replay mixing ratio, frozen with the
   training code.
 - Whether ladder v2 snapshots on `/gs/bs` are complete for all 76 parents
