@@ -1459,12 +1459,22 @@ choice open, the code fixes it as follows:
   - *Logs.* A stop inside a step now logs that step: the frame it reached, the
     hand's error then, and the grasp after a pick.
   - *Self-replay summary.* Every R2 stage of the tasks run is listed. A stage
-    with fewer than 20 demos, none included, fails. Under this rule the third
-    self-replay fails on `CuttingToolSelection:drawer_open` (0 demos).
-  - *drawer_open is open.* RoboCasa's `is_open` asks for 90% of the drawer's
-    travel (0.55 × its depth). In all 100 clean CuttingToolSelection demos the
-    predicate is never true, so R1 links no segment to it. A completion rule
-    the demos reach is needed before that task can transfer.
+    with fewer than 20 demos, none included, fails. The one exception is a
+    stage whose predicate holds at the first frame of every clean demo: there
+    is nothing to replay, and it passes untested (`true_at_start`). Self-replay
+    writes one `no_sources` row per stage without demos, carrying that share.
+    GarnishPancake's `pancake_on_plate` and `plate_on_table` are the expected
+    cases.
+  - *drawer_open is skipped.* CuttingToolSelection is RoboCasa's
+    `ManipulateDrawer` with `behavior="close"`, whose reset opens the drawer to
+    27–30% of its travel. `drawer_open` is `is_open`, which asks for 90% (of
+    0.55 × the drawer's depth). It is false in every reset and in all 100 clean
+    demos. Every demo segments as pick and place, and the first instruction
+    reads "pick up the peeler from the right open drawer". No one performs the
+    stage, and the ladder runs already exclude it (`exclude_predicates`). R2
+    skips it in transfer and self-replay (`EXCLUDED_STAGES`). The third
+    self-replay predates the `no_sources` rows; resuming it adds them without
+    replaying anything.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

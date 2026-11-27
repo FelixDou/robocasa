@@ -870,6 +870,14 @@ class GateTest(unittest.TestCase):
         every = er.self_replay_summary(rows)                                     # every ArrangeTea stage
         self.assertEqual(every["failing"], ["ArrangeTea:cabinet_closed", "ArrangeTea:kettle_on_tray"])
         self.assertEqual(next(x for x in every["stages"] if x["predicate"] == "cabinet_closed")["demos"], 0)
+        for share, passed in ((1.0, True), (0.97, False)):          # true at every demo's start: nothing to replay
+            marked = rows + [{"task_name": "ArrangeTea", "predicate": "cabinet_closed", "episode": None,
+                              "no_sources": True, "stage_completed": False, "true_at_start_share": share}]
+            row = next(x for x in er.self_replay_summary(marked)["stages"] if x["predicate"] == "cabinet_closed")
+            self.assertEqual(row["passed"], passed, share)
+        index = [{"task_name": "T", "clean": True, "stage_events": {"p": {"true_at_start": i < 3}}} for i in range(4)]
+        index.append({"task_name": "T", "clean": False, "stage_events": {"p": {"true_at_start": False}}})
+        self.assertEqual(er.true_at_start_share(index, "T", "p"), 0.75)
         self.assertTrue(next(x for x in s["stages"] if x["predicate"] == "mug_on_tray")["passed"])
         runs = [{"task_name": "ArrangeTea", "stages": [{"predicate": "kettle_on_tray", "stage_completed": True},
                                                        {"predicate": "mug_on_tray", "stage_completed": i < 6}]}
@@ -879,6 +887,10 @@ class GateTest(unittest.TestCase):
         self.assertEqual(er.transfer_stages("ArrangeTea", ["kettle_on_tray", "mug_on_tray", "cabinet_closed",
                                                            "gripper_released"]),
                          ["kettle_on_tray", "mug_on_tray", "cabinet_closed"])
+        self.assertEqual(er.transfer_stages("CuttingToolSelection", ["drawer_open", "correct_tool_on_cutting_board",
+                                                                     "wrong_tool_not_on_cutting_board"]),
+                         ["correct_tool_on_cutting_board"])         # the reset opens the drawer
+        self.assertNotIn(("CuttingToolSelection", "drawer_open"), er.self_replay_stages(["CuttingToolSelection"]))
 
     def test_cli_parser(self):
         args = er.build_parser().parse_args(["gate-r", "--index-dir", "i", "--gains", "g.json", "--output-dir", "o",

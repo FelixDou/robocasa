@@ -127,6 +127,11 @@ STAGE_SPECS = {
     ("GarnishPancake", "strawberry_on_pancake"): {"kind": "pick_place", "object": "strawberry",
                                                   "reference": ("object", "pancake")},
 }
+# Stages no one performs: CuttingToolSelection is ManipulateDrawer(behavior="close"), whose reset opens
+# the drawer to 27-30% of its travel; ``drawer_open`` (RoboCasa's is_open, 90%) is false in every reset
+# and every demo, and the demos start by picking the tool from the open drawer. The ladder runs
+# exclude it the same way (``exclude_predicates``); R2 skips it in transfer and self-replay.
+EXCLUDED_STAGES = {("CuttingToolSelection", "drawer_open")}
 CUTTING_TOOLS = ("knife", "peeler")
 WRONG_TOOL_STAGE = ("CuttingToolSelection", "wrong_tool_not_on_cutting_board")
 CORRECT_TOOL_STAGE = ("CuttingToolSelection", "correct_tool_on_cutting_board")
@@ -427,6 +432,15 @@ def build_source(row, predicate, *, named, actions, object_names, object_pos, ob
                   gripper=np.asarray(actions[frames, 6], dtype=float), objects=objects,
                   mode=np.asarray(actions[frames, 11], dtype=float), actions=np.asarray(actions[frames], dtype=float),
                   first_true=event.get("first_true"))
+
+
+def true_at_start_share(rows, task_name, predicate):
+    """Share of the task's clean index rows whose first frame already has ``predicate``; None if none."""
+    clean = [r for r in rows if r["task_name"] == task_name and r["clean"]]
+    if not clean:
+        return None
+    hits = sum(bool(((r.get("stage_events") or {}).get(predicate) or {}).get("true_at_start")) for r in clean)
+    return round(hits / len(clean), 4)
 
 
 def usable_rows(rows, task_name, predicate):
@@ -1343,14 +1357,19 @@ class ExpertRun:
 
 def self_replay_stages(tasks):
     """Every stage self-replay checks for ``tasks``: all R2 stages but the scripted set-aside."""
-    return [k for k, spec in STAGE_SPECS.items() if k[0] in set(tasks) and spec["kind"] != "set_aside"]
+    return [k for k, spec in STAGE_SPECS.items()
+            if k[0] in set(tasks) and spec["kind"] != "set_aside" and k not in EXCLUDED_STAGES]
 
 
 def self_replay_summary(records, *, min_demos=SELF_REPLAY_DEMOS, threshold=SELF_REPLAY_MIN, expected=None):
-    """Per stage: completion over its demos. ``expected`` stages without records fail (no demos);
-    by default every R2 stage of the tasks in ``records``."""
-    by = defaultdict(list)
+    """Per stage: completion over its demos. ``expected`` stages without records fail (no demos),
+    unless a ``no_sources`` record says the predicate holds at the start of every clean demo.
+    ``expected`` defaults to every R2 stage of the tasks in ``records``."""
+    by, starts = defaultdict(list), {}
     for r in records:
+        if r.get("no_sources"):
+            starts[(r["task_name"], r["predicate"])] = r.get("true_at_start_share")
+            continue
         by[(r["task_name"], r["predicate"])].append(r)
     if expected is None:
         expected = self_replay_stages({r["task_name"] for r in records})
@@ -1358,6 +1377,11 @@ def self_replay_summary(records, *, min_demos=SELF_REPLAY_DEMOS, threshold=SELF_
         by.setdefault(tuple(key), [])
     stages, failing = [], []
     for (task, pred), rows in sorted(by.items()):
+        if not rows and starts.get((task, pred)) == 1.0:
+            # True from the first frame of every clean demo: there is nothing to replay.
+            stages.append({"task_name": task, "predicate": pred, "demos": 0, "completed": 0, "rate": None,
+                           "true_at_start": True, "passed": True})
+            continue
         done = sum(bool(r["stage_completed"]) for r in rows)
         conv = [r["convention_residual"] for r in rows if r.get("convention_residual") is not None]
         row = {"task_name": task, "predicate": pred, "demos": len(rows), "completed": done,
@@ -2480,9 +2504,18 @@ def run_self_replay(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, 
         env = None
         try:
             for (t, predicate), spec in STAGE_SPECS.items():
-                if t != task or spec["kind"] == "set_aside" or (wanted is not None and (t, predicate) not in wanted):
+                if (t != task or spec["kind"] == "set_aside" or (t, predicate) in EXCLUDED_STAGES
+                        or (wanted is not None and (t, predicate) not in wanted)):
                     continue
-                for n, src in enumerate(library.sources(task, predicate)[: int(demos)]):
+                found = library.sources(task, predicate)[: int(demos)]
+                if not found and (task, predicate, None) not in done:
+                    record = {"task_name": task, "predicate": predicate, "episode": None, "no_sources": True,
+                              "stage_completed": False, "true_at_start_share": true_at_start_share(
+                                  library.rows, task, predicate), "created_at": ladder.utc_now()}
+                    ladder.append_jsonl(out_path, record)
+                    log(f"[self-replay] {task}:{predicate} no sources "
+                        f"(true at start in {record['true_at_start_share']} of the clean demos)")
+                for n, src in enumerate(found):
                     if (task, predicate, src.episode) in done:
                         continue
                     record = {"task_name": task, "predicate": predicate, "episode": src.episode,
@@ -2611,7 +2644,8 @@ def measure_source_doors(library, task, cache_path, *, make_env=None, max_source
 
 
 def transfer_stages(task_name, required):
-    return [p for p in required if (task_name, p) in STAGE_SPECS and (task_name, p) != WRONG_TOOL_STAGE]
+    return [p for p in required if (task_name, p) in STAGE_SPECS and (task_name, p) != WRONG_TOOL_STAGE
+            and (task_name, p) not in EXCLUDED_STAGES]
 
 
 def run_transfer(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, dataset_base=None,
