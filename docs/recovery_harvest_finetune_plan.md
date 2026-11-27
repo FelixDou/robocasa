@@ -1272,6 +1272,49 @@ choice open, the code fixes it as follows:
   navigation plan logs of the failing episodes (was a path planned, was the
   door dropped as containing the start or goal), and a diagnostic run of
   both stages (all 20 demos, the action-replay control, videos).
+
+  *The plan logs.* Every failing drive had a planned path, and no obstacle
+  was dropped. The base pinned on the door within about 30 steps, while
+  turning to the goal heading. The cause is the robot model. The planner
+  treated the base as a point that must stay 10 cm from footprints. In
+  robosuite's Omron base the collision box (`pedestal_feet_col`) is
+  0.70 x 0.50 m, centred 0.20 m behind the pose the controller steers, and
+  the yaw joint is 0.21 m behind it. The rear corners reach 0.60 m from the
+  steered point and swing through doors as the base turns.
+
+  *Amendment: the planner moves the base's box.* Search states are
+  (cell, heading), with 16 headings. Moves go to the 8 neighbouring cells at
+  a fixed heading or turn one heading bin in place about the yaw axis.
+  - For each heading, a grid holds the box's clearance with its yaw axis at
+    each cell. It is the minimum of the footprint distance field over the
+    box's cells, widened by half a cell diagonal. On a cell centre (every
+    planned state) it matches the exact box gap to within 3.5 cm.
+  - A state needs `HARD_GAP` = 3 cm of clearance. Below `SOFT_GAP` = 15 cm
+    it costs extra. A heading bin costs 5 cm of travel.
+  - Door footprints are rasterised conservatively (every cell they touch
+    reads 0), so a box cannot slip through a 2 cm door between cells.
+  - A start or goal box closer than 3 cm (parked against a counter's
+    overhang) first moves straight out at its own heading. It never comes
+    closer to what it touches, nor closer than 2 cm to a door.
+  - The follower aims 0.15 m ahead along the path (a radian counts 0.3 m)
+    and returns the controller pose, heading included. The base turns where
+    the path turns, not straight away.
+  - The navigation step limit counts turning as well as distance.
+
+  `SimWorld.base_shape` measures the box and the yaw-joint position from the
+  model (the mobile base's collision geoms in its body frame) and falls back
+  to the robosuite numbers. The plan log records it (`base_shape`) with the
+  planned turn. Tests:
+  - the grid's box clearance matches the exact gap at all 16 headings;
+  - a 2 cm door through the box is never missed;
+  - the path goes around an island with no box overlap anywhere along it;
+  - the base turns lengthwise before a 0.62 m corridor it cannot cross
+    sideways;
+  - the base leaves a counter it is parked 2 cm from;
+  - a base parked 1.5 cm beside an open door never crosses it;
+  - the executor drives around an island where the straight line pins.
+
+  The grid and the search take about 0.5 s on a 10 x 8 m scene.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

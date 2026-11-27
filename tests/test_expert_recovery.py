@@ -579,18 +579,25 @@ class SelfReplayLoopTest(unittest.TestCase):
 
 
 class BlockedWorld(FakeWorld):
-    """The base stops where its centre would come within ``radius`` of an island's footprint."""
+    """The base stops where its collision box would overlap an island's footprint.
 
-    def __init__(self, island, radius=0.3, planner=True, **kwargs):
+    FakeWorld turns the base about its own origin, so the box's turning axis is the origin; the
+    box sits behind it, as on the Omron base.
+    """
+
+    SHAPE = er.bp.BaseShape(half=(0.35, 0.25), centre=(-0.20, 0.0), pivot=(0.0, 0.0))
+
+    def __init__(self, island, planner=True, **kwargs):
         super().__init__(**kwargs)
-        self.island, self.radius, self.blocked = island, radius, 0
+        self.island, self.blocked = island, 0
         if planner:
             self.obstacles = lambda: [("table", self.island)]
+            self.base_shape = lambda: self.SHAPE
 
     def step(self, a):
         mobile, eef = self.mobile.copy(), self.eef.copy()
         info = super().step(a)
-        if er.bp.polygon_distance(self.mobile[None, :2], self.island)[0] < self.radius:
+        if er.bp.polygons_overlap(self.SHAPE.corners(self.mobile), self.island):
             self.mobile, self.eef = mobile, eef
             self.blocked += 1
         return info

@@ -663,32 +663,37 @@ def program_cap(program, library_sources):
 
 # ---- R2b: the executor (world adapter: real simulator or a test stand-in) -----------------------
 
-def plan_navigation(obstacles, mobile, goal):
+def plan_navigation(obstacles, mobile, goal, shape=None):
     """(PathFollower or None, log) for a drive from ``mobile`` to ``goal`` among named footprints.
 
+    The planner moves the base's collision box (``shape``, a ``bp.BaseShape``; robosuite's
+    Omron base by default) over position and heading. Footprints named like doors are thin.
     A footprint containing the start or the goal is dropped and logged: the base cannot stand
     inside a real obstacle, so such a box is not one (a room-sized or mis-registered fixture).
     """
+    shape = shape if shape is not None else bp.BaseShape()
     start, end = np.asarray(mobile[:2], dtype=float), np.asarray(goal[:2], dtype=float)
-    kept, dropped = [], []
+    kept, thin, dropped = [], [], []
     for name, poly in obstacles:
         if bp.point_in_polygon(start, poly) or bp.point_in_polygon(end, poly):
             dropped.append(str(name))
         else:
             kept.append(poly)
-    log = {"plan": "failed", "obstacles": len(kept), "dropped_obstacles": dropped}
+            thin.append("door" in str(name).lower())
+    log = {"plan": "failed", "obstacles": len(kept), "dropped_obstacles": dropped, "base_shape": shape.summary()}
     if not kept:
         log["plan"] = "straight"
         return None, log
-    grid = bp.NavGrid(kept, extra_points=[start, end])
-    log.update({"start_clearance": round(grid.clearance(start), 3), "goal_clearance": round(grid.clearance(end), 3)})
-    points = grid.plan(start, end)
+    grid = bp.NavGrid(kept, extra_points=[start, end], thin=thin, shape=shape)
+    log.update({"start_clearance": round(grid.clearance(mobile), 3), "goal_clearance": round(grid.clearance(goal), 3)})
+    points = grid.plan(mobile, goal)
     if points is None:
         return None, log
     log.update({"plan": "planned", "planned_length": round(bp.path_length(points), 3),
+                "planned_turn": round(bp.path_turn(points), 3),
                 "straight_length": round(float(np.linalg.norm(end - start)), 3),
                 "planned_every_10": [[round(float(v), 3) for v in p] for p in points[::10] + [points[-1]]]})
-    return bp.PathFollower(points), log
+    return bp.PathFollower(points, shape), log
 
 
 def toward_base(obs):
@@ -896,10 +901,11 @@ class ExpertRun:
         follower, plan = None, {"plan": "straight"}
         max_steps = NAVIGATE_MAX_STEPS
         if obstacles is not None:
-            follower, plan = plan_navigation(obstacles(), mobile, goal)
+            shape = getattr(self.world, "base_shape", None)
+            follower, plan = plan_navigation(obstacles(), mobile, goal, shape() if shape is not None else None)
             if follower is not None:
-                max_steps = int(min(NAV_PLANNED_MAX_STEPS,
-                                    max(NAVIGATE_MAX_STEPS, math.ceil(1.5 * plan["planned_length"] / NAV_STEP_POS))))
+                drive = plan["planned_length"] / NAV_STEP_POS + plan["planned_turn"] / NAV_STEP_YAW
+                max_steps = int(min(NAV_PLANNED_MAX_STEPS, max(NAVIGATE_MAX_STEPS, math.ceil(1.5 * drive))))
         trace, cosines, path, touched = [], [], 0.0, Counter()
         frame_since = len(self.frame.samples)
         for k in range(max_steps):
@@ -909,9 +915,9 @@ class ExpertRun:
                 break
             aim = goal
             if follower is not None:
-                point = follower.target(mobile)
+                pose = follower.target(mobile)
                 if not follower.at_end():
-                    aim = (float(point[0]), float(point[1]), goal[2])
+                    aim = tuple(float(v) for v in pose)   # the path's heading: the box turns where it fits
             frame_yaw = self.frame.frame_yaw(obs)
             hit = self.base_act(obs, aim, self.gripper, navigating=True)
             touching = bool(hit)
@@ -1492,6 +1498,36 @@ class SimWorld:
             if poly is not None:
                 out.append((str(name), poly))
         return out + self.door_obstacles()
+
+    def base_shape(self):
+        """The mobile base's collision box and yaw axis in its body frame, measured from the model.
+
+        Falls back to robosuite's Omron numbers (``bp.BaseShape()``) if the bodies are not found.
+        """
+        try:
+            model, data = self.kitchen.sim.model, self.kitchen.sim.data
+            bid = model.body_name2id("mobilebase0_base")
+            p0, R0 = np.asarray(data.body_xpos[bid], dtype=float), np.asarray(data.body_xmat[bid]).reshape(3, 3)
+            aabb = getattr(model, "geom_aabb", None)
+            pts = []
+            for g in range(int(model.ngeom)):
+                body = model.body_id2name(int(model.geom_bodyid[g])) or ""
+                if not body.startswith("mobilebase") or not (int(model.geom_contype[g]) or int(model.geom_conaffinity[g])):
+                    continue
+                c = bp.geom_corners(int(model.geom_type[g]), model.geom_size[g], data.geom_xpos[g], data.geom_xmat[g],
+                                    float(model.geom_rbound[g]), None if aabb is None else aabb[g])
+                if c[:, 2].min() <= bp.OBSTACLE_MAX_Z:
+                    pts.append((c - p0) @ R0)
+            pts = np.concatenate(pts, axis=0)[:, :2]
+            lo, hi = pts.min(axis=0), pts.max(axis=0)
+            pivot = bp.BASE_PIVOT
+            for j in range(int(model.njnt)):
+                name = model.joint_id2name(j) or ""
+                if name.startswith("mobilebase") and name.endswith("joint_mobile_yaw"):
+                    pivot = np.asarray(model.jnt_pos[j], dtype=float)[:2]
+            return bp.BaseShape(half=(hi - lo) / 2, centre=(hi + lo) / 2, pivot=pivot)
+        except Exception:
+            return bp.BaseShape()
 
     def door_obstacles(self):
         """(body, footprint) of every door body's collision geoms, where the doors are now.
