@@ -675,6 +675,79 @@ class TaskSuccessTest(unittest.TestCase):
             self.assertEqual((result["stop"], result["stage_completed"]), ("task_success", completed))
 
 
+class ShortArmWorld(FakeWorld):
+    """The arm reaches only ``share`` of each commanded motion."""
+
+    def __init__(self, share=0.7, **kw):
+        super().__init__(**kw)
+        self.share = share
+
+    def step(self, a):
+        a = np.asarray(a, dtype=float).copy()
+        if a[11] < 0.5:
+            a[0:6] *= self.share
+        return super().step(a)
+
+
+class FeedforwardTrackingTest(unittest.TestCase):
+    """Tracking sends the demo's own arm actions (carried to here) plus a share of the error."""
+
+    def recorded_demo(self, n=40):
+        world = FakeWorld(mobile=(0.0, 0.0, 0.0))
+        t = np.linspace(0, 1, n)
+        actions = np.zeros((n, 12))
+        actions[:, 0] = 0.3 * np.sin(3 * t)
+        actions[:, 1] = 0.4 * np.cos(2 * t)
+        actions[:, 2] = -0.2
+        actions[:, 3] = 0.1 * np.sin(4 * t)
+        actions[:, 5] = 0.15
+        actions[:, 6] = (t > 0.5).astype(float)
+        actions[:, 11] = -1.0
+        eef, base = [], []
+        for a in actions:
+            eef.append(world.eef.copy())
+            base.append(world.base_T())
+            world.step(a)
+        return er.Source(task_name="ArrangeTea", episode=0, predicate="moved", target=None, start=0, end=n,
+                         steps=[er.SourceStep("PickPlace", er.PICK, 0, n)], eef=np.stack(eef), base=np.stack(base),
+                         gripper=actions[:, 6].copy(), actions=actions)
+
+    def run_track(self, world, src):
+        sent = []
+        step = world.step
+        world.step = lambda a: (sent.append(np.asarray(a, dtype=float).copy()), step(a))[1]
+        run = er.ExpertRun(world, TRUE_GAINS, {src.key: src}, None, cap=10 ** 5, budget=10 ** 5)
+        out = run.run([{"phase": "track", "source": list(src.key), "step": 0, "kind": er.PICK,
+                        "reference": ["base", None]}])
+        return np.array(sent), out["phases"][0]
+
+    def test_self_replay_sends_the_demo_actions(self):
+        src = self.recorded_demo()
+        sent, phase = self.run_track(FakeWorld(mobile=(0.0, 0.0, 0.0)), src)
+        self.assertEqual(len(sent), len(src.actions) + er.TAIL_STEPS)       # then the tail holds still
+        np.testing.assert_allclose(sent[:len(src.actions), :7], src.actions[:, :7], atol=1e-9)
+        self.assertEqual((phase["catchup_steps"], phase["stalled_frames"]), (0, 0))
+
+    def test_another_base_pose_replays_the_motion_in_its_own_frame(self):
+        src = self.recorded_demo()
+        world = FakeWorld(mobile=(1.0, 2.0, 0.7))
+        sent, phase = self.run_track(world, src)
+        self.assertLess(phase["pos_lag_max"], 1e-9)
+        self.assertLess(phase["rot_err_max"], 1e-9)
+        n = len(src.actions)
+        np.testing.assert_allclose(np.linalg.norm(sent[:n, 0:3], axis=1), np.linalg.norm(src.actions[:, 0:3], axis=1),
+                                   rtol=0.25)   # same motion, other axes: the gains are anisotropic
+
+    def test_a_lagging_arm_is_corrected_then_caught_up_without_resending_the_demo_action(self):
+        src = self.recorded_demo()
+        n = len(src.actions)
+        for share, catches_up in ((0.7, False), (0.3, True)):
+            sent, phase = self.run_track(ShortArmWorld(share=share, mobile=(0.0, 0.0, 0.0)), src)
+            self.assertEqual(phase["catchup_steps"] > 0, catches_up, share)
+            self.assertLessEqual(phase["pos_lag_max"], er.TRACK_TOL)   # logged to 4 decimals
+            self.assertLess(np.abs(np.diff(sent[:n, 0:3], axis=0)).max(), 1.0, share)   # no full reversals
+
+
 class GateTest(unittest.TestCase):
     def test_gate_r_counts_states_with_a_full_success(self):
         states = [{"parent_id": f"p{i}", "task_name": "ArrangeTea", "stage": "mug_on_tray"} for i in range(4)]

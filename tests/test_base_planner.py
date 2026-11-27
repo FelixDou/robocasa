@@ -61,6 +61,25 @@ class GeomCornersTest(unittest.TestCase):
         self.assertLess(min(p[1] for p in points), -0.8 - bp.HARD_CLEARANCE + 1e-9)   # around the door's end
 
 
+class EscapeTest(unittest.TestCase):
+    def test_a_start_beside_a_thin_door_leaves_on_its_own_side(self):
+        # The robot boxed in a 17 cm pocket between a neighbouring fixture's side (x <= -0.05) and a
+        # door open along x = 0.12..0.16: no clear cell inside the pocket, the nearest clear cell is
+        # just across the door, and the way out is down the pocket.
+        cabinet = bp.footprint(box(-1.5, 1.5, 0.0, 0.6))
+        side = bp.footprint(box(-0.6, -0.05, -0.6, 0.0))
+        door = bp.footprint(box(0.12, 0.16, -0.6, 0.0))
+        start, goal = (0.035, -0.05), (2.0, -1.5)
+        grid = bp.NavGrid([cabinet, side, door], extra_points=[start, goal])
+        points = grid.plan(start, goal)
+        self.assertIsNotNone(points)
+        for a, b in zip(points, points[1:]):
+            for s in np.linspace(0, 1, 11):
+                p = (1 - s) * np.asarray(a) + s * np.asarray(b)
+                self.assertFalse(bp.point_in_polygon(p, door), (a, b))
+        self.assertLess(points[1][1], -0.6)   # first clear cell: below the pocket, not across the door
+
+
 class PlanTest(unittest.TestCase):
     def check_path(self, grid, points, start, goal):
         np.testing.assert_allclose(points[0], start[:2])

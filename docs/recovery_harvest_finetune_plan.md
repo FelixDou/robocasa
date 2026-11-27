@@ -1179,6 +1179,54 @@ choice open, the code fixes it as follows:
   episode 4. The demo actions complete them; the executor reaches the place
   step and does not complete it. One pick ended without a grasp despite
   closing 3.7 mm from the demo pose. Their videos come next.
+
+  *diag5 (commit b955034, 5 demos per stage).* Executor / demo actions:
+  bread_in_basket 3 / 5, basket_on_dining_counter 3 / 5, cabinet_closed 4 / 5
+  (the task-success count now applies), strawberry_on_pancake 4 / 4 (0 in
+  diag3). Navigation reached 8 of 10 goals. Both misses again pressed on a
+  door: basket episode 1 on a cabinet door for 294 steps, strawberry
+  episode 2 for 450.
+
+  *The bread videos (episodes 0 and 1).* Both executor failures drop the
+  bread in transport after a good grasp. In episode 1 the bread is in the
+  gripper at step 165 in both runs; by step 230 the executor's bread is
+  falling while the demo-action run still holds it. In episode 0 it sits
+  tilted on the fingertips by step 200. The recorded actions show the
+  executor's commands are much rougher than the demo's over the same frames.
+  Step-to-step change, median (maximum): 0.158 (1.73) against 0.050 (0.25),
+  and 0.256 (0.85) against 0.071 (0.35). Rotation command medians: 0.388
+  against 0.066, and 0.265 against 0.209. Commanding the whole remaining
+  error each step, with the arm controller's lag, overshoots and chatters.
+  The hand stays within millimetres on average but shakes the bread loose.
+
+  *Amendment: feedforward tracking.* In arm-mode frames the executor now
+  sends the demo's own arm action for the frame, carried to here, plus 30%
+  of the current pose error (`FEEDBACK_GAIN`). "Carried to here" means the
+  motion the gains predict for the demo action, rotated from the demo's base
+  frame through the source-to-here transform into the current base frame.
+  In self-replay that rotation is the identity, so the demo action comes
+  back unchanged. A frame is passed when the hand is within 2 cm of the
+  next frame's pose. Until then, only 50% of that error is sent
+  (`CATCHUP_GAIN`), and the demo action is never sent twice. The last frame
+  of a step finishes once its action is sent, since no later pose was
+  recorded. Base-mode frames are unchanged. Tests:
+  - in an exact world, self-replay sends exactly the demo's actions;
+  - from a moved and turned base, the hand follows the transformed path
+    exactly;
+  - an arm reaching 70% of each command stays within tolerance through the
+    correction alone;
+  - one reaching 30% needs catch-up steps but stays within tolerance, with
+    no command reversals.
+
+  *Amendment: the start escape cannot cross obstacles.* A start or goal
+  closer than 0.10 m to a footprint joins the nearest clear cell. That
+  search used 8-neighbours through any cell, so it could jump across a thin
+  open door. It now uses 4-neighbours and never passes a cell within half a
+  cell diagonal (3.5 cm) of a footprint. A test reproduces the trap: a
+  robot boxed in a 17 cm pocket between an open door and a neighbouring
+  fixture. The old search jumped across the door; the new one leaves down
+  the pocket. Whether this was the cause of the two door misses is not yet
+  confirmed; their traces were not inspected.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

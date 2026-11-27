@@ -66,6 +66,8 @@ RANK_YAW_WEIGHT = 0.1         # m per rad in the source ranking distance
 APPROACH_POS_STEP, APPROACH_ROT_STEP = 0.01, 0.05   # m, rad per step toward a step's first pose
 SETTLE_TOL, SETTLE_STEPS = 0.01, 20
 TRACK_TOL = 0.02              # m: a source frame is held until the end effector is this close
+FEEDBACK_GAIN = 0.3           # share of the pose error added to the demo's own arm action each frame
+CATCHUP_GAIN = 0.5            # share of the error commanded while a frame is not yet reached (no feedforward)
 TRACK_YAW_TOL = 0.05          # rad: ... and, in the source's base-mode frames, the base this close in heading
 TORSO_TOL = 0.01              # m: the torso follows the source's base height beyond this
 TORSO_MIN_GAIN = 1e-4         # m per step per unit action: below this the probe found no torso motion
@@ -253,6 +255,28 @@ def action_vector(*, arm_pos=None, arm_rot=None, gripper=GRIPPER_OPEN, base=None
     out[7:10] = 0 if base is None else base
     out[11] = mode
     return out
+
+
+def arm_feedback(base_T, eef_T, target_T, gains):
+    """Unclipped arm action (position, rotation) that would remove the pose error in one step."""
+    Rb = base_T[:3, :3]
+    dp = Rb.T @ (target_T[:3, 3] - eef_T[:3, 3])
+    drot = rotvec((Rb.T @ target_T[:3, :3]) @ (Rb.T @ eef_T[:3, :3]).T)
+    return np.linalg.solve(gains.arm_pos, dp), np.linalg.solve(gains.arm_rot, drot)
+
+
+def feedforward_arm(demo_action, src_base_R, here_base_R, transform_R, gains):
+    """The demo's arm action carried to here: its motion moved through ``transform`` into this base frame.
+
+    The demo's (position, rotation) action gives a motion in the demo's base frame through ``gains``;
+    the executor replays that motion rotated by the source-to-here transform, in its own base frame.
+    In self-replay the rotation is the identity and the demo action comes back unchanged.
+    """
+    M = here_base_R.T @ transform_R @ src_base_R
+    a = np.asarray(demo_action, dtype=float)
+    a_pos = np.linalg.solve(gains.arm_pos, M @ (gains.arm_pos @ a[0:3]))
+    a_rot = np.linalg.solve(gains.arm_rot, M @ (gains.arm_rot @ a[3:6]))
+    return a_pos, a_rot
 
 
 def arm_command(base_T, eef_T, target_T, gains, gripper):
@@ -692,6 +716,7 @@ class TrackDiag:
     def __init__(self):
         self.pos, self.rot, self.closes = [], [], []
         self.per_frame = Counter()
+        self.catchup = 0
 
     def step(self, i):
         self.per_frame[i] += 1
@@ -707,7 +732,7 @@ class TrackDiag:
         q = lambda v, f: round(float(f(v)), 4) if v else None  # noqa: E731
         return {"pos_lag_median": q(self.pos, np.median), "pos_lag_max": q(self.pos, np.max),
                 "rot_err_median": q(self.rot, np.median), "rot_err_max": q(self.rot, np.max),
-                "stalled_frames": sum(1 for n in self.per_frame.values() if n > 1),
+                "stalled_frames": sum(1 for n in self.per_frame.values() if n > 1), "catchup_steps": self.catchup,
                 "max_steps_on_frame": max(self.per_frame.values(), default=0), "closes": self.closes}
 
 
@@ -930,7 +955,7 @@ class ExpertRun:
         start, base_frames = self.steps, 0
         frame_since = len(self.frame.samples)
         diag = TrackDiag()
-        i = 0
+        i, sent = 0, False
         while i < len(targets):
             obs = self.world.observe()
             diag.step(i)
@@ -948,20 +973,46 @@ class ExpertRun:
                 d_yaw = wrap(yaw_of(bases[i][:3, :3]) - yaw_of(obs["base"][:3, :3]))
                 if math.hypot(d[0], d[1]) < TRACK_TOL and abs(d_yaw) < TRACK_YAW_TOL:
                     i += 1
+                    sent = False
                 continue
             if (i == 0 or driving[i - 1]) and pose_error(obs["eef"], targets[i])[0] >= TRACK_TOL:
                 self.move_to(targets[i], grippers[i])   # approach the first arm frame of a run
                 obs = self.world.observe()
-            if grippers[i] >= 0.5 and (i == 0 or grippers[i - 1] < 0.5):
+                sent = False
+            if grippers[i] >= 0.5 and (i == 0 or grippers[i - 1] < 0.5) and not sent:
                 diag.close(frames[i], pose_error(obs["eef"], targets[i]))
-            action = arm_command(obs["base"], obs["eef"], targets[i], self.gains, grippers[i])
+            if source.actions is None:
+                # No demo actions (test sources): command the whole error, hold the frame until reached.
+                action = arm_command(obs["base"], obs["eef"], targets[i], self.gains, grippers[i])
+                goal = targets[i]
+            else:
+                # The demo's own action for this frame plus a share of the error, once; then, while the
+                # next frame's pose is not reached, a share of the error alone (no repeated feedforward).
+                goal = targets[min(i + 1, len(targets) - 1)]
+                if not sent:
+                    ff_pos, ff_rot = feedforward_arm(source.actions[source.at(frames[i])],
+                                                     source.base[source.at(frames[i])][:3, :3],
+                                                     obs["base"][:3, :3], transform[:3, :3], self.gains)
+                    fb_pos, fb_rot = arm_feedback(obs["base"], obs["eef"], targets[i], self.gains)
+                    a_pos, a_rot = ff_pos + FEEDBACK_GAIN * fb_pos, ff_rot + FEEDBACK_GAIN * fb_rot
+                    sent = True
+                else:
+                    fb_pos, fb_rot = arm_feedback(obs["base"], obs["eef"], goal, self.gains)
+                    a_pos, a_rot = CATCHUP_GAIN * fb_pos, CATCHUP_GAIN * fb_rot
+                    diag.catchup += 1
+                action = action_vector(arm_pos=np.clip(a_pos, -1, 1), arm_rot=np.clip(a_rot, -1, 1),
+                                       gripper=grippers[i], mode=ARM_MODE)
             action[10] = self.gains.torso_command(dz, ARM_MODE)
             self.act(action)
             obs = self.world.observe()
-            err = pose_error(obs["eef"], targets[i])
-            if err[0] < TRACK_TOL:
-                diag.advance(err)
+            err = pose_error(obs["eef"], goal)
+            # The last frame has no recorded pose after it: its demo action, once sent, finishes it.
+            last = source.actions is not None and i + 1 >= len(targets)
+            if err[0] < TRACK_TOL or last:
+                if not last:
+                    diag.advance(err)
                 i += 1
+                sent = False
         out = {"phase": "track", "kind": step.kind, "steps": self.steps - start, "frames": len(targets),
                "base_mode_steps": base_frames, **diag.summary()}
         if base_frames:

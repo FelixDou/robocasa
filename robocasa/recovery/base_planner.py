@@ -153,21 +153,26 @@ class NavGrid:
         return 1.0 + SOFT_WEIGHT * ((SOFT_CLEARANCE - d) / (SOFT_CLEARANCE - HARD_CLEARANCE)) ** 2
 
     def _escape(self, cell):
-        """Nearest cell with ``HARD_CLEARANCE`` (breadth-first), for a start or goal inside it."""
+        """Nearest cell with ``HARD_CLEARANCE``, for a start or goal inside that band.
+
+        Breadth-first over 4-neighbours, never through a cell within half a cell diagonal of a
+        footprint, so a thin door (a few cm) is a wall: the robot leaves on its own side of it.
+        """
         if self.dist[cell] >= HARD_CLEARANCE:
             return cell
+        solid = 0.5 * math.sqrt(2) * self.res
         seen, frontier = {cell}, [cell]
         while frontier:
             nxt = []
             for c in frontier:
-                for di in (-1, 0, 1):
-                    for dj in (-1, 0, 1):
-                        n = (c[0] + di, c[1] + dj)
-                        if n in seen or not (0 <= n[0] < self.shape[0] and 0 <= n[1] < self.shape[1]):
-                            continue
-                        if self.dist[n] >= HARD_CLEARANCE:
-                            return n
-                        seen.add(n)
+                for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    n = (c[0] + di, c[1] + dj)
+                    if n in seen or not (0 <= n[0] < self.shape[0] and 0 <= n[1] < self.shape[1]):
+                        continue
+                    seen.add(n)
+                    if self.dist[n] >= HARD_CLEARANCE:
+                        return n
+                    if self.dist[n] > solid:
                         nxt.append(n)
             frontier = nxt
         return None
