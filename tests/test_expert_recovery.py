@@ -501,6 +501,77 @@ class DiagnosticsTest(unittest.TestCase):
         self.assertEqual((out["stage_completed"], out["stop"], out["steps"]), (False, "end", n + er.TAIL_STEPS))
 
 
+class SelfReplayLoopTest(unittest.TestCase):
+    """The self-replay loop end to end, with the simulator parts replaced by the kinematic world."""
+
+    def test_executor_control_and_videos_run_without_errors(self):
+        from unittest import mock
+
+        obj, tray, base = world_pose(0.55, 0.05, 0.9), world_pose(0.6, -0.4, 0.9), world_pose(0, 0, 0.3)
+        demos = []
+        for episode in (3, 4):
+            src = demo_source(obj, tray, base, episode=episode)
+            src.actions = np.zeros((src.end - src.start, 12))
+            src.first_true = src.end - 2
+            demos.append(src)
+
+        class Library:
+            lerobots = {"ArrangeTea": Path("unused")}
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def sources(self, task, predicate, target=None):
+                return demos if (task, predicate) == ("ArrangeTea", "mug_on_tray") else []
+
+            def named_state(self, task, episode, frame):
+                return {}
+
+        class World(FakeWorld):
+            def __init__(self, env, recorder=None, *, reset=True):
+                super().__init__(objects={"obj": obj.copy(), "container": tray.copy()}, predicate=mug_on_tray)
+                self.obs, self.recorder = {}, recorder
+
+            def facts(self, task):
+                return facts_of(self)
+
+        class Recorder:
+            made = []
+
+            def __init__(self, folder):
+                self.folder = Path(folder)
+                Recorder.made.append(self.folder.name)
+
+            def finish(self, meta):
+                self.folder.mkdir(parents=True)
+
+        env = mock.MagicMock()
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(er, "load_gains", return_value=TRUE_GAINS), \
+                mock.patch.object(er, "SourceLibrary", Library), \
+                mock.patch.object(er, "_lerobots", return_value={}), \
+                mock.patch.object(er, "_make_env", return_value=env), \
+                mock.patch.object(er.es, "load_episode", return_value=(np.zeros((50, 3)), {}, "<mujoco/>")), \
+                mock.patch.object(er, "SimWorld", World), \
+                mock.patch.object(er, "AttemptRecorder", Recorder), \
+                mock.patch.object(er, "convention_residual", return_value=0.0), \
+                mock.patch.object(er.ladder, "_close"):
+            lines = []
+            er.run_self_replay(Path(tmp), Path(tmp) / "out", Path(tmp) / "gains.json", tasks=["ArrangeTea"],
+                               stages=["ArrangeTea:mug_on_tray"], action_replay=True, videos=1, log=lines.append)
+            rows = er.ladder.read_jsonl(Path(tmp) / "out" / "self_replay.jsonl")
+        self.assertEqual([r["episode"] for r in rows], [3, 4])
+        for r in rows:
+            self.assertNotIn("error", r, r.get("error"))
+            self.assertIn(r["stop"], ("stage", "cap", "program_end"))
+            self.assertIn(r["action_replay"]["stop"], ("stage", "end"))
+            self.assertIn("holding_after", r["phases"][0])
+            self.assertEqual(r["first_true_after_end"], -2)
+        self.assertEqual(Recorder.made, ["episode_000003", "episode_000003_actions"])   # first demo only
+        self.assertIn("recording", rows[0])
+        self.assertNotIn("recording", rows[1])
+
+
 class GateTest(unittest.TestCase):
     def test_gate_r_counts_states_with_a_full_success(self):
         states = [{"parent_id": f"p{i}", "task_name": "ArrangeTea", "stage": "mug_on_tray"} for i in range(4)]

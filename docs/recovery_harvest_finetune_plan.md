@@ -1013,6 +1013,11 @@ choice open, the code fixes it as follows:
   Next: `r2-self-replay-diag` (5 demos per stage, the action-replay control,
   2 videos per stage). The full 20-demo self-replay reruns after the
   executor fixes that the diagnostics point to.
+  The first diagnostic launch (commit 629fab8) crashed on every demo: the
+  video-count argument and the per-demo record shared a name. The argument
+  is now `videos`, and a test runs the whole self-replay loop on the
+  kinematic test world, so loop code no longer meets its first run in the
+  simulator. The crashed run's output was moved aside, not resumed.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

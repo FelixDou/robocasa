@@ -1826,12 +1826,12 @@ def convention_residual(world_obs, named):
 
 def run_self_replay(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, dataset_base=None,
                     lerobot_overrides=None, demos=SELF_REPLAY_DEMOS, resume=False, stages=None,
-                    action_replay=False, record=0, log=print):
+                    action_replay=False, videos=0, log=print):
     """Each stage's own demos from their own state at the segment start (target kitchens).
 
     ``stages``: only these ``TASK:predicate`` stages. ``action_replay``: also replay the demo's own
     actions open loop from the same restore (a control: it separates restore and executor problems).
-    ``record``: videos of the first ``record`` demos per stage under ``videos/``.
+    ``videos``: videos of the first ``videos`` demos per stage under ``videos/``.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1866,7 +1866,7 @@ def run_self_replay(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, 
                             ladder._env_method(env, "reset_to")({"model": model_xml, "states": states[src.start],
                                                                  "ep_meta": json.dumps(ep_meta)})
                             rec = None
-                            if n < int(record) and not video.with_name(video.name + name).exists():
+                            if n < int(videos) and not video.with_name(video.name + name).exists():
                                 rec = AttemptRecorder(video.with_name(video.name + name))
                             return SimWorld(env, recorder=rec)
 
@@ -2266,7 +2266,7 @@ def main(argv=None):
         raise SystemExit("pass --dataset-base or --lerobot TASK=PATH")
     if args.command == "self-replay":
         run_self_replay(args.index_dir, args.output_dir, args.gains, tasks=args.tasks, demos=args.demos,
-                        stages=args.stages, action_replay=args.action_replay, record=args.record, **common)
+                        stages=args.stages, action_replay=args.action_replay, videos=args.record, **common)
     elif args.command == "transfer":
         run_transfer(args.index_dir, args.output_dir, args.gains, tasks=args.tasks, resets=args.resets, **common)
     else:
