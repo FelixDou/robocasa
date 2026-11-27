@@ -822,7 +822,7 @@ class ExpertRun:
             if follower is not None:
                 max_steps = int(min(NAV_PLANNED_MAX_STEPS,
                                     max(NAVIGATE_MAX_STEPS, math.ceil(1.5 * plan["planned_length"] / NAV_STEP_POS))))
-        trace, cosines, path = [], [], 0.0
+        trace, cosines, path, touched = [], [], 0.0, Counter()
         for k in range(max_steps):
             obs = self.world.observe()
             mobile = obs["mobile"]
@@ -835,8 +835,11 @@ class ExpertRun:
                     aim = (float(point[0]), float(point[1]), goal[2])
             frame_yaw = obs.get("command_frame_yaw", 0.0)
             self.act(base_command(mobile, aim, self.gains, self.gripper, frame_yaw=frame_yaw), navigating=True)
-            touching = bool(contact()) if contact is not None else False
+            hit = contact() if contact is not None else False
+            touching = bool(hit)
             contact_steps += int(touching)
+            if isinstance(hit, str):
+                touched[hit] += 1
             after = self.world.observe()["mobile"]
             want = np.array([aim[0] - mobile[0], aim[1] - mobile[1]])
             moved = np.array([after[0] - mobile[0], after[1] - mobile[1]])
@@ -851,6 +854,7 @@ class ExpertRun:
                 "final_distance": round(math.hypot(goal[0] - mobile[0], goal[1] - mobile[1]), 4),
                 "final_yaw_error": round(abs(wrap(goal[2] - mobile[2])), 4), "contact_steps": contact_steps,
                 "path_length": round(path, 4), "max_steps": max_steps, **plan,
+                "contact_bodies": dict(touched.most_common(5)),
                 "heading_cos_median": round(float(np.median(cosines)), 3) if cosines else None,
                 "heading_cos_below_half": sum(c < 0.5 for c in cosines),
                 "trace_every_10": trace}
@@ -1385,7 +1389,10 @@ class SimWorld:
         return out
 
     def base_in_contact(self):
-        """The mobile base touches anything but the robot and the floor (the world body)."""
+        """The mobile base touches anything but the robot and the floor (the world body).
+
+        Returns the first such pair as "base_body>other_body" (truthy), else False.
+        """
         sim = self.kitchen.sim
         model = sim.model
         for i in range(int(sim.data.ncon)):
@@ -1397,7 +1404,8 @@ class SimWorld:
             other = names[1] if base[0] else names[0]
             if other == "world" or "floor" in other.lower() or other.startswith(("mobilebase", "robot", "gripper")):
                 continue
-            return True
+            mine = names[0] if base[0] else names[1]
+            return f"{mine}>{other or '<unnamed>'}"
         return False
 
     def step(self, action):
