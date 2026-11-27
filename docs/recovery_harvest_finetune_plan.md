@@ -825,6 +825,24 @@ choice open, the code fixes it as follows:
   checks the restore itself (also within 5e-3 m). The per-step value is still
   reported, with each run's base travel, turn and settled offset. The other
   thresholds are unchanged.
+
+  *Amended again (27 November 2026, after the second probe, still before any
+  executor run).* The second probe gave the same gains, the largest base
+  travel 0.062 m and turn 0.17 rad, and the hand 7.3 mm off after the base runs
+  and 7.3 mm off after the zero-motion run. The arm is not left behind
+  (that would be about 6 cm). The 7 mm happens with no command at all, so
+  it is drift, not a leak from base mode, and a fixed 5e-3 m on the
+  zero-motion run tested the wrong thing. What the executor needs instead:
+  - *Base runs against the zero-motion run.* After each base run plus 20
+    steps of zero motion, the hand must be within 5e-3 m of where the
+    zero-motion run's hand is after the same number of steps (a difference
+    of vectors, not of norms).
+  - *Drift over a navigation.* The executor sends no arm command while the
+    base drives, for up to 300 steps (`NAVIGATE_MAX_STEPS`). Zero-motion runs
+    of 300 steps in each mode must keep the hand within 0.02 m (TRACK_TOL)
+    of its start in the base frame. The probe reports the offset every 10
+    steps and the final offset vector, so a drift that keeps growing is
+    visible as such.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

@@ -75,7 +75,9 @@ PROBE_AMPLITUDES = (0.25, 0.5)
 PROBE_STEPS = 6
 PROBE_MIN_R2, PROBE_MAX_COND = 0.9, 20.0
 ARM_MOVES_BASE_TOL = 1e-3     # m per step: arm-mode commands must not move the base
-ARM_HOLD_TOL = 5e-3           # m: hand offset in the base frame after a base run and SETTLE_STEPS of zero motion
+ARM_HOLD_TOL = 5e-3           # m: hand after a base run and SETTLE_STEPS of zero motion vs the zero-motion run
+DRIFT_STEPS = NAVIGATE_MAX_STEPS  # the longest stretch with no arm command
+DRIFT_TOL = TRACK_TOL            # m: hand drift in the base frame over DRIFT_STEPS with no command
 
 GRIPPER_OPEN, GRIPPER_CLOSE = 0.0, 1.0       # the gym wrapper closes at >= 0.5
 ARM_MODE, BASE_MODE = 0.0, 1.0               # ... and switches to base motion at >= 0.5
@@ -1274,15 +1276,30 @@ def _rel_position(obs):
 def probe_world(world, reset):
     """The probe's measurements on ``world``; ``reset()`` puts it back in the probe's start state.
 
+    Zero-motion runs of DRIFT_STEPS (a navigation's length) in each mode give the hand's drift in the
+    base frame with no command at all; the executor sends no arm command while the base drives.
     Base-mode runs drive for PROBE_STEPS, then send zero motion for SETTLE_STEPS. The arm may lag
     while the base accelerates (``base_moves_arm``, per step, reported only); what the executor needs
-    is that the hand returns to its pose in the base frame once the base stops (``settled``). An arm
-    that held its world pose instead would end offset by about the base's travel.
+    is that the hand ends where the zero-motion run's hand is after as many steps (``settled``). An
+    arm that held its world pose instead would end offset by about the base's travel.
     """
     arm_pos, arm_rot, base = [], [], []
-    leaks = {"arm_moves_base": 0.0, "base_moves_arm": 0.0, "base_moves_arm_settled": 0.0,
-             "zero_action_drift": 0.0}
+    leaks = {"arm_moves_base": 0.0, "base_moves_arm": 0.0, "base_moves_arm_settled": 0.0}
     base_runs = []
+    drift = {}
+    for name, mode in (("arm", ARM_MODE), ("base", BASE_MODE)):
+        reset()
+        p0 = _rel_position(world.observe())
+        hold = np.zeros(12)
+        hold[11] = mode
+        offsets = []
+        for _ in range(DRIFT_STEPS):
+            world.step(hold)
+            offsets.append(_rel_position(world.observe()) - p0)
+        norms = [float(np.linalg.norm(o)) for o in offsets]
+        drift[name] = {"max": max(norms), "final": norms[-1], "final_vector": [float(v) for v in offsets[-1]],
+                       "every_10_steps": norms[9::10], "offsets": offsets}
+    control = drift["base"]["offsets"][PROBE_STEPS + SETTLE_STEPS - 1]   # base-mode drift after a base run's length
     for dim in range(9):
         for amp in PROBE_AMPLITUDES:
             for sign in (1.0, -1.0):
@@ -1327,21 +1344,17 @@ def probe_world(world, reset):
                 for _ in range(SETTLE_STEPS):
                     world.step(hold)
                 end_obs = world.observe()
-                settled = float(np.linalg.norm(_rel_position(end_obs) - _rel_position(start_obs)))
+                offset = _rel_position(end_obs) - _rel_position(start_obs)
+                settled = float(np.linalg.norm(offset - control))
                 m0, m1 = start_obs["mobile"], moved_obs["mobile"]
                 base_runs.append({"dim": dim - 6, "amplitude": amp, "sign": sign,
                                   "travel": math.hypot(m1[0] - m0[0], m1[1] - m0[1]),
-                                  "turn": abs(wrap(m1[2] - m0[2])), "peak_step_lag": peak, "settled": settled})
+                                  "turn": abs(wrap(m1[2] - m0[2])), "peak_step_lag": peak,
+                                  "offset": float(np.linalg.norm(offset)), "settled": settled})
                 leaks["base_moves_arm"] = max(leaks["base_moves_arm"], peak)
                 leaks["base_moves_arm_settled"] = max(leaks["base_moves_arm_settled"], settled)
-    # Control: zero motion in base mode for as long as a base run, to separate the restore's own effect.
-    reset()
-    start_obs = world.observe()
-    hold = np.zeros(12)
-    hold[11] = BASE_MODE
-    for _ in range(PROBE_STEPS + SETTLE_STEPS):
-        world.step(hold)
-    leaks["zero_action_drift"] = float(np.linalg.norm(_rel_position(world.observe()) - _rel_position(start_obs)))
+    for d in drift.values():
+        del d["offsets"]
     torso = {}
     for mode in (ARM_MODE, BASE_MODE):
         rates = []
@@ -1365,10 +1378,10 @@ def probe_world(world, reset):
     conds = {k: float(np.linalg.cond(m)) for k, m in (("arm_pos", M_pos), ("arm_rot", M_rot), ("base", M_base))}
     ok = min(r2_pos, r2_rot, r2_base) >= PROBE_MIN_R2 and max(conds.values()) < PROBE_MAX_COND \
         and leaks["arm_moves_base"] < ARM_MOVES_BASE_TOL and leaks["base_moves_arm_settled"] < ARM_HOLD_TOL \
-        and leaks["zero_action_drift"] < ARM_HOLD_TOL
+        and max(d["max"] for d in drift.values()) < DRIFT_TOL
     return {"kind": "r2_control_probe", "gains": gains.to_json(),
             "r2": {"arm_pos": r2_pos, "arm_rot": r2_rot, "base": r2_base}, "condition_numbers": conds,
-            "mode_leaks": leaks, "base_runs": base_runs,
+            "mode_leaks": leaks, "zero_action_drift": drift, "drift_steps": DRIFT_STEPS, "base_runs": base_runs,
             "torso_by_mode": {"arm": torso[ARM_MODE], "base": torso[BASE_MODE]},
             "amplitudes": list(PROBE_AMPLITUDES), "steps": PROBE_STEPS, "settle_steps": SETTLE_STEPS,
             "ok": bool(ok)}
@@ -1389,6 +1402,7 @@ def run_probe(env, output, *, log=print):
     ladder.atomic_write_json(output, result)
     runs = result["base_runs"]
     summary = {k: result[k] for k in ("ok", "r2", "condition_numbers", "mode_leaks", "torso_by_mode")}
+    summary["zero_action_drift"] = result["zero_action_drift"]
     summary["largest_base_travel"] = max(r["travel"] for r in runs)
     summary["largest_base_turn"] = max(r["turn"] for r in runs)
     log(json.dumps(summary, indent=2))

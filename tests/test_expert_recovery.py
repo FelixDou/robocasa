@@ -494,6 +494,26 @@ class ArmFollowWorld(FakeWorld):
         return {"predicates": {}, "task_success": False}
 
 
+class SaggingWorld(ArmFollowWorld):
+    """ArmFollowWorld whose hand sinks after the restore, as an arm controller holding its achieved pose would.
+
+    ``settle`` < 1: the sag shrinks geometrically and levels off at ``depth``; ``settle`` = 1: it sinks by
+    ``depth`` every step, without end.
+    """
+
+    def __init__(self, depth, settle, catch_up=0.25, **kw):
+        super().__init__(catch_up, **kw)
+        self.depth, self.settle, self.t = depth, settle, 0
+
+    def step(self, a):
+        out = super().step(a)
+        dz = self.depth if self.settle == 1 else self.depth * (1 - self.settle) * self.settle ** self.t
+        self.t += 1
+        self.eef[2, 3] -= dz
+        self.hold[2, 3] -= dz
+        return out
+
+
 class ProbeTest(unittest.TestCase):
     def probe(self, world_cls, **kw):
         world = {}
@@ -526,6 +546,24 @@ class ProbeTest(unittest.TestCase):
         result = self.probe(ArmFollowWorld, catch_up=0.0)
         run = max(result["base_runs"], key=lambda r: r["travel"])
         self.assertGreater(run["settled"], 0.5 * run["travel"])
+        self.assertFalse(result["ok"])
+
+    def test_a_sag_that_levels_off_is_compared_against_the_zero_motion_run(self):
+        # The second probe: base runs and the zero-motion run both ended about 7 mm off.
+        result = self.probe(SaggingWorld, depth=0.0073, settle=0.85)
+        drift = result["zero_action_drift"]
+        self.assertGreater(drift["base"]["max"], er.ARM_HOLD_TOL)
+        self.assertLess(drift["base"]["max"], er.DRIFT_TOL)
+        self.assertEqual(len(drift["base"]["every_10_steps"]), er.DRIFT_STEPS // 10)
+        self.assertLess(result["mode_leaks"]["base_moves_arm_settled"], er.ARM_HOLD_TOL)
+        self.assertTrue(all(r["offset"] > er.ARM_HOLD_TOL for r in result["base_runs"]))
+        self.assertTrue(result["ok"])
+
+    def test_a_sag_that_keeps_growing_fails(self):
+        result = self.probe(SaggingWorld, depth=0.0003, settle=1)   # 9 cm over a navigation
+        drift = result["zero_action_drift"]
+        self.assertGreater(drift["arm"]["final"], er.DRIFT_TOL)
+        self.assertLess(result["mode_leaks"]["base_moves_arm_settled"], er.ARM_HOLD_TOL)
         self.assertFalse(result["ok"])
 
 
