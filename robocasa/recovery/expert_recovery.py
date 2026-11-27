@@ -732,6 +732,46 @@ class ExpertStop(Exception):
     pass
 
 
+FRAME_GAIN = 0.3        # share of each measured command-frame error taken into the estimate
+FRAME_MIN_MOVE = 0.004  # m: steps moving or predicted to move less than this are not measured
+
+
+class BaseFrameEstimator:
+    """Measures, while driving, the angle between a base command and the motion it produces.
+
+    The model (``command_frame_yaw``) says the base takes planar commands in the heading of the
+    controller's reference. The control probe measured that in its environment; recordings of
+    restored demo episodes, the human demonstrators' own actions included, showed commands in the
+    current body frame (27 November 2026). So the executor starts from the model and corrects it
+    online: ``offset`` is the filtered gap between the measured and the modelled direction.
+    """
+
+    def __init__(self, gain=FRAME_GAIN):
+        self.gain, self.offset, self.samples = float(gain), 0.0, []
+
+    def frame_yaw(self, obs):
+        return obs.get("command_frame_yaw", 0.0) - self.offset
+
+    def update(self, obs, action, after_mobile, gains, touching=False):
+        """Fold in one base-mode step: ``obs`` before it, ``action`` sent, the mobile pose after it."""
+        before = np.asarray(obs["mobile"][:2], dtype=float)
+        moved = np.asarray(after_mobile[:2], dtype=float) - before
+        predicted = np.asarray(gains.base, dtype=float)[:2, :2] @ np.asarray(action, dtype=float)[7:9]
+        if touching or np.linalg.norm(moved) < FRAME_MIN_MOVE or np.linalg.norm(predicted) < FRAME_MIN_MOVE:
+            return None
+        model = obs["mobile"][2] - obs.get("command_frame_yaw", 0.0)   # world angle of the command frame
+        measured = math.atan2(moved[1], moved[0]) - math.atan2(predicted[1], predicted[0])
+        gap = wrap(measured - model)
+        self.samples.append(gap)
+        self.offset = wrap(self.offset + self.gain * wrap(gap - self.offset))
+        return gap
+
+    def summary(self, since=0):
+        gaps = self.samples[since:]
+        return {"frame_offset": round(self.offset, 4), "frame_samples": len(gaps),
+                "frame_gap_median": round(float(np.median(gaps)), 4) if gaps else None}
+
+
 def world_holding(world):
     """The world's grasp check as a bool (``SimWorld.holding`` also returns the held bodies)."""
     holding = getattr(world, "holding", None)
@@ -755,6 +795,7 @@ class ExpertRun:
         self.cap, self.budget = int(cap), int(budget)
         self.steps, self.nav_steps, self.completed, self.success = 0, 0, False, False
         self.log = []
+        self.frame = BaseFrameEstimator()
         # Navigation keeps the gripper as it is: closed if the run starts holding something.
         self.gripper = GRIPPER_CLOSE if world_holding(world) else GRIPPER_OPEN
 
@@ -775,6 +816,15 @@ class ExpertRun:
         if self.success:
             raise ExpertStop("task_success")
         return info
+
+    def base_act(self, obs, goal, gripper, *, torso=0.0, navigating=False):
+        """One base-mode step toward ``goal`` in the measured command frame; returns the contact."""
+        action = base_command(obs["mobile"], goal, self.gains, gripper, torso=torso, frame_yaw=self.frame.frame_yaw(obs))
+        self.act(action, navigating=navigating)
+        contact = getattr(self.world, "base_in_contact", None)
+        hit = contact() if contact is not None else False
+        self.frame.update(obs, action, self.world.observe()["mobile"], self.gains, touching=bool(hit))
+        return hit
 
     def move_to(self, target, gripper, *, settle=True):
         obs = self.world.observe()
@@ -813,7 +863,6 @@ class ExpertRun:
             return {"phase": "navigate", "skipped": "already_there"}
         start, contact_steps = self.steps, 0
         start_dist = math.hypot(goal[0] - mobile[0], goal[1] - mobile[1])
-        contact = getattr(self.world, "base_in_contact", None)
         obstacles = getattr(self.world, "obstacles", None)
         follower, plan = None, {"plan": "straight"}
         max_steps = NAVIGATE_MAX_STEPS
@@ -823,6 +872,7 @@ class ExpertRun:
                 max_steps = int(min(NAV_PLANNED_MAX_STEPS,
                                     max(NAVIGATE_MAX_STEPS, math.ceil(1.5 * plan["planned_length"] / NAV_STEP_POS))))
         trace, cosines, path, touched = [], [], 0.0, Counter()
+        frame_since = len(self.frame.samples)
         for k in range(max_steps):
             obs = self.world.observe()
             mobile = obs["mobile"]
@@ -833,9 +883,8 @@ class ExpertRun:
                 point = follower.target(mobile)
                 if not follower.at_end():
                     aim = (float(point[0]), float(point[1]), goal[2])
-            frame_yaw = obs.get("command_frame_yaw", 0.0)
-            self.act(base_command(mobile, aim, self.gains, self.gripper, frame_yaw=frame_yaw), navigating=True)
-            hit = contact() if contact is not None else False
+            frame_yaw = self.frame.frame_yaw(obs)
+            hit = self.base_act(obs, aim, self.gripper, navigating=True)
             touching = bool(hit)
             contact_steps += int(touching)
             if isinstance(hit, str):
@@ -853,7 +902,7 @@ class ExpertRun:
                 "goal": [float(v) for v in goal], "start_distance": round(start_dist, 4),
                 "final_distance": round(math.hypot(goal[0] - mobile[0], goal[1] - mobile[1]), 4),
                 "final_yaw_error": round(abs(wrap(goal[2] - mobile[2])), 4), "contact_steps": contact_steps,
-                "path_length": round(path, 4), "max_steps": max_steps, **plan,
+                "path_length": round(path, 4), "max_steps": max_steps, **plan, **self.frame.summary(frame_since),
                 "contact_bodies": dict(touched.most_common(5)),
                 "heading_cos_median": round(float(np.median(cosines)), 3) if cosines else None,
                 "heading_cos_below_half": sum(c < 0.5 for c in cosines),
@@ -875,6 +924,7 @@ class ExpertRun:
         grippers = [float(source.gripper[source.at(f)]) for f in frames]
         driving = [source.base_mode(f) for f in frames]
         start, base_frames = self.steps, 0
+        frame_since = len(self.frame.samples)
         diag = TrackDiag()
         i = 0
         while i < len(targets):
@@ -887,9 +937,7 @@ class ExpertRun:
                 d_yaw = wrap(yaw_of(bases[i][:3, :3]) - yaw_of(obs["base"][:3, :3]))
                 m = obs["mobile"]
                 goal = (m[0] + d[0], m[1] + d[1], m[2] + d_yaw)
-                self.act(base_command(m, goal, self.gains, grippers[i],
-                                      torso=self.gains.torso_command(dz, BASE_MODE),
-                                      frame_yaw=obs.get("command_frame_yaw", 0.0)))
+                self.base_act(obs, goal, grippers[i], torso=self.gains.torso_command(dz, BASE_MODE))
                 base_frames += 1
                 obs = self.world.observe()
                 d = bases[i][:3, 3] - obs["base"][:3, 3]
@@ -912,6 +960,8 @@ class ExpertRun:
                 i += 1
         out = {"phase": "track", "kind": step.kind, "steps": self.steps - start, "frames": len(targets),
                "base_mode_steps": base_frames, **diag.summary()}
+        if base_frames:
+            out.update(self.frame.summary(frame_since))
         if step.kind == PICK:
             out["holding_after"] = world_holding(self.world)
         return out

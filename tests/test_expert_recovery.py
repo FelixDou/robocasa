@@ -628,6 +628,44 @@ class PlannedNavigationTest(unittest.TestCase):
         self.assertEqual(log["plan"], "straight")
 
 
+class MisreportedFrameWorld(FakeWorld):
+    """Body-frame base commands (as FakeWorld) but a frame model claiming the reset heading."""
+
+    def observe(self):
+        obs = super().observe()
+        obs["command_frame_yaw"] = float(self.mobile[2])
+        return obs
+
+
+class BaseFrameEstimatorTest(unittest.TestCase):
+    def drive(self, gain):
+        world = MisreportedFrameWorld(mobile=(0.0, 0.0, 0.0), goals={("fixture", "table"): (2.0, -1.5, -math.pi)})
+        run = er.ExpertRun(world, TRUE_GAINS, {}, None, cap=10 ** 5, budget=10 ** 5)
+        run.frame = er.BaseFrameEstimator(gain=gain)
+        return run.run([{"phase": "navigate", "reference": ["fixture", "table"], "if_needed": False}])["phases"][0]
+
+    def test_a_wrong_frame_model_is_corrected_while_driving(self):
+        nav = self.drive(er.FRAME_GAIN)
+        self.assertTrue(nav["reached"], {k: v for k, v in nav.items() if k != "trace_every_10"})
+        self.assertLess(abs(er.wrap(nav["frame_offset"] - math.pi)), 0.1)   # the full heading change, measured
+        self.assertFalse(self.drive(0.0)["reached"])                       # the model alone drives off
+
+    def test_a_right_model_stays_put(self):
+        world = FakeWorld(mobile=(0.0, 0.0, 0.0), goals={("fixture", "table"): (2.0, -1.5, -math.pi)})
+        run = er.ExpertRun(world, TRUE_GAINS, {}, None, cap=10 ** 5, budget=10 ** 5)
+        nav = run.run([{"phase": "navigate", "reference": ["fixture", "table"], "if_needed": False}])["phases"][0]
+        self.assertTrue(nav["reached"])
+        self.assertLess(abs(nav["frame_offset"]), 1e-6)
+
+    def test_blocked_or_still_steps_are_not_measured(self):
+        est = er.BaseFrameEstimator()
+        obs = {"mobile": (0.0, 0.0, 0.5), "command_frame_yaw": 0.5}
+        a = er.action_vector(base=[1.0, 0.0, 0.0], mode=er.BASE_MODE)
+        self.assertIsNone(est.update(obs, a, (0.0, 0.0, 0.5), TRUE_GAINS))
+        self.assertIsNone(est.update(obs, a, (0.03, 0.0, 0.5), TRUE_GAINS, touching=True))
+        self.assertAlmostEqual(est.update(obs, a, (0.0, 0.03, 0.5), TRUE_GAINS), math.pi / 2)
+
+
 class GateTest(unittest.TestCase):
     def test_gate_r_counts_states_with_a_full_success(self):
         states = [{"parent_id": f"p{i}", "task_name": "ArrangeTea", "stage": "mug_on_tray"} for i in range(4)]

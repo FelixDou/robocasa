@@ -1103,6 +1103,43 @@ choice open, the code fixes it as follows:
     straight drive is blocked on more than 100 steps and never arrives; the
     planned drive arrives without touching it. The fixture footprints, the
     clearance band and the A* search have not yet run in the simulator.
+
+  *First planned navigation (self-replay-diag3, basket episode 0, commit
+  cacf4df).* 39 fixture footprints, none dropped; the start and the goal 0.19
+  and 0.21 m from the nearest footprint; a 1.79 m path against 1.62 m
+  straight. The stage completed, but the base stopped 0.72 m from the goal,
+  in contact for 248 of 300 steps.
+
+  The trace shows the base did not follow the path. The path runs straight
+  along x = 4.81 m, but as the robot turned to the goal heading (−π/2), the
+  base drifted in −x and pinned at (4.08, −2.55). At yaw −1.57 the follower
+  wanted (+0.29, −0.30) and the base moved (−0.23, −0.27), about 85° off.
+
+  *The base command frame, measured from recordings.* In the four recorded
+  basket runs (executor and demo actions, episodes 0 and 1), base-mode steps
+  were binned by heading. In every bin, the world angle of the motion minus
+  the angle of the command equals the current heading: −1.59 at −1.57,
+  −1.57 at −1.54, −2.96 at −3.12, −0.20 at −0.07. The human demonstrators'
+  own actions behave this way too. In these restored episodes the base
+  therefore takes commands in its current body frame. The reset-heading
+  model from the fourth probe, measured in a fresh pretrain-split reset with
+  a state-only restore, rotated every command by the full heading change
+  here.
+
+  *Amendment: the command frame is measured while driving.* Every base step
+  (navigation, and base-mode frames inside a tracked step) compares the
+  motion with the motion the gains predict for the command. The gap from the
+  model's command-frame angle goes into a filtered offset (30% per step),
+  and the next command uses the model corrected by that offset. Steps moving
+  less than 4 mm, or with the base in contact, are not measured. Each
+  navigate and base-mode track log reports the final offset and the median
+  gap. That records which convention held in each environment (self-replay,
+  transfer, Gate R) without assuming one.
+
+  In a test world with body-frame commands and a model claiming the reset
+  heading, a drive with a half turn arrives, and the offset reaches π. With
+  the filter off, the same drive misses. A world matching its model keeps a
+  zero offset.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
