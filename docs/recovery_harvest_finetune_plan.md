@@ -1394,6 +1394,40 @@ choice open, the code fixes it as follows:
   strawberry_on_pancake sits exactly at the threshold, as in diag7 (18 / 20).
   One of its two misses, episode 6, stopped at the cap. Executor
   check 1 is passed; the pretrain-transfer check (check 2) runs next.
+
+  *Pretrain transfer (commit e33dca8, 100 runs, 28 November 2026): failed.*
+  Rates are completed / reached per stage; a run stops at its first failed
+  stage.
+
+  | First stage | Completed / reached | How the misses ended |
+  | --- | --- | --- |
+  | ArrangeBreadBasket cabinet_open | 1 / 20 | 13 cap inside the replay; 6 replayed to the end, door shut |
+  | GarnishPancake fridge_open | 0 / 20 | 9 cap inside the replay; 11 replayed to the end, door shut |
+  | BreadSelection croissant_on_cutting_board | 1 / 20 | 15 cap inside the pick; 4 cap after the pick |
+  | ArrangeTea kettle_on_tray | 7 / 20 | 7 cap inside the pick; 5 picks closed on nothing |
+  | CuttingToolSelection | 0 runs | 20 errors: no sources for `drawer_open` |
+
+  Later stages were reached too rarely to rate: mug_on_tray 1 / 7, and one
+  run each for bread_in_basket, cabinet_closed and jam_on_cutting_board.
+
+  What the records show:
+  - *Fixture stages.* In 37 of the 40 runs the reset already counts as at
+    the fixture, so the robot does not move. The demo's hand path, replayed
+    in the robot's base frame, is tracked to within 1–3 mm (median lag) in
+    all 17 runs that finish it. Yet the door stays shut: the hand follows the
+    demo's path relative to where the demo's base stood, not relative to this
+    door. Sources are not ranked for fixture stages (distance infinite), so
+    reset *i* takes the *i*-th demo in episode order.
+  - *Pick stages.* Most misses hit the cap inside the first pick, before its
+    log is written. The robot does not drive when the ranked distance is
+    under 0.25 m (here 0.06–0.31 m), so the object-relative hand path can lie
+    where this base cannot reach it. Five kettle picks closed on nothing.
+  - *CuttingToolSelection.* The R1 index has no usable `drawer_open`
+    segment, so every reset raised before its first stage. Self-replay never
+    noticed: its summary lists only stages that have records, and
+    `drawer_open` had none.
+  - Self-replay restores each demo's own state, so none of these could show
+    there.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
