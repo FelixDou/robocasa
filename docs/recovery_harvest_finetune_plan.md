@@ -1018,6 +1018,55 @@ choice open, the code fixes it as follows:
   is now `videos`, and a test runs the whole self-replay loop on the
   kinematic test world, so loop code no longer meets its first run in the
   simulator. The crashed run's output was moved aside, not resumed.
+
+  *Diagnostic self-replay (27 November 2026, commit 463160a, 5 demos per
+  stage).* Stages completed by the executor, then by the demo's own actions
+  from the same restore:
+
+  | Stage | Executor | Demo actions |
+  | --- | --- | --- |
+  | ArrangeBreadBasket cabinet_open | 4/5 | 5/5 |
+  | ArrangeBreadBasket bread_in_basket | 3/5 | 5/5 |
+  | ArrangeBreadBasket basket_on_dining_counter | 0/5 | 5/5 |
+  | ArrangeTea kettle_on_tray | 5/5 | 5/5 |
+  | ArrangeTea mug_on_tray | 5/5 | 5/5 |
+  | ArrangeTea cabinet_closed | 0/5 | 2/5 |
+  | BreadSelection croissant_on_cutting_board | 5/5 | 5/5 |
+  | BreadSelection jam_on_cutting_board | 4/5 | 3/5 |
+  | CuttingToolSelection correct_tool_on_cutting_board | 4/5 | 4/5 |
+  | GarnishPancake fridge_open | 4/5 | 5/5 |
+
+  Readings:
+  - *The restore is sound and tracking is close.* The demo's own actions
+    complete 43 of 50 stages. The hand trails the source frames by a median
+    of 1–6 mm (at most 2 cm, the tolerance). At most gripper closes it is
+    within 7 mm of the demo pose.
+  - *Navigation is the main executor failure.* In basket_on_dining_counter,
+    all five navigations ran 300 steps without arriving, with base contact
+    on 215–292 of the steps. In one the robot ended farther from the goal
+    than it started (1.15 m, then 2.44 m). The demo actions complete all five.
+  - *Stages that settle after the segment.* cabinet_closed settles 1–3 frames
+    after R1's segment end, and the two jam failures 5 and 7 frames after.
+    Holding still for 15 steps does not complete them, even with the demo's
+    actions. The demo needed those frames' motion, not just time.
+  - *The finger-pad grasp check misses grasps.* It reported no grasp after
+    picks that then completed their place (kettle, croissant, mug).
+
+  Changes (amendments):
+  - A source now runs on past R1's segment end to the frame where the demo's
+    predicate has held for `STABLE_FRAMES` (`first_true + 5`) when that is
+    later. The executor and the action control replay those frames too. The
+    15-step tail stays.
+  - `SimWorld.holding` is true if the finger pads hold one body *or*
+    RoboCasa's `check_obj_grasped` holds for any task object.
+  - Navigation logs a trace every 10 steps (pose, command-frame heading,
+    contact), its path length, and the cosine between the wanted and the
+    actual displacement direction per step. A blocked base and a base driving
+    the wrong way look different in it.
+
+  Next: a targeted diagnostic run on the failing stages (`R2_STAGES`), and the
+  basket_on_dining_counter videos. Navigation is redesigned on that evidence,
+  not before.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

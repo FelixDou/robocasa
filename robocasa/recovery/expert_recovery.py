@@ -329,6 +329,7 @@ class Source:
     mode: np.ndarray | None = None                # (N,) the demo's control mode (>= 0.5: base motion)
     actions: np.ndarray | None = None             # (N, 12) the demo's own actions (self-replay control)
     first_true: int | None = None                 # demo frame from which the predicate holds
+    segment_end: int | None = None                # R1's segment end; ``end`` runs on to the predicate's settle
 
     def base_mode(self, frame):
         return self.mode is not None and float(self.mode[self.at(frame)]) >= 0.5
@@ -367,16 +368,26 @@ def world_poses(named, frames):
 
 
 def build_source(row, predicate, *, named, actions, object_names, object_pos, object_quat):
-    """A ``Source`` from an index row, its LeRobot states/actions and the index's object poses (wxyz)."""
+    """A ``Source`` from an index row, its LeRobot states/actions and the index's object poses (wxyz).
+
+    The source runs past R1's segment end when the demo's predicate settles later (R1 matches a
+    predicate turning true up to ``BOUNDARY_TOLERANCE`` frames after a boundary to the earlier
+    segment): to ``first_true + STABLE_FRAMES``, the frames the demo needed to complete the stage.
+    """
     event = row["stage_events"][predicate]
     seg = event["segment"]
     target, _ = es.target_object(seg, row.get("object_lang"))
-    frames = np.arange(int(seg["start"]), int(seg["end"]))
+    seg_end, first_true = int(seg["end"]), event.get("first_true")
+    end = seg_end if first_true is None else max(seg_end, min(len(actions), int(first_true) + es.STABLE_FRAMES))
+    frames = np.arange(int(seg["start"]), end)
+    steps = source_steps(row, seg)
+    if steps and end > seg_end:
+        steps[-1] = SourceStep(steps[-1].name, steps[-1].kind, steps[-1].start, end, steps[-1].lang)
     base, eef = world_poses(named, frames)
     objects = {str(name): np.stack([pose(object_pos[t, j], quat_wxyz_to_mat(object_quat[t, j])) for t in frames])
                for j, name in enumerate(object_names)}
     return Source(task_name=row["task_name"], episode=int(row["episode"]), predicate=predicate, target=target,
-                  start=int(seg["start"]), end=int(seg["end"]), steps=source_steps(row, seg), eef=eef, base=base,
+                  start=int(seg["start"]), end=end, steps=steps, eef=eef, base=base, segment_end=seg_end,
                   gripper=np.asarray(actions[frames, 6], dtype=float), objects=objects,
                   mode=np.asarray(actions[frames, 11], dtype=float), actions=np.asarray(actions[frames], dtype=float),
                   first_true=event.get("first_true"))
@@ -773,19 +784,33 @@ class ExpertRun:
         start, contact_steps = self.steps, 0
         start_dist = math.hypot(goal[0] - mobile[0], goal[1] - mobile[1])
         contact = getattr(self.world, "base_in_contact", None)
-        for _ in range(NAVIGATE_MAX_STEPS):
+        trace, cosines, path = [], [], 0.0
+        for k in range(NAVIGATE_MAX_STEPS):
             obs = self.world.observe()
             mobile = obs["mobile"]
             if navigation_done(mobile, goal, NAV_FINE_POS, math.cos(NAV_FINE_YAW)):
                 break
-            self.act(base_command(mobile, goal, self.gains, self.gripper,
-                                  frame_yaw=obs.get("command_frame_yaw", 0.0)), navigating=True)
-            contact_steps += int(bool(contact())) if contact is not None else 0
+            frame_yaw = obs.get("command_frame_yaw", 0.0)
+            self.act(base_command(mobile, goal, self.gains, self.gripper, frame_yaw=frame_yaw), navigating=True)
+            touching = bool(contact()) if contact is not None else False
+            contact_steps += int(touching)
+            after = self.world.observe()["mobile"]
+            want = np.array([goal[0] - mobile[0], goal[1] - mobile[1]])
+            moved = np.array([after[0] - mobile[0], after[1] - mobile[1]])
+            path += float(np.linalg.norm(moved))
+            if np.linalg.norm(want) > NAV_FINE_POS and np.linalg.norm(moved) > 1e-4:
+                cosines.append(float(want @ moved / (np.linalg.norm(want) * np.linalg.norm(moved))))
+            if k % 10 == 0:
+                trace.append([round(float(v), 3) for v in (*mobile, frame_yaw)] + [int(touching)])
         mobile = self.world.observe()["mobile"]
         return {"phase": "navigate", "steps": self.steps - start, "reached": navigation_done(mobile, goal),
                 "goal": [float(v) for v in goal], "start_distance": round(start_dist, 4),
                 "final_distance": round(math.hypot(goal[0] - mobile[0], goal[1] - mobile[1]), 4),
-                "final_yaw_error": round(abs(wrap(goal[2] - mobile[2])), 4), "contact_steps": contact_steps}
+                "final_yaw_error": round(abs(wrap(goal[2] - mobile[2])), 4), "contact_steps": contact_steps,
+                "path_length": round(path, 4),
+                "heading_cos_median": round(float(np.median(cosines)), 3) if cosines else None,
+                "heading_cos_below_half": sum(c < 0.5 for c in cosines),
+                "trace_every_10": trace}
 
     def track(self, source, step_index, reference):
         step = source.steps[step_index]
@@ -1285,7 +1310,21 @@ class SimWorld:
         return wrap(yaw_of(np.asarray(current).reshape(3, 3)) - yaw_of(np.asarray(ctrl.init_ori).reshape(3, 3)))
 
     def holding(self):
-        return gripper_holds_any(self.kitchen)[0]
+        """Finger pads on one body, or RoboCasa's grasp check on any task object (the pad check
+        missed grasps that then completed a place in the diagnostic self-replay)."""
+        from robocasa.utils import object_utils as OU
+
+        if gripper_holds_any(self.kitchen)[0]:
+            return True
+        for name in self.kitchen.objects:
+            if str(name).startswith(es.DISTRACTOR_PREFIXES):
+                continue
+            try:
+                if OU.check_obj_grasped(self.kitchen, name):
+                    return True
+            except Exception:
+                pass
+        return False
 
     def base_in_contact(self):
         """The mobile base touches anything but the robot and the floor (the world body)."""
@@ -1854,7 +1893,8 @@ def run_self_replay(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, 
                     record = {"task_name": task, "predicate": predicate, "episode": src.episode,
                               "target": src.target, "created_at": ladder.utc_now(),
                               "segment_frames": src.end - src.start,
-                              "first_true_after_end": None if src.first_true is None else int(src.first_true - src.end)}
+                              "first_true_after_end": None if src.first_true is None
+                              else int(src.first_true - (src.segment_end or src.end))}
                     video = output_dir / "videos" / task / predicate / f"episode_{int(src.episode):06d}"
                     try:
                         if env is None:

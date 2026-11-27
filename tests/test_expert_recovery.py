@@ -214,6 +214,12 @@ class SourceTest(unittest.TestCase):
         self.assertEqual(src.gripper[src.at(15)], 1.0)
         with self.assertRaises(IndexError):
             src.at(28)
+        # A predicate settling after the segment end: the source runs on to first_true + STABLE_FRAMES.
+        for first_true, end in ((22, 28), (24, 24 + es.STABLE_FRAMES), (27, T)):
+            row["stage_events"]["mug_on_tray"]["first_true"] = first_true
+            src = er.build_source(row, "mug_on_tray", named=named, actions=actions, object_names=["obj"],
+                                  object_pos=pos, object_quat=quat)
+            self.assertEqual((src.end, src.segment_end, src.steps[-1].end, len(src.gripper)), (end, 28, end, end - 5))
 
     def test_library_reads_the_index_and_filters_by_target(self):
         with tempfile.TemporaryDirectory() as tmp:
