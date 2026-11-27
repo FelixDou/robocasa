@@ -843,6 +843,24 @@ choice open, the code fixes it as follows:
     of its start in the base frame. The probe reports the offset every 10
     steps and the final offset vector, so a drift that keeps growing is
     visible as such.
+
+  *Third probe (27 November 2026): the 7 mm comes from the restore.* With
+  the zero-motion runs first, straight after the environment reset, the hand
+  drifted 8e-6 m over 300 steps in either mode. The same run made after
+  the motion runs (second probe) drifted 7.3 mm, and every base run, each
+  restored after the previous one, ended 7.3 mm off. `restore_world` (the
+  evaluator's `env_to_last_good`, through the wrapper's `reset_to` with
+  states only) sets the simulator state and does not touch the robot's
+  controllers, so their goals, and any frame they keep, carry over from the
+  previous run. Gate R restores alarm snapshots this way on a reused
+  environment, and so did every ladder branch. `probe-restore`
+  (`r2-probe-restore`, diagnostic only) measures the hand's motion after a
+  restore that follows each kind of motion (arm, base, turn, torso, none),
+  with and without `reset_controllers` (each part controller's goal set to
+  the current state), checks whether a forward base command still points
+  forward after the base has turned, and lists the controllers' goal and
+  frame attributes. Until it has run, the probe stays failed and no executor
+  check runs.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

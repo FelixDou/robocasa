@@ -1409,6 +1409,185 @@ def run_probe(env, output, *, log=print):
     return result
 
 
+RESTORE_PERTURBATIONS = {   # (action index, value, mode), sent for PROBE_STEPS before the second restore
+    "none": None,
+    "arm_x": (0, 0.5, ARM_MODE),
+    "arm_down": (2, -0.5, ARM_MODE),
+    "base_x": (7, 0.5, BASE_MODE),
+    "base_turn": (9, 0.5, BASE_MODE),
+    "torso_up": (10, 0.5, ARM_MODE),
+}
+RESTORE_HOLD_STEPS = PROBE_STEPS + SETTLE_STEPS
+
+
+def restore_trials(world, restore, reset_controllers=None):
+    """How far the hand moves, with no command, after a restore that follows each perturbation.
+
+    A restore that also restored the controllers would give the same trace after every
+    perturbation. Each trial: restore, perturb, restore (then ``reset_controllers()`` in the "reset"
+    variant), then RESTORE_HOLD_STEPS of zero motion in each mode; offsets in the base frame.
+    """
+    variants = [("plain", None)] + ([("reset", reset_controllers)] if reset_controllers else [])
+    trials = []
+    for name, spec in RESTORE_PERTURBATIONS.items():
+        for variant, fix in variants:
+            for hold_name, hold_mode in (("arm", ARM_MODE), ("base", BASE_MODE)):
+                restore()
+                if spec is not None:
+                    a = np.zeros(12)
+                    a[spec[0]], a[11] = spec[1], spec[2]
+                    for _ in range(PROBE_STEPS):
+                        world.step(a)
+                restore()
+                if fix is not None:
+                    fix()
+                start = world.observe()
+                p0, m0 = _rel_position(start), start["mobile"]
+                hold = np.zeros(12)
+                hold[11] = hold_mode
+                offsets = []
+                for _ in range(RESTORE_HOLD_STEPS):
+                    world.step(hold)
+                    offsets.append(_rel_position(world.observe()) - p0)
+                m1 = world.observe()["mobile"]
+                norms = [float(np.linalg.norm(o)) for o in offsets]
+                trials.append({"perturbation": name, "variant": variant, "hold_mode": hold_name,
+                               "first_step": norms[0], "final": norms[-1], "max": max(norms),
+                               "final_vector": [float(v) for v in offsets[-1]],
+                               "base_moved": math.hypot(m1[0] - m0[0], m1[1] - m0[1]),
+                               "base_turned": abs(wrap(m1[2] - m0[2]))})
+    return trials
+
+
+def base_frame_after_turn(world, restore, reset_controllers=None, *, turn=0.5, max_turn_steps=60):
+    """Direction of a forward base command in the mobile frame, at the start pose and after turning."""
+    def forward():
+        a = np.zeros(12)
+        a[7], a[11] = PROBE_AMPLITUDES[-1], BASE_MODE
+        m0 = world.observe()["mobile"]
+        for _ in range(PROBE_STEPS):
+            world.step(a)
+        m1 = world.observe()["mobile"]
+        d = rot_z(-m0[2])[:2, :2] @ np.array([m1[0] - m0[0], m1[1] - m0[1]])
+        return math.atan2(d[1], d[0]), float(np.linalg.norm(d))
+
+    out = {}
+    variants = [("plain", None)] + ([("reset", reset_controllers)] if reset_controllers else [])
+    for variant, fix in variants:
+        restore()
+        if fix is not None:
+            fix()
+        heading0, dist0 = forward()
+        restore()
+        if fix is not None:
+            fix()
+        start_yaw = world.observe()["mobile"][2]
+        a = np.zeros(12)
+        a[9], a[11] = PROBE_AMPLITUDES[-1], BASE_MODE
+        for _ in range(max_turn_steps):
+            if abs(wrap(world.observe()["mobile"][2] - start_yaw)) >= turn:
+                break
+            world.step(a)
+        turned = wrap(world.observe()["mobile"][2] - start_yaw)
+        heading1, dist1 = forward()
+        out[variant] = {"heading_at_start": heading0, "heading_after_turn": heading1, "turned": turned,
+                        "heading_change": wrap(heading1 - heading0), "distance": [dist0, dist1]}
+    return out
+
+
+_CONTROLLER_KEYS = ("goal", "init", "origin", "mode", "frame", "type", "ref", "last", "interp")
+
+
+def _small(value):
+    if isinstance(value, (bool, int, float, str)) or value is None:
+        return value
+    try:
+        arr = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    return arr.round(6).reshape(-1).tolist() if arr.size <= 16 else None
+
+
+def controller_inventory(env):
+    """Class and goal/frame-like attributes of every part controller (robosuite internals, best effort)."""
+    kitchen = _kitchen(env)
+    out = []
+    for i, robot in enumerate(getattr(kitchen, "robots", [])):
+        cc = getattr(robot, "composite_controller", None)
+        entry = {"robot": i, "composite": type(cc).__name__ if cc is not None else None, "parts": {}}
+        for name, ctrl in (getattr(cc, "part_controllers", None) or {}).items():
+            attrs = {}
+            for key, value in sorted(vars(ctrl).items()):
+                if any(k in key.lower() for k in _CONTROLLER_KEYS):
+                    v = _small(value)
+                    if v is not None or value is None:
+                        attrs[key] = v
+            entry["parts"][str(name)] = {"class": type(ctrl).__name__,
+                                         "has_reset_goal": hasattr(ctrl, "reset_goal"), "attributes": attrs}
+        out.append(entry)
+    return out
+
+
+def reset_controllers(env):
+    """Point every part controller's goal at the current simulator state (after a state-only restore)."""
+    kitchen = _kitchen(env)
+    reset = []
+    for robot in getattr(kitchen, "robots", []):
+        cc = getattr(robot, "composite_controller", None)
+        if cc is not None and hasattr(cc, "update_state"):
+            cc.update_state()
+        for name, ctrl in (getattr(cc, "part_controllers", None) or {}).items():
+            if hasattr(ctrl, "update"):
+                try:
+                    ctrl.update(force=True)
+                except TypeError:
+                    ctrl.update()
+            if hasattr(ctrl, "reset_goal"):
+                ctrl.reset_goal()
+                reset.append(str(name))
+    return reset
+
+
+def run_restore_probe(env, output, *, log=print):
+    """Diagnostic: does ``restore_world`` leave controller state from the previous run behind?"""
+    world = SimWorld(env)
+    snap = ladder.capture_snapshot(env)
+
+    def restore():
+        ladder.restore_world(env, snap)
+        world.obs = ladder.live_observation(env)
+
+    def fix():
+        reset_controllers(env)
+        world.obs = ladder.live_observation(env)
+
+    result = {"kind": "r2_restore_probe", "inventory_fresh": controller_inventory(env)}
+    restore()
+    a = np.zeros(12)
+    a[0], a[11] = 0.5, ARM_MODE
+    for _ in range(PROBE_STEPS):
+        world.step(a)
+    restore()
+    result["inventory_after_arm_move_and_restore"] = controller_inventory(env)
+    result["reset_parts"] = reset_controllers(env)
+    result["inventory_after_reset_controllers"] = controller_inventory(env)
+    result["trials"] = restore_trials(world, restore, fix)
+    result["base_frame_after_turn"] = base_frame_after_turn(world, restore, fix)
+    restore()
+    result.update(hold_steps=RESTORE_HOLD_STEPS, git_commit=ladder.current_git_commit(), created_at=ladder.utc_now())
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    ladder.atomic_write_json(output, result)
+    log("perturbation  variant  hold  first_step  final  max   (mm)")
+    for t in result["trials"]:
+        log(f"{t['perturbation']:<12}  {t['variant']:<7}  {t['hold_mode']:<4}  {1e3 * t['first_step']:9.2f}  "
+            f"{1e3 * t['final']:6.2f}  {1e3 * t['max']:5.2f}")
+    log(json.dumps({"reset_parts": result["reset_parts"],
+                    "base_frame_after_turn": result["base_frame_after_turn"],
+                    "inventory_after_arm_move_and_restore": result["inventory_after_arm_move_and_restore"]},
+                   indent=1))
+    return result
+
+
 def _make_env(task, split, seed, env_interface="gym"):
     from robocasa.recovery.evaluate_recovery_benchmark import make_env
 
@@ -1764,6 +1943,11 @@ def build_parser():
     p.add_argument("--split", default="pretrain")
     p.add_argument("--seed", type=int, default=TRANSFER_BASE_SEED)
     p.add_argument("--output", required=True, type=Path)
+    p = sub.add_parser("probe-restore", help="diagnostic: controller state left behind by a restore (simulator)")
+    p.add_argument("--task", default="ArrangeTea")
+    p.add_argument("--split", default="pretrain")
+    p.add_argument("--seed", type=int, default=TRANSFER_BASE_SEED)
+    p.add_argument("--output", required=True, type=Path)
     p = sub.add_parser("self-replay", help="executor check 1: own segment from own state (simulator)")
     data_args(p)
     p.add_argument("--tasks", nargs="*", default=list(es.PILOT_TASKS))
@@ -1799,11 +1983,11 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    if args.command == "probe-controls":
+    if args.command in ("probe-controls", "probe-restore"):
         env = _make_env(args.task, args.split, args.seed)
         env.reset(seed=args.seed)
         try:
-            run_probe(env, args.output)
+            (run_probe if args.command == "probe-controls" else run_restore_probe)(env, args.output)
         finally:
             ladder._close(env, None)
         return

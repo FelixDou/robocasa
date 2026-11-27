@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase A of docs/recovery_harvest_finetune_plan.md: recoverability at the Hide-and-Seek + P alarm.
 #   export | score | plan | start | resume | status | analyze | audit | decide | segments | segments-status | r1
-#   r2-probe | r2-self-replay | r2-transfer | r2-gate | r2-status | r2-analyze | r2-export
+#   r2-probe | r2-probe-restore | r2-self-replay | r2-transfer | r2-gate | r2-status | r2-analyze | r2-export
 # audit/decide are step R0 of the redesign (failure audit; simulator only, no policy server).
 # segments/r1 are step R1 (human-demo expert segments; CPU simulator replay, then a join with R0).
 # r2-* are step R2 (expert recoveries): control probe and the two executor checks (simulator only),
@@ -11,8 +11,8 @@
 set -euo pipefail
 action=${1:-status}
 case "$action" in export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1|\
-  r2-probe|r2-self-replay|r2-transfer|r2-gate|r2-status|r2-analyze|r2-export) ;; *)
-  echo "Usage: $0 {export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1|r2-probe|r2-self-replay|r2-transfer|r2-gate|r2-status|r2-analyze|r2-export}"; exit 1 ;; esac
+  r2-probe|r2-probe-restore|r2-self-replay|r2-transfer|r2-gate|r2-status|r2-analyze|r2-export) ;; *)
+  echo "Usage: $0 {export|score|plan|start|resume|status|analyze|audit|decide|segments|segments-status|r1|r2-probe|r2-probe-restore|r2-self-replay|r2-transfer|r2-gate|r2-status|r2-analyze|r2-export}"; exit 1 ;; esac
 
 export STORAGE_BS=${STORAGE_BS:-/gs/bs/tga-shinoda/felid}
 export ROBOCASA_REPO=${ROBOCASA_REPO:-/gs/fs/tga-shinoda/felid/robocasa}
@@ -176,6 +176,15 @@ if [[ "$action" == r2-probe ]]; then
   CUDA_VISIBLE_DEVICES="$gpu" MUJOCO_EGL_DEVICE_ID="$gpu" PYTHONPATH="$ROBOCASA_REPO" \
     "$py" -u -m robocasa.recovery.expert_recovery probe-controls --output "$gains" \
     2>&1 | tee "$log_dir/$(basename "$ALARM_ROOT")_r2_probe_$(date +%Y%m%d_%H%M%S).log"
+  exit 0
+fi
+if [[ "$action" == r2-probe-restore ]]; then
+  # Diagnostic, one simulator GPU, about a minute: controller state left behind by a state-only restore.
+  gpu=${R2_GPU:-0}
+  mkdir -p "$r2_dir"
+  CUDA_VISIBLE_DEVICES="$gpu" MUJOCO_EGL_DEVICE_ID="$gpu" PYTHONPATH="$ROBOCASA_REPO" \
+    "$py" -u -m robocasa.recovery.expert_recovery probe-restore --output "$r2_dir/restore_probe.json" \
+    2>&1 | tee "$log_dir/$(basename "$ALARM_ROOT")_r2_probe_restore_$(date +%Y%m%d_%H%M%S).log"
   exit 0
 fi
 if [[ "$action" == r2-self-replay || "$action" == r2-transfer ]]; then

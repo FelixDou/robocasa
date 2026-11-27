@@ -567,6 +567,84 @@ class ProbeTest(unittest.TestCase):
         self.assertFalse(result["ok"])
 
 
+class StaleControllerWorld(FakeWorld):
+    """A world whose controllers keep state across ``restore()``, which only resets the simulator.
+
+    The arm controller tracks a goal in the base frame (moving half the way each step) that arm
+    commands shift and a restore leaves alone; the base controller takes commands in the frame of its
+    heading at the last ``reset_controllers()``, also left alone by a restore.
+    """
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.rel = (er.inverse(self.base_T()) @ self.eef)[:3, 3].copy()
+        self.goal, self.base_ref_yaw = self.rel.copy(), self.mobile[2]
+        self.saved = (self.mobile.copy(), self.rel.copy())
+
+    def restore(self):
+        self.mobile, self.rel = self.saved[0].copy(), self.saved[1].copy()
+        self._place()
+
+    def reset_controllers(self):
+        self.goal, self.base_ref_yaw = self.rel.copy(), self.mobile[2]
+
+    def _place(self):
+        self.eef = self.base_T() @ er.pose(self.rel, R_DOWN)
+
+    def step(self, a):
+        a = np.clip(np.asarray(a, dtype=float), -1, 1)
+        self.steps += 1
+        if a[11] >= 0.5:
+            d = self.gains.base @ a[7:10]
+            self.mobile[:2] += er.rot_z(self.base_ref_yaw)[:2, :2] @ d[:2]
+            self.mobile[2] = er.wrap(self.mobile[2] + d[2])
+        else:
+            self.goal = self.goal + self.gains.arm_pos @ a[0:3]
+        self.rel = self.rel + 0.5 * (self.goal - self.rel)
+        self._place()
+        return {"predicates": {}, "task_success": False}
+
+
+class RestoreProbeTest(unittest.TestCase):
+    def setUp(self):
+        self.world = StaleControllerWorld()
+
+    def trials(self):
+        rows = er.restore_trials(self.world, self.world.restore, self.world.reset_controllers)
+        return {(r["perturbation"], r["variant"], r["hold_mode"]): r for r in rows}
+
+    def test_a_stale_arm_goal_shows_after_an_arm_move_and_the_reset_removes_it(self):
+        rows = self.trials()
+        self.assertEqual(len(rows), len(er.RESTORE_PERTURBATIONS) * 2 * 2)
+        self.assertLess(rows[("none", "plain", "arm")]["final"], 1e-9)
+        stale = rows[("arm_x", "plain", "arm")]
+        self.assertGreater(stale["final"], 0.05)       # pulled back toward the previous run's goal
+        self.assertLess(rows[("arm_x", "reset", "arm")]["final"], 1e-9)
+        self.assertLess(rows[("arm_x", "reset", "base")]["final"], 1e-9)
+
+    def test_base_commands_in_a_stale_frame_turn_with_the_base(self):
+        out = er.base_frame_after_turn(self.world, self.world.restore, self.world.reset_controllers)
+        plain, reset = out["plain"], out["reset"]
+        self.assertGreater(abs(plain["turned"]), 0.45)
+        self.assertAlmostEqual(plain["heading_change"], -plain["turned"], places=6)
+        # reset_controllers() before the turn only: the frame is still the one before the turn
+        self.assertAlmostEqual(reset["heading_change"], -reset["turned"], places=6)
+
+    def test_a_rigid_world_shows_nothing(self):
+        world = {}
+
+        def restore():
+            world["w"] = FakeWorld()
+
+        restore()
+        proxy = type("Proxy", (), {"observe": lambda _s: world["w"].observe(),
+                                   "step": lambda _s, a: world["w"].step(a)})()
+        rows = er.restore_trials(proxy, restore)
+        self.assertTrue(all(r["final"] < 1e-9 for r in rows))
+        out = er.base_frame_after_turn(proxy, restore)
+        self.assertAlmostEqual(out["plain"]["heading_change"], 0.0, places=6)
+
+
 class NpyWriter:
     """Stand-in for an imageio video writer: the frames, exactly, as a .npy file at the .mp4 path."""
 
