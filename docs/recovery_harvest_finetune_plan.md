@@ -1364,8 +1364,12 @@ choice open, the code fixes it as follows:
   - the phase names the place step;
   - the executor drives to the world's chosen goal.
 
-  *diag8 (commit 3fffd0e, basket_on_dining_counter, 20 demos): passed*
-  (at least 18 / 20; the last eight episodes completed with the stage). The
+  *diag8 (commit 3fffd0e, basket_on_dining_counter, 20 demos): 20 / 20.*
+  The drive slid 0.33 to 0.53 m off the sink (`sink_island_group`) in the
+  six episodes that had placed into it before (1, 4, 7, 10, 15, 19), and in
+  episode 6. In episodes 8, 12 and 18 it slid 2.5 to 12.5 cm to clear a
+  distractor object on the counter (`dstr_dining2`). The other ten kept the
+  centred pose. The
   full 20-demo self-replay of all eleven stages reruns next, since the box
   planner and the place spot change every stage that drives.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
