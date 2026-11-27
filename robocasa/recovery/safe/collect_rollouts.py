@@ -10,7 +10,24 @@ import numpy as np
 
 from .dataset import save_rollout
 from .schema import SafeRolloutMetadata
-from .subtask_safe import build_subtask_safe_record
+from .subtask_safe import RECOVERY_PREDICATES, build_subtask_safe_record
+
+
+class _TimedVideoWriter:
+    """Associate each image actually appended with the observed post-action state."""
+
+    def __init__(self, writer):
+        self.writer = writer
+        self.environment_step = 0
+        self.frame_steps = []
+
+    def append_data(self, frame, *args, **kwargs):
+        result = self.writer.append_data(frame, *args, **kwargs)
+        self.frame_steps.append(self.environment_step)
+        return result
+
+    def __getattr__(self, name):
+        return getattr(self.writer, name)
 
 
 def collect_single_rollout(
@@ -57,6 +74,7 @@ def collect_single_rollout(
     if video_frame_stride < 1:
         raise ValueError("video_frame_stride must be positive")
     num_video_frames = 0
+    timed_writer = None
     subtask_evals = []
     if record_subtask_trace:
         if subtask_eval_fn is None:
@@ -68,6 +86,10 @@ def collect_single_rollout(
             if reset_info.get("subtask_eval") is not None
             else subtask_eval_fn(env)
         )
+        observed_task = task_name or (subtask_evals[0] or {}).get("task_name")
+        if (observed_task in RECOVERY_PREDICATES and frame_fn is not None
+                and callable(getattr(video_writer, "append_data", None))):
+            timed_writer = _TimedVideoWriter(video_writer)
     for step_index in range(horizon):
         action = policy(obs, instruction=instruction)
         actions.append(action)
@@ -100,8 +122,14 @@ def collect_single_rollout(
                 or success
             )
         ):
-            previous_frame = frame_fn(env, video_writer, obs, previous_frame)
-            num_video_frames += 1
+            if timed_writer is None:
+                previous_frame = frame_fn(env, video_writer, obs, previous_frame)
+                num_video_frames += 1
+            else:
+                # A missing render must not substitute an earlier image at the new timestamp.
+                timed_writer.environment_step = num_env_steps
+                frame_fn(env, timed_writer, obs, None)
+                num_video_frames = len(timed_writer.frame_steps)
         if success:
             termination_reason = "success"
             break
@@ -169,6 +197,8 @@ def collect_single_rollout(
         if record_subtask_trace
         else None
     )
+    if timed_writer is not None:
+        subtask_safe_record["video_frame_environment_steps"] = timed_writer.frame_steps
     return {
         "success": success,
         "num_env_steps": num_env_steps,

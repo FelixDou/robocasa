@@ -20,6 +20,59 @@ SUBTASK_DEFINITION_SOURCE = (
     "mapped_subtask_sequence observation-safe semantic normalization"
 )
 
+RECOVERY_PREDICATES = {
+    "ArrangeBreadBasket": (
+        "bread_in_basket", "bread_grasped", "basket_grasped", "basket_on_dining_counter",
+    ),
+    "CuttingToolSelection": (
+        "correct_tool_grasped", "correct_tool_present_on_board", "wrong_tool_grasped",
+        "wrong_tool_not_on_cutting_board", "correct_tool_on_cutting_board",
+    ),
+}
+
+
+def _recovery_observations(evals, names):
+    """Store reset, changes and terminal truth independently of ordered progress."""
+    observations = []
+    for step, payload in enumerate(evals):
+        predicates = payload.get("predicates", {})
+        values = {}
+        for name in names:
+            value = predicates.get(name, {}).get("value")
+            values[name] = None if value is None else bool(value)
+        if step == 0 or values != observations[-1]["values"] or step == len(evals) - 1:
+            observations.append({"environment_step": step, "values": values})
+    return observations
+
+
+def _validate_recovery_observations(record):
+    observations = record["recovery_observations"]
+    names = RECOVERY_PREDICATES.get(record.get("task_name"))
+    nstates = record.get("num_environment_states")
+    if not names or not isinstance(observations, list) or not observations or type(nstates) is not int or nstates < 1:
+        raise ValueError("Invalid recovery observation history")
+    previous = -1
+    for item in observations:
+        if not isinstance(item, dict):
+            raise ValueError("Recovery observations must have a timestamp and predicate values")
+        step = item.get("environment_step")
+        values = item.get("values")
+        if type(step) is not int or not previous < step < nstates:
+            raise ValueError("Recovery observation times must increase within the rollout")
+        if not isinstance(values, dict) or set(values) != set(names) or any(
+            v is not None and not isinstance(v, bool) for v in values.values()
+        ):
+            raise ValueError("Recovery observations need the task's predicates as boolean or null")
+        previous = step
+    if observations[0]["environment_step"] != 0 or previous != nstates - 1:
+        raise ValueError("Recovery observations must include reset and terminal states")
+    if "video_frame_environment_steps" in record:
+        steps = record["video_frame_environment_steps"]
+        if (not isinstance(steps, list)
+                or any(type(s) is not int or not 0 < s < nstates for s in steps)
+                or any(a > b for a, b in zip(steps, steps[1:]))):
+            raise ValueError("Recovery video frames need ordered post-action state timestamps")
+
 
 def _valid_evals(
     subtask_evals: list[dict[str, Any] | None],
@@ -578,7 +631,7 @@ def build_subtask_safe_record(
         if terminal_active_subtask is not None
         else None
     )
-    return {
+    record = {
         "schema_version": SUBTASK_SAFE_SCHEMA_VERSION,
         "rollout_id": rollout_id,
         "task_name": task_name,
@@ -612,6 +665,9 @@ def build_subtask_safe_record(
         "excluded_completed_subtasks": excluded_completed_subtasks,
         "excluded_bypassed_subtasks": excluded_bypassed_subtasks,
     }
+    if task_name in RECOVERY_PREDICATES:
+        record["recovery_observations"] = _recovery_observations(valid_evals, RECOVERY_PREDICATES[task_name])
+    return record
 
 
 def validate_subtask_safe_record(
@@ -630,6 +686,8 @@ def validate_subtask_safe_record(
         )
     if record.get("rollout_id") != rollout_id:
         raise ValueError("Subtask-SAFE rollout_id disagrees with manifest")
+    if "recovery_observations" in record:
+        _validate_recovery_observations(record)
     if task_name is not None and record.get("task_name") != task_name:
         raise ValueError("Subtask-SAFE task_name disagrees with manifest")
     if record.get("rollout_failed") != bool(rollout_failed):
