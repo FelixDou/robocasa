@@ -889,6 +889,31 @@ choice open, the code fixes it as follows:
   after turns of ±0.5 rad, marks a command that moves less than half as far as
   at the start pose as blocked, and takes the median heading change over the
   rest. Next: the restore used by the probe and by Gate R follows from it.
+
+  *Second restore probe (27 November 2026).* With `reset_controllers` after
+  the restore, every trial stayed within 0.01 mm, in both modes, after every
+  perturbation; the full reload gave the same. Without it: 49–53 mm in base
+  mode after an arm move, and 8.5 mm (driving), 20.2 mm (turning) and 15.4 mm
+  (torso) in arm mode, so the arm goal is not the only stale state. In arm
+  mode the goal is the current hand pose read in the arm's origin frame, and
+  robosuite refreshes that origin only inside `run_controller`, after
+  `set_goal`; `reset_controllers` refreshes it first. The turn test was
+  spoiled by contact at the start pose (half the commands blocked, the rest
+  between -0.30 and +0.52 rad).
+
+  **Decision (27 November 2026, before any executor run).** Every R2 world
+  (`SimWorld`: probe, self-replay, transfer, Gate R) calls `reset_controllers`
+  after the reset or restore it is built on, without a physics step. A fresh
+  `env.reset()` needs it too: robosuite's own `reset_goal` leaves the arm's
+  base-mode goal in the world frame, so a base-mode command before the first
+  arm-mode one would swing the arm. The probe now also backs away from the
+  start pose (40 steps), then checks forward, back, left and right after
+  turns of ±0.5 rad. A command is blocked if the base touches anything but
+  the robot and the floor, or moves less than half as far as before the
+  turn. The probe passes only if every direction is free before the turn and,
+  after each turn, at least two are free with a median direction change
+  within 0.1 rad. Commands kept in a frame fixed at the episode reset would
+  change by about -0.5 rad and fail it.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
@@ -1247,6 +1272,14 @@ Runs go from a pinned worktree if other recovery runs share the checkout.
   November, see Step 0 findings); whether the training model takes the
   RoboCasa365 inputs, the input-match check, run time and the sanity-check
   result (answered 27 November: Step 0 passed).
+- *Ladder restores (found 27 November 2026).* Every ladder branch was
+  restored with `restore_world` alone on a reused environment, so XR-1's first
+  steps in a branch ran with controller state left by the previous branch:
+  in base mode the previous arm goal, and in arm mode an arm origin from
+  before the restore. The diagnostic measured 8–20 mm after short motions.
+  After a whole branch it could be larger. How much this moved the ladder's
+  branch outcomes is open. A check: rerun a sample of ladder branches with
+  `reset_controllers` after the restore and compare.
 - Exact recovery-prompt text and the replay mixing ratio, frozen with the
   training code.
 - Whether ladder v2 snapshots on `/gs/bs` are complete for all 76 parents

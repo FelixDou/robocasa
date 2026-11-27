@@ -1157,9 +1157,11 @@ def slide_to(goal, fixture_xy, target_xy):
 class SimWorld:
     """World adapter on a RoboCasa gym env: poses in the observation's convention, 12-d actions."""
 
-    def __init__(self, env, recorder=None):
+    def __init__(self, env, recorder=None, *, reset=True):
         self.env = env
         self.kitchen = _kitchen(env)
+        if reset:   # every SimWorld follows a reset or restore, which leave stale controller goals
+            reset_controllers(env)
         self.obs = ladder.live_observation(env)
         self.info = {}
         self.recorder = recorder
@@ -1178,6 +1180,22 @@ class SimWorld:
             bid = self.kitchen.obj_body_id[name]
             objects[str(name)] = pose(sim.data.body_xpos[bid], quat_wxyz_to_mat(sim.data.body_xquat[bid]))
         return {"base": base, "eef": eef, "mobile": mobile, "objects": objects}
+
+    def base_in_contact(self):
+        """The mobile base touches anything but the robot and the floor (the world body)."""
+        sim = self.kitchen.sim
+        model = sim.model
+        for i in range(int(sim.data.ncon)):
+            c = sim.data.contact[i]
+            names = [model.body_id2name(int(model.geom_bodyid[g])) or "" for g in (c.geom1, c.geom2)]
+            base = [n.startswith("mobilebase") for n in names]
+            if not any(base):
+                continue
+            other = names[1] if base[0] else names[0]
+            if other == "world" or "floor" in other.lower() or other.startswith(("mobilebase", "robot", "gripper")):
+                continue
+            return True
+        return False
 
     def step(self, action):
         from robocasa.recovery.openpi_websocket_policy import _convert_action
@@ -1379,7 +1397,19 @@ def probe_world(world, reset):
     ok = min(r2_pos, r2_rot, r2_base) >= PROBE_MIN_R2 and max(conds.values()) < PROBE_MAX_COND \
         and leaks["arm_moves_base"] < ARM_MOVES_BASE_TOL and leaks["base_moves_arm_settled"] < ARM_HOLD_TOL \
         and max(d["max"] for d in drift.values()) < DRIFT_TOL
-    return {"kind": "r2_control_probe", "gains": gains.to_json(),
+    backoff = np.zeros(12)
+    backoff[7], backoff[11] = -PROBE_AMPLITUDES[-1], BASE_MODE
+
+    def clear_of_contact():   # back away from the start pose's counter before turning
+        reset()
+        for _ in range(BACKOFF_STEPS):
+            world.step(backoff)
+
+    turn = base_frame_after_turn(world, clear_of_contact)
+    frame_ok = all(row["unblocked"] >= TURN_MIN_UNBLOCKED and abs(row["median_heading_change"]) <= TURN_FRAME_TOL
+                   for row in turn["turns"])
+    ok = ok and frame_ok and turn["start_unblocked"] == len(TURN_DIRECTIONS)
+    return {"kind": "r2_control_probe", "gains": gains.to_json(), "base_frame_after_turn": turn,
             "r2": {"arm_pos": r2_pos, "arm_rot": r2_rot, "base": r2_base}, "condition_numbers": conds,
             "mode_leaks": leaks, "zero_action_drift": drift, "drift_steps": DRIFT_STEPS, "base_runs": base_runs,
             "torso_by_mode": {"arm": torso[ARM_MODE], "base": torso[BASE_MODE]},
@@ -1394,6 +1424,7 @@ def run_probe(env, output, *, log=print):
 
     def reset():
         ladder.restore_world(env, snap)
+        reset_controllers(env)
         world.obs = ladder.live_observation(env)
 
     result = probe_world(world, reset)
@@ -1402,7 +1433,15 @@ def run_probe(env, output, *, log=print):
     ladder.atomic_write_json(output, result)
     runs = result["base_runs"]
     summary = {k: result[k] for k in ("ok", "r2", "condition_numbers", "mode_leaks", "torso_by_mode")}
-    summary["zero_action_drift"] = result["zero_action_drift"]
+    summary["zero_action_drift"] = {k: {"max": v["max"], "final": v["final"]}
+                                    for k, v in result["zero_action_drift"].items()}
+    turn = result["base_frame_after_turn"]
+    summary["base_frame_after_turn"] = {
+        "start": {k: [round(v["heading"], 3), round(v["distance"], 4), v["blocked"]] for k, v in turn["start"].items()},
+        "turns": [{"turned": round(r["median_turned"], 3), "unblocked": r["unblocked"],
+                   "median_heading_change": r["median_heading_change"],
+                   "directions": {k: [round(d["heading_change"], 3), round(d["distance"], 4), d["blocked"]]
+                                  for k, d in r["directions"].items()}} for r in turn["turns"]]}
     summary["largest_base_travel"] = max(r["travel"] for r in runs)
     summary["largest_base_turn"] = max(r["turn"] for r in runs)
     log(json.dumps(summary, indent=2))
@@ -1459,24 +1498,32 @@ def restore_trials(world, variants):
 TURN_DIRECTIONS = {"forward": (7, 1.0), "back": (7, -1.0), "left": (8, 1.0), "right": (8, -1.0)}
 TURN_ANGLES = (0.5, -0.5)
 BLOCKED_RATIO = 0.5   # a command moving the base less than this share of its motion at the start pose
+BACKOFF_STEPS = 40    # probe: back away from the start pose's counter before the turn check
+TURN_FRAME_TOL = 0.1  # rad: median change of a base command's direction in the mobile frame after a turn
+TURN_MIN_UNBLOCKED = 2
 
 
 def base_frame_after_turn(world, restore, *, turns=TURN_ANGLES, max_turn_steps=80):
     """Direction of each planar base command in the mobile frame, at the start pose and after turning.
 
     Commands taken in the current base frame keep their direction after a turn (change 0); commands
-    taken in a frame fixed at the episode reset turn against it (change -turn). A command that moves
-    the base much less than at the start pose is marked blocked (contact) and left out of the median.
+    taken in a frame fixed at the episode reset turn against it (change -turn). A command is marked
+    blocked, and left out of the median, if the base touches something while it runs (worlds with
+    ``base_in_contact``) or moves the base much less than at the start pose.
     """
+    contact = getattr(world, "base_in_contact", None)
+
     def drive(index, sign):
         a = np.zeros(12)
         a[index], a[11] = sign * PROBE_AMPLITUDES[-1], BASE_MODE
         m0 = world.observe()["mobile"]
+        touched = False
         for _ in range(PROBE_STEPS):
             world.step(a)
+            touched = touched or bool(contact and contact())
         m1 = world.observe()["mobile"]
         d = rot_z(-m0[2])[:2, :2] @ np.array([m1[0] - m0[0], m1[1] - m0[1]])
-        return math.atan2(d[1], d[0]), float(np.linalg.norm(d))
+        return math.atan2(d[1], d[0]), float(np.linalg.norm(d)), touched
 
     def turn_by(angle):
         start_yaw = world.observe()["mobile"][2]
@@ -1492,19 +1539,21 @@ def base_frame_after_turn(world, restore, *, turns=TURN_ANGLES, max_turn_steps=8
     for name, (index, sign) in TURN_DIRECTIONS.items():
         restore()
         start[name] = drive(index, sign)
-    out = {"start": {k: {"heading": h, "distance": d} for k, (h, d) in start.items()}, "turns": []}
+    out = {"start": {k: {"heading": h, "distance": d, "blocked": bool(t)} for k, (h, d, t) in start.items()},
+           "start_unblocked": sum(not t for _, _, t in start.values()), "turns": []}
     for angle in turns:
         rows, changes = {}, []
         for name, (index, sign) in TURN_DIRECTIONS.items():
             restore()
             turned = turn_by(angle)
-            heading, dist = drive(index, sign)
+            heading, dist, touched = drive(index, sign)
             change = wrap(heading - start[name][0])
-            blocked = dist < BLOCKED_RATIO * start[name][1]
-            rows[name] = {"turned": turned, "heading_change": change, "distance": dist, "blocked": bool(blocked)}
+            blocked = touched or start[name][2] or dist < BLOCKED_RATIO * start[name][1]
+            rows[name] = {"turned": turned, "heading_change": change, "distance": dist,
+                          "contact": bool(touched), "blocked": bool(blocked)}
             if not blocked:
                 changes.append(change)
-        out["turns"].append({"angle": angle, "directions": rows,
+        out["turns"].append({"angle": angle, "directions": rows, "unblocked": len(changes),
                              "median_heading_change": float(np.median(changes)) if changes else None,
                              "median_turned": float(np.median([r["turned"] for r in rows.values()]))})
     return out
@@ -1578,7 +1627,7 @@ def reset_controllers(env):
 
 def run_restore_probe(env, output, *, log=print):
     """Diagnostic: does ``restore_world`` leave controller state from the previous run behind?"""
-    world = SimWorld(env)
+    world = SimWorld(env, reset=False)
     snap = ladder.capture_snapshot(env)
     kitchen = _kitchen(env)
     model_xml, ep_meta = kitchen.sim.model.get_xml(), json.dumps(kitchen.get_ep_meta())
@@ -1619,7 +1668,7 @@ def run_restore_probe(env, output, *, log=print):
         log(f"{t['perturbation']:<12}  {t['variant']:<7}  {t['hold_mode']:<4}  {1e3 * t['first_step']:9.2f}  "
             f"{1e3 * t['final']:6.2f}  {1e3 * t['max']:5.2f}")
     turn = result["base_frame_after_turn"]["plain"]
-    log("start pose: " + "  ".join(f"{k} {v['heading']:+.3f} rad {1e3 * v['distance']:.1f} mm"
+    log("start pose: " + "  ".join(f"{k} {v['heading']:+.3f} rad {1e3 * v['distance']:.1f} mm{' BLOCKED' if v['blocked'] else ''}"
                                    for k, v in turn["start"].items()))
     for row in turn["turns"]:
         log(f"after turning {row['median_turned']:+.3f} rad: median heading change "

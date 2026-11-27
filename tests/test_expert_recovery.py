@@ -559,6 +559,21 @@ class ProbeTest(unittest.TestCase):
         self.assertTrue(all(r["offset"] > er.ARM_HOLD_TOL for r in result["base_runs"]))
         self.assertTrue(result["ok"])
 
+    def test_base_commands_that_keep_the_reset_heading_fail(self):
+        # StaleControllerWorld takes base commands in the frame of its heading at construction.
+        result = self.probe(StaleControllerWorld)
+        turn = result["base_frame_after_turn"]
+        self.assertEqual(turn["start_unblocked"], len(er.TURN_DIRECTIONS))
+        for row in turn["turns"]:
+            self.assertAlmostEqual(row["median_heading_change"], -row["median_turned"], places=6)
+        self.assertFalse(result["ok"])
+
+    def test_a_rigid_world_keeps_its_base_frame_after_turning(self):
+        turn = self.probe(FakeWorld)["base_frame_after_turn"]
+        for row in turn["turns"]:
+            self.assertEqual(row["unblocked"], len(er.TURN_DIRECTIONS))
+            self.assertAlmostEqual(row["median_heading_change"], 0.0, places=6)
+
     def test_a_sag_that_keeps_growing_fails(self):
         result = self.probe(SaggingWorld, depth=0.0003, settle=1)   # 9 cm over a navigation
         drift = result["zero_action_drift"]
@@ -679,6 +694,32 @@ class RestoreProbeTest(unittest.TestCase):
         for row in out["turns"]:
             self.assertTrue(row["directions"]["left"]["blocked"])
             self.assertAlmostEqual(row["median_heading_change"], 0.0, places=6)
+
+
+class ContactWorld(FakeWorld):
+    """A wall touches the base once it has turned by more than 0.1 rad; motion itself is unaffected."""
+
+    def base_in_contact(self):
+        return abs(self.mobile[2]) > 0.1
+
+
+class ContactTest(unittest.TestCase):
+    def test_contact_marks_a_command_blocked_even_when_it_moves_freely(self):
+        world = {}
+
+        def restore():
+            world["w"] = ContactWorld()
+
+        restore()
+        proxy = type("Proxy", (), {"observe": lambda _s: world["w"].observe(),
+                                   "step": lambda _s, a: world["w"].step(a),
+                                   "base_in_contact": lambda _s: world["w"].base_in_contact()})()
+        out = er.base_frame_after_turn(proxy, restore)
+        self.assertEqual(out["start_unblocked"], len(er.TURN_DIRECTIONS))
+        for row in out["turns"]:
+            self.assertEqual(row["unblocked"], 0)
+            self.assertIsNone(row["median_heading_change"])
+            self.assertTrue(all(d["contact"] for d in row["directions"].values()))
 
 
 class FakePart:
