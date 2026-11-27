@@ -1474,7 +1474,10 @@ choice open, the code fixes it as follows:
     stage, and the ladder runs already exclude it (`exclude_predicates`). R2
     skips it in transfer and self-replay (`EXCLUDED_STAGES`). The third
     self-replay predates the `no_sources` rows; resuming it adds them without
-    replaying anything.
+    replaying anything. Resumed at 2c60536 (28 November): both GarnishPancake
+    stages hold at the start of all clean demos (share 1.0), and the summary
+    still passes. The records' own commit is kept in
+    `git_commit_records_0750d99.txt`.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
