@@ -1363,6 +1363,11 @@ choice open, the code fixes it as follows:
   - the offset is where the demo left the object;
   - the phase names the place step;
   - the executor drives to the world's chosen goal.
+
+  *diag8 (commit 3fffd0e, basket_on_dining_counter, 20 demos): passed*
+  (at least 18 / 20; the last eight episodes completed with the stage). The
+  full 20-demo self-replay of all eleven stages reruns next, since the box
+  planner and the place spot change every stage that drives.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
