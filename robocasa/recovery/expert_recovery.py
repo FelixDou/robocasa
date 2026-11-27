@@ -73,6 +73,9 @@ TRANSFER_BASE_SEED = 710007   # fresh pretrain-split seeds 710007-710026; Phase 
 CONVENTION_TOL = 1e-3         # self-replay: observation vs LeRobot state at the segment start
 PROBE_AMPLITUDES = (0.25, 0.5)
 PROBE_STEPS = 6
+PROBE_MIN_R2, PROBE_MAX_COND = 0.9, 20.0
+ARM_MOVES_BASE_TOL = 1e-3     # m per step: arm-mode commands must not move the base
+ARM_HOLD_TOL = 5e-3           # m: hand offset in the base frame after a base run and SETTLE_STEPS of zero motion
 
 GRIPPER_OPEN, GRIPPER_CLOSE = 0.0, 1.0       # the gym wrapper closes at >= 0.5
 ARM_MODE, BASE_MODE = 0.0, 1.0               # ... and switches to base motion at >= 0.5
@@ -1263,17 +1266,28 @@ def _sources_of(programs, library, task_name):
     return out
 
 
-def run_probe(env, output, *, log=print):
-    """Measure the per-step motion each unit action produces (arm in base frame, base in mobile frame)."""
-    world = SimWorld(env)
-    snap = ladder.capture_snapshot(env)
+def _rel_position(obs):
+    """End-effector position in the robot base frame."""
+    return (inverse(obs["base"]) @ obs["eef"])[:3, 3]
+
+
+def probe_world(world, reset):
+    """The probe's measurements on ``world``; ``reset()`` puts it back in the probe's start state.
+
+    Base-mode runs drive for PROBE_STEPS, then send zero motion for SETTLE_STEPS. The arm may lag
+    while the base accelerates (``base_moves_arm``, per step, reported only); what the executor needs
+    is that the hand returns to its pose in the base frame once the base stops (``settled``). An arm
+    that held its world pose instead would end offset by about the base's travel.
+    """
     arm_pos, arm_rot, base = [], [], []
-    leaks = {"arm_moves_base": 0.0, "base_moves_arm": 0.0}
+    leaks = {"arm_moves_base": 0.0, "base_moves_arm": 0.0, "base_moves_arm_settled": 0.0,
+             "zero_action_drift": 0.0}
+    base_runs = []
     for dim in range(9):
         for amp in PROBE_AMPLITUDES:
             for sign in (1.0, -1.0):
-                ladder.restore_world(env, snap)
-                world.obs = ladder.live_observation(env)
+                reset()
+                start_obs = world.observe()
                 a = np.zeros(12)
                 if dim < 6:
                     a[dim] = sign * amp
@@ -1281,6 +1295,7 @@ def run_probe(env, output, *, log=print):
                 else:
                     a[7 + dim - 6] = sign * amp
                     a[11] = BASE_MODE
+                peak = 0.0
                 for t in range(PROBE_STEPS):
                     before = world.observe()
                     world.step(a)
@@ -1303,16 +1318,35 @@ def run_probe(env, output, *, log=print):
                         unit = np.zeros(3)
                         unit[dim - 6] = sign * amp
                         base.append((unit, np.array([d[0], d[1], wrap(m1[2] - m0[2])])))
-                        rel_before = inverse(before["base"]) @ before["eef"]
-                        rel_after = inverse(after["base"]) @ after["eef"]
-                        leaks["base_moves_arm"] = max(leaks["base_moves_arm"],
-                                                      float(np.linalg.norm(rel_after[:3, 3] - rel_before[:3, 3])))
+                        peak = max(peak, float(np.linalg.norm(_rel_position(after) - _rel_position(before))))
+                if dim < 6:
+                    continue
+                moved_obs = world.observe()
+                hold = np.zeros(12)
+                hold[11] = BASE_MODE
+                for _ in range(SETTLE_STEPS):
+                    world.step(hold)
+                end_obs = world.observe()
+                settled = float(np.linalg.norm(_rel_position(end_obs) - _rel_position(start_obs)))
+                m0, m1 = start_obs["mobile"], moved_obs["mobile"]
+                base_runs.append({"dim": dim - 6, "amplitude": amp, "sign": sign,
+                                  "travel": math.hypot(m1[0] - m0[0], m1[1] - m0[1]),
+                                  "turn": abs(wrap(m1[2] - m0[2])), "peak_step_lag": peak, "settled": settled})
+                leaks["base_moves_arm"] = max(leaks["base_moves_arm"], peak)
+                leaks["base_moves_arm_settled"] = max(leaks["base_moves_arm_settled"], settled)
+    # Control: zero motion in base mode for as long as a base run, to separate the restore's own effect.
+    reset()
+    start_obs = world.observe()
+    hold = np.zeros(12)
+    hold[11] = BASE_MODE
+    for _ in range(PROBE_STEPS + SETTLE_STEPS):
+        world.step(hold)
+    leaks["zero_action_drift"] = float(np.linalg.norm(_rel_position(world.observe()) - _rel_position(start_obs)))
     torso = {}
     for mode in (ARM_MODE, BASE_MODE):
         rates = []
         for sign in (1.0, -1.0):
-            ladder.restore_world(env, snap)
-            world.obs = ladder.live_observation(env)
+            reset()
             a = np.zeros(12)
             a[10], a[11] = sign * PROBE_AMPLITUDES[-1], mode
             for t in range(PROBE_STEPS):
@@ -1322,24 +1356,42 @@ def run_probe(env, output, *, log=print):
                     rates.append((world.observe()["base"][2, 3] - before["base"][2, 3]) / (sign * PROBE_AMPLITUDES[-1]))
         torso[mode] = float(np.mean(rates))
     torso_mode = max(torso, key=lambda m: abs(torso[m]))
-    ladder.restore_world(env, snap)
+    reset()
     M_pos, r2_pos = estimate_gains(arm_pos)
     M_rot, r2_rot = estimate_gains(arm_rot)
     M_base, r2_base = estimate_gains(base)
     torso_gain = torso[torso_mode] if abs(torso[torso_mode]) >= TORSO_MIN_GAIN else 0.0
     gains = Gains(M_pos, M_rot, M_base, torso=torso_gain, torso_mode=torso_mode)
     conds = {k: float(np.linalg.cond(m)) for k, m in (("arm_pos", M_pos), ("arm_rot", M_rot), ("base", M_base))}
-    ok = min(r2_pos, r2_rot, r2_base) >= 0.9 and max(conds.values()) < 20 and leaks["arm_moves_base"] < 1e-3 \
-        and leaks["base_moves_arm"] < 5e-3
-    result = {"kind": "r2_control_probe", "gains": gains.to_json(),
-              "r2": {"arm_pos": r2_pos, "arm_rot": r2_rot, "base": r2_base}, "condition_numbers": conds,
-              "mode_leaks": leaks, "torso_by_mode": {"arm": torso[ARM_MODE], "base": torso[BASE_MODE]},
-              "amplitudes": list(PROBE_AMPLITUDES), "steps": PROBE_STEPS, "ok": bool(ok),
-              "git_commit": ladder.current_git_commit(), "created_at": ladder.utc_now()}
+    ok = min(r2_pos, r2_rot, r2_base) >= PROBE_MIN_R2 and max(conds.values()) < PROBE_MAX_COND \
+        and leaks["arm_moves_base"] < ARM_MOVES_BASE_TOL and leaks["base_moves_arm_settled"] < ARM_HOLD_TOL \
+        and leaks["zero_action_drift"] < ARM_HOLD_TOL
+    return {"kind": "r2_control_probe", "gains": gains.to_json(),
+            "r2": {"arm_pos": r2_pos, "arm_rot": r2_rot, "base": r2_base}, "condition_numbers": conds,
+            "mode_leaks": leaks, "base_runs": base_runs,
+            "torso_by_mode": {"arm": torso[ARM_MODE], "base": torso[BASE_MODE]},
+            "amplitudes": list(PROBE_AMPLITUDES), "steps": PROBE_STEPS, "settle_steps": SETTLE_STEPS,
+            "ok": bool(ok)}
+
+
+def run_probe(env, output, *, log=print):
+    """Measure the per-step motion each unit action produces (arm in base frame, base in mobile frame)."""
+    world = SimWorld(env)
+    snap = ladder.capture_snapshot(env)
+
+    def reset():
+        ladder.restore_world(env, snap)
+        world.obs = ladder.live_observation(env)
+
+    result = probe_world(world, reset)
+    result.update(git_commit=ladder.current_git_commit(), created_at=ladder.utc_now())
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     ladder.atomic_write_json(output, result)
-    log(json.dumps({k: result[k] for k in ("ok", "r2", "condition_numbers", "mode_leaks", "torso_by_mode")},
-                   indent=2))
+    runs = result["base_runs"]
+    summary = {k: result[k] for k in ("ok", "r2", "condition_numbers", "mode_leaks", "torso_by_mode")}
+    summary["largest_base_travel"] = max(r["travel"] for r in runs)
+    summary["largest_base_turn"] = max(r["turn"] for r in runs)
+    log(json.dumps(summary, indent=2))
     return result
 
 

@@ -468,6 +468,67 @@ class GateTest(unittest.TestCase):
             np.testing.assert_allclose(er.load_gains(path).arm_pos, TRUE_GAINS.arm_pos)
 
 
+class ArmFollowWorld(FakeWorld):
+    """In base mode the hand is left at its world pose, then closes ``catch_up`` of its base-frame offset per step."""
+
+    def __init__(self, catch_up, **kw):
+        super().__init__(**kw)
+        self.catch_up = catch_up
+        self.hold = er.inverse(self.base_T()) @ self.eef   # the arm controller's goal, in the base frame
+
+    def step(self, a):
+        a = np.clip(np.asarray(a, dtype=float), -1, 1)
+        if a[11] < 0.5:
+            out = super().step(a)
+            self.hold = er.inverse(self.base_T()) @ self.eef
+            return out
+        self.steps += 1
+        world_eef = self.eef.copy()
+        d = self.gains.base @ a[7:10]
+        self.mobile[:2] += er.rot_z(self.mobile[2])[:2, :2] @ d[:2]
+        self.mobile[2] = er.wrap(self.mobile[2] + d[2])
+        rel = er.inverse(self.base_T()) @ world_eef
+        rel[:3, 3] += self.catch_up * (self.hold[:3, 3] - rel[:3, 3])
+        rel[:3, :3] = self.hold[:3, :3]
+        self.eef = self.base_T() @ rel
+        return {"predicates": {}, "task_success": False}
+
+
+class ProbeTest(unittest.TestCase):
+    def probe(self, world_cls, **kw):
+        world = {}
+
+        def reset():
+            world["w"] = world_cls(**kw)
+
+        reset()
+        proxy = type("Proxy", (), {"observe": lambda _s: world["w"].observe(),
+                                   "step": lambda _s, a: world["w"].step(a)})()
+        return er.probe_world(proxy, reset)
+
+    def test_recovers_the_gains_of_a_rigid_arm(self):
+        result = self.probe(FakeWorld)
+        self.assertTrue(result["ok"])
+        gains = er.Gains.from_json(result["gains"])
+        np.testing.assert_allclose(gains.arm_pos, TRUE_GAINS.arm_pos, atol=1e-9)
+        np.testing.assert_allclose(gains.base, TRUE_GAINS.base, atol=1e-9)
+        self.assertLess(result["mode_leaks"]["base_moves_arm"], 1e-9)
+        self.assertEqual(len(result["base_runs"]), 3 * len(er.PROBE_AMPLITUDES) * 2)
+
+    def test_an_arm_that_lags_but_returns_passes(self):
+        result = self.probe(ArmFollowWorld, catch_up=0.25)
+        leaks = result["mode_leaks"]
+        self.assertGreater(leaks["base_moves_arm"], er.ARM_HOLD_TOL)   # what failed the first probe
+        self.assertLess(leaks["base_moves_arm_settled"], er.ARM_HOLD_TOL)
+        self.assertTrue(result["ok"])
+
+    def test_an_arm_that_holds_its_world_pose_fails(self):
+        result = self.probe(ArmFollowWorld, catch_up=0.0)
+        run = max(result["base_runs"], key=lambda r: r["travel"])
+        self.assertGreater(run["settled"], 0.5 * run["travel"])
+        self.assertFalse(result["ok"])
+
+
 class NpyWriter:
     """Stand-in for an imageio video writer: the frames, exactly, as a .npy file at the .mp4 path."""
 

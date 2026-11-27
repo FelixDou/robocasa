@@ -808,6 +808,23 @@ choice open, the code fixes it as follows:
   keys, which the policy and the LeRobot demos share. Self-replay checks that
   shared convention at every segment start (difference ≤ 1e-3, otherwise the
   demo is reported as a mismatch). This settles the first open item above.
+
+  *Probe amended (27 November 2026, after the first probe and before any
+  executor run).* The first probe (ArrangeTea, pretrain seed 0) had R² 0.99,
+  0.97 and 0.95 (arm position, arm rotation, base), condition numbers 1.3–3.1,
+  arm-mode commands moving the base by at most 2e-5 m per step, and torso
+  0.0077 m per step per unit in both modes. It failed only on base-mode commands
+  moving the hand in the base frame: 0.013 m in one step against 5e-3.
+  That rule measured the step-to-step change while the base accelerates, which
+  cannot tell a lagging arm from one that holds its world pose. The executor
+  re-approaches the first arm frame after base motion (beyond TRACK_TOL), so
+  a transient lag does not matter; an arm left at its world pose would
+  (carrying during navigation). The rule now: after each base-mode run, 20
+  steps of zero motion, and the hand must be back within 5e-3 m of its
+  starting pose in the base frame. A zero-motion run of the same length
+  checks the restore itself (also within 5e-3 m). The per-step value is still
+  reported, with each run's base travel, turn and settled offset. The other
+  thresholds are unchanged.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
