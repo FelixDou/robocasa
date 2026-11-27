@@ -861,6 +861,34 @@ choice open, the code fixes it as follows:
   forward after the base has turned, and lists the controllers' goal and
   frame attributes. Until it has run, the probe stays failed and no executor
   check runs.
+
+  *First restore probe (27 November 2026), read against robosuite's source.*
+  The composite controller (`HybridMobileBase`) gives the arm every action
+  slice in both modes but switches its goal update: "achieved" (current
+  hand + delta) in arm mode, "desired" (previous goal + delta) in base mode.
+  So in base mode the arm holds the goal of its last arm-mode step, and after
+  a restore that is the previous run's hand pose: with zero motion in base
+  mode the hand moved 49–53 mm after an arm move, 0 mm in arm mode. robosuite's
+  `reset_goal` made it worse (330–357 mm in base mode): it writes the
+  world-frame hand pose into a goal that this base-frame controller reads in
+  the base frame. Smaller offsets remain after base and torso motion (7.5 mm
+  after driving, 20 mm after turning, 10.7 mm after the torso, in arm mode),
+  which the arm goal does not explain. The base controller
+  (`LegacyMobileBaseJointVelocityController`) rotates each planar command by
+  the heading change since the episode reset (`init_ori`, set at reset).
+  Whether that keeps commands in the current base frame is not settled: the
+  one forward command after a 0.51 rad turn moved 2.7 mm instead of 28.7 mm,
+  probably blocked.
+
+  Second version of the diagnostic: `reset_controllers` now sets the arm goal
+  to the current hand pose in the base frame, the torso goal to its current
+  position, and the base's velocity goal to zero, and keeps the base's heading
+  reference, as in the original rollout. It is compared with a plain restore
+  and with a full reload (`reset_to` with the model XML, then
+  `reset_controllers`). The turn test drives forward, back, left and right
+  after turns of ±0.5 rad, marks a command that moves less than half as far as
+  at the start pose as blocked, and takes the median heading change over the
+  rest. Next: the restore used by the probe and by Gate R follows from it.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

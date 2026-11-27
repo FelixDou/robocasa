@@ -1420,17 +1420,16 @@ RESTORE_PERTURBATIONS = {   # (action index, value, mode), sent for PROBE_STEPS 
 RESTORE_HOLD_STEPS = PROBE_STEPS + SETTLE_STEPS
 
 
-def restore_trials(world, restore, reset_controllers=None):
+def restore_trials(world, variants):
     """How far the hand moves, with no command, after a restore that follows each perturbation.
 
-    A restore that also restored the controllers would give the same trace after every
-    perturbation. Each trial: restore, perturb, restore (then ``reset_controllers()`` in the "reset"
-    variant), then RESTORE_HOLD_STEPS of zero motion in each mode; offsets in the base frame.
+    ``variants`` maps a name to a restore callable. A restore that also restored the controllers
+    gives the same trace after every perturbation. Each trial: restore, perturb, restore, then
+    RESTORE_HOLD_STEPS of zero motion in each mode; offsets in the base frame.
     """
-    variants = [("plain", None)] + ([("reset", reset_controllers)] if reset_controllers else [])
     trials = []
     for name, spec in RESTORE_PERTURBATIONS.items():
-        for variant, fix in variants:
+        for variant, restore in variants.items():
             for hold_name, hold_mode in (("arm", ARM_MODE), ("base", BASE_MODE)):
                 restore()
                 if spec is not None:
@@ -1439,8 +1438,6 @@ def restore_trials(world, restore, reset_controllers=None):
                     for _ in range(PROBE_STEPS):
                         world.step(a)
                 restore()
-                if fix is not None:
-                    fix()
                 start = world.observe()
                 p0, m0 = _rel_position(start), start["mobile"]
                 hold = np.zeros(12)
@@ -1459,11 +1456,21 @@ def restore_trials(world, restore, reset_controllers=None):
     return trials
 
 
-def base_frame_after_turn(world, restore, reset_controllers=None, *, turn=0.5, max_turn_steps=60):
-    """Direction of a forward base command in the mobile frame, at the start pose and after turning."""
-    def forward():
+TURN_DIRECTIONS = {"forward": (7, 1.0), "back": (7, -1.0), "left": (8, 1.0), "right": (8, -1.0)}
+TURN_ANGLES = (0.5, -0.5)
+BLOCKED_RATIO = 0.5   # a command moving the base less than this share of its motion at the start pose
+
+
+def base_frame_after_turn(world, restore, *, turns=TURN_ANGLES, max_turn_steps=80):
+    """Direction of each planar base command in the mobile frame, at the start pose and after turning.
+
+    Commands taken in the current base frame keep their direction after a turn (change 0); commands
+    taken in a frame fixed at the episode reset turn against it (change -turn). A command that moves
+    the base much less than at the start pose is marked blocked (contact) and left out of the median.
+    """
+    def drive(index, sign):
         a = np.zeros(12)
-        a[7], a[11] = PROBE_AMPLITUDES[-1], BASE_MODE
+        a[index], a[11] = sign * PROBE_AMPLITUDES[-1], BASE_MODE
         m0 = world.observe()["mobile"]
         for _ in range(PROBE_STEPS):
             world.step(a)
@@ -1471,27 +1478,35 @@ def base_frame_after_turn(world, restore, reset_controllers=None, *, turn=0.5, m
         d = rot_z(-m0[2])[:2, :2] @ np.array([m1[0] - m0[0], m1[1] - m0[1]])
         return math.atan2(d[1], d[0]), float(np.linalg.norm(d))
 
-    out = {}
-    variants = [("plain", None)] + ([("reset", reset_controllers)] if reset_controllers else [])
-    for variant, fix in variants:
-        restore()
-        if fix is not None:
-            fix()
-        heading0, dist0 = forward()
-        restore()
-        if fix is not None:
-            fix()
+    def turn_by(angle):
         start_yaw = world.observe()["mobile"][2]
         a = np.zeros(12)
-        a[9], a[11] = PROBE_AMPLITUDES[-1], BASE_MODE
+        a[9], a[11] = math.copysign(PROBE_AMPLITUDES[-1], angle), BASE_MODE
         for _ in range(max_turn_steps):
-            if abs(wrap(world.observe()["mobile"][2] - start_yaw)) >= turn:
+            if abs(wrap(world.observe()["mobile"][2] - start_yaw)) >= abs(angle):
                 break
             world.step(a)
-        turned = wrap(world.observe()["mobile"][2] - start_yaw)
-        heading1, dist1 = forward()
-        out[variant] = {"heading_at_start": heading0, "heading_after_turn": heading1, "turned": turned,
-                        "heading_change": wrap(heading1 - heading0), "distance": [dist0, dist1]}
+        return wrap(world.observe()["mobile"][2] - start_yaw)
+
+    start = {}
+    for name, (index, sign) in TURN_DIRECTIONS.items():
+        restore()
+        start[name] = drive(index, sign)
+    out = {"start": {k: {"heading": h, "distance": d} for k, (h, d) in start.items()}, "turns": []}
+    for angle in turns:
+        rows, changes = {}, []
+        for name, (index, sign) in TURN_DIRECTIONS.items():
+            restore()
+            turned = turn_by(angle)
+            heading, dist = drive(index, sign)
+            change = wrap(heading - start[name][0])
+            blocked = dist < BLOCKED_RATIO * start[name][1]
+            rows[name] = {"turned": turned, "heading_change": change, "distance": dist, "blocked": bool(blocked)}
+            if not blocked:
+                changes.append(change)
+        out["turns"].append({"angle": angle, "directions": rows,
+                             "median_heading_change": float(np.median(changes)) if changes else None,
+                             "median_turned": float(np.median([r["turned"] for r in rows.values()]))})
     return out
 
 
@@ -1529,51 +1544,73 @@ def controller_inventory(env):
 
 
 def reset_controllers(env):
-    """Point every part controller's goal at the current simulator state (after a state-only restore)."""
+    """Point the arm and torso goals at the current state after a state-only restore.
+
+    robosuite's own ``reset_goal`` is not used for the arm: it stores the world-frame hand pose in a
+    goal that a base-frame (``input_ref_frame="base"``) controller reads in the base frame, and in
+    base mode the arm holds that goal. The base controller's heading reference (``init_ori``, set at
+    the episode reset) is left alone, as in the original rollout; only its velocity goal is zeroed.
+    """
     kitchen = _kitchen(env)
-    reset = []
+    done = {}
     for robot in getattr(kitchen, "robots", []):
-        cc = getattr(robot, "composite_controller", None)
-        if cc is not None and hasattr(cc, "update_state"):
-            cc.update_state()
-        for name, ctrl in (getattr(cc, "part_controllers", None) or {}).items():
-            if hasattr(ctrl, "update"):
-                try:
-                    ctrl.update(force=True)
-                except TypeError:
-                    ctrl.update()
-            if hasattr(ctrl, "reset_goal"):
-                ctrl.reset_goal()
-                reset.append(str(name))
-    return reset
+        cc = robot.composite_controller
+        cc.update_state()
+        for name, ctrl in cc.part_controllers.items():
+            name = str(name)
+            ctrl.update(force=True)
+            if name in getattr(cc, "arms", ()) or hasattr(ctrl, "goal_pos"):
+                ref_pos, ref_ori = np.asarray(ctrl.ref_pos), np.asarray(ctrl.ref_ori_mat)
+                if getattr(ctrl, "input_ref_frame", "world") == "base":
+                    R0, p0 = np.asarray(ctrl.origin_ori), np.asarray(ctrl.origin_pos)
+                    ctrl.goal_pos, ctrl.goal_ori = R0.T @ (ref_pos - p0), R0.T @ ref_ori
+                else:
+                    ctrl.goal_pos, ctrl.goal_ori = ref_pos.copy(), ref_ori.copy()
+                done[name] = "arm goal = current hand pose"
+            elif hasattr(ctrl, "goal_qpos"):
+                ctrl.goal_qpos = np.array(ctrl.joint_pos)
+                done[name] = "joint goal = current position"
+            elif hasattr(ctrl, "goal_qvel") and hasattr(ctrl, "init_ori"):
+                ctrl.goal_qvel = np.zeros(len(np.atleast_1d(ctrl.goal_qvel)))
+                done[name] = "base velocity goal = 0 (heading reference kept)"
+    return done
 
 
 def run_restore_probe(env, output, *, log=print):
     """Diagnostic: does ``restore_world`` leave controller state from the previous run behind?"""
     world = SimWorld(env)
     snap = ladder.capture_snapshot(env)
+    kitchen = _kitchen(env)
+    model_xml, ep_meta = kitchen.sim.model.get_xml(), json.dumps(kitchen.get_ep_meta())
 
-    def restore():
+    def plain():
         ladder.restore_world(env, snap)
         world.obs = ladder.live_observation(env)
 
-    def fix():
+    def reset():
+        ladder.restore_world(env, snap)
+        reset_controllers(env)
+        world.obs = ladder.live_observation(env)
+
+    def full():
+        ladder._env_method(env, "reset_to")({"model": model_xml, "states": snap["states"], "ep_meta": ep_meta})
         reset_controllers(env)
         world.obs = ladder.live_observation(env)
 
     result = {"kind": "r2_restore_probe", "inventory_fresh": controller_inventory(env)}
-    restore()
+    plain()
     a = np.zeros(12)
     a[0], a[11] = 0.5, ARM_MODE
     for _ in range(PROBE_STEPS):
         world.step(a)
-    restore()
+    plain()
     result["inventory_after_arm_move_and_restore"] = controller_inventory(env)
     result["reset_parts"] = reset_controllers(env)
     result["inventory_after_reset_controllers"] = controller_inventory(env)
-    result["trials"] = restore_trials(world, restore, fix)
-    result["base_frame_after_turn"] = base_frame_after_turn(world, restore, fix)
-    restore()
+    variants = {"plain": plain, "reset": reset, "full": full}
+    result["trials"] = restore_trials(world, variants)
+    result["base_frame_after_turn"] = {"plain": base_frame_after_turn(world, plain)}
+    plain()
     result.update(hold_steps=RESTORE_HOLD_STEPS, git_commit=ladder.current_git_commit(), created_at=ladder.utc_now())
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     ladder.atomic_write_json(output, result)
@@ -1581,10 +1618,15 @@ def run_restore_probe(env, output, *, log=print):
     for t in result["trials"]:
         log(f"{t['perturbation']:<12}  {t['variant']:<7}  {t['hold_mode']:<4}  {1e3 * t['first_step']:9.2f}  "
             f"{1e3 * t['final']:6.2f}  {1e3 * t['max']:5.2f}")
-    log(json.dumps({"reset_parts": result["reset_parts"],
-                    "base_frame_after_turn": result["base_frame_after_turn"],
-                    "inventory_after_arm_move_and_restore": result["inventory_after_arm_move_and_restore"]},
-                   indent=1))
+    turn = result["base_frame_after_turn"]["plain"]
+    log("start pose: " + "  ".join(f"{k} {v['heading']:+.3f} rad {1e3 * v['distance']:.1f} mm"
+                                   for k, v in turn["start"].items()))
+    for row in turn["turns"]:
+        log(f"after turning {row['median_turned']:+.3f} rad: median heading change "
+            f"{row['median_heading_change'] if row['median_heading_change'] is None else round(row['median_heading_change'], 3)}; "
+            + "  ".join(f"{k} {v['heading_change']:+.3f} rad {1e3 * v['distance']:.1f} mm{' BLOCKED' if v['blocked'] else ''}"
+                        for k, v in row["directions"].items()))
+    log(json.dumps({"reset_parts": result["reset_parts"]}, indent=1))
     return result
 
 

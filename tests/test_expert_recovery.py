@@ -571,8 +571,8 @@ class StaleControllerWorld(FakeWorld):
     """A world whose controllers keep state across ``restore()``, which only resets the simulator.
 
     The arm controller tracks a goal in the base frame (moving half the way each step) that arm
-    commands shift and a restore leaves alone; the base controller takes commands in the frame of its
-    heading at the last ``reset_controllers()``, also left alone by a restore.
+    commands shift and a restore leaves alone, as robosuite's arm does in base mode; the base takes
+    commands in the frame of its heading at construction (the episode reset), which nothing resets.
     """
 
     def __init__(self, **kw):
@@ -586,7 +586,7 @@ class StaleControllerWorld(FakeWorld):
         self._place()
 
     def reset_controllers(self):
-        self.goal, self.base_ref_yaw = self.rel.copy(), self.mobile[2]
+        self.goal = self.rel.copy()
 
     def _place(self):
         self.eef = self.base_T() @ er.pose(self.rel, R_DOWN)
@@ -605,12 +605,31 @@ class StaleControllerWorld(FakeWorld):
         return {"predicates": {}, "task_success": False}
 
 
+def rigid_proxy():
+    """A FakeWorld rebuilt on every restore (nothing carries over), behind a fixed handle."""
+    world = {}
+
+    def restore():
+        world["w"] = FakeWorld()
+
+    restore()
+    proxy = type("Proxy", (), {"observe": lambda _s: world["w"].observe(),
+                               "step": lambda _s, a: world["w"].step(a)})()
+    return proxy, restore
+
+
 class RestoreProbeTest(unittest.TestCase):
     def setUp(self):
         self.world = StaleControllerWorld()
 
     def trials(self):
-        rows = er.restore_trials(self.world, self.world.restore, self.world.reset_controllers)
+        w = self.world
+
+        def reset():
+            w.restore()
+            w.reset_controllers()
+
+        rows = er.restore_trials(w, {"plain": w.restore, "reset": reset})
         return {(r["perturbation"], r["variant"], r["hold_mode"]): r for r in rows}
 
     def test_a_stale_arm_goal_shows_after_an_arm_move_and_the_reset_removes_it(self):
@@ -622,27 +641,83 @@ class RestoreProbeTest(unittest.TestCase):
         self.assertLess(rows[("arm_x", "reset", "arm")]["final"], 1e-9)
         self.assertLess(rows[("arm_x", "reset", "base")]["final"], 1e-9)
 
-    def test_base_commands_in_a_stale_frame_turn_with_the_base(self):
-        out = er.base_frame_after_turn(self.world, self.world.restore, self.world.reset_controllers)
-        plain, reset = out["plain"], out["reset"]
-        self.assertGreater(abs(plain["turned"]), 0.45)
-        self.assertAlmostEqual(plain["heading_change"], -plain["turned"], places=6)
-        # reset_controllers() before the turn only: the frame is still the one before the turn
-        self.assertAlmostEqual(reset["heading_change"], -reset["turned"], places=6)
+    def test_base_commands_in_a_frame_fixed_at_reset_turn_against_the_base(self):
+        out = er.base_frame_after_turn(self.world, self.world.restore)
+        self.assertEqual([round(r["angle"], 3) for r in out["turns"]], list(er.TURN_ANGLES))
+        for row in out["turns"]:
+            self.assertGreater(abs(row["median_turned"]), 0.45)
+            self.assertAlmostEqual(row["median_heading_change"], -row["median_turned"], places=6)
+            self.assertFalse(any(d["blocked"] for d in row["directions"].values()))
 
     def test_a_rigid_world_shows_nothing(self):
-        world = {}
-
-        def restore():
-            world["w"] = FakeWorld()
-
-        restore()
-        proxy = type("Proxy", (), {"observe": lambda _s: world["w"].observe(),
-                                   "step": lambda _s, a: world["w"].step(a)})()
-        rows = er.restore_trials(proxy, restore)
+        proxy, restore = rigid_proxy()
+        rows = er.restore_trials(proxy, {"plain": restore})
         self.assertTrue(all(r["final"] < 1e-9 for r in rows))
         out = er.base_frame_after_turn(proxy, restore)
-        self.assertAlmostEqual(out["plain"]["heading_change"], 0.0, places=6)
+        for row in out["turns"]:
+            self.assertAlmostEqual(row["median_heading_change"], 0.0, places=6)
+
+    def test_a_blocked_command_is_left_out_of_the_median(self):
+        real_step = FakeWorld.step
+
+        class Wall(FakeWorld):
+            def step(self, a):       # after any turn, a wall stops motion to the left
+                if a[11] >= 0.5 and a[8] > 0 and abs(self.mobile[2]) > 0.1:
+                    a = np.array(a, dtype=float)
+                    a[8] = 0.0
+                return real_step(self, a)
+
+        world = {}
+
+        def restore_wall():
+            world["w"] = Wall()
+
+        restore_wall()
+        wall = type("Proxy", (), {"observe": lambda _s: world["w"].observe(),
+                                  "step": lambda _s, a: world["w"].step(a)})()
+        out = er.base_frame_after_turn(wall, restore_wall)
+        for row in out["turns"]:
+            self.assertTrue(row["directions"]["left"]["blocked"])
+            self.assertAlmostEqual(row["median_heading_change"], 0.0, places=6)
+
+
+class FakePart:
+    def __init__(self, **attrs):
+        self.__dict__.update(attrs)
+        self.updated = False
+
+    def update(self, force=False):
+        self.updated = force
+
+
+class ResetControllersTest(unittest.TestCase):
+    def test_goals_follow_the_current_state_in_each_controller_s_own_frame(self):
+        R0 = er.rot_z(0.7)
+        arm = FakePart(input_ref_frame="base", origin_pos=np.array([1.0, 2.0, 0.7]), origin_ori=R0,
+                       ref_pos=np.array([1.3, 2.2, 1.2]), ref_ori_mat=R0 @ R_DOWN,
+                       goal_pos=np.array([9.0, 9.0, 9.0]), goal_ori=np.eye(3))
+        torso = FakePart(goal_qpos=np.array([0.2]), joint_pos=np.array([0.05]))
+        init = er.rot_z(1.2)
+        base = FakePart(goal_qvel=np.array([0.5, 0.0, 0.1]), init_ori=init, init_pos=np.zeros(3))
+        gripper = FakePart(goal_qvel=np.array([1.0, -1.0]))
+        cc = type("CC", (), {"arms": ["right"], "update_state": lambda _s: None,
+                             "part_controllers": {"right": arm, "torso": torso, "base": base,
+                                                  "right_gripper": gripper}})()
+        kitchen = type("K", (), {"robots": [type("R", (), {"composite_controller": cc})()]})()
+        original = er._kitchen
+        er._kitchen = lambda env: kitchen
+        try:
+            done = er.reset_controllers(None)
+        finally:
+            er._kitchen = original
+        self.assertEqual(set(done), {"right", "torso", "base"})
+        np.testing.assert_allclose(arm.origin_pos + R0 @ arm.goal_pos, arm.ref_pos)   # base frame
+        np.testing.assert_allclose(R0 @ arm.goal_ori, arm.ref_ori_mat)
+        np.testing.assert_allclose(torso.goal_qpos, [0.05])
+        np.testing.assert_allclose(base.goal_qvel, 0.0)
+        self.assertIs(base.init_ori, init)                  # the heading reference is kept
+        np.testing.assert_allclose(gripper.goal_qvel, [1.0, -1.0])
+        self.assertTrue(arm.updated and torso.updated and base.updated)
 
 
 class NpyWriter:
