@@ -261,16 +261,22 @@ def arm_command(base_T, eef_T, target_T, gains, gripper):
     return action_vector(arm_pos=a_pos, arm_rot=a_rot, gripper=gripper, mode=ARM_MODE)
 
 
-def base_command(mobile, goal, gains, gripper=GRIPPER_OPEN, torso=0.0):
-    """Base action toward ``goal`` = (x, y, yaw) from ``mobile`` = (x, y, yaw), holonomic P-control."""
+def base_command(mobile, goal, gains, gripper=GRIPPER_OPEN, torso=0.0, frame_yaw=0.0):
+    """Base action toward ``goal`` = (x, y, yaw) from ``mobile`` = (x, y, yaw), holonomic P-control.
+
+    ``frame_yaw``: the base's heading change since the controller's reference (the episode reset).
+    RoboCasa's base controller takes planar commands in that reference heading, not the current one
+    (control probe, 27 November 2026), so the wanted motion is rotated into it before ``gains``.
+    """
     x, y, yaw = mobile
     d_world = np.array([goal[0] - x, goal[1] - y])
     d_body = rot_z(-yaw)[:2, :2] @ d_world
     norm = float(np.linalg.norm(d_body))
     if norm > NAV_STEP_POS:
         d_body = d_body * (NAV_STEP_POS / norm)
+    d_cmd = rot_z(frame_yaw)[:2, :2] @ d_body
     d_yaw = float(np.clip(wrap(goal[2] - yaw), -NAV_STEP_YAW, NAV_STEP_YAW))
-    a = np.clip(np.linalg.solve(gains.base, np.array([d_body[0], d_body[1], d_yaw])), -1, 1)
+    a = np.clip(np.linalg.solve(gains.base, np.array([d_cmd[0], d_cmd[1], d_yaw])), -1, 1)
     out = action_vector(gripper=gripper, base=a, mode=BASE_MODE)
     out[10] = torso
     return out
@@ -647,10 +653,14 @@ class ExpertRun:
         self.cap, self.budget = int(cap), int(budget)
         self.steps, self.nav_steps, self.completed, self.success = 0, 0, False, False
         self.log = []
+        holding = getattr(world, "holding", None)
+        # Navigation keeps the gripper as it is: closed if the run starts holding something.
+        self.gripper = GRIPPER_CLOSE if holding is not None and holding() else GRIPPER_OPEN
 
     def act(self, action, navigating=False):
         if self.steps >= self.budget or (not navigating and self.steps - self.nav_steps >= self.cap):
             raise ExpertStop("cap")
+        self.gripper = float(np.asarray(action, dtype=float)[6])
         info = self.world.step(action)
         self.steps += 1
         if info.get("done"):
@@ -702,10 +712,12 @@ class ExpertRun:
             return {"phase": "navigate", "skipped": "already_there"}
         start = self.steps
         for _ in range(NAVIGATE_MAX_STEPS):
-            mobile = self.world.observe()["mobile"]
+            obs = self.world.observe()
+            mobile = obs["mobile"]
             if navigation_done(mobile, goal, NAV_FINE_POS, math.cos(NAV_FINE_YAW)):
                 break
-            self.act(base_command(mobile, goal, self.gains), navigating=True)
+            self.act(base_command(mobile, goal, self.gains, self.gripper,
+                                  frame_yaw=obs.get("command_frame_yaw", 0.0)), navigating=True)
         mobile = self.world.observe()["mobile"]
         return {"phase": "navigate", "steps": self.steps - start, "reached": navigation_done(mobile, goal),
                 "goal": [float(v) for v in goal]}
@@ -737,7 +749,8 @@ class ExpertRun:
                 m = obs["mobile"]
                 goal = (m[0] + d[0], m[1] + d[1], m[2] + d_yaw)
                 self.act(base_command(m, goal, self.gains, grippers[i],
-                                      torso=self.gains.torso_command(dz, BASE_MODE)))
+                                      torso=self.gains.torso_command(dz, BASE_MODE),
+                                      frame_yaw=obs.get("command_frame_yaw", 0.0)))
                 base_frames += 1
                 obs = self.world.observe()
                 d = bases[i][:3, 3] - obs["base"][:3, 3]
@@ -1179,7 +1192,19 @@ class SimWorld:
         for name in self.kitchen.objects:
             bid = self.kitchen.obj_body_id[name]
             objects[str(name)] = pose(sim.data.body_xpos[bid], quat_wxyz_to_mat(sim.data.body_xquat[bid]))
-        return {"base": base, "eef": eef, "mobile": mobile, "objects": objects}
+        return {"base": base, "eef": eef, "mobile": mobile, "objects": objects,
+                "command_frame_yaw": self.command_frame_yaw()}
+
+    def command_frame_yaw(self):
+        """Heading change since the base controller's reference (``init_ori``, set at the episode reset)."""
+        ctrl = self.kitchen.robots[0].composite_controller.part_controllers.get("base")
+        if ctrl is None or getattr(ctrl, "init_ori", None) is None:
+            return 0.0
+        _, current = ctrl.get_base_pose()
+        return wrap(yaw_of(np.asarray(current).reshape(3, 3)) - yaw_of(np.asarray(ctrl.init_ori).reshape(3, 3)))
+
+    def holding(self):
+        return gripper_holds_any(self.kitchen)
 
     def base_in_contact(self):
         """The mobile base touches anything but the robot and the floor (the world body)."""
@@ -1350,6 +1375,7 @@ def probe_world(world, reset):
                     else:
                         m0, m1 = before["mobile"], after["mobile"]
                         d = rot_z(-m0[2])[:2, :2] @ np.array([m1[0] - m0[0], m1[1] - m0[1]])
+                        d = rot_z(before.get("command_frame_yaw", 0.0))[:2, :2] @ d   # in the command frame
                         unit = np.zeros(3)
                         unit[dim - 6] = sign * amp
                         base.append((unit, np.array([d[0], d[1], wrap(m1[2] - m0[2])])))
@@ -1394,9 +1420,11 @@ def probe_world(world, reset):
     torso_gain = torso[torso_mode] if abs(torso[torso_mode]) >= TORSO_MIN_GAIN else 0.0
     gains = Gains(M_pos, M_rot, M_base, torso=torso_gain, torso_mode=torso_mode)
     conds = {k: float(np.linalg.cond(m)) for k, m in (("arm_pos", M_pos), ("arm_rot", M_rot), ("base", M_base))}
-    ok = min(r2_pos, r2_rot, r2_base) >= PROBE_MIN_R2 and max(conds.values()) < PROBE_MAX_COND \
-        and leaks["arm_moves_base"] < ARM_MOVES_BASE_TOL and leaks["base_moves_arm_settled"] < ARM_HOLD_TOL \
-        and max(d["max"] for d in drift.values()) < DRIFT_TOL
+    checks = {"fit": min(r2_pos, r2_rot, r2_base) >= PROBE_MIN_R2,
+              "conditioning": max(conds.values()) < PROBE_MAX_COND,
+              "arm_moves_base": leaks["arm_moves_base"] < ARM_MOVES_BASE_TOL,
+              "base_moves_arm": leaks["base_moves_arm_settled"] < ARM_HOLD_TOL,
+              "drift": max(d["max"] for d in drift.values()) < DRIFT_TOL}
     backoff = np.zeros(12)
     backoff[7], backoff[11] = -PROBE_AMPLITUDES[-1], BASE_MODE
 
@@ -1406,10 +1434,12 @@ def probe_world(world, reset):
             world.step(backoff)
 
     turn = base_frame_after_turn(world, clear_of_contact)
-    frame_ok = all(row["unblocked"] >= TURN_MIN_UNBLOCKED and abs(row["median_heading_change"]) <= TURN_FRAME_TOL
+    frame_ok = all(row["unblocked"] >= TURN_MIN_UNBLOCKED and abs(row["median_model_residual"]) <= TURN_FRAME_TOL
                    for row in turn["turns"])
-    ok = ok and frame_ok and turn["start_unblocked"] == len(TURN_DIRECTIONS)
-    return {"kind": "r2_control_probe", "gains": gains.to_json(), "base_frame_after_turn": turn,
+    checks["base_frame"] = bool(frame_ok and turn["start_unblocked"] == len(TURN_DIRECTIONS))
+    checks = {k: bool(v) for k, v in checks.items()}
+    ok = all(checks.values())
+    return {"kind": "r2_control_probe", "gains": gains.to_json(), "base_frame_after_turn": turn, "checks": checks,
             "r2": {"arm_pos": r2_pos, "arm_rot": r2_rot, "base": r2_base}, "condition_numbers": conds,
             "mode_leaks": leaks, "zero_action_drift": drift, "drift_steps": DRIFT_STEPS, "base_runs": base_runs,
             "torso_by_mode": {"arm": torso[ARM_MODE], "base": torso[BASE_MODE]},
@@ -1432,7 +1462,7 @@ def run_probe(env, output, *, log=print):
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     ladder.atomic_write_json(output, result)
     runs = result["base_runs"]
-    summary = {k: result[k] for k in ("ok", "r2", "condition_numbers", "mode_leaks", "torso_by_mode")}
+    summary = {k: result[k] for k in ("ok", "checks", "r2", "condition_numbers", "mode_leaks", "torso_by_mode")}
     summary["zero_action_drift"] = {k: {"max": v["max"], "final": v["final"]}
                                     for k, v in result["zero_action_drift"].items()}
     turn = result["base_frame_after_turn"]
@@ -1440,7 +1470,10 @@ def run_probe(env, output, *, log=print):
         "start": {k: [round(v["heading"], 3), round(v["distance"], 4), v["blocked"]] for k, v in turn["start"].items()},
         "turns": [{"turned": round(r["median_turned"], 3), "unblocked": r["unblocked"],
                    "median_heading_change": r["median_heading_change"],
-                   "directions": {k: [round(d["heading_change"], 3), round(d["distance"], 4), d["blocked"]]
+                   "median_model_residual": r["median_model_residual"],
+                   "max_model_residual": r["max_model_residual"],
+                   "directions": {k: [round(d["heading_change"], 3), round(d["model_residual"], 3),
+                                      round(d["distance"], 4), d["blocked"]]
                                   for k, d in r["directions"].items()}} for r in turn["turns"]]}
     summary["largest_base_travel"] = max(r["travel"] for r in runs)
     summary["largest_base_turn"] = max(r["turn"] for r in runs)
@@ -1499,7 +1532,8 @@ TURN_DIRECTIONS = {"forward": (7, 1.0), "back": (7, -1.0), "left": (8, 1.0), "ri
 TURN_ANGLES = (0.5, -0.5)
 BLOCKED_RATIO = 0.5   # a command moving the base less than this share of its motion at the start pose
 BACKOFF_STEPS = 40    # probe: back away from the start pose's counter before the turn check
-TURN_FRAME_TOL = 0.1  # rad: median change of a base command's direction in the mobile frame after a turn
+TURN_FRAME_TOL = 0.1  # rad: median gap, after a turn, between a base command's direction and the frame model
+DRIVE_SETTLE_STEPS = 10   # zero-motion steps before each drive of the turn check
 TURN_MIN_UNBLOCKED = 2
 
 
@@ -1514,16 +1548,21 @@ def base_frame_after_turn(world, restore, *, turns=TURN_ANGLES, max_turn_steps=8
     contact = getattr(world, "base_in_contact", None)
 
     def drive(index, sign):
+        stop = np.zeros(12)
+        stop[11] = BASE_MODE
+        for _ in range(DRIVE_SETTLE_STEPS):   # start each drive from rest
+            world.step(stop)
         a = np.zeros(12)
         a[index], a[11] = sign * PROBE_AMPLITUDES[-1], BASE_MODE
-        m0 = world.observe()["mobile"]
+        obs0 = world.observe()
+        m0, f0 = obs0["mobile"], obs0.get("command_frame_yaw", 0.0)
         touched = False
         for _ in range(PROBE_STEPS):
             world.step(a)
             touched = touched or bool(contact and contact())
         m1 = world.observe()["mobile"]
         d = rot_z(-m0[2])[:2, :2] @ np.array([m1[0] - m0[0], m1[1] - m0[1]])
-        return math.atan2(d[1], d[0]), float(np.linalg.norm(d)), touched
+        return math.atan2(d[1], d[0]), float(np.linalg.norm(d)), touched, f0
 
     def turn_by(angle):
         start_yaw = world.observe()["mobile"][2]
@@ -1539,22 +1578,28 @@ def base_frame_after_turn(world, restore, *, turns=TURN_ANGLES, max_turn_steps=8
     for name, (index, sign) in TURN_DIRECTIONS.items():
         restore()
         start[name] = drive(index, sign)
-    out = {"start": {k: {"heading": h, "distance": d, "blocked": bool(t)} for k, (h, d, t) in start.items()},
-           "start_unblocked": sum(not t for _, _, t in start.values()), "turns": []}
+    out = {"start": {k: {"heading": h, "distance": d, "blocked": bool(t)} for k, (h, d, t, _) in start.items()},
+           "start_unblocked": sum(not t for _, _, t, _ in start.values()), "turns": []}
     for angle in turns:
-        rows, changes = {}, []
+        rows, changes, residuals = {}, [], []
         for name, (index, sign) in TURN_DIRECTIONS.items():
             restore()
             turned = turn_by(angle)
-            heading, dist, touched = drive(index, sign)
+            heading, dist, touched, frame = drive(index, sign)
             change = wrap(heading - start[name][0])
+            # The executor's model: commands are taken in the controller's reference heading, so a
+            # command's direction in the mobile frame changes by minus the change of command_frame_yaw.
+            residual = wrap(change + (frame - start[name][3]))
             blocked = touched or start[name][2] or dist < BLOCKED_RATIO * start[name][1]
-            rows[name] = {"turned": turned, "heading_change": change, "distance": dist,
-                          "contact": bool(touched), "blocked": bool(blocked)}
+            rows[name] = {"turned": turned, "heading_change": change, "model_residual": residual,
+                          "distance": dist, "contact": bool(touched), "blocked": bool(blocked)}
             if not blocked:
                 changes.append(change)
+                residuals.append(residual)
         out["turns"].append({"angle": angle, "directions": rows, "unblocked": len(changes),
                              "median_heading_change": float(np.median(changes)) if changes else None,
+                             "median_model_residual": float(np.median(residuals)) if residuals else None,
+                             "max_model_residual": float(np.max(np.abs(residuals))) if residuals else None,
                              "median_turned": float(np.median([r["turned"] for r in rows.values()]))})
     return out
 

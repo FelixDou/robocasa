@@ -97,6 +97,9 @@ class FakeWorld:
     def navigation_goal(self, reference):
         return self.goals.get(tuple(reference))
 
+    def holding(self):
+        return self.attached is not None
+
 
 def mug_on_tray(world):
     mug, tray = world.objects["obj"][:3, 3], world.objects["container"][:3, 3]
@@ -412,6 +415,35 @@ class ExecutorTest(unittest.TestCase):
         self.assertEqual(TRUE_GAINS.torso_command(0.05, er.ARM_MODE), 0.0)   # no torso found
         self.assertEqual(er.Gains.from_json(g.to_json()).torso, 0.01)
 
+    def test_navigation_converges_with_commands_in_the_reset_heading(self):
+        goal = (2.0, -1.5, -2.8)
+
+        def drive(compensate):
+            world = StaleControllerWorld(mobile=(0.0, 0.0, 2.5))
+            world.base_ref_yaw = 0.0      # the episode reset faced +x; the base has since turned 2.5 rad
+            for _ in range(er.NAVIGATE_MAX_STEPS):
+                obs = world.observe()
+                if er.navigation_done(obs["mobile"], goal, er.NAV_FINE_POS, math.cos(er.NAV_FINE_YAW)):
+                    break
+                frame = obs["command_frame_yaw"] if compensate else 0.0
+                world.step(er.base_command(obs["mobile"], goal, TRUE_GAINS, frame_yaw=frame))
+            return er.navigation_done(world.observe()["mobile"], goal)
+
+        self.assertTrue(drive(True))
+        self.assertFalse(drive(False))
+
+    def test_navigation_keeps_a_held_object(self):
+        world = FakeWorld(objects={"obj": world_pose(0.5, 0.0, 1.2), "container": world_pose(2.0, 1.0, 0.9)},
+                          goals={("object", "container"): (1.5, 1.0, 0.0)})
+        world.objects["obj"] = world.eef.copy()
+        world.step(er.action_vector(gripper=er.GRIPPER_CLOSE))
+        self.assertEqual(world.attached[0], "obj")
+        run = er.ExpertRun(world, TRUE_GAINS, {}, None, cap=10 ** 5, budget=10 ** 5)
+        result = run.run([{"phase": "navigate", "reference": ["object", "container"], "if_needed": False}])
+        self.assertTrue(result["phases"][0]["reached"], result)
+        self.assertIsNotNone(world.attached)                 # still held after driving
+        self.assertLess(np.linalg.norm(world.objects["obj"][:3, 3] - world.eef[:3, 3]), 1e-9)
+
     def test_navigation_controller_converges(self):
         world = FakeWorld(mobile=(0.0, 0.0, 0.0))
         goal = (2.0, -1.5, -2.8)
@@ -529,6 +561,8 @@ class ProbeTest(unittest.TestCase):
     def test_recovers_the_gains_of_a_rigid_arm(self):
         result = self.probe(FakeWorld)
         self.assertTrue(result["ok"])
+        self.assertEqual(set(result["checks"]), {"fit", "conditioning", "arm_moves_base", "base_moves_arm",
+                                                 "drift", "base_frame"})
         gains = er.Gains.from_json(result["gains"])
         np.testing.assert_allclose(gains.arm_pos, TRUE_GAINS.arm_pos, atol=1e-9)
         np.testing.assert_allclose(gains.base, TRUE_GAINS.base, atol=1e-9)
@@ -559,13 +593,26 @@ class ProbeTest(unittest.TestCase):
         self.assertTrue(all(r["offset"] > er.ARM_HOLD_TOL for r in result["base_runs"]))
         self.assertTrue(result["ok"])
 
-    def test_base_commands_that_keep_the_reset_heading_fail(self):
+    def test_base_commands_in_the_reset_heading_pass_when_the_world_reports_that_heading(self):
         # StaleControllerWorld takes base commands in the frame of its heading at construction.
         result = self.probe(StaleControllerWorld)
         turn = result["base_frame_after_turn"]
         self.assertEqual(turn["start_unblocked"], len(er.TURN_DIRECTIONS))
         for row in turn["turns"]:
             self.assertAlmostEqual(row["median_heading_change"], -row["median_turned"], places=6)
+            self.assertAlmostEqual(row["median_model_residual"], 0.0, places=6)
+        self.assertTrue(result["checks"]["base_frame"])    # (this fake world ignores rotation commands)
+        np.testing.assert_allclose(er.Gains.from_json(result["gains"]).base, TRUE_GAINS.base, atol=1e-9)
+
+    def test_base_commands_in_an_unreported_frame_fail(self):
+        class Unreported(StaleControllerWorld):    # the third probe's finding, without the frame reading
+            def observe(self):
+                obs = super().observe()
+                del obs["command_frame_yaw"]
+                return obs
+
+        result = self.probe(Unreported)
+        self.assertFalse(result["checks"]["base_frame"])
         self.assertFalse(result["ok"])
 
     def test_a_rigid_world_keeps_its_base_frame_after_turning(self):
@@ -602,6 +649,11 @@ class StaleControllerWorld(FakeWorld):
 
     def reset_controllers(self):
         self.goal = self.rel.copy()
+
+    def observe(self):
+        obs = super().observe()
+        obs["command_frame_yaw"] = er.wrap(self.mobile[2] - self.base_ref_yaw)
+        return obs
 
     def _place(self):
         self.eef = self.base_T() @ er.pose(self.rel, R_DOWN)

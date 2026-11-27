@@ -914,6 +914,34 @@ choice open, the code fixes it as follows:
   after each turn, at least two are free with a median direction change
   within 0.1 rad. Commands kept in a frame fixed at the episode reset would
   change by about -0.5 rad and fail it.
+
+  *Fourth probe (27 November 2026).* With `reset_controllers`, every check
+  passed except the turn check: R² 0.99/0.98/0.95, condition numbers
+  1.3–3.1, arm commands moving the base by 2e-5 m per step, the hand 0.27 mm
+  off after base runs, drift at most 7.5e-6 m over 300 steps, and no
+  direction blocked after backing off. After turns of +0.52 and -0.52 rad
+  every direction changed by -0.39 to -0.53 rad and +0.39 to +0.53 rad
+  (medians ∓0.45). So RoboCasa's base controller takes planar commands in
+  the heading it had at the episode reset (`init_ori`), not in the current
+  one. Part of the spread came from the test: the reference drives started
+  while the base was still rolling back from the back-off.
+
+  **Decision (27 November 2026, before any executor run).** The executor
+  rotates each planar base command by the heading change since the base
+  controller's reference (read from the controller as `command_frame_yaw`),
+  in navigation and in tracked base-mode frames. The probe fits the base
+  gains in that command frame. Its turn check starts each drive from rest
+  (10 zero-motion steps) and now tests this model: after each turn, the
+  median gap between the observed direction change and minus the change in
+  `command_frame_yaw` must be within 0.1 rad. The probe reports each check by
+  name (`checks`).
+
+  *Bug found while making this change.* Navigation sent its base commands
+  with the gripper open, so navigating while holding something (a navigate
+  step between a pick and a place, or navigating first when the target is
+  already held) would have dropped it. The executor now keeps the last
+  commanded gripper state, starting closed when the gripper holds something.
+  A test covers it and fails on the old code.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
