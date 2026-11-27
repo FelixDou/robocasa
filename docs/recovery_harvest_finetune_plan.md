@@ -942,6 +942,19 @@ choice open, the code fixes it as follows:
   already held) would have dropped it. The executor now keeps the last
   commanded gripper state, starting closed when the gripper holds something.
   A test covers it and fails on the old code.
+
+  *Fifth probe (27 November 2026, commit ab278cf): passed.* Every check
+  passed (`control_probe.json`): R² 0.990, 0.978 and 0.950 (arm position,
+  arm rotation, base), condition numbers 1.34, 1.39 and 3.09, arm commands
+  moving the base by 2.1e-5 m per step, the hand 0.27 mm off after base runs
+  (5.6 mm peak lag in a step), drift at most 7.5e-6 m over 300 steps, torso
+  0.0077 m per step per unit in both modes. Turn check: all four directions
+  free before and after turns of ±0.521 rad, direction changes ∓0.46 to
+  ∓0.49 rad, model gap median ±0.047 rad and at most 0.061 rad. The
+  remaining gap is systematic: the commands turn by about 0.92 of the
+  heading change, which navigation corrects in closed loop. Self-replay
+  started at 10:33 on r9n7, GPU 0
+  (`..._r2_self-replay_20261127_103314.log`).
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
