@@ -42,6 +42,7 @@ import traceback
 
 import numpy as np
 
+from robocasa.recovery import base_planner as bp
 from robocasa.recovery import expert_segments as es
 from robocasa.recovery import recoverability_ladder as ladder
 
@@ -56,6 +57,7 @@ TAIL_STEPS = es.BOUNDARY_TOLERANCE + HOLD_STEPS   # hold still after the program
                               # turn true up to BOUNDARY_TOLERANCE frames after its segment ends
 SEGMENT_SLACK = 0.5           # expert cap: executed source frames x (1 + slack), navigation apart
 NAVIGATE_MAX_STEPS = 300
+NAV_PLANNED_MAX_STEPS = 600   # a planned path may be longer: 1.5x its length at NAV_STEP_POS, within this
 NAV_POS_TOL, NAV_COS_TOL = 0.20, 0.98        # NavigateKitchen's success test
 NAV_FINE_POS, NAV_FINE_YAW = 0.05, 0.05      # m, rad: the controller drives on to this before stopping
 NAV_STEP_POS, NAV_STEP_YAW = 0.02, 0.05      # per-step displacement limits (0.4 m/s, 1 rad/s at 20 Hz)
@@ -637,6 +639,34 @@ def program_cap(program, library_sources):
 
 # ---- R2b: the executor (world adapter: real simulator or a test stand-in) -----------------------
 
+def plan_navigation(obstacles, mobile, goal):
+    """(PathFollower or None, log) for a drive from ``mobile`` to ``goal`` among named footprints.
+
+    A footprint containing the start or the goal is dropped and logged: the base cannot stand
+    inside a real obstacle, so such a box is not one (a room-sized or mis-registered fixture).
+    """
+    start, end = np.asarray(mobile[:2], dtype=float), np.asarray(goal[:2], dtype=float)
+    kept, dropped = [], []
+    for name, poly in obstacles:
+        if bp.point_in_polygon(start, poly) or bp.point_in_polygon(end, poly):
+            dropped.append(str(name))
+        else:
+            kept.append(poly)
+    log = {"plan": "failed", "obstacles": len(kept), "dropped_obstacles": dropped}
+    if not kept:
+        log["plan"] = "straight"
+        return None, log
+    grid = bp.NavGrid(kept, extra_points=[start, end])
+    log.update({"start_clearance": round(grid.clearance(start), 3), "goal_clearance": round(grid.clearance(end), 3)})
+    points = grid.plan(start, end)
+    if points is None:
+        return None, log
+    log.update({"plan": "planned", "planned_length": round(bp.path_length(points), 3),
+                "straight_length": round(float(np.linalg.norm(end - start)), 3),
+                "planned_every_10": [[round(float(v), 3) for v in p] for p in points[::10] + [points[-1]]]})
+    return bp.PathFollower(points), log
+
+
 def toward_base(obs):
     """Horizontal unit vector from the end effector back toward the robot base."""
     d = obs["base"][:3, 3] - obs["eef"][:3, 3]
@@ -784,18 +814,31 @@ class ExpertRun:
         start, contact_steps = self.steps, 0
         start_dist = math.hypot(goal[0] - mobile[0], goal[1] - mobile[1])
         contact = getattr(self.world, "base_in_contact", None)
+        obstacles = getattr(self.world, "obstacles", None)
+        follower, plan = None, {"plan": "straight"}
+        max_steps = NAVIGATE_MAX_STEPS
+        if obstacles is not None:
+            follower, plan = plan_navigation(obstacles(), mobile, goal)
+            if follower is not None:
+                max_steps = int(min(NAV_PLANNED_MAX_STEPS,
+                                    max(NAVIGATE_MAX_STEPS, math.ceil(1.5 * plan["planned_length"] / NAV_STEP_POS))))
         trace, cosines, path = [], [], 0.0
-        for k in range(NAVIGATE_MAX_STEPS):
+        for k in range(max_steps):
             obs = self.world.observe()
             mobile = obs["mobile"]
             if navigation_done(mobile, goal, NAV_FINE_POS, math.cos(NAV_FINE_YAW)):
                 break
+            aim = goal
+            if follower is not None:
+                point = follower.target(mobile)
+                if not follower.at_end():
+                    aim = (float(point[0]), float(point[1]), goal[2])
             frame_yaw = obs.get("command_frame_yaw", 0.0)
-            self.act(base_command(mobile, goal, self.gains, self.gripper, frame_yaw=frame_yaw), navigating=True)
+            self.act(base_command(mobile, aim, self.gains, self.gripper, frame_yaw=frame_yaw), navigating=True)
             touching = bool(contact()) if contact is not None else False
             contact_steps += int(touching)
             after = self.world.observe()["mobile"]
-            want = np.array([goal[0] - mobile[0], goal[1] - mobile[1]])
+            want = np.array([aim[0] - mobile[0], aim[1] - mobile[1]])
             moved = np.array([after[0] - mobile[0], after[1] - mobile[1]])
             path += float(np.linalg.norm(moved))
             if np.linalg.norm(want) > NAV_FINE_POS and np.linalg.norm(moved) > 1e-4:
@@ -807,7 +850,7 @@ class ExpertRun:
                 "goal": [float(v) for v in goal], "start_distance": round(start_dist, 4),
                 "final_distance": round(math.hypot(goal[0] - mobile[0], goal[1] - mobile[1]), 4),
                 "final_yaw_error": round(abs(wrap(goal[2] - mobile[2])), 4), "contact_steps": contact_steps,
-                "path_length": round(path, 4),
+                "path_length": round(path, 4), "max_steps": max_steps, **plan,
                 "heading_cos_median": round(float(np.median(cosines)), 3) if cosines else None,
                 "heading_cos_below_half": sum(c < 0.5 for c in cosines),
                 "trace_every_10": trace}
@@ -1325,6 +1368,21 @@ class SimWorld:
             except Exception:
                 pass
         return False
+
+    def obstacles(self):
+        """(name, floor-plane footprint) of every fixture that can block the base."""
+        out = []
+        for name, fxtr in self.kitchen.fixtures.items():
+            if "floor" in str(name).lower():
+                continue
+            try:
+                corners = np.asarray(fxtr.get_ext_sites(all_points=True, relative=False), dtype=float)
+            except Exception:
+                continue
+            poly = bp.footprint(corners)
+            if poly is not None:
+                out.append((str(name), poly))
+        return out
 
     def base_in_contact(self):
         """The mobile base touches anything but the robot and the floor (the world body)."""

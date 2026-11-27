@@ -1067,6 +1067,42 @@ choice open, the code fixes it as follows:
   Next: a targeted diagnostic run on the failing stages (`R2_STAGES`), and the
   basket_on_dining_counter videos. Navigation is redesigned on that evidence,
   not before.
+
+  *The basket videos (episodes 0 and 1).* The recorded base positions and the
+  camera frames show the base was blocked; it did not drive the wrong way.
+  - Episode 0: the command stayed saturated for more than 200 steps while the
+    base stood at (3.46, −2.55), beside the dining counter's corner.
+  - Episode 1: the base was pinned against the island's end after 0.75 m, with
+    the basket held over the floor.
+  - The demo's own actions drove about 100 base steps around to the
+    counter's long side and placed the basket there.
+  The straight line toward RoboCasa's placement pose cuts across the corner of
+  the fixture it drives to.
+
+  *Amendment: planned navigation (`robocasa/recovery/base_planner.py`).*
+  - *Obstacles.* Every fixture whose bounding box (`get_ext_sites`) spans the
+    base's height band (bottom below 0.60 m, top above 0.05 m), projected to
+    its floor-plane hull. Floors are excluded. A footprint containing the start
+    or the goal is dropped and logged, since the base cannot stand inside a
+    real obstacle.
+  - *Grid.* 5 cm cells storing their distance to the nearest footprint.
+  - *Search.* A* over 8-connected cells. Cells closer than 0.10 m to a
+    footprint are excluded. Cells closer than 0.45 m cost extra (up to 21
+    times a free cell), so the path keeps clear of furniture. A start or goal
+    inside the excluded band, such as a robot standing against a counter,
+    joins the nearest allowed cell.
+  - *Following.* The controller aims at a point 0.3 m ahead on the path,
+    keeping the goal heading, and drives the last stretch straight to the goal
+    pose. The step limit is 1.5 times the planned length at 0.02 m per step,
+    at least 300 and at most 600. The probe's drift check covered 300 steps;
+    it measured 7.5 µm over that span.
+  - *Fallback.* The old straight drive when no obstacles are known or no path
+    exists. The log says which was used (`plan`), with the planned and
+    straight-line lengths, the start and goal clearances, and the path.
+  - *Tests.* In a test world where an island physically stops the base, the
+    straight drive is blocked on more than 100 steps and never arrives; the
+    planned drive arrives without touching it. The fixture footprints, the
+    clearance band and the A* search have not yet run in the simulator.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
@@ -1280,7 +1316,7 @@ Tests (simulator- and PyTorch-free; the detector save/load test runs only
 where PyTorch is installed):
 
 ```bash
-python -m unittest tests.test_hs_p_alarm tests.test_alarm_branching tests.test_failure_audit tests.test_recoverability_ladder tests.test_expert_segments tests.test_expert_recovery
+python -m unittest tests.test_hs_p_alarm tests.test_alarm_branching tests.test_failure_audit tests.test_recoverability_ladder tests.test_expert_segments tests.test_expert_recovery tests.test_base_planner
 ```
 
 ### Phase A runbook (cluster)

@@ -578,6 +578,56 @@ class SelfReplayLoopTest(unittest.TestCase):
         self.assertNotIn("recording", rows[1])
 
 
+class BlockedWorld(FakeWorld):
+    """The base stops where its centre would come within ``radius`` of an island's footprint."""
+
+    def __init__(self, island, radius=0.3, planner=True, **kwargs):
+        super().__init__(**kwargs)
+        self.island, self.radius, self.blocked = island, radius, 0
+        if planner:
+            self.obstacles = lambda: [("table", self.island)]
+
+    def step(self, a):
+        mobile, eef = self.mobile.copy(), self.eef.copy()
+        info = super().step(a)
+        if er.bp.polygon_distance(self.mobile[None, :2], self.island)[0] < self.radius:
+            self.mobile, self.eef = mobile, eef
+            self.blocked += 1
+        return info
+
+
+class PlannedNavigationTest(unittest.TestCase):
+    ISLAND = er.bp.footprint(np.array([[x, y, z] for x in (1.5, 2.5) for y in (-1.5, 1.5) for z in (0, 0.9)]))
+
+    def drive(self, planner):
+        world = BlockedWorld(self.ISLAND, planner=planner, mobile=(0.0, 0.0, 0.0),
+                             goals={("fixture", "table"): (4.0, 0.0, math.pi)})
+        run = er.ExpertRun(world, TRUE_GAINS, {}, None, cap=10 ** 5, budget=10 ** 5)
+        return world, run.run([{"phase": "navigate", "reference": ["fixture", "table"], "if_needed": False}])
+
+    def test_a_straight_line_pins_against_the_island_and_the_planned_path_goes_around(self):
+        world, result = self.drive(planner=False)
+        nav = result["phases"][0]
+        self.assertFalse(nav["reached"])
+        self.assertEqual(nav["plan"], "straight")
+        self.assertGreater(world.blocked, 100)
+        world, result = self.drive(planner=True)
+        nav = result["phases"][0]
+        self.assertTrue(nav["reached"], {k: v for k, v in nav.items() if k != "trace_every_10"})
+        self.assertEqual(nav["plan"], "planned")
+        self.assertEqual(world.blocked, 0)
+        self.assertGreater(nav["planned_length"], nav["straight_length"])
+        self.assertLessEqual(nav["steps"], nav["max_steps"])
+
+    def test_a_footprint_around_the_start_is_dropped(self):
+        room = er.bp.footprint(np.array([[x, y, z] for x in (-5, 5) for y in (-5, 5) for z in (0, 3)]))
+        follower, log = er.plan_navigation([("room", room), ("table", self.ISLAND)], (0, 0, 0), (4, 0, 0))
+        self.assertEqual((log["plan"], log["dropped_obstacles"], log["obstacles"]), ("planned", ["room"], 1))
+        follower, log = er.plan_navigation([("room", room)], (0, 0, 0), (4, 0, 0))
+        self.assertIsNone(follower)
+        self.assertEqual(log["plan"], "straight")
+
+
 class GateTest(unittest.TestCase):
     def test_gate_r_counts_states_with_a_full_success(self):
         states = [{"parent_id": f"p{i}", "task_name": "ArrangeTea", "stage": "mug_on_tray"} for i in range(4)]
