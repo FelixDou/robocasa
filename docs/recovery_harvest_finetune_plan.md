@@ -1240,8 +1240,38 @@ choice open, the code fixes it as follows:
   strawberry_on_pancake 11 / 20 (0.55). All nine strawberry failures stop
   at the expert cap (1.5 x the executed source frames, navigation apart),
   not at a wrong stage end. Feedforward tracking fixed the bread drops
-  (3 / 5 in diag5, 20 / 20 here). The phase breakdown of the two failing
-  stages comes next.
+  (3 / 5 in diag5, 20 / 20 here).
+
+  *Phase breakdown of the two failing stages.* Every pick in both stages
+  ends holding the object, with a median lag of at most 0.6 mm.
+  - strawberry_on_pancake: all nine failures are navigation failures. None
+    reached the goal; the cap then ran out on the place step, from a base
+    1.7 to 4.5 m from its goal. Eight pressed on an open door for most of
+    the drive:
+    - the open fridge door: episodes 6, 8, 10, 18 and 19, about 280 to 290
+      contact steps each;
+    - stack_1_front's left door: episodes 2, 9 and 16, 395 to 451 contact
+      steps.
+
+    Episode 3 ran its 300 steps with no contact and ended 2.07 m from the
+    goal. All eleven successes reached the goal.
+  - basket_on_dining_counter: of eight failures, two are navigation
+    failures. Episodes 1 and 6 pressed on stack_1's right door for 294 and
+    298 of 300 steps. Episode 11 also missed its goal on a door and still
+    succeeded. The other six reached the goal and then failed to place:
+    - episodes 4, 7, 12 and 15 ran the place step to its end without the
+      basket on the counter;
+    - episodes 10 and 19 ran out the cap during it.
+
+    Their place lag is far above the pick's. Median 0.13 to 1.4 cm against
+    0.02 to 0.06 cm, up to 2 cm. Episode 7 held one frame for 22 steps.
+
+  So two problems remain. Open doors still stop navigation with the door
+  obstacles in place. And the basket place, carried to a base pose other
+  than the demo's, does not finish in six of twenty episodes. Next: the
+  navigation plan logs of the failing episodes (was a path planned, was the
+  door dropped as containing the start or goal), and a diagnostic run of
+  both stages (all 20 demos, the action-replay control, videos).
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
