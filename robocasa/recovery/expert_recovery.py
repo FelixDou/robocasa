@@ -73,6 +73,10 @@ TORSO_TOL = 0.01              # m: the torso follows the source's base height be
 TORSO_MIN_GAIN = 1e-4         # m per step per unit action: below this the probe found no torso motion
 RELEASE_OPEN_STEPS, RELEASE_LIFT, RELEASE_BACKOFF = 10, 0.10, 0.10
 SET_ASIDE_LIFT, SET_ASIDE_SIDE, SET_ASIDE_LOWER = 0.15, 0.30, 0.10
+PLACE_EDGE_MARGIN = 0.08      # m: a place on a fixture lands at least this far inside its top's edge,
+PLACE_FIXTURE_MARGIN = 0.12   # m: ... this far from any other fixture at the top's height (a sink),
+PLACE_OBJECT_MARGIN = 0.15    # m: ... and this far from objects standing there
+PLACE_SLIDE_STEP = 0.025      # m between candidate base positions along the fixture's front
 SELF_REPLAY_DEMOS, SELF_REPLAY_MIN = 20, 0.9
 TRANSFER_RESETS, TRANSFER_MIN = 20, 0.7
 TRANSFER_BASE_SEED = 710007   # fresh pretrain-split seeds 710007-710026; Phase A/B and Step 0 do not use them
@@ -616,20 +620,87 @@ def stage_phases(source, spec, target, first, *, navigate_first=False, navigate_
     if spec["kind"] == "fixture" and navigate_to_fixture:
         phases.append({"phase": "navigate", "reference": ["fixture", spec["fixture"]], "if_needed": True})
     elif navigate_first:
-        manip = [s for s in source.steps[first:] if s.kind != NAVIGATE]
-        kind = manip[0].kind if manip else PICK
-        phases.append({"phase": "navigate", "reference": list(navigation_reference(kind, spec, target)),
-                       "if_needed": False})
+        nxt = next((j for j in range(first, len(source.steps)) if source.steps[j].kind != NAVIGATE), None)
+        kind = source.steps[nxt].kind if nxt is not None else PICK
+        phases.append(_navigate_phase(source, spec, target, kind, nxt, if_needed=False))
     for i, step in enumerate(source.steps[first:], start=first):
         if step.kind == NAVIGATE:
-            nxt = next((s for s in source.steps[i + 1:] if s.kind != NAVIGATE), None)
-            kind = nxt.kind if nxt else PLACE
-            phases.append({"phase": "navigate", "reference": list(navigation_reference(kind, spec, target)),
-                           "if_needed": True})
+            nxt = next((j for j in range(i + 1, len(source.steps)) if source.steps[j].kind != NAVIGATE), None)
+            kind = source.steps[nxt].kind if nxt is not None else PLACE
+            phases.append(_navigate_phase(source, spec, target, kind, nxt, if_needed=True))
         else:
             phases.append({"phase": "track", "source": list(source.key), "step": i, "kind": step.kind,
                            "reference": list(step_reference(step.kind, spec, target))})
     return phases
+
+
+def _navigate_phase(source, spec, target, kind, step_index, *, if_needed):
+    """A navigate phase; before a place on a fixture it names the place step, so the drive can
+    choose where along the fixture the place lands (``SimWorld.place_goal``)."""
+    reference = navigation_reference(kind, spec, target)
+    phase = {"phase": "navigate", "reference": list(reference), "if_needed": if_needed}
+    if kind == PLACE and reference[0] == "fixture" and step_index is not None:
+        obj = spec.get("object")
+        phase["place"] = {"source": list(source.key), "step": int(step_index),
+                          "object": None if obj is None or str(obj).startswith("@") else obj}
+    return phase
+
+
+def place_offset(source, step_index, obj=None):
+    """Where a source's place step leaves the placed object (else the hand), as (x, y) in the base
+    frame at the step's start."""
+    step = source.steps[step_index]
+    i0, i1 = source.at(step.start), source.at(step.end - 1)
+    poses = source.objects.get(obj) if obj else None
+    end = poses[i1] if poses is not None else source.eef[i1]
+    rel = inverse(source.base[i0]) @ end
+    return float(rel[0, 3]), float(rel[1, 3])
+
+
+def choose_place_goal(goal, offset, surface, others=(), objects=(), obstacles=(), shape=None):
+    """(goal, log): ``goal`` slid along the fixture's front so a place at ``offset`` lands free.
+
+    The scripted drive to a fixture stops at RoboCasa's placement pose, centred on the fixture, and
+    a fixture place is replayed in the base frame: it lands wherever the base stands (into an
+    island's sink, diagnostic self-replay 7, 27 November 2026). Candidates slide the base sideways
+    along the front, nearest the centred pose first. The place point must be ``PLACE_EDGE_MARGIN``
+    inside ``surface`` (the fixture's top), ``PLACE_FIXTURE_MARGIN`` from ``others`` (named
+    footprints of fixtures at the top's height), ``PLACE_OBJECT_MARGIN`` from ``objects`` (named
+    (x, y) points), and the base box must not overlap ``obstacles`` (named footprints).
+    """
+    shape = shape if shape is not None else bp.BaseShape()
+    x, y, yaw = (float(v) for v in goal)
+    c, s = math.cos(yaw), math.sin(yaw)
+    lateral = np.array([-s, c])
+    surface = np.asarray(surface, dtype=float)
+    proj = (surface[:, :2] - np.array([x, y])) @ lateral
+    ts = [0.0] + sorted(np.arange(proj.min(), proj.max() + 1e-9, PLACE_SLIDE_STEP).tolist(), key=abs)
+    tight = bp.BaseShape(half=shape.half - 0.02, centre=shape.centre, pivot=shape.pivot)
+    ox, oy = offset
+    rejected = Counter()
+    centred = None
+    for t in ts:
+        bx, by = x + t * lateral[0], y + t * lateral[1]
+        point = np.array([bx + c * ox - s * oy, by + s * ox + c * oy])
+        if centred is None:
+            centred = point
+        if bp.inside_depth(point, surface) < PLACE_EDGE_MARGIN:
+            rejected["edge"] += 1
+            continue
+        hit = next((n for n, poly in others if bp.polygon_distance(point[None], poly)[0] < PLACE_FIXTURE_MARGIN), None)
+        if hit is None:
+            hit = next((n for n, q in objects
+                        if math.hypot(q[0] - point[0], q[1] - point[1]) < PLACE_OBJECT_MARGIN), None)
+        if hit is None:
+            box = tight.corners((bx, by, yaw))
+            hit = next(("base>" + str(n) for n, poly in obstacles if bp.polygons_overlap(box, poly)), None)
+        if hit is not None:
+            rejected[str(hit)] += 1
+            continue
+        return (bx, by, yaw), {"place_shift": round(t, 3), "place_point": [round(float(v), 3) for v in point],
+                               "place_rejected": dict(rejected.most_common(6))}
+    return (x, y, yaw), {"place_shift": None, "place_point": [round(float(v), 3) for v in centred],
+                         "place_rejected": dict(rejected.most_common(6))}
 
 
 def set_aside_phases(source, tool, spec, facts):
@@ -888,13 +959,18 @@ class ExpertRun:
         back[:3, 3] += toward_base(obs) * RELEASE_BACKOFF
         self.move_to(back, GRIPPER_OPEN)
 
-    def navigate(self, reference, if_needed):
-        goal = self.world.navigation_goal(tuple(reference))
+    def navigate(self, reference, if_needed, place=None):
+        place_log = {}
+        if place is not None and getattr(self.world, "place_goal", None) is not None:
+            offset = place_offset(self.sources[tuple(place["source"])], place["step"], place.get("object"))
+            goal, place_log = self.world.place_goal(tuple(reference), offset, place.get("object"))
+        else:
+            goal = self.world.navigation_goal(tuple(reference))
         if goal is None:
-            return {"phase": "navigate", "skipped": "no_goal"}
+            return {"phase": "navigate", "skipped": "no_goal", **place_log}
         mobile = self.world.observe()["mobile"]
         if if_needed and navigation_done(mobile, goal):
-            return {"phase": "navigate", "skipped": "already_there"}
+            return {"phase": "navigate", "skipped": "already_there", **place_log}
         start, contact_steps = self.steps, 0
         start_dist = math.hypot(goal[0] - mobile[0], goal[1] - mobile[1])
         obstacles = getattr(self.world, "obstacles", None)
@@ -940,7 +1016,7 @@ class ExpertRun:
                 "path_length": round(path, 4), "max_steps": max_steps, **plan, **self.frame.summary(frame_since),
                 "contact_bodies": dict(touched.most_common(5)),
                 "heading_cos_median": round(float(np.median(cosines)), 3) if cosines else None,
-                "heading_cos_below_half": sum(c < 0.5 for c in cosines),
+                "heading_cos_below_half": sum(c < 0.5 for c in cosines), **place_log,
                 "trace_every_10": trace}
 
     def track(self, source, step_index, reference):
@@ -1059,7 +1135,7 @@ class ExpertRun:
                     self.release()
                     self.log.append({"phase": "release"})
                 elif ph["phase"] == "navigate":
-                    self.log.append(self.navigate(ph["reference"], ph.get("if_needed", True)))
+                    self.log.append(self.navigate(ph["reference"], ph.get("if_needed", True), ph.get("place")))
                 elif ph["phase"] == "track":
                     self.log.append(self.track(self.sources[tuple(ph["source"])], ph["step"], ph["reference"]))
                 elif ph["phase"] == "set_aside":
@@ -1612,6 +1688,48 @@ class SimWorld:
         if target is not None:
             goal = slide_to(goal, np.asarray(fxtr.pos, dtype=float)[:2], target[:2])
         return goal
+
+    def place_goal(self, reference, offset, carried=None):
+        """(goal, log) for a drive before a place at ``offset`` (base frame) onto a fixture.
+
+        The fixture's top is its box's hull; the other fixtures at the top's height (a sink, a
+        cooktop, a neighbour; not cabinets below it nor wall cabinets above) and the objects near
+        that height, apart from what the hand carries, are kept clear (``choose_place_goal``).
+        """
+        goal = self.navigation_goal(reference)
+        if goal is None or reference[0] != "fixture":
+            return goal, {}
+        fxtr = getattr(self.kitchen, reference[1], None)
+        try:
+            corners = np.asarray(fxtr.get_ext_sites(all_points=True, relative=False), dtype=float)
+        except Exception:
+            return goal, {"place_shift": None, "place_error": "no fixture box"}
+        top = float(corners[:, 2].max())
+        surface = bp.convex_hull(corners)
+        own, others = None, []
+        for name, f in self.kitchen.fixtures.items():
+            if f is fxtr:
+                own = str(name)
+                continue
+            if "floor" in str(name).lower() or "wall" in str(name).lower():
+                continue
+            try:
+                c = np.asarray(f.get_ext_sites(all_points=True, relative=False), dtype=float)
+            except Exception:
+                continue
+            if c[:, 2].max() < top - 0.01 or c[:, 2].min() > top + 0.05:
+                continue
+            hull = bp.convex_hull(c)
+            if len(hull) >= 3:
+                others.append((str(name), hull))
+        obs = self.observe()
+        hand = obs["eef"][:3, 3]
+        objects = [(n, T[:2, 3]) for n, T in obs["objects"].items()
+                   if n != carried and abs(float(T[2, 3]) - top) < 0.3 and np.linalg.norm(T[:3, 3] - hand) > 0.25]
+        obstacles = [(n, p) for n, p in self.obstacles() if n != own]
+        goal, log = choose_place_goal(goal, offset, surface, others, objects, obstacles, self.base_shape())
+        log["place_offset"] = [round(float(v), 3) for v in offset]
+        return goal, log
 
     def facts(self, task_name):
         from robocasa.utils import object_utils as OU

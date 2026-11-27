@@ -1315,6 +1315,54 @@ choice open, the code fixes it as follows:
   - the executor drives around an island where the straight line pins.
 
   The grid and the search take about 0.5 s on a 10 x 8 m scene.
+
+  *diag7 (commit 009b95b, the two failing stages, 20 demos each, videos).*
+  The box planner reads the base shape from the model as expected (half
+  0.35 x 0.25 m, centre -0.20 m, yaw axis -0.21 m).
+  - strawberry_on_pancake: 18 / 20, the same as the demo's own actions
+    (18 / 20). It passes; all nine earlier failures were door pins.
+  - basket_on_dining_counter: 13 / 20, against 20 / 20 for the demo's
+    actions. Every drive reached its goal with no contact (episode 1 had
+    pinned on a door for 294 steps before). All seven failures are at the
+    place.
+
+  *The basket videos.* In six failures (episodes 1, 4, 7, 10, 15, 19) the
+  executor sets the basket down in the dining counter's sink. In episode 8
+  it lands tilted on a small object on the counter. The hand goes as low as
+  in the demo; the place point is wrong. The drive stops at RoboCasa's
+  placement pose, centred on the fixture. A place on a fixture is replayed
+  in the base frame, so it lands wherever the base stands: in these
+  kitchens, the sink in the middle of the island. The demo had stood
+  elsewhere along the counter (in episode 1, 1.2 m away).
+
+  *Amendment: a drive before a place on a fixture chooses where along it to
+  stop.* The navigate phase names the place step (`stage_phases`).
+  `place_offset` is where the source's place leaves the object (or the hand),
+  in the base frame at the step's start. `choose_place_goal` slides
+  RoboCasa's pose along the fixture's front in 2.5 cm steps, nearest the
+  centre first, and takes the first base position where:
+  - the place point is at least 8 cm inside the fixture's top;
+  - it is at least 12 cm from any other fixture at the top's height (a
+    sink, a cooktop; not the cabinets below nor wall cabinets above);
+  - it is at least 15 cm from objects standing there, apart from what the
+    hand carries;
+  - the base box does not overlap other footprints.
+
+  If no position qualifies, the centred pose is kept, and the log says why
+  per reason (`place_rejected`). `SimWorld.place_goal` builds these from the
+  fixture boxes and the scene. The navigation log records the shift, the
+  place point and the offset. Object-referenced places are unchanged. The
+  change affects the two fixture places, basket_on_dining_counter and
+  plate_on_table. Tests:
+  - a free centre is kept;
+  - a place over the sink moves off it by the least slide, still facing the
+    fixture;
+  - an object on one side, or a fixture blocking the base on that side,
+    sends it to the other;
+  - with no free spot the centred goal is kept and reported;
+  - the offset is where the demo left the object;
+  - the phase names the place step;
+  - the executor drives to the world's chosen goal.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

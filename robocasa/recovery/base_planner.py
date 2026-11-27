@@ -94,6 +94,19 @@ def polygon_distance(points, poly):
     return d
 
 
+def inside_depth(point, poly):
+    """How far a 2-D point is inside a convex CCW polygon (negative outside)."""
+    p = np.asarray(point, dtype=float)[:2]
+    poly = np.asarray(poly, dtype=float)
+    depth = math.inf
+    for a, b in zip(poly, np.roll(poly, -1, axis=0)):
+        e = b - a
+        n = float(np.linalg.norm(e))
+        if n > 1e-12:
+            depth = min(depth, float(e[0] * (p[1] - a[1]) - e[1] * (p[0] - a[0])) / n)
+    return depth
+
+
 def point_in_polygon(point, poly):
     return bool(polygon_distance(np.asarray(point, dtype=float)[None, :2], poly)[0] == 0.0)
 

@@ -682,6 +682,97 @@ class TaskSuccessTest(unittest.TestCase):
             self.assertEqual((result["stop"], result["stage_completed"]), ("task_success", completed))
 
 
+class FixturePlaceTest(unittest.TestCase):
+    """A place on a fixture lands where the base stands: the drive picks a free part of the top."""
+
+    # A 2.4 x 0.8 m island with a 0.5 x 0.4 m sink at its middle; the robot faces it from y < 0.
+    SURFACE = er.bp.convex_hull([[-1.2, 0.0], [1.2, 0.0], [1.2, 0.8], [-1.2, 0.8]])
+    SINK = er.bp.convex_hull([[-0.25, 0.1], [0.25, 0.1], [0.25, 0.5], [-0.25, 0.5]])
+    GOAL = (0.0, -0.2, math.pi / 2)   # RoboCasa's centred placement pose
+    OFFSET = (0.5, 0.0)               # the demo set the basket down 0.5 m ahead of its base
+
+    def choose(self, **kw):
+        return er.choose_place_goal(self.GOAL, self.OFFSET, self.SURFACE, **kw)
+
+    def test_a_free_centre_is_kept(self):
+        goal, log = self.choose()
+        self.assertEqual(goal, self.GOAL)
+        self.assertEqual(log["place_shift"], 0.0)
+        np.testing.assert_allclose(log["place_point"], [0.0, 0.3], atol=1e-9)
+
+    def test_the_place_moves_off_the_sink_by_the_least_slide(self):
+        goal, log = self.choose(others=[("sink", self.SINK)])
+        point = np.array(log["place_point"])
+        self.assertGreaterEqual(er.bp.polygon_distance(point[None], self.SINK)[0], er.PLACE_FIXTURE_MARGIN)
+        self.assertLessEqual(abs(log["place_shift"]), 0.25 + er.PLACE_FIXTURE_MARGIN + er.PLACE_SLIDE_STEP)
+        self.assertAlmostEqual(goal[1], self.GOAL[1])          # slid along the front, still facing it
+        self.assertEqual(goal[2], self.GOAL[2])
+        self.assertIn("sink", log["place_rejected"])
+
+    def test_objects_and_blocked_base_positions_push_it_to_the_other_side(self):
+        # The robot faces +y, so its left is -x. Block the left: an object on the top, a fixture by the base.
+        left_object = [("bowl", np.array([-0.45, 0.3]))]
+        goal, log = self.choose(others=[("sink", self.SINK)], objects=left_object)
+        self.assertGreater(log["place_point"][0], 0.25)
+        stool = er.bp.convex_hull([[0.2, -0.9], [0.9, -0.9], [0.9, -0.5], [0.2, -0.5]])
+        goal, log = self.choose(others=[("sink", self.SINK)], obstacles=[("stool", stool)])
+        self.assertLess(log["place_point"][0], -0.25)
+        self.assertFalse(er.bp.polygons_overlap(er.bp.BaseShape().corners(goal), stool))
+
+    def test_no_free_spot_keeps_the_centred_goal_and_says_so(self):
+        goal, log = er.choose_place_goal(self.GOAL, (2.0, 0.0), self.SURFACE)   # always past the far edge
+        self.assertEqual(goal, self.GOAL)
+        self.assertIsNone(log["place_shift"])
+        self.assertGreater(log["place_rejected"]["edge"], 10)
+
+    def test_the_offset_is_where_the_demo_left_the_object(self):
+        base = world_pose(1.0, 2.0, 0.3, math.pi / 2)
+        src = demo_source(world_pose(1.0, 2.6, 0.9), world_pose(0.7, 2.5, 0.9), base)
+        src.objects["obj"][-1] = world_pose(0.7, 2.5, 0.9 + PLACE_HEIGHT)
+        np.testing.assert_allclose(er.place_offset(src, 1, "obj"), (0.5, 0.3), atol=1e-9)
+        np.testing.assert_allclose(er.place_offset(src, 1), (0.5, 0.3), atol=1e-9)   # the hand, there too
+
+    def place_source(self):
+        src = demo_source(world_pose(0.6, 0, 0.9), world_pose(0.6, -0.3, 0.9), world_pose(0, 0, 0.3),
+                          predicate="basket_on_dining_counter", target="basket")
+        src.task_name = "ArrangeBreadBasket"
+        src.objects["basket"] = src.objects.pop("obj")
+        src.steps = [src.steps[0], er.SourceStep("NavigateKitchen", er.NAVIGATE, 20, 20), src.steps[1]]
+        return src
+
+    def test_the_navigation_before_a_fixture_place_names_the_place_step(self):
+        src = self.place_source()
+        spec = er.STAGE_SPECS[("ArrangeBreadBasket", "basket_on_dining_counter")]
+        phases = er.stage_phases(src, spec, "basket", 0, navigate_to_fixture=False)
+        nav = phases[1]
+        self.assertEqual(nav["reference"], ["fixture", "dining_table"])
+        self.assertEqual(nav["place"], {"source": list(src.key), "step": 2, "object": "basket"})
+        pick_nav = er.stage_phases(src, er.STAGE_SPECS[("ArrangeBreadBasket", "bread_in_basket")], "bread", 0)
+        self.assertTrue(all("place" not in ph for ph in pick_nav))   # an object reference: no change
+
+    def test_the_executor_drives_to_the_world_chosen_place_goal(self):
+        src = self.place_source()
+        calls = []
+
+        class PlaceWorld(FakeWorld):
+            def place_goal(self, reference, offset, carried=None):
+                calls.append((reference, offset, carried))
+                return (0.5, 0.0, 0.0), {"place_shift": 0.5}
+
+        world = PlaceWorld(mobile=(0.0, 0.0, 0.0), goals={("fixture", "dining_table"): (0.0, 0.0, 0.0)})
+        run = er.ExpertRun(world, TRUE_GAINS, {src.key: src}, None, cap=10 ** 5, budget=10 ** 5)
+        place = {"source": list(src.key), "step": 2, "object": "basket"}
+        result = run.run([{"phase": "navigate", "reference": ["fixture", "dining_table"], "if_needed": True,
+                           "place": place}])
+        nav = result["phases"][0]
+        self.assertEqual(calls[0][0], ("fixture", "dining_table"))
+        np.testing.assert_allclose(calls[0][1], er.place_offset(src, 2, "basket"))
+        self.assertEqual(calls[0][2], "basket")
+        self.assertTrue(nav["reached"])
+        self.assertEqual(nav["place_shift"], 0.5)
+        np.testing.assert_allclose(world.mobile[:2], [0.5, 0.0], atol=0.05)
+
+
 class ShortArmWorld(FakeWorld):
     """The arm reaches only ``share`` of each commanded motion."""
 
