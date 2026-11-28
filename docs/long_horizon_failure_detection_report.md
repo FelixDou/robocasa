@@ -231,29 +231,33 @@ Implemented and locally verified before the next cluster collection:
 
 Ran `PILOT_GPUS="0" bash scripts/run_xr1_recovery_pilot_6tasks.sh --smoke` (`2` rollouts/task = 12 rollouts total, `seed = 2700007`, `video_frame_stride = 1`, ~25 min on 1 GPU, commit `4b3666de`).
 
+- **Cluster root:** `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_pilot6_smoke_20261128_135824/shard0`
+- **Local metadata archive:** `outputs/long_horizon_failure_detection/cluster_imports/xr1_pilot6_smoke_metadata.tar.gz` (SHA-256 `e4d123dab4ee1c3e7d68ad572057e2f97acc2a4870619ce1e4b0f16cef2a3b0c`)
 - **Validation:** `RoboCasa SAFE dataset: VALID` (12 rollouts: **9 successes, 3 failures**; 42 usable segments: 39 successes, 3 failures, 0 errors), `PASS: 12 synchronized XR-1 recordings`, exact 1-to-1 decoded frame sync on every episode.
-- **Per-rollout opposing-pad `_check_grasp` summary:**
+- **Per-rollout opposing-pad `_check_grasp` timelines:**
 
-| Task | Rollout ID | Outcome | Frames / Decs | Obs changes | Grasp onsets (`_check_grasp`) |
-|---|---|---|---:|---:|---|
-| `ArrangeBreadBasket` | `aa214332a8c17e2f576155da` | **succeeded** | 1,015 / 64 | 14 | `bread_grasped: 1`, `basket_grasped: 2` |
-| `ArrangeBreadBasket` | `eaa2bfe17ae17ca418363127` | failed | 4,350 / 272 | 12 | `bread_grasped: 4`, `basket_grasped: 1` |
-| `CuttingToolSelection` | `0991c30bf37e02796a17b0cf` | **succeeded** | 308 / 20 | 4 | `correct_tool_grasped: 1`, `wrong_tool_grasped: 0` |
-| `CuttingToolSelection` | `5a4fdad1b1e1fc325653009f` | failed | 1,200 / 75 | 7 | `correct_tool_grasped: 1`, `wrong_tool_grasped: 1` |
-| `DeliverStraw` | `25c61d7219b98c6503e93a52` | **succeeded** | 948 / 60 | 19 | `straw_grasped: 2` |
-| `DeliverStraw` | `1c0979ccc457e27459793396` | **succeeded** | 1,009 / 64 | 8 | `straw_grasped: 1` |
-| `GarnishPancake` | `147b5ad937f776e90ce6e5cc` | **succeeded** | 1,248 / 78 | 13 | `strawberry_grasped: 1` |
-| `GarnishPancake` | `1d703e912d8c0752d4d48182` | failed | 2,700 / 169 | 11 | `strawberry_grasped: 1` |
-| `MakeIceLemonade` | `d285494e886a902cf64b5a26` | **succeeded** | 2,034 / 128 | 44 | `lemon: 1`, `ice_cube1: 1`, `ice_cube2: 1` |
-| `MakeIceLemonade` | `99438606c14f973d368b6bf4` | **succeeded** | 1,532 / 96 | 20 | `lemon: 1`, `ice_cube1: 0`, `ice_cube2: 1` |
-| `SetUpCuttingStation` | `87bbbc908c954b2806152b6e` | **succeeded** | 1,673 / 105 | 15 | `knife_grasped: 2`, `meat_grasped: 1` |
-| `SetUpCuttingStation` | `b1b33b2b23925a92fbd93609` | **succeeded** | 798 / 50 | 13 | `knife_grasped: 1`, `meat_grasped: 1` |
+| Task | Rollout ID | Outcome | Steps / Decs | Grasp intervals (start→end, steps) | Key physical event & timing |
+|---|---|---|---:|---|---|
+| `ArrangeBreadBasket` | `aa214332` | **succ** | 1,015 / 64 | `bread`: 591→700 (109); `basket`: 983→985, 986→998 | `bread_in_basket` @ 707 (+7 steps); `basket_on_dining_counter` @ 982 *(wire-basket carry only hit both pads at set-down)* |
+| `ArrangeBreadBasket` | `eaa2bfe1` | **fail** | 4,350 / 272 | `bread`: 664→668, 670→783 (113), 1105→1794 (689); `basket`: 2857→2960 (103) | **Missed bread placement @ 783 (−178 s) & @ 1,794 (−128 s); then grasped empty basket @ 2,857 (−75 s)** |
+| `CuttingToolSelection` | `0991c30b` | **succ** | 308 / 20 | `correct_tool`: 210→294 (84) | Placed cleanly @ 294 (+0 steps) |
+| `CuttingToolSelection` | `5a4fdad1` | **fail** | 1,200 / 75 | `wrong_tool`: 241→388 (147); `correct_tool`: 664→766 (102) | **Wrong tool placed on board @ 386 (−40.7 s); later missed correct-tool placement @ 766 (−21.7 s)** |
+| `DeliverStraw` | `25c61d72` | **succ** | 948 / 60 | `straw`: 371→866 (495), 870→872 (2) | `straw_in_glass` @ 831 (+0 steps; 2-step touch on release) |
+| `DeliverStraw` | `1c0979cc` | **succ** | 1,009 / 64 | `straw`: 396→962 (566) | `straw_in_glass` @ 964 (+2 steps) |
+| `GarnishPancake` | `147b5ad9` | **succ** | 1,248 / 78 | `strawberry`: 741→1225 (484) | `strawberry_on_pancake` @ 1,227 (+2 steps) |
+| `GarnishPancake` | `1d703e91` | **fail** | 2,700 / 169 | `strawberry`: 461→669 (208) | **Missed strawberry placement @ 669 (−101.5 s); `gripper_released` @ 695 → timeout** |
+| `MakeIceLemonade` | `d285494e` | **succ** | 2,034 / 128 | `lemon`: 719→1035 (316); `ice1`: 1525→1561 (36); `ice2`: 1854→2017 (163) | **Genuine 14.7 s (18-decision) unassisted self-correction:** missed glass with `ice_cube1` @ 1,561, returned to fridge, grasped `ice_cube2` @ 1,854, placed @ 2,018 (+1 step), succeeded @ 2,034 |
+| `MakeIceLemonade` | `99438606` | **succ** | 1,532 / 96 | `lemon`: 475→759 (284); `ice2`: 1137→1505 (368) | `lemon_in_glass` @ 759 (+0 steps), `ice_in_glass` @ 1,505 (+0 steps) |
+| `SetUpCuttingStation` | `87bbbc90` | **succ** | 1,673 / 105 | `knife`: 409→915 (506), 916→919 (3); `meat`: 1310→1645 (335) | `knife_on_board` @ 915 (+0 steps; 3-step release touch); `meat_on_board` @ 1,647 (+2 steps) |
+| `SetUpCuttingStation` | `b1b33b2b` | **succ** | 798 / 50 | `knife`: 392→544 (152); `meat`: 685→775 (90) | `knife_on_board` @ 544 (+0 steps); `meat_on_board` @ 777 (+2 steps) |
 
-- **Key validation result:** The `_check_grasp` fix worked immediately on live XR-1:
-  - `bread_grasped` now fires cleanly on wide bread loaves (`1` on success, `4` on failure — previously `0` throughout `00072ff1`);
-  - `basket_grasped` dropped from 23 grazing pulses (`00072ff1`) to `1`–`2` real opposing-pad grasps;
-  - **3 of 9 successful episodes** (`ArrangeBreadBasket aa214332`, `DeliverStraw 25c61d72`, `SetUpCuttingStation 87bbbc90`) recorded **multiple grasp onsets (`2`)** — strong candidate unassisted retries to inspect once `metadata_review.tar.gz` is synced locally.
-- **Decision:** Gate passed — proceed immediately to the **full 6-task pilot** (`NUM_ROLLOUTS=20`/task = 120 rollouts, `seed = 2800007`, `video_frame_stride = 2`).
+- **Five key empirical findings from the 12 timelines:**
+  1. **Clean `_check_grasp` signal across all 6 tasks:** Every solid object (`bread`, `knife`, `peeler`, `straw`, `strawberry`, `lemon`, `ice_cube1`, `ice_cube2`, `meat`) produced continuous **36–689-step** grasp intervals (`bread_grasped` fired for 109–689 steps; `wrong_tool_grasped` fired for 147 steps on a genuine wrong-tool pick-and-place). Caveat: thin wire-mesh `basket` carry in `aa214332` did not trigger opposing-pad grasp until set-down (`983–998`).
+  2. **All 13 clean successful placements landed within 0–7 control steps (≤ 0.35 s) after release.**
+  3. **All 3 failures (3/3) had unmistakable, huge-lead physical mistakes:** 21.7 s to 178 s before timeout (`eaa2bfe1` missed bread twice then grasped the empty basket; `5a4fdad1` placed the wrong tool on the cutting board 40.7 s before timeout; `1d703e91` dropped the strawberry 101.5 s before timeout).
+  4. **First verified multi-decision unassisted self-correction (`MakeIceLemonade d285494e`):** XR-1 dropped/missed with `ice_cube1` at step 1,561, spent **293 steps (14.7 s / 18 policy decisions)** returning for `ice_cube2` (step 1,854), and succeeded at step 2,034. A naive 32-step missed-placement rule would false-alarm around step 1,600.
+  5. **Precondition note:** `fridge_open` fired cleanly on all 4 fridge episodes, whereas `drawer_open` / `cabinet_open` remained `False` even on successful `DeliverStraw`, `CuttingToolSelection`, `SetUpCuttingStation`, and `ArrangeBreadBasket` runs.
+- **Decision:** Gate passed — launched the **full 6-task pilot** (`NUM_ROLLOUTS=20`/task = 120 rollouts, `seed = 2800007`, `video_frame_stride = 2`, 1 GPU on `tsubame`).
 
 ---
 
@@ -266,13 +270,14 @@ Ran `PILOT_GPUS="0" bash scripts/run_xr1_recovery_pilot_6tasks.sh --smoke` (`2` 
 | Roadmap document | `reports/long_horizon_failure_detection_roadmap.docx` | Initial 27 Nov 2026 roadmap |
 | Prototype event audit | `docs/long_horizon_relation_events.md`, `outputs/long_horizon_failure_detection/xr1_ladder_76/summary.json` | 76 October parents |
 | Calibrated pilot (internal fit) | `docs/long_horizon_calibration_pilot.md`, `outputs/long_horizon_failure_detection/xr1_ladder_76_calibration_v1/calibration.json` | +6.42 pp, 2/36 vs 1/36 succ |
-| Calibrated pilot (external naturals) | `outputs/long_horizon_failure_detection/xr1_ladder_76_calibration_external_naturals/calibration.json` | `a3282acb...`; +6.37 pp, 2/36 vs 1/36 succ |
+| Calibrated pilot (external naturals) | `docs/long_horizon_calibration_pilot.md`, `outputs/long_horizon_failure_detection/xr1_ladder_76_calibration_external_naturals/calibration.json` | `a3282acb...`; +6.37 pp, 2/36 vs 1/36 succ |
 | External naturals archive | `outputs/long_horizon_failure_detection/cluster_imports/xr1_naturals_fit.tar.gz` | `9dbc1fff...`; 60 parents (25 succ) |
 | Local release-clock controls | `docs/long_horizon_local_controls.md`, `outputs/long_horizon_failure_detection/xr1_ladder_76_local_controls/results.json` | 0/76 alarm diff at 32–256 steps; 0 verified pairs |
 | Cluster cohort audit | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/long_horizon_cohort_audit_20261128_130837.json` | Legacy August cohorts lack video/actions/raw predicates |
-| Synchronized XR-1 smoke run | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_recording_PNL4QPfz` | Commit `9e59c463`; 4/4 verified; archive `cc8999a5...` |
+| Synchronized XR-1 smoke run (2 tasks) | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_recording_PNL4QPfz` | Commit `9e59c463`; 4/4 verified; archive `cc8999a5...` |
 | Visual inspection contact sheets | `outputs/long_horizon_failure_detection/xr1_recovery_recording_PNL4QPfz_inspection/*.png` | 4 contact sheets (Section 6.2) |
-| 6-task pilot launcher & verifier | `scripts/run_xr1_recovery_pilot_6tasks.sh`, `scripts/xr1_lead_time/verify_recovery_recording.py` | 34/34 unit tests pass; ready to push & run |
+| Synchronized XR-1 smoke run (6 tasks) | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_pilot6_smoke_20261128_135824` | Commit `4b3666de`; 12/12 verified (9S/3F); metadata `e4d123da...` |
+| 6-task pilot launcher & verifier | `scripts/run_xr1_recovery_pilot_6tasks.sh`, `scripts/xr1_lead_time/verify_recovery_recording.py` | 34/34 unit tests pass; full 120-rollout run launched |
 
 ### Recommended next steps (in order)
 
