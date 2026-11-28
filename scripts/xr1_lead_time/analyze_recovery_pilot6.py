@@ -228,8 +228,8 @@ TASK_SPECS = {
         "wrong_grasps": (),
     },
     "WaffleReheat": {
+        # Waffle starts inside the bowl at reset; robot grasps and places the bowl into the microwave.
         "placements": (
-            ("place_waffle", ("waffle_grasped",), "waffle_in_bowl"),
             ("place_bowl", ("bowl_grasped",), "bowl_in_microwave"),
         ),
         "hold_conditions": ("waffle_in_bowl", "bowl_in_microwave"),
@@ -1035,6 +1035,7 @@ def load_episodes(
     latch_steps: int = 16,
     loss_confirm_steps: int = 16,
     miss_confirm_steps: int = 32,
+    tasks_filter: set[str] | None = None,
 ) -> tuple[list[EpisodeData], dict[str, str]]:
     manifest_paths = []
     for r in roots:
@@ -1058,6 +1059,8 @@ def load_episodes(
             rid = row["rollout_id"]
             if rid in seen_ids:
                 raise ValueError(f"Duplicate rollout_id across shards: {rid}")
+            if tasks_filter is not None and row["task_name"] not in tasks_filter:
+                continue
             seen_ids.add(rid)
             trace = json.loads((base / row["subtask_trace_path"]).read_text())
             episodes.append(
@@ -1082,6 +1085,7 @@ def run_analysis(
     loss_confirm_steps: int = 16,
     miss_confirm_steps: int = 32,
     num_folds: int = 5,
+    tasks_filter: set[str] | None = None,
 ) -> dict:
     if output_dir.exists():
         raise FileExistsError(f"Choose a fresh output directory: {output_dir}")
@@ -1091,6 +1095,7 @@ def run_analysis(
         latch_steps=latch_steps,
         loss_confirm_steps=loss_confirm_steps,
         miss_confirm_steps=miss_confirm_steps,
+        tasks_filter=tasks_filter,
     )
     by_task_counts = {}
     for t in sorted({e.task for e in episodes}):
@@ -1185,6 +1190,7 @@ def main(argv=None):
     parser.add_argument("--loss-confirm-steps", type=int, default=16)
     parser.add_argument("--miss-confirm-steps", type=int, default=32)
     parser.add_argument("--num-folds", type=int, default=5)
+    parser.add_argument("--tasks", nargs="+", default=None, help="Optional subset of tasks to analyze")
     args = parser.parse_args(argv)
 
     res = run_analysis(
@@ -1195,6 +1201,7 @@ def main(argv=None):
         loss_confirm_steps=args.loss_confirm_steps,
         miss_confirm_steps=args.miss_confirm_steps,
         num_folds=args.num_folds,
+        tasks_filter=set(args.tasks) if args.tasks else None,
     )
     c = res["cohort"]
     t2 = res["test2_readiness"]

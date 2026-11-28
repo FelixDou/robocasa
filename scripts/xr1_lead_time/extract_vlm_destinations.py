@@ -684,6 +684,7 @@ def extract_vlm_scores(
     decision_stride: int = 2,
     batch_size: int = 16,
     max_rollouts_per_task: int | None = None,
+    tasks_filter: set[str] | None = None,
     scorer: Any = None,
 ) -> dict:
     """Run zero-shot Qwen3-VL destination verification across rollouts with per-rollout resume."""
@@ -708,6 +709,8 @@ def extract_vlm_scores(
             if rid in seen_ids:
                 raise ValueError(f"Duplicate rollout_id: {rid}")
             task = row["task_name"]
+            if tasks_filter is not None and task not in tasks_filter:
+                continue
             if max_rollouts_per_task is not None and per_task_counts.get(task, 0) >= max_rollouts_per_task:
                 continue
             seen_ids.add(rid)
@@ -888,6 +891,7 @@ def main(argv=None):
     parser.add_argument("--decision-stride", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--max-rollouts-per-task", type=int, default=None)
+    parser.add_argument("--tasks", nargs="+", default=None)
     args = parser.parse_args(argv)
     extract_vlm_scores(
         args.run,
@@ -896,6 +900,7 @@ def main(argv=None):
         decision_stride=args.decision_stride,
         batch_size=args.batch_size,
         max_rollouts_per_task=args.max_rollouts_per_task,
+        tasks_filter=set(args.tasks) if args.tasks else None,
     )
 
 
