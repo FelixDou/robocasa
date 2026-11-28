@@ -1620,6 +1620,46 @@ choice open, the code fixes it as follows:
   - *Videos.* `transfer --record N` records the first N resets per task under
     `videos/<task>/seed_<seed>`. The launcher takes `R2_TAG` (a separate
     output folder) and `R2_ARGS` (extra arguments).
+
+  *Pretrain transfer, diagnostic run (commit 0354fb2, `transfer_diag`, 28
+  November 2026).* 100 resets, 0 errors, 0 `ceiling_error`. The stage rates
+  match the third run (cabinet_open 1/19, fridge_open 1/20, kettle 7/20, mug
+  2/7, croissant 4/20, tools 0/20). The door samples and the videos (seeds
+  710007 and 710008) show three distinct door failures, none of them the
+  door's radius:
+
+  | Door failure | fridge_open (20) | cabinet_open (19) |
+  |---|---|---|
+  | Hand never reaches the handle: door at 0, fingers on the door panel | 11 | 5 |
+  | Hand swings, door does not follow (grip on nothing, or slipped early; under a quarter of the wanted angle) | 1 | 7 |
+  | Door follows, then stalls: slip, or the door hits the arm or base | 7 | 6 |
+  | Completed | 1 | 1 |
+
+  - In the first group the stop log lists the fingers touching the door
+    panel (`*_door_main`, `fridge_*_door`), not its handle. In seed 710008
+    the hand ends at the edge of the right fridge door, far from the handle
+    bars, and the base touches the island.
+  - Where the door follows, it tracks the wanted angle to within a few
+    hundredths of a radian until the stall. So door-angle replay works once
+    the handle is held.
+  - The arm or base hits the swinging door in 3 runs (`robot0_link0`–`link4`
+    or `mobilebase0` against the door).
+
+  Picks:
+  - The ceiling check keeps the jam on the cabinet shelf (3/3, shelf
+    `level1` 23–24 cm above the pads) and some tools in drawers on the
+    replayed pick. The replayed pick still fails them.
+  - For tools in the drawer, the scripted grasp stops about 23 cm above its
+    target, with the fingers on the counter top (`island_main`,
+    `counter_*_main`). The counter's front edge is not above the object, so
+    the rays miss it, but the hand comes down against it.
+  - Croissants: the 7.6 cm span took 2 more to the scripted grasp; it held
+    8/10. 10/20 still measured over 7.6 cm.
+
+  For the Gate R statistic: with p the per-attempt stage rate, the chance
+  that at least one of 10 attempts completes the stage is 1 − (1 − p)^10.
+  That is 0.99 at p = 0.35 (kettle), 0.89 at 0.2 (croissant), 0.40 at 0.05
+  (doors) and 0 at 0 (tools, jam).
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
