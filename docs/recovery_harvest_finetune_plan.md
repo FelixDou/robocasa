@@ -1948,6 +1948,47 @@ choice open, the code fixes it as follows:
   control step while it is closed on the bar (about 0.12 rad/s at 20 Hz, a
   quarter of the damping torque), instead of the approach's 0.05 rad and
   1 cm. A full pull of 1.5 rad takes about 250 steps.
+
+  *Pretrain transfer, slow pull (commit ae678cc, `transfer_slowpull1`,
+  28 November 2026).* GarnishPancake and ArrangeBreadBasket only, 40 resets,
+  0 errors, 110 minutes.
+
+  | Stage | transfer_door4 | transfer_slowpull1 |
+  |---|---|---|
+  | fridge_open | 14/20 | 15/20 (0.75, passes) |
+  | cabinet_open | 3/20 | 6/20 |
+  | pancake_on_plate | 14/14 | 15/15 |
+  | plate_on_table | 14/14 | 15/15 |
+  | strawberry_on_pancake | 0/14 | 0/15 |
+  | bread_in_basket | 0/3 | 0/6 |
+
+  - Cabinet pulls: 213 (279 before); 147 ended at `slip` (236), 46 at
+    `reach` (33), 15 at `goal` (8). The mean gain per pull doubled, from
+    0.08 to 0.16 rad. Fridge pulls gained 0.32 rad on average (0.28).
+  - Over the 80 held cabinet pulls that ended at `slip`, the peak hinge
+    torque before the loss fell to a median of 0.22 N m (0.74 before). The
+    damping no longer strips the grip. What remains is mixed:
+    - *Fingers pried open* (24): as the door turns, the hand drifts up to
+      3 cm along the fingers' closing axis and the opening grows by 1 cm or
+      more until the bar escapes.
+    - *Shallow grasps* (seed 710013, every pull): the pads close 9 mm in
+      front of the bar's axis instead of on it, and the bar slides out at
+      almost no load.
+    - *The hand stops, not the grip* (seeds 710009, 710015, 710018): the door
+      follows the hand cleanly (seed 710015: pads within 1.5 mm of the bar,
+      0.22 N m, to 0.40 rad and on), then stops at about 0.93–1.25 rad with
+      the bar still in the fingers and no load. The hand no longer reaches
+      its pull targets, though the stance planner's reach model said it
+      would; the lag passes 0.25 rad and the pull is counted as a slip. The
+      next pull's planned stance was blocked by the kitchen (`goal_blocked`),
+      so the base stayed and the door stopped at the same angle again.
+  - strawberry_on_pancake ended at the step cap in 14 of its 15 failures,
+    bread_in_basket in 5 of 6. Not yet inspected.
+
+  *Diagnostic (29 November 2026, before the full transfer run).* Each grip
+  sample after a pull step also records the hand's position and rotation
+  error from that step's target (`track`), to tell a hand that cannot
+  follow from a bar that leaves the fingers.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

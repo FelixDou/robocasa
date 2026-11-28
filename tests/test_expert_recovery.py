@@ -1844,8 +1844,10 @@ class ScriptedDoorTest(unittest.TestCase):
         cyc = out["phases"][0]["doors"][0]["cycles"][0]
         self.assertGreaterEqual(len(cyc["grip"]), 2)
         self.assertLessEqual(len(cyc["grip"]), er.DOOR_GRIP_TRACE + 1)
-        q_wanted, q, offset = cyc["grip"][0]
+        q_wanted, q, offset, track = cyc["grip"][0]
         self.assertLess(max(abs(v) for v in offset[:2]), 0.03)   # closed on the bar
+        self.assertIsNone(track["track"])                       # no target yet
+        self.assertLess(cyc["grip"][1][-1]["track"][0], er.SETTLE_TOL)   # the hand reached each pull pose
 
     def test_the_torso_brings_the_base_as_far_below_a_higher_handle_as_the_source_stood(self):
         gains = er.Gains(TRUE_GAINS.arm_pos, TRUE_GAINS.arm_rot, TRUE_GAINS.base, torso=0.01, torso_mode=er.ARM_MODE)
