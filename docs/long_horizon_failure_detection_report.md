@@ -25,7 +25,7 @@ Key findings through November 28, 2026:
    - **Failure anatomy:** **40/56 failures (71.4%)** exhibited a confirmed physical mistake (30 missed placement, 7 lost condition, 3 both).
    - **Test-2 self-correction prevalence:** **5/64 successes (7.8%)** in the 120-rollout cohort (**6/73 = 8.2%** combining smoke + full) showed genuine multi-decision unassisted self-corrections (3–40 decisions before recovery), yielding **4 matched Test-2 pairs** (~1 matched pair per 30 rollouts → ~900 rollouts projected for 30 pairs).
 
-**Current decision:** **Zero-shot `Qwen3-VL-4B-Instruct` destination verifier VALIDATED & first policy-agnostic hybrid monitor beats $G$ by +5.5 s at 3.1% FPR (Section 9).** Replacing pooled SigLIP (`0.51` LOTO AUROC) with zero-shot `Qwen3-VL-4B-Instruct` jumps universal placement AUROC to **0.7905** (and up to **0.990** on `strawberry_on_pancake`, **0.910** on `lemon_in_glass`, **0.874** on `meat_on_cutting_board`, **0.866** on `straw_in_glass`) and lifts `true_grasp + vlm_dest` by **+23.1 s** (`20.5 s → 43.6 s`, **+9.1 s over $G$ at 3.1% FPR, 98.2% recall**). With **zero privileged inputs**, `proprio_actions + Qwen3-VL` already reaches **27.79% (40.0 s) at 3.1% FPR, 96.4% recall** (**+7.35 pp over inferred stage clock, +5.5 s over $G$**), and even the **100% zero-shot LOTO universal monitor** (zero target-task grasp or destination labels) beats both its inferred stage clock (**+5.96 pp**) and $G$ (**+1.5 s**) at **3.1% FPR, 98.2% recall**. The remaining gap to oracle (`40.0 s → 55.0 s`) comes from three fixable scoring issues — Yes/No prior bias (`AUROC = 0.99` yet `@0.5 F1 = 0.30`), fridge-view false losses on hold-only predicates (`vis = 0.98` because the VLM ignored `"Unknown"`), and hard 0.5 thresholding before conformal calibration — all testable immediately on the already-saved logits without re-running VLM inference.
+**Current decision:** **Zero-shot `Qwen3-VL-4B-Instruct` hits 0.812 macro post-release AUROC (0.868 across 8/9 targets) and black-box `proprio + Qwen3-VL` reaches 42.2 s (+7.7 s over $G$) at 4.7% FPR (Section 9).** Replacing pooled SigLIP (`0.51` LOTO AUROC) with zero-shot `Qwen3-VL-4B-Instruct` lifts `true_grasp + vlm_zeroshot` (`placement_only`, **zero RoboCasa training**) to **34.25% (50.0 s) at 3.1% FPR — +2.20 pp over oracle `stage_clock`, +15.4 s over $G$, capturing 92.6% of the 54.0 s placement-only oracle ceiling**. With **zero privileged inputs, zero internal VLA latents, and zero target-task VLM labels**, `hyb_dpre_platt_soft_verholds` (`proprio_actions` grasp + pre-grasp-debiased LOTO-Platt `Qwen3-VL` + verified-target holds) reaches **30.18% (42.2 s) at 4.7% FPR, 94.6% recall — +5.49 pp over its inferred stage clock and +4.56 pp (+7.7 s) over $G$ (4/6 tasks positive)**. Logit diagnostics expose the exact remaining barrier: zero-shot `Qwen3-VL-4B` has a massive **−5 to −12 No-bias** (e.g., `straw_in_glass` `neg=-9.22 / pos=-1.16`, `basket_on_dining_counter` `neg=-8.03 / pos=-7.58` despite **0.864 post-release AUROC**!) plus 1 genuinely blind predicate (`ice_in_glass` `0.36` post-release AUROC), which inflates the pooled conformal cutoff across tasks. Next highest-leverage experiment: **3-fold cross-task LoRA adaptation of `Qwen3-VL-4B-Instruct`** (train on 4 tasks, evaluate **strictly zero-shot on 2 held-out unseen tasks** across all 6 tasks) to test whether RoboCasa visual grounding + calibration transfers zero-shot across unseen objects/receptacles and closes the remaining gap to the 55 s oracle.
 
 ---
 
@@ -455,6 +455,43 @@ Per-task `full_physical − stage_clock` gains (all 6 tasks positive, 0 rollouts
    - **Hard 0.5 thresholding before split conformal calibration:** Any single false negative on a successful episode keeps `missed_effect_age` ticking until termination and inflates the 95% conformal quantile for all episodes (which is why balanced-F1 thresholds hurt lead vs. high-recall `vlm_zeroshot`). Switching to **continuous probability-weighted missed-effect evidence** (integrating `1 - p_placed(t)` after release) or recall-safe calibration + causal baseline subtraction can be tested immediately on the already-saved `vlm_destination_scores.npz` in < 30 seconds without re-running the VLM.
    - **Only two visually hard predicates remain:** `basket_on_dining_counter` (`0.540 AUROC`, needs before/after reset-frame comparison or base-displacement cue) and `ice_in_glass` (`0.615 AUROC`, tiny translucent cube — candidate for before/after wrist comparison or 4-train / 2-held-out-task `Qwen3-VL` LoRA).
 
+### 9.5 Zero-re-inference scoring upgrades & post-release diagnostics (`xr1_vlm_scoring_upgrades_20261128_195948`)
+
+- **Code:** commit `970e3217` (`scripts/xr1_lead_time/eval_vlm_scoring_upgrades.py`, `scripts/run_xr1_vlm_scoring_upgrades.sh`, `tests/test_long_horizon_vlm_scoring_upgrades.py` — 4/4 tests passed).
+- **Cluster output:** `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_vlm_scoring_upgrades_20261128_195948` (`vlm_scoring_upgrades.tar.gz`, 45 KB).
+
+**Post-release logit diagnostics (all 9 placement targets, strictly after first release):**
+
+| Task | Predicate | All-frame raw AUROC | **Post-release raw / `dpre` AUROC** | Raw `neg / pos` mean logit | `dpre` `neg / pos` mean logit |
+|---|---|---:|---:|---:|---:|
+| `GarnishPancake` | `strawberry_on_pancake` | 0.988 | **0.983 / 0.986** | −12.53 / +9.90 | +3.23 / +25.60 |
+| `DeliverStraw` | `straw_in_glass` | 0.873 | **0.911 / 0.896** | −9.22 / −1.16 | +1.98 / +9.84 |
+| `MakeIceLemonade` | `lemon_in_glass` | 0.908 | **0.906 / 0.893** | −9.26 / +1.05 | +1.12 / +10.99 |
+| `SetUpCuttingStation` | `knife_on_cutting_board` | 0.745 | **0.769 / 0.874** | −6.06 / −1.01 | +0.36 / +7.00 |
+| `ArrangeBreadBasket` | `basket_on_dining_counter` | 0.523 | **0.864 / 0.841** | −8.03 / −7.58 | −1.40 / −2.85 |
+| `SetUpCuttingStation` | `meat_on_cutting_board` | 0.884 | **0.797 / 0.859** | −6.64 / +5.77 | +1.41 / +14.20 |
+| `ArrangeBreadBasket` | `bread_in_basket` | 0.754 | **0.737 / 0.806** | −8.31 / +1.03 | −0.45 / +7.35 |
+| `CuttingToolSelection` | `correct_tool_present_on_board` | 0.748 | **0.730 / 0.790** | −5.25 / +0.86 | +0.49 / +7.99 |
+| `MakeIceLemonade` | `ice_in_glass` | 0.614 | 0.361 / 0.366 | −7.95 / −4.82 | +1.54 / +5.53 |
+| **Macro (9 targets / 8 non-ice)** | | **0.782** | **0.784 / 0.812** *(0.868 on 8/9)* | | |
+
+**Key upgraded monitor arms (120 rollouts, 5-fold split-conformal, 5% nominal FPR):**
+
+| Configuration | Privileged? | Stage lead | Full lead (% / s) | FPR | Recall | vs. stage | vs. $G$ (% / s, 95% CI) |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `oracle_full_all_holds` | Yes | 32.05% | **38.67% / 55.0 s** | 3.1% | 98.2% | +6.63 pp | +13.05 pp (+20.5 s) [+6.1, +20.2] |
+| `oracle_placement_only` | Yes | 32.05% | **37.07% / 54.0 s** | 3.1% | 96.4% | +5.02 pp | +11.45 pp (+19.5 s) [+2.2, +19.9] |
+| **`tg_vlm_raw_hard_placeonly`** *(0 training!)* | Grasp+stage | 32.05% | **34.25% / 50.0 s** | **3.1%** | 92.9% | **+2.20 pp** | **+8.63 pp (+15.4 s)** [−0.3, +16.9] |
+| `tg_vlm_raw_soft_c070` *(0 training!)* | Grasp+stage | 32.05% | **33.90% / 49.3 s** | **3.1%** | 92.9% | **+1.86 pp** | **+8.29 pp (+14.8 s)** [−0.5, +16.3] |
+| **`hyb_dpre_platt_soft_verholds` (`proprio`)** | **NONE (black-box!)** | **24.70%** | **30.18% / 42.2 s** | **4.7%** | **94.6%** | **+5.49 pp** | **+4.56 pp (+7.7 s)** [−2.3, +12.3] (4/6) |
+| **`hyb_dpre_platt_soft_verholds` (`xr1_dit`)** | **NONE (0 dest labels)** | **24.68%** | **28.85% / 40.6 s** | **4.7%** | **94.6%** | **+4.17 pp** | **+3.23 pp (+6.1 s)** [−3.6, +10.7] (3/6) |
+
+**Exact root-cause diagnosis from Section 9.5:**
+1. **Zero-shot `Qwen3-VL-4B` ALREADY sees 8 of 9 placements cleanly right after release (`0.868` macro post-release AUROC; even `basket_on_dining_counter` is `0.864` post-release!)**, and simply dropping fridge-view background holds jumps `true_grasp + zero-shot Qwen3-VL` by **+6.4 s to 50.0 s** (**92.6% of the 54.0 s placement-only oracle ceiling at 3.1% FPR, +2.20 pp over oracle `stage_clock`, zero training**).
+2. **Pre-grasp debiasing + LOTO Platt + verified-target holds lifts the completely black-box monitor (`proprio_actions` + `Qwen3-VL`, zero privileged inputs, zero DiT latents, zero target-task VLM labels) to `30.18% (42.2 s)` at `4.7% FPR` (+5.49 pp over inferred stage clock, +7.7 s over $G$).**
+3. **Why the remaining ~12 s gap exists:** `Qwen3-VL-4B` has a severe **−5 to −12 No-bias** (`straw_in_glass` pos = −1.16, `knife_on_cutting_board` pos = −1.01, `basket_on_dining_counter` pos = −7.58) plus 1 genuinely blind predicate (`ice_in_glass`, `0.36` post-release AUROC). When any single task stays below the decision threshold on successes (`basket_on_dining_counter` / `ice_in_glass`), its 10 calibration successes (~20% of the pooled calibration set > 5%) blow up the pooled conformal cutoff for `miss_term` across *all* 6 tasks and drag `inferred_stage_clock` from `32.05%` down to `24.70%`.
+4. **Clear next test:** **3-fold cross-task LoRA fine-tuning of `Qwen3-VL-4B-Instruct`** (train on 4 tasks, evaluate **strictly zero-shot on the 2 held-out unseen tasks** across all 3 folds = all 120 rollouts) tests directly whether lightweight RoboCasa visual grounding eliminates the −8 No-bias, improves tiny-object perception (`ice_in_glass` / `basket_on_dining_counter`), and transfers zero-shot to unseen tasks so the **100% zero-shot unseen-task monitor** closes the gap to ~50 s.
+
 ---
 
 ## 10. Artifact index and next experiments
@@ -478,10 +515,11 @@ Per-task `full_physical − stage_clock` gains (all 6 tasks positive, 0 rollouts
 | 120-rollout split-conformal analysis | `outputs/long_horizon_failure_detection/xr1_pilot6_full_120_analysis/summary.json` | `ff8c5660...`; **+6.63 pp (+8.3 s) over stage clock @ 0.00 pp excess FPR** |
 | Combined 132-rollout sensitivity | `outputs/long_horizon_failure_detection/xr1_pilot6_combined_132_analysis/summary.json` | `9c3b2154...`; +5.55 pp (+8.1 s) over stage clock @ 0.00 pp excess FPR |
 | Perception floor check (120 rollouts) | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_perception_floor_20261128_191229` | Commit `bad8bbd8`; LOTO grasp 0.966; `xr1_dit` cam_full +2.7 s vs G / +3.91 pp vs inf_stage |
-| **Zero-shot Qwen3-VL destination check** | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_vlm_dest_full_20261128_193617` | Commit `f865dd48`; 14,082 queries (323 s); universal AUROC 0.791; `proprio+VLM` **40.0 s (+5.5 s vs G, +7.35 pp vs inf\_stage) @ 3.1% FPR** |
+| Zero-shot Qwen3-VL destination check | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_vlm_dest_full_20261128_193617` | Commit `f865dd48`; 14,082 queries (323 s); universal AUROC 0.791 |
+| **VLM scoring upgrades & post-release audit** | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_vlm_scoring_upgrades_20261128_195948` | Commit `970e3217`; post-rel AUROC 0.812 (0.868 on 8/9); `tg_placeonly` **50.0 s @ 3.1% FPR**; black-box `proprio+VLM` **42.2 s (+7.7 s vs G) @ 4.7% FPR** |
 
 ### Recommended next steps (in order)
 
-1. **Zero-VLM-inference scoring upgrade on the saved `vlm_destination_scores.npz` (< 30 s):** Test (a) per-episode causal pre-release baseline subtraction (`delta_logit = logit_diff(t) - baseline(0..g_start)`), (b) placement-only vs. hold-condition gating (preventing fridge-view false losses on `pancake_on_plate`/`plate_on_table`), and (c) continuous soft missed-effect evidence (`cumsum(1 - p_placed)` after release) instead of hard 0.5 thresholding before split-conformal calibration — measuring exact lead gain for both `hybrid_proprio_vlm` and `zero_shot_loto_universal`.
-2. **Targeted VLM visual upgrade (if needed after Step 1):** Compare two-frame before/after prompting (`[t_reset, t_now]` or `[t_grasp, t_now]`) for `basket_on_dining_counter` + `ice_in_glass` (and/or lightweight 4-train / 2-held-out-task `Qwen3-VL-4B` LoRA fine-tuning) to verify cross-task destination transfer above 0.85+ AUROC / 0.80+ F1 on all tasks.
-3. **Test continuation-aware features on the 4–5 matched Test-2 pairs** and lock the 18-task Group-A/B train vs. held-out composition split (Test 1).
+1. **3-fold cross-task LoRA adaptation of `Qwen3-VL-4B-Instruct` on the 120 recorded videos (~10–15 min on 1 GPU):** Train rank-16 LoRA (binary Yes/No cross-entropy over balanced pre/post-release frames) on **4 tasks** and evaluate **strictly zero-shot on the 2 held-out unseen tasks** across all 3 disjoint folds (covering all 6 tasks / 120 rollouts). Plug the zero-shot unseen-task VLM probabilities directly into our LOTO universal grasp + `verified_targets_only` monitor to test whether calibrated RoboCasa visual grounding closes the gap from `42.2 s` toward `~50 s` with **zero privileged inputs and zero target-task labels**.
+2. **If `ice_in_glass` / `basket_on_dining_counter` benefit from temporal reference:** Add optional 2-frame before/after (`[t_reset, t_now]`) input to the LoRA-adapted VLM.
+3. **Test continuation-aware features on matched Test-2 pairs** and expand collection to the frozen 18-task Group-A/B train vs. held-out composition split (Test 1).
