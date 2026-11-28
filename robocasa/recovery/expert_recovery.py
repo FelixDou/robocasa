@@ -108,6 +108,8 @@ DOOR_PULL_STEP_SLIDE = 0.01
 DOOR_SLIP = 0.25              # rad (hinge) the door may trail the pull before it counts as slipped ...
 DOOR_SLIP_SLIDE = 0.05        # ... m for a slide
 DOOR_GRIP_TRACE = 10          # pull steps of each cycle whose grip is logged (and the last before a slip)
+DOOR_TORSO_STEPS = 200        # most steps the torso takes to bring the base to the source's height below the handle
+DOOR_TORSO_STALL = 10         # ... it stops early after this many steps without 2 mm of progress
 DOOR_REACH_MIN = 0.25         # m: the pull stops when the hand would come this close to the robot base ...
 DOOR_REACH_MAX = 0.85         # ... or this far from it (horizontal distance)
 DOOR_RETREAT = 0.10           # m: after a pull, the open hand backs off the handle along the door's normal
@@ -1698,7 +1700,8 @@ class ExpertRun:
 
     def source_stance(self, source, step):
         """(x, y, yaw) of the source base in its handle frame when the source closes on the handle,
-        and the source door's hinge side; None without a measured source door."""
+        the source door's hinge side, and the source base's height above its handle then (m);
+        None without a measured source door."""
         src = source.door
         if not src or "frame" not in src:
             return None
@@ -1711,8 +1714,42 @@ class ExpertRun:
             q = float(track[k])
         if "axis" not in src:
             q = 0.0
-        rel = inverse(yaw_frame(door_handle_frame(src, q))) @ yaw_frame(source.base[source.at(close)])
-        return (float(rel[0, 3]), float(rel[1, 3]), yaw_of(rel[:3, :3])), int(src.get("side", 0))
+        handle = door_handle_frame(src, q)
+        base = source.base[source.at(close)]
+        rel = inverse(yaw_frame(handle)) @ yaw_frame(base)
+        return ((float(rel[0, 3]), float(rel[1, 3]), yaw_of(rel[:3, :3])), int(src.get("side", 0)),
+                float(base[2, 3] - handle[2, 3]))
+
+    def raise_torso(self, z_goal):
+        """Move the torso until the robot base stands at height ``z_goal``, the hand held still
+        relative to the base. A log; empty when the robot has no torso the probe could move."""
+        obs = self.world.observe()
+        dz = float(z_goal) - float(obs["base"][2, 3])
+        log = {"dz": round(dz, 4)}
+        mode = self.gains.torso_mode
+        if self.gains.torso_command(dz, mode) == 0.0:
+            return {**log, "steps": 0}
+        self.cap += DOOR_TORSO_STEPS
+        best, stall, n = abs(dz), 0, 0
+        for n in range(1, DOOR_TORSO_STEPS + 1):
+            cmd = self.gains.torso_command(dz, mode)
+            if cmd == 0.0:
+                break
+            if mode == BASE_MODE:
+                self.base_act(obs, obs["mobile"], GRIPPER_OPEN, torso=cmd)
+            else:
+                action = arm_command(obs["base"], obs["eef"], obs["eef"], self.gains, GRIPPER_OPEN)
+                action[10] = cmd
+                self.act(action)
+            obs = self.world.observe()
+            dz = float(z_goal) - float(obs["base"][2, 3])
+            if abs(dz) < best - 0.002:
+                best, stall = abs(dz), 0
+            else:
+                stall += 1
+                if stall >= DOOR_TORSO_STALL:
+                    break
+        return {**log, "left": round(dz, 4), "steps": n}
 
     def door_q(self, door):
         joint_q = getattr(self.world, "joint_q", None)
@@ -1768,7 +1805,7 @@ class ExpertRun:
             axes = getattr(self.world, "gripper_axes", None)
             approach, closing, pads = axes() if axes is not None else ((0, 0, 1), (0, 1, 0), (0, 0, 0))
             if self.align_base and stance is not None:
-                rel, src_side = stance
+                rel, src_side = stance[:2]
                 mirror = bool(src_side and door.get("side") and src_side != door["side"])
                 planned = handle_grasp(door, q0, approach, closing, pads, obs["eef"][:3, :3], obs["eef"][2, 3])
                 where, cyc["stance_plan"] = door_pull_stance(door, q0, door_goal_q(door, DOOR_OPEN_GOAL),
@@ -1778,6 +1815,9 @@ class ExpertRun:
                 cyc["align"] = self.align(goal)
                 obs = self.world.observe()
             q0 = self.door_q(door)
+            if stance is not None and len(stance) > 2:   # the base as high below this handle as the source's
+                cyc["torso"] = self.raise_torso(door_handle_frame(door, q0)[2, 3] + stance[2])
+                obs = self.world.observe()
             if self.around_edge(door, q0, -1, (1, 0)):   # the hand is behind this open door
                 cyc["around_edge"] = "in"
                 obs = self.world.observe()
@@ -1846,7 +1886,7 @@ class ExpertRun:
 
     def grip_sample(self, door, pads, q_wanted):
         """[wanted q, door q, pad offset from the bar (``pad_bar_offset``), finger opening, what each
-        finger touches] of the hand on the door now."""
+        finger touches, the rest of the robot's contacts] of the hand on the door now."""
         obs = self.world.observe()
         q = self.door_q(door)
         out = [round(float(q_wanted), 4), round(q, 4), pad_bar_offset(door, q, obs["eef"], pads)]
@@ -1857,6 +1897,9 @@ class ExpertRun:
                 out += [got.get("width"), got.get("left"), got.get("right")]
             except Exception as exc:   # keep the sample, say why the grip was not read
                 out.append(f"{type(exc).__name__}: {exc}"[:120])
+        contacts = getattr(self.world, "robot_contacts", None)
+        if contacts is not None:
+            out.append({k: v for k, v in contacts().items() if "finger" not in k.split(">")[0]})
         return out
 
     def around_edge(self, door, q, side, order):

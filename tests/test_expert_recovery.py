@@ -1730,6 +1730,26 @@ def door_open_demo(door, base_T, *, episode=0):
                      gripper=np.array([0.0] * 10 + [1.0] * 20), door={**door, "q_track": qs, "q_track_start": 0})
 
 
+class TorsoDoorWorld(DoorPullWorld):
+    """DoorPullWorld whose torso lifts the base (and the hand with it) by ``lift`` per unit action
+    in arm mode, between 0 and ``top`` above the usual 0.3 m."""
+
+    def __init__(self, doors, *, lift=0.01, top=0.5, **kw):
+        self.z, self.lift, self.top = 0.0, lift, top
+        super().__init__(doors, **kw)
+
+    def base_T(self):
+        return world_pose(self.mobile[0], self.mobile[1], 0.3 + self.z, self.mobile[2])
+
+    def step(self, a):
+        a = np.clip(np.asarray(a, dtype=float), -1, 1)
+        if a[11] < 0.5 and a[10] != 0.0:
+            z = float(np.clip(self.z + self.lift * a[10], 0.0, self.top))
+            self.eef[2, 3] += z - self.z
+            self.z = z
+        return super().step(a)
+
+
 # The source stands 0.65 m in front of its left door's handle and 0.2 m away from the hinge, facing it.
 SOURCE_DOOR = front_door((0.0, 0.0), 0.4)
 SOURCE_BASE = world_pose(0.6, 0.65, 0.3, yaw=-math.pi / 2)
@@ -1821,6 +1841,25 @@ class ScriptedDoorTest(unittest.TestCase):
         self.assertLessEqual(len(cyc["grip"]), er.DOOR_GRIP_TRACE + 1)
         q_wanted, q, offset = cyc["grip"][0]
         self.assertLess(max(abs(v) for v in offset[:2]), 0.03)   # closed on the bar
+
+    def test_the_torso_brings_the_base_as_far_below_a_higher_handle_as_the_source_stood(self):
+        gains = er.Gains(TRUE_GAINS.arm_pos, TRUE_GAINS.arm_rot, TRUE_GAINS.base, torso=0.01, torso_mode=er.ARM_MODE)
+        demo = door_open_demo(SOURCE_DOOR, SOURCE_BASE)          # base 0.5 m below the handle
+        high = front_door((0.0, 0.0), 0.4, height=1.1)
+        world = TorsoDoorWorld([high], gains=gains, mobile=(0.5, 0.9, -math.pi / 2), eef_rel=(0.45, 0.0, 0.5))
+        run = er.ExpertRun(world, gains, {demo.key: demo}, "fridge_open", cap=10 ** 6, budget=10 ** 7,
+                           scripted_door=True)
+        out = run.run([{"phase": "track", "source": list(demo.key), "step": 0, "kind": er.EXECUTE,
+                        "reference": ["door", "fridge"]}])
+        cyc = out["phases"][0]["doors"][0]["cycles"][0]
+        self.assertAlmostEqual(cyc["torso"]["dz"], 0.3, places=3)
+        self.assertLess(abs(cyc["torso"]["left"]), 0.011)
+        self.assertAlmostEqual(world.base_T()[2, 3], 0.6, delta=0.011)
+        self.assertTrue(out["stage_completed"])
+
+    def test_without_a_torso_the_base_height_is_left_alone(self):
+        world, out = self.run_doors([front_door((0.0, 0.0), 0.4, height=1.1)])
+        self.assertEqual(out["phases"][0]["doors"][0]["cycles"][0]["torso"]["steps"], 0)
 
     def test_the_hand_goes_around_the_first_open_door_to_the_second(self):
         left = front_door((0.0, 0.0), 0.4, joint="left")
