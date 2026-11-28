@@ -92,6 +92,7 @@ GRASP_LIFT = 0.12             # m: lift after closing
 GRASP_CLOSE_STEPS = 15
 GRASP_STEPS = 150             # steps the scripted grasp adds to the expert cap
 GRASP_CEILING = 0.25          # m: free height the hand needs above the pads to come down from above
+GRASP_HEADROOM_PROBE = 0.60   # m: how far up the ceiling rays look (beyond GRASP_CEILING only logged)
 GRASP_FINGER = 0.01           # m: finger thickness outside the object's narrow side, for the ceiling rays
 GRASP_HAND_HALF = 0.04        # m: the hand's half breadth along the object's long side, for the ceiling rays
 DOOR_SAMPLE_EVERY = 25        # frames between logged (wanted, actual) door joint values on a door step
@@ -1952,12 +1953,15 @@ class ExpertRun:
         ceiling = getattr(self.world, "ceiling", None)
         if plan is not None and "grasp" in plan and ceiling is not None:
             try:
-                hit = ceiling(name, ceiling_points(plan), GRASP_CEILING)
+                hit = ceiling(name, ceiling_points(plan), GRASP_HEADROOM_PROBE)
             except Exception as exc:   # keep the grasp, say why the check did not run
                 plan["ceiling_error"] = f"{type(exc).__name__}: {exc}"[:200]
                 hit = None
-            if hit is not None:   # a shelf, a counter over a drawer: the hand cannot come down from above
+            if hit is not None and float(hit[1]) < GRASP_CEILING:   # a shelf, a counter over a drawer:
+                # the hand cannot come down from above
                 return {"blocked": hit[0], "clearance": round(float(hit[1]), 4), "width": plan["width"]}
+            # What is over the object farther up (a fridge shelf, a cabinet top), or None: free to the probe.
+            plan["headroom"] = None if hit is None else {"body": hit[0], "clearance": round(float(hit[1]), 4)}
         return plan
 
     def scripted_pick(self, plan, step, ref_log, align_log):

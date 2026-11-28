@@ -1989,6 +1989,33 @@ choice open, the code fixes it as follows:
   sample after a pull step also records the hand's position and rotation
   error from that step's target (`track`), to tell a hand that cannot
   follow from a bar that leaves the fingers.
+
+  *Picks inside fixtures (`transfer_slowpull1`, 29 November 2026).* The two
+  stages after the doors fail on the pick, for the same reason: the object
+  sits inside an enclosure with little headroom.
+  - *strawberry_on_pancake* (0/15): the strawberry is on a fridge shelf,
+    pads at 1.0–1.4 m. 13 of 15 resets used the scripted top-down grasp, and
+    in all 13 the hand stopped 0.17–0.84 m from its target and held nothing.
+    In the recording of seed 710007, the hand starts outside the fridge at
+    door-handle height and heads straight for the pose 15 cm above the
+    strawberry; that line rises through the glass shelf the strawberry sits
+    on, and the hand stays under it. The other 2 had a shelf within 0.25 m
+    above (`grasp_skipped: blocked`) and replayed the source's pick (held
+    1 of 2, then ran out of steps). Without the strawberry, the place step
+    tracks the source's object path from its first frame until the step
+    cap.
+  - *bread_in_basket* (0/6): every pick replayed the source's grasp, because
+    the loaf is too wide for a top-down grasp (7.8–8.6 cm, `too_wide`) or the
+    cabinet's shelf is 0.20 m above it (`blocked`). The replayed grasp held
+    once in 6. In the recording of seed 710008, the hand hangs top-down over
+    the loaf on the wall cabinet's floor and does not come down.
+  - Both need a grasp that enters the fixture horizontally through its open
+    front at the object's height, rather than from above. Not yet written.
+
+  *Diagnostic (29 November 2026, before the full transfer run).* The ceiling
+  rays of a scripted grasp look up to 0.60 m (the grasp is still skipped only
+  under 0.25 m). A scripted pick logs `headroom`: the body over the object
+  and its clearance, or null if nothing is within 0.60 m.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

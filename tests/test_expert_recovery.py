@@ -2044,12 +2044,19 @@ class ScriptedGraspTest(unittest.TestCase):
             return ("shelf_main", 0.12)
 
         _, out = self.scene({"obj": ([0.015, 0.0, 0.0], [0.02, 0.03, 0.03])}, ceiling=ceiling)
-        self.assertEqual(asked, [("obj", 5, er.GRASP_CEILING)])
+        self.assertEqual(asked, [("obj", 5, er.GRASP_HEADROOM_PROBE)])
         self.assertTrue(out["stage_completed"], out)
         self.assertEqual(out["phases"][0]["grasp"], "replay")
         self.assertEqual(out["phases"][0]["grasp_skipped"], {"blocked": "shelf_main", "clearance": 0.12, "width": 0.04})
         _, clear = self.scene({"obj": ([0.015, 0.0, 0.0], [0.02, 0.03, 0.03])}, ceiling=lambda *a: None)
         self.assertEqual(clear["phases"][0]["grasp"], "scripted")
+        self.assertIsNone(clear["phases"][0]["headroom"])
+
+    def test_a_shelf_beyond_the_ceiling_keeps_the_scripted_pick_and_is_logged(self):
+        _, out = self.scene({"obj": ([0.015, 0.0, 0.0], [0.02, 0.03, 0.03])},
+                            ceiling=lambda *a: ("fridge_shelf", 0.31))
+        self.assertEqual(out["phases"][0]["grasp"], "scripted")
+        self.assertEqual(out["phases"][0]["headroom"], {"body": "fridge_shelf", "clearance": 0.31})
 
     def test_an_object_too_wide_for_the_gripper_keeps_the_replayed_pick(self):
         _, out = self.scene({"obj": ([0.0, 0.0, 0.0], [0.06, 0.06, 0.03])})
