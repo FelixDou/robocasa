@@ -21,6 +21,7 @@ SUBTASK_DEFINITION_SOURCE = (
 )
 
 RECOVERY_PREDICATES = {
+    # Original 6 Group-A pilot tasks (schema frozen to match pilot6_full_120 cohort)
     "ArrangeBreadBasket": (
         "bread_in_basket", "bread_grasped", "basket_grasped", "basket_on_dining_counter",
     ),
@@ -42,6 +43,60 @@ RECOVERY_PREDICATES = {
     "SetUpCuttingStation": (
         "drawer_open", "knife_grasped", "knife_on_cutting_board",
         "meat_grasped", "meat_on_cutting_board", "gripper_released",
+    ),
+    # 12 additional shared-primitive Group-A/B benchmark tasks (18-task Test-1/Test-2 suite)
+    "LoadDishwasher": (
+        "dishwasher_rack_accessible", "cup_grasped", "cup_on_rack",
+        "bowl_grasped", "bowl_on_rack", "dishes_on_rack", "dishwasher_closed",
+    ),
+    "BreadSelection": (
+        "croissant_grasped", "croissant_on_cutting_board",
+        "jam_grasped", "jam_on_cutting_board", "gripper_released",
+    ),
+    "PackIdenticalLunches": (
+        "fridge_open", "vegetable0_grasped", "vegetable1_grasped",
+        "meat0_grasped", "meat1_grasped",
+        "vegetable0_in_tupperware", "vegetable1_in_tupperware",
+        "meat0_in_tupperware", "meat1_in_tupperware",
+        "tupperware0_has_one_vegetable", "tupperware0_has_one_meat",
+        "tupperware1_has_one_vegetable", "tupperware1_has_one_meat",
+        "objects_not_duplicated", "gripper_released",
+    ),
+    "StackBowlsCabinet": (
+        "cabinet_open", "smaller_bowl_grasped", "larger_bowl_grasped",
+        "larger_bowl_in_cabinet", "smaller_bowl_in_cabinet",
+        "bowls_stacked", "gripper_released",
+    ),
+    "WashFruitColander": (
+        "colander_grasped", "fruit0_grasped", "fruit1_grasped", "fruit2_grasped",
+        "fruit0_in_colander", "fruit1_in_colander", "fruit2_in_colander",
+        "colander_in_sink", "fruit_in_colander", "colander_under_water",
+    ),
+    "GetToastedBread": (
+        "toaster_started", "bread_grasped", "bread_on_plate", "gripper_released",
+    ),
+    "KettleBoiling": (
+        "kettle_grasped", "kettle_on_burner", "burner_on", "gripper_released",
+    ),
+    "PreSoakPan": (
+        "pan_grasped", "pan_in_sink", "sponge_grasped", "sponge_in_sink",
+        "water_on", "gripper_released",
+    ),
+    "SearingMeat": (
+        "cabinet_open", "pan_grasped", "pan_on_target_burner",
+        "meat_grasped", "meat_in_pan", "burner_on", "gripper_released",
+    ),
+    "ArrangeTea": (
+        "kettle_grasped", "kettle_on_tray", "mug_grasped", "mug_on_tray",
+        "cabinet_closed", "gripper_released",
+    ),
+    "SteamInMicrowave": (
+        "vegetable_grasped", "vegetable_in_bowl", "bowl_grasped",
+        "bowl_in_microwave", "microwave_closed", "microwave_started",
+    ),
+    "WaffleReheat": (
+        "microwave_open", "waffle_grasped", "waffle_in_bowl", "bowl_grasped",
+        "bowl_in_microwave", "microwave_closed", "microwave_started",
     ),
 }
 

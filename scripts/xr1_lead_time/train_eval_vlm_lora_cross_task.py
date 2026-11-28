@@ -73,15 +73,16 @@ def format_binary_question(task: str, predicate: str, task_instruction: str) -> 
 
 def validate_cross_task_folds(
     folds: tuple[tuple[str, ...], ...] = CROSS_TASK_FOLDS,
+    expected_tasks: tuple[str, ...] | set[str] | None = None,
 ) -> dict[str, int]:
-    """Verify folds are pairwise disjoint and cover every task in ``pilot6.TASK_SPECS``."""
+    """Verify folds are pairwise disjoint and cover ``expected_tasks`` (default: PILOT6_TASKS)."""
     task_to_fold: dict[str, int] = {}
     for f_idx, held in enumerate(folds):
         for task in held:
             if task in task_to_fold:
                 raise ValueError(f"Duplicate task across folds: {task}")
             task_to_fold[task] = f_idx
-    expected = set(pilot6.TASK_SPECS.keys())
+    expected = set(pilot6.PILOT6_TASKS if expected_tasks is None else expected_tasks)
     if set(task_to_fold.keys()) != expected:
         raise ValueError(f"Folds {set(task_to_fold)} do not cover expected tasks {expected}")
     return task_to_fold
@@ -477,9 +478,10 @@ def run_cross_task_lora(
     # Pre-plan balanced training samples for all 3 folds and pre-decode ONLY needed training frames ONCE.
     fold_train_samples: dict[int, list[dict]] = {}
     needed_train_frames: dict[str, set[int]] = defaultdict(set)
+    all_fold_tasks = {t for fold in CROSS_TASK_FOLDS for t in fold}
     for f_idx, held_tasks in enumerate(CROSS_TASK_FOLDS):
         held_set = set(held_tasks)
-        train_set = set(pilot6.TASK_SPECS.keys()) - held_set
+        train_set = all_fold_tasks - held_set
         samps = select_balanced_training_samples(records, train_set, seed=seed + f_idx)
         fold_train_samples[f_idx] = samps
         for s in samps:

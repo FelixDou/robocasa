@@ -41,6 +41,50 @@ ARMS = (
     "full_physical",
 )
 
+# Pre-registered 18-task shared-primitive Group-A/B benchmark split:
+#   - 10 Train/Dev tasks (6 pilot tasks + 4 appliance/fixture tasks covering dishwasher,
+#     toaster, sink, and microwave primitives)
+#   - 8 Held-Out Unseen Composition Test-1 tasks (4 Group A + 4 Group B)
+PILOT6_TASKS = (
+    "ArrangeBreadBasket",
+    "CuttingToolSelection",
+    "DeliverStraw",
+    "GarnishPancake",
+    "MakeIceLemonade",
+    "SetUpCuttingStation",
+)
+BENCHMARK18_TRAIN_TASKS = PILOT6_TASKS + (
+    "LoadDishwasher",
+    "GetToastedBread",
+    "PreSoakPan",
+    "SteamInMicrowave",
+)
+BENCHMARK18_HELDOUT_TASKS = (
+    "BreadSelection",
+    "PackIdenticalLunches",
+    "StackBowlsCabinet",
+    "WashFruitColander",
+    "ArrangeTea",
+    "KettleBoiling",
+    "SearingMeat",
+    "WaffleReheat",
+)
+BENCHMARK18_NEW12_TASKS = (
+    "LoadDishwasher",
+    "GetToastedBread",
+    "PreSoakPan",
+    "SteamInMicrowave",
+    "BreadSelection",
+    "PackIdenticalLunches",
+    "StackBowlsCabinet",
+    "WashFruitColander",
+    "ArrangeTea",
+    "KettleBoiling",
+    "SearingMeat",
+    "WaffleReheat",
+)
+BENCHMARK18_ALL_TASKS = BENCHMARK18_TRAIN_TASKS + BENCHMARK18_HELDOUT_TASKS
+
 # Declarative per-task physical event specs over RECOVERY_PREDICATES.
 # Each placement tuple is (operation_name, grasp_predicates, target_predicate).
 TASK_SPECS = {
@@ -87,6 +131,108 @@ TASK_SPECS = {
             ("place_meat", ("meat_grasped",), "meat_on_cutting_board"),
         ),
         "hold_conditions": ("knife_on_cutting_board", "meat_on_cutting_board"),
+        "wrong_grasps": (),
+    },
+    # --- 12 additional shared-primitive Group-A/B tasks ---
+    "LoadDishwasher": {
+        "placements": (
+            ("place_cup", ("cup_grasped",), "cup_on_rack"),
+            ("place_bowl", ("bowl_grasped",), "bowl_on_rack"),
+        ),
+        "hold_conditions": ("cup_on_rack", "bowl_on_rack"),
+        "wrong_grasps": (),
+    },
+    "BreadSelection": {
+        "placements": (
+            ("place_croissant", ("croissant_grasped",), "croissant_on_cutting_board"),
+            ("place_jam", ("jam_grasped",), "jam_on_cutting_board"),
+        ),
+        "hold_conditions": ("croissant_on_cutting_board", "jam_on_cutting_board"),
+        "wrong_grasps": (),
+    },
+    "PackIdenticalLunches": {
+        "placements": (
+            ("pack_veg0", ("vegetable0_grasped",), "vegetable0_in_tupperware"),
+            ("pack_veg1", ("vegetable1_grasped",), "vegetable1_in_tupperware"),
+            ("pack_meat0", ("meat0_grasped",), "meat0_in_tupperware"),
+            ("pack_meat1", ("meat1_grasped",), "meat1_in_tupperware"),
+        ),
+        "hold_conditions": (
+            "vegetable0_in_tupperware", "vegetable1_in_tupperware",
+            "meat0_in_tupperware", "meat1_in_tupperware",
+        ),
+        "wrong_grasps": (),
+    },
+    "StackBowlsCabinet": {
+        "placements": (
+            ("place_larger_bowl", ("larger_bowl_grasped",), "larger_bowl_in_cabinet"),
+            ("place_smaller_bowl", ("smaller_bowl_grasped",), "smaller_bowl_in_cabinet"),
+        ),
+        "hold_conditions": ("larger_bowl_in_cabinet", "smaller_bowl_in_cabinet", "bowls_stacked"),
+        "wrong_grasps": (),
+    },
+    "WashFruitColander": {
+        "placements": (
+            ("place_colander", ("colander_grasped",), "colander_in_sink"),
+            ("place_fruit0", ("fruit0_grasped",), "fruit0_in_colander"),
+            ("place_fruit1", ("fruit1_grasped",), "fruit1_in_colander"),
+            ("place_fruit2", ("fruit2_grasped",), "fruit2_in_colander"),
+        ),
+        "hold_conditions": ("colander_in_sink", "fruit_in_colander"),
+        "wrong_grasps": (),
+    },
+    "GetToastedBread": {
+        "placements": (
+            ("place_bread", ("bread_grasped",), "bread_on_plate"),
+        ),
+        "hold_conditions": ("bread_on_plate",),
+        "wrong_grasps": (),
+    },
+    "KettleBoiling": {
+        "placements": (
+            ("place_kettle", ("kettle_grasped",), "kettle_on_burner"),
+        ),
+        "hold_conditions": ("kettle_on_burner",),
+        "wrong_grasps": (),
+    },
+    "PreSoakPan": {
+        "placements": (
+            ("place_pan", ("pan_grasped",), "pan_in_sink"),
+            ("place_sponge", ("sponge_grasped",), "sponge_in_sink"),
+        ),
+        "hold_conditions": ("pan_in_sink", "sponge_in_sink"),
+        "wrong_grasps": (),
+    },
+    "SearingMeat": {
+        "placements": (
+            ("place_pan", ("pan_grasped",), "pan_on_target_burner"),
+            ("place_meat", ("meat_grasped",), "meat_in_pan"),
+        ),
+        "hold_conditions": ("pan_on_target_burner", "meat_in_pan"),
+        "wrong_grasps": (),
+    },
+    "ArrangeTea": {
+        "placements": (
+            ("place_kettle", ("kettle_grasped",), "kettle_on_tray"),
+            ("place_mug", ("mug_grasped",), "mug_on_tray"),
+        ),
+        "hold_conditions": ("kettle_on_tray", "mug_on_tray"),
+        "wrong_grasps": (),
+    },
+    "SteamInMicrowave": {
+        "placements": (
+            ("place_vegetable", ("vegetable_grasped",), "vegetable_in_bowl"),
+            ("place_bowl", ("bowl_grasped",), "bowl_in_microwave"),
+        ),
+        "hold_conditions": ("vegetable_in_bowl", "bowl_in_microwave"),
+        "wrong_grasps": (),
+    },
+    "WaffleReheat": {
+        "placements": (
+            ("place_waffle", ("waffle_grasped",), "waffle_in_bowl"),
+            ("place_bowl", ("bowl_grasped",), "bowl_in_microwave"),
+        ),
+        "hold_conditions": ("waffle_in_bowl", "bowl_in_microwave"),
         "wrong_grasps": (),
     },
 }

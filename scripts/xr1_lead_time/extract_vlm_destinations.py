@@ -133,6 +133,224 @@ PREDICATE_PROMPTS: dict[str, dict[str, dict[str, Any]]] = {
             "invert": False,
         },
     },
+    # --- 12 additional shared-primitive Group-A/B tasks ---
+    "LoadDishwasher": {
+        "cup_on_rack": {
+            "question": (
+                "Is the cup currently resting inside the dishwasher rack "
+                "(not on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+        "bowl_on_rack": {
+            "question": (
+                "Is the bowl currently resting inside the dishwasher rack "
+                "(not on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+    },
+    "BreadSelection": {
+        "croissant_on_cutting_board": {
+            "question": (
+                "Is the croissant currently resting on top of the cutting board "
+                "(not elsewhere on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+        "jam_on_cutting_board": {
+            "question": (
+                "Is the jar of jam currently resting on top of the cutting board "
+                "(not elsewhere on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+    },
+    "PackIdenticalLunches": {
+        "vegetable0_in_tupperware": {
+            "question": (
+                "Task: {task_instruction} Is at least one vegetable piece currently resting "
+                "inside one of the tupperware containers?"
+            ),
+            "invert": False,
+        },
+        "vegetable1_in_tupperware": {
+            "question": (
+                "Task: {task_instruction} Are both tupperware containers each holding a "
+                "vegetable piece (two vegetables placed into the tupperware containers)?"
+            ),
+            "invert": False,
+        },
+        "meat0_in_tupperware": {
+            "question": (
+                "Task: {task_instruction} Is at least one piece of meat currently resting "
+                "inside one of the tupperware containers?"
+            ),
+            "invert": False,
+        },
+        "meat1_in_tupperware": {
+            "question": (
+                "Task: {task_instruction} Are both tupperware containers each holding a "
+                "piece of meat (two meat pieces placed into the tupperware containers)?"
+            ),
+            "invert": False,
+        },
+    },
+    "StackBowlsCabinet": {
+        "larger_bowl_in_cabinet": {
+            "question": (
+                "Is the larger bowl currently resting inside the cabinet "
+                "(not on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+        "smaller_bowl_in_cabinet": {
+            "question": (
+                "Is the smaller bowl currently resting inside the cabinet "
+                "(not on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+        "bowls_stacked": {
+            "question": "Are the two bowls currently stacked one inside the other?",
+            "invert": False,
+        },
+    },
+    "WashFruitColander": {
+        "colander_in_sink": {
+            "question": (
+                "Is the colander currently resting inside the sink basin "
+                "(not on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+        "fruit0_in_colander": {
+            "question": (
+                "Task: {task_instruction} Is at least one piece of fruit currently resting "
+                "inside the colander?"
+            ),
+            "invert": False,
+        },
+        "fruit1_in_colander": {
+            "question": (
+                "Task: {task_instruction} Are at least two pieces of fruit (or all requested fruit) "
+                "currently resting inside the colander?"
+            ),
+            "invert": False,
+        },
+        "fruit2_in_colander": {
+            "question": (
+                "Task: {task_instruction} Are all requested fruit pieces currently resting "
+                "inside the colander?"
+            ),
+            "invert": False,
+        },
+        "fruit_in_colander": {
+            "question": (
+                "Task: {task_instruction} Are all requested fruit pieces currently resting "
+                "inside the colander?"
+            ),
+            "invert": False,
+        },
+    },
+    "GetToastedBread": {
+        "bread_on_plate": {
+            "question": (
+                "Is the slice of toasted bread currently resting on top of the plate "
+                "(not inside the toaster and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+    },
+    "KettleBoiling": {
+        "kettle_on_burner": {
+            "question": (
+                "Is the kettle currently resting on top of a stove burner "
+                "(not on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+    },
+    "PreSoakPan": {
+        "pan_in_sink": {
+            "question": (
+                "Is the pan currently resting inside the sink basin "
+                "(not on the counter or stove and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+        "sponge_in_sink": {
+            "question": (
+                "Is the sponge currently resting inside the sink basin "
+                "(not on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+    },
+    "SearingMeat": {
+        "pan_on_target_burner": {
+            "question": (
+                "Task: {task_instruction} Is the pan currently resting on top of the "
+                "requested stove burner (not in the cabinet and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+        "meat_in_pan": {
+            "question": (
+                "Is the piece of meat currently resting inside the pan "
+                "(not on the plate or counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+    },
+    "ArrangeTea": {
+        "kettle_on_tray": {
+            "question": (
+                "Is the kettle currently resting on top of the tray "
+                "(not inside the cabinet and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+        "mug_on_tray": {
+            "question": (
+                "Is the mug currently resting on top of the tray "
+                "(not inside the cabinet and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+    },
+    "SteamInMicrowave": {
+        "vegetable_in_bowl": {
+            "question": (
+                "Task: {task_instruction} Is the vegetable currently resting inside the bowl "
+                "(not on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+        "bowl_in_microwave": {
+            "question": (
+                "Is the bowl currently placed inside the microwave "
+                "(not on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+    },
+    "WaffleReheat": {
+        "waffle_in_bowl": {
+            "question": (
+                "Is the waffle currently resting inside the bowl "
+                "(not on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+        "bowl_in_microwave": {
+            "question": (
+                "Is the bowl with the waffle currently placed inside the microwave "
+                "(not on the counter and not held in the gripper)?"
+            ),
+            "invert": False,
+        },
+    },
 }
 
 SYSTEM_PROMPT = (

@@ -131,7 +131,7 @@ class RecoveryObservationTests(unittest.TestCase):
             "MakeIceLemonade",
             "SetUpCuttingStation",
         }
-        self.assertEqual(set(RECOVERY_PREDICATES), expected_tasks)
+        self.assertTrue(expected_tasks.issubset(RECOVERY_PREDICATES))
 
         def make_env(task_name):
             class _Base:

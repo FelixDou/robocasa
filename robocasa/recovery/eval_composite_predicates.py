@@ -2331,6 +2331,30 @@ def _pack_identical_lunches(env):
     no_duplicates = len(all_objs) == len(set(all_objs))
     return {
         "fridge_open": _p(_is_open(env, env.fridge), stage="precondition"),
+        "vegetable0_grasped": _p(_grasped(env, "vegetable0"), stage="transient"),
+        "vegetable1_grasped": _p(_grasped(env, "vegetable1"), stage="transient"),
+        "meat0_grasped": _p(_grasped(env, "meat0"), stage="transient"),
+        "meat1_grasped": _p(_grasped(env, "meat1"), stage="transient"),
+        "vegetable0_in_tupperware": _p(
+            "vegetable0" in veg_in_0 or "vegetable0" in veg_in_1,
+            required=False,
+            stage="placement",
+        ),
+        "vegetable1_in_tupperware": _p(
+            "vegetable1" in veg_in_0 or "vegetable1" in veg_in_1,
+            required=False,
+            stage="placement",
+        ),
+        "meat0_in_tupperware": _p(
+            "meat0" in meat_in_0 or "meat0" in meat_in_1,
+            required=False,
+            stage="placement",
+        ),
+        "meat1_in_tupperware": _p(
+            "meat1" in meat_in_0 or "meat1" in meat_in_1,
+            required=False,
+            stage="placement",
+        ),
         "tupperware0_has_one_vegetable": _p(len(veg_in_0) == 1, stage="placement"),
         "tupperware0_has_one_meat": _p(len(meat_in_0) == 1, stage="placement"),
         "tupperware1_has_one_vegetable": _p(len(veg_in_1) == 1, stage="placement"),
@@ -2448,6 +2472,8 @@ def _stack_bowls_cabinet(env):
     stacked = _in(env, "bowl2", "bowl1") or _in(env, "bowl1", "bowl2")
     return {
         "cabinet_open": _p(_is_open(env, env.cabinet), stage="precondition"),
+        "smaller_bowl_grasped": _p(_grasped(env, "bowl1"), stage="transient"),
+        "larger_bowl_grasped": _p(_grasped(env, "bowl2"), stage="transient"),
         "larger_bowl_in_cabinet": _p(bowl2_in_cabinet, stage="placement"),
         "smaller_bowl_in_cabinet": _p(bowl1_in_cabinet, stage="placement"),
         "bowls_stacked": _p(stacked, stage="placement"),
@@ -2457,6 +2483,8 @@ def _stack_bowls_cabinet(env):
 
 def _steam_in_microwave(env):
     return {
+        "vegetable_grasped": _p(_grasped(env, "vegetable"), stage="transient"),
+        "bowl_grasped": _p(_grasped(env, "bowl"), stage="transient"),
         "vegetable_in_bowl": _p(_in(env, "vegetable", "bowl"), stage="placement"),
         "bowl_in_microwave": _p(_inside(env, "bowl", env.microwave), stage="placement"),
         "microwave_closed": _p(_is_closed(env, env.microwave), stage="fixture_state"),
@@ -2513,6 +2541,8 @@ def _arrange_bread_basket(env):
 
 def _arrange_tea(env):
     return {
+        "kettle_grasped": _p(_grasped(env, "obj2"), stage="transient"),
+        "mug_grasped": _p(_grasped(env, "obj"), stage="transient"),
         "kettle_on_tray": _p(_in(env, "obj2", "container"), stage="placement"),
         "mug_on_tray": _p(_in(env, "obj", "container"), stage="placement"),
         "cabinet_closed": _p(_is_closed(env, env.cab), stage="fixture_state"),
@@ -2522,6 +2552,8 @@ def _arrange_tea(env):
 
 def _bread_selection(env):
     return {
+        "croissant_grasped": _p(_grasped(env, "croissant"), stage="transient"),
+        "jam_grasped": _p(_grasped(env, "jam"), stage="transient"),
         "croissant_on_cutting_board": _p(
             _in(env, "croissant", "cutting_board"), stage="placement"
         ),
@@ -2728,6 +2760,8 @@ def _separate_freezer_rack(env):
 def _waffle_reheat(env):
     return {
         "microwave_open": _p(_is_open(env, env.microwave), stage="precondition"),
+        "waffle_grasped": _p(_grasped(env, "waffle"), stage="transient"),
+        "bowl_grasped": _p(_grasped(env, "waffle_container"), stage="transient"),
         "waffle_in_bowl": _p(
             _in(env, "waffle", "waffle_container"), stage="object_state"
         ),
@@ -2740,10 +2774,17 @@ def _waffle_reheat(env):
 
 
 def _wash_fruit_colander(env):
-    fruit_in_colander = all(
-        _in(env, f"fruit{i}", "colander") for i in range(env.num_fruit)
-    )
+    num_fruit = int(getattr(env, "num_fruit", 1))
+    fruit_in_list = [_in(env, f"fruit{i}", "colander") for i in range(num_fruit)]
+    fruit_in_colander = all(fruit_in_list) if fruit_in_list else False
     return {
+        "colander_grasped": _p(_grasped(env, "colander"), stage="transient"),
+        "fruit0_grasped": _p(_grasped(env, "fruit0") if num_fruit > 0 else False, stage="transient"),
+        "fruit1_grasped": _p(_grasped(env, "fruit1") if num_fruit > 1 else False, stage="transient"),
+        "fruit2_grasped": _p(_grasped(env, "fruit2") if num_fruit > 2 else False, stage="transient"),
+        "fruit0_in_colander": _p(fruit_in_list[0] if num_fruit > 0 else True, required=False, stage="placement"),
+        "fruit1_in_colander": _p(fruit_in_list[1] if num_fruit > 1 else True, required=False, stage="placement"),
+        "fruit2_in_colander": _p(fruit_in_list[2] if num_fruit > 2 else True, required=False, stage="placement"),
         "colander_in_sink": _p(_inside(env, "colander", env.sink), stage="placement"),
         "fruit_in_colander": _p(fruit_in_colander, stage="placement"),
         "colander_under_water": _p(

@@ -29,7 +29,7 @@ class CrossTaskLoRATests(unittest.TestCase):
         )
 
         mapping = validate_cross_task_folds(CROSS_TASK_FOLDS)
-        self.assertEqual(set(mapping.keys()), set(pilot6.TASK_SPECS.keys()))
+        self.assertEqual(set(mapping.keys()), set(pilot6.PILOT6_TASKS))
         self.assertEqual(len(CROSS_TASK_FOLDS), 3)
         for f in CROSS_TASK_FOLDS:
             self.assertEqual(len(f), 2)
