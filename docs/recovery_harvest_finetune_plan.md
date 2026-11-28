@@ -1478,6 +1478,48 @@ choice open, the code fixes it as follows:
     stages hold at the start of all clean demos (share 1.0), and the summary
     still passes. The records' own commit is kept in
     `git_commit_records_0750d99.txt`.
+
+  *Pretrain transfer, aligned (commit 2c60536, 100 runs, 28 November 2026):
+  failed.* No errors. Ten stages fail, and the rates barely move from the
+  first run:
+
+  | Stage | Completed / reached (aligned) | First run |
+  | --- | --- | --- |
+  | ArrangeBreadBasket cabinet_open | 2 / 20 | 1 / 20 |
+  | GarnishPancake fridge_open | 1 / 20 | 0 / 20 |
+  | BreadSelection croissant_on_cutting_board | 2 / 20 | 1 / 20 |
+  | ArrangeTea kettle_on_tray | 7 / 20 | 7 / 20 |
+  | CuttingToolSelection correct_tool_on_cutting_board | 0 / 20 | not reached |
+  | ArrangeTea mug_on_tray | 2 / 7 | 1 / 7 |
+
+  The rest were reached once or twice. GarnishPancake's `pancake_on_plate`
+  and `plate_on_table` held at the start of the one run that reached them.
+
+  The alignment does its job:
+  - of the 100 aligned steps that drove, 97 end within 5 cm;
+  - 9 were already aligned;
+  - 36 goals are blocked (`goal_blocked`), and those steps stay unaligned;
+  - the hand still tracks closely: median lag 3 mm per step, and 8 mm at
+    the 90th percentile.
+
+  Two causes remain. Both come from the pretrain split, which samples every
+  object instance but the last 4 of each category, in other kitchens. No
+  pretrain reset holds a demo's own object or door. This is the case the
+  alarm states need, so the check stands.
+  - *Doors of another size.* A door stage completes in 3 of the 5 runs whose
+    best source door is within 0.10 of this one (`door_distance`, mostly the
+    hinge-radius difference), and in 0 of the 35 further off. The replay
+    moves the demo's hand arc rigidly to this door's handle. On a door of
+    another radius the arc leaves the handle's circle. Of the 37 misses, 27
+    stall against the door until the cap, and in 10 the hand slips off and
+    the replay ends with the door shut.
+  - *Objects of another shape.* In 38 of the 73 logged picks the gripper
+    never closes, mostly because the cap falls during the approach. The hand
+    path fits the demo's instance, not this one; that it runs into the
+    object or its surroundings is the likely reading, not yet checked on
+    video. Of the 35 picks that close, 23 hold the object. Picks that
+    close and hold, out of logged picks: kettle 9 / 20, mug 4 / 7, croissant
+    5 / 20, correct cutting tool 4 / 20.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
