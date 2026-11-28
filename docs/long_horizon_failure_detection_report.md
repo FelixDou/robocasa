@@ -17,12 +17,15 @@ Key findings through November 28, 2026:
 1. **Retrospective 5-task oracle pilot (`n = 76` October parents; Sections 2–3).** Adding physical loss and candidate missed-placement rules to the calibrated task timer + overdue-stage clock gained **+6.42 percentage points (pp)** of task horizon (+8.34 s at 20 Hz, 95% task-then-episode bootstrap CI **[+1.87, +11.57] pp**, positive on 5/5 tasks) under internal cross-fitting, and **+6.37 pp** (+8.28 s, 95% CI **[+1.85, +11.49] pp**) when fitting grace windows on the independent 60-parent October naturals cohort (25 successes). Both runs **failed the roadmap's 2 pp excess-FPR screen** solely because a single ambiguous cutting-tool success (`51fccafb19d3bb617aec`, wrong tool obscured the board until termination) gave 2/36 vs. 1/36 false alarms (+2.78 pp).
 2. **Local release-clock control and self-correction yield (Section 4).** At the 32–256 step waits, **hiding the destination predicate completely** (replacing missed-placement verification with a plain post-release timer) produced **100% identical first alarms on all 76 parents** (+6.05 pp over both clocks at 32 steps). Across all 76 parents there were **zero verified multi-decision self-correction pairs** for testing recovery-aware waiting.
 3. **Cluster cohort inventory and 32-task transferability matrix (Section 5).** Both legacy 250-rollout August live-traced SAFE collections contain **0 videos, 0 action traces, and no raw time-resolved object/grasp predicates** (latched stage traces only), confirming fresh synchronized collection is required. Cross-referencing [`robocasa/recovery/eval_composite_predicates.py`](../robocasa/recovery/eval_composite_predicates.py) with XR-1's 39-task baseline success pool identifies **18 composite tasks** in the **28%–80% XR-1 success band** built strictly from shared physical primitives (11 pure manipulation/fixture + 7 with appliance states; 11 of 18 already define `_grasped`).
-4. **First live synchronized XR-1 recording and visual inspection (`xr1_recovery_recording_PNL4QPfz`; Section 6).** Four fresh passive rollouts (`2 × ArrangeBreadBasket`, `2 × CuttingToolSelection`) passed end-to-end verification (`PASS: four synchronized XR-1 recordings`, exact 1-to-1 decoded frame match: 4,350/4,350 and 1,200/1,200 at 20.0 fps). Visual frame inspection against `recovery_observations` uncovered **three critical simulator-predicate defects** in RoboCasa's existing helpers:
-   - `OU.check_obj_grasped(..., threshold=0.035)` produced a **complete false negative** while XR-1 visibly grasped, lifted, and carried a wide bread loaf into the basket (`00072ff15e9a5bb3695e4bcd`, steps 700–851);
-   - `OU.check_obj_grasped` uses `env.check_contact(gripper, obj) and gripper_closed` (any contact while closed, not opposing-finger grasp), producing a **false positive** on `wrong_tool_grasped` when the closed gripper holding the knife grazed the adjacent peeler (`cd28746d88039ebcffc5a123`, step 973) and 22 brief grazing pulses on `basket_grasped` (`00072ff15e9a5bb3695e4bcd`);
-   - `is_open` stayed `False` throughout **3 of 4 episodes** (`1dd3b4ce`, `f8d2c686`, `cd28746d`) even though the cabinet/drawer was visually open wide enough for XR-1 to reach inside and manipulate objects.
+4. **First live synchronized XR-1 recording, predicate repair, and 6-task smoke (Section 6).** Visual inspection of 4 synchronized recordings (`xr1_recovery_recording_PNL4QPfz`) exposed three simulator-predicate defects (`OU.check_obj_grasped` 0.035 m false negative on wide bread loaves, closed-gripper grazing false positive on `wrong_tool_grasped`, and strict `is_open` thresholds). Replacing `_grasped` with Robosuite's opposing-pad `env._check_grasp` and expanding `RECOVERY_PREDICATES` to 6 Group-A tasks passed a 12-rollout live smoke (`xr1_recovery_pilot6_smoke_20261128_135824`, 9S/3F, 12/12 synced).
+5. **Fresh 120-rollout 6-task prospective oracle milestone — PASSED ALL ROADMAP GATES (Section 7).** Across 120 fresh synchronized XR-1 rollouts (`xr1_recovery_pilot6_full_20261128_142543`, 64S/56F, 20/task across 6 tasks, strict 5-fold split-conformal calibration at nominal 5% FPR):
+   - **`full_physical` vs. `stage_clock`:** **+6.63 pp (+8.3 s)** more failure lead (38.67% / 55.0 s vs. 32.05% / 46.6 s; 95% task-then-episode bootstrap CI **[+3.10, +11.16] pp**; positive on **6/6 tasks**; **26 earlier / 0 later**; failure recall **98.2% vs. 92.9%**) at **identical 3.1% FPR (2/64 vs. 2/64; 0.00 pp excess FPR)**.
+   - **`full_physical` vs. `clocks_release_timer` (blind action-clock control):** **+18.92 pp (+25.4 s)**, 95% CI **[+14.19, +23.56] pp**, **6/6 tasks positive** — decisively disproving the single-object release-clock confound once multi-object tasks are included.
+   - **`full_physical` vs. `global_timer` ($G$):** **+13.05 pp (+20.5 s)**, 95% CI **[+6.06, +20.21] pp**, **6/6 tasks positive**, identical 3.1% FPR.
+   - **Failure anatomy:** **40/56 failures (71.4%)** exhibited a confirmed physical mistake (30 missed placement, 7 lost condition, 3 both).
+   - **Test-2 self-correction prevalence:** **5/64 successes (7.8%)** in the 120-rollout cohort (**6/73 = 8.2%** combining smoke + full) showed genuine multi-decision unassisted self-corrections (3–40 decisions before recovery), yielding **4 matched Test-2 pairs** (~1 matched pair per 30 rollouts → ~900 rollouts projected for 30 pairs).
 
-**Current decision:** Do **not** scale up multi-task data collection or camera model training until the grasp-predicate defect (`check_obj_grasped`) is repaired/verified and an action-event / missed-grasp baseline is added alongside the stage clock.
+**Current decision:** **Simulator-oracle gate PASSED.** Proceed to the **camera-perception floor check** (evaluate a frozen VLM / SigLIP / lightweight visual probe directly on the 120 already-recorded synchronized `obs_grid` videos in `xr1_recovery_pilot6_full_20261128_142543`, and substitute predicted relations into `analyze_recovery_pilot6` to measure how much of the +20.5 s / +8.3 s lead survives real camera observations) before designing or scaling up full camera-monitor training.
 
 ---
 
@@ -271,7 +274,78 @@ End-to-end smoke check on `xr1_pilot6_smoke_meta` (12 rollouts: 9S/3F; output [`
 
 ---
 
-## 7. Artifact index and next experiments
+## 7. Fresh 120-rollout 6-task prospective oracle & Test-2 milestone (28 November 2026)
+
+### 7.1 Run provenance and validation
+
+- **Code:** commit `4b3666ded3ead257eddb9d32dc9e731e7ef32aa3` (`origin/codex/xr1-recovery-pilot-6tasks`)
+- **Command:** `PILOT_GPUS="0" NUM_ROLLOUTS=20 VIDEO_FRAME_STRIDE=2 bash scripts/run_xr1_recovery_pilot_6tasks.sh` (`seed = 2800007`, disjoint from all Stage 1, ladder, and smoke seeds)
+- **Cluster output:** `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_pilot6_full_20261128_142543/shard0`
+- **Local metadata archive:** `outputs/long_horizon_failure_detection/cluster_imports/xr1_pilot6_full_metadata.tar.gz` (SHA-256 `8407eb2454668255a87c86d8b838e1ee83c1c36933cfc4dcf4f6cdb45d7101e1`)
+- **Analysis outputs:**
+  - Primary 120-rollout split-conformal analysis: [`outputs/long_horizon_failure_detection/xr1_pilot6_full_120_analysis/summary.json`](../outputs/long_horizon_failure_detection/xr1_pilot6_full_120_analysis/summary.json) (SHA-256 `ff8c56602f9c5fcac2b4c601fa5793a3d976c063ba297a396cbb9a131cdd6904`)
+  - Combined 132-rollout sensitivity (12 smoke + 120 full): [`outputs/long_horizon_failure_detection/xr1_pilot6_combined_132_analysis/summary.json`](../outputs/long_horizon_failure_detection/xr1_pilot6_combined_132_analysis/summary.json) (SHA-256 `9c3b21541a8bf66bded6fa5c0ca9e6270639d41efcbb9e084864c9e50e8b5356`)
+- **Validation:** `RoboCasa SAFE dataset: VALID`, `PASS: 120 synchronized XR-1 recordings`, **0 errors**, 377 usable Subtask-SAFE segments (321S / 56F), exact stride-2 frame alignment on every episode.
+- **Per-task outcome balance (64 successes / 56 failures):** `ArrangeBreadBasket` 11S/9F (55%), `CuttingToolSelection` 11S/9F (55%), `DeliverStraw` 9S/11F (45%), `GarnishPancake` 10S/10F (50%), `MakeIceLemonade` 9S/11F (45%), `SetUpCuttingStation` 14S/6F (70%).
+
+### 7.2 6-arm split-conformal oracle hierarchy (5-fold CV, nominal 5% episode-level FPR)
+
+Every fold used strict disjoint split-conformal calibration (`n_fit = 17` successes for task/stage quantiles and grace windows, `n_cal = 34–35` successes for episode-level `ceil(0.95 × (n + 1))` cutoffs, scored out-of-fold on all 120 rollouts).
+
+| Arm | Failures warned / 56 | Recall | Successes warned / 64 | Realized FPR (Wilson 95%) | Equal-task mean lead (% horizon) | Equal-task mean lead (s @ 20 Hz) |
+|---|---:|---:|---:|---:|---:|---:|
+| `global_timer` ($G$) | 56 | 100.0% | 2 | 3.1% [0.9%, 10.7%] | 25.62% | 34.5 s |
+| `task_timer` ($P$) | 52 | 92.9% | 3 | 4.7% [1.6%, 12.9%] | 22.00% | 33.3 s |
+| `stage_clock` | 52 | 92.9% | 2 | 3.1% [0.9%, 10.7%] | 32.05% | 46.6 s |
+| `clocks_release_timer` *(blind)* | 44 | 78.6% | 1 | 1.6% [0.3%, 8.3%] | 19.75% | 29.6 s |
+| `clocks_loss` | 54 | 96.4% | 2 | 3.1% [0.9%, 10.7%] | 33.98% | 48.3 s |
+| **`full_physical`** | **55** | **98.2%** | **2** | **3.1% [0.9%, 10.7%]** | **38.67%** | **55.0 s** |
+
+**Key paired comparisons (120 fresh rollouts; task-then-episode bootstrap, 2,000 replicates):**
+
+| Comparison | Mean gain (% horizon) | Mean gain (s) | Bootstrap 95% CI (% horizon) | Positive tasks | Earlier / Later | Excess FPR |
+|---|---:|---:|---:|---:|---:|---:|
+| `stage_clock − task_timer` | +10.04 pp | +13.3 s | [+4.75, +16.12] | **6 / 6** | 28 / 13 | −1.6 pp |
+| `clocks_release_timer − stage_clock` | −12.30 pp | −17.0 s | [−18.09, −6.66] | 0 / 6 | 15 / 38 | −1.6 pp |
+| **`full_physical − stage_clock`** | **+6.63 pp** | **+8.3 s** | **[+3.10, +11.16]** | **6 / 6** | **26 / 0** | **0.00 pp** |
+| **`full_physical − clocks_release_timer`** | **+18.92 pp** | **+25.4 s** | **[+14.19, +23.56]** | **6 / 6** | **52 / 3** | +1.6 pp |
+| **`full_physical − global_timer`** | **+13.05 pp** | **+20.5 s** | **[+6.06, +20.21]** | **6 / 6** | **47 / 7** | **0.00 pp** |
+
+Per-task `full_physical − stage_clock` gains (all 6 tasks positive, 0 rollouts warned later):
+- `MakeIceLemonade`: **+13.38 pp (+20.1 s)**
+- `CuttingToolSelection`: **+9.19 pp (+5.5 s)**
+- `GarnishPancake`: **+6.76 pp (+9.1 s)**
+- `DeliverStraw`: **+5.61 pp (+7.2 s)**
+- `ArrangeBreadBasket`: **+2.49 pp (+5.4 s)**
+- `SetUpCuttingStation`: **+2.33 pp (+2.8 s)**
+
+**Combined 132-rollout sensitivity check (12 smoke + 120 full; 73S / 59F):** confirms every finding — `full_physical` reaches **44.72% (62.2 s)** lead at **4.1% FPR (3/73)** vs. `stage_clock` **39.17% (54.0 s)** at **4.1% FPR (3/73)** → **+5.55 pp (+8.1 s)**, 95% CI **[+2.38, +9.09] pp**, **6/6 tasks positive**, **24 earlier / 0 later**, **0.00 pp excess FPR**; and **+17.05 pp (+24.6 s)** over `global_timer`, **+11.35 pp (+14.5 s)** over `clocks_release_timer` (6/6 tasks positive).
+
+**Why destination verification decisively beats the blind release clock here:** On multi-object composite tasks (`ArrangeBreadBasket`, `MakeIceLemonade`, `SetUpCuttingStation`), successful episodes continue for 500–1,000+ steps *after* Object 1 is released. The blind release timer keeps ticking throughout Object 2 on successes, inflating its split-conformal cutoff to `0.28–0.62` (vs. `0.18–0.38` for `full_physical`). Checking the destination stops the clock immediately on arrival (median placement delay **1.0 step**, p90 **10.5 steps** across 126 placements), preserving the exact same cutoff and **0.00 pp excess FPR** as `stage_clock` (the 2 false alarms of `full_physical` — `c0f68907` @ 960 and `35d06a39` @ 1,712 — were identical to `stage_clock`'s 2 false alarms, both caused by long self-correcting successes hitting the stage timer).
+
+### 7.3 Failure anatomy and Test-2 self-correction readiness
+
+- **Failure anatomy (56 failures):**
+  - `missed_placement_only`: **30 / 56 (53.6%)**
+  - `lost_condition_only`: **7 / 56 (12.5%)**
+  - `missed_placement + lost_condition`: **3 / 56 (5.4%)**
+  - *(Total with explicit physical violation: **40 / 56 = 71.4%**)*
+  - `no_sustained_grasp_before_timeout`: **12 / 56 (21.4%)**
+  - `placed_then_stalled_later`: **4 / 56 (7.1%)**
+- **Multi-decision unassisted self-corrections:** **5 / 64 successes (7.8%)** in the 120-rollout run (**6 / 73 = 8.2%** in 132 combined):
+  - `DeliverStraw a1ddc0a9`: missed straw placement @ 488 → confirmed @ 528 → restored @ 1,165 (**40 XR-1 decisions** window)
+  - `ArrangeBreadBasket 66764859`: missed basket placement @ 1,614 → confirmed @ 1,648 → restored @ 2,005 (**23 decisions**)
+  - `SetUpCuttingStation 35d06a39`: missed meat placement @ 1,411 → confirmed @ 1,456 → restored @ 1,678 (**14 decisions**)
+  - `MakeIceLemonade eca17b9b`: lost `lemon_in_glass` @ 1,091 → confirmed @ 1,120 → restored @ 1,244 (**8 decisions**)
+  - `CuttingToolSelection c0f68907`: wrong tool placed on cutting board @ 423 → confirmed @ 448 → removed & succeeded @ 482 (**3 decisions**)
+  - *(Plus smoke `MakeIceLemonade d285494e`: missed `ice_cube1` @ 1,561 → confirmed @ 1,600 → `ice_cube2` placed @ 2,016, **26 decisions**)*
+- **Matched Test-2 pairs (120 rollouts):** **4 matched pairs** across 4 distinct tasks (`ArrangeBreadBasket`, `CuttingToolSelection`, `DeliverStraw`, `SetUpCuttingStation`), with matched observation windows of **3, 14, 23, and 40 XR-1 decisions**. Yield is **~1 matched pair per 30 rollouts** → powering 30 matched Test-2 pairs passively projects to **~900 test rollouts** (consistent with collecting ~400 test successes).
+
+**Gate decision:** **PASSED.** The 6-task simulator oracle clears every roadmap threshold (`+6.63 pp >= +3 pp`, `6/6 >= 3` tasks positive, `0.00 pp <= 2 pp` excess FPR, 26 earlier / 0 later, 71.4% physical-violation coverage, and 7.8% self-correction prevalence among successes).
+
+---
+
+## 8. Artifact index and next experiments
 
 ### Reproducibility & artifact index
 
@@ -287,13 +361,13 @@ End-to-end smoke check on `xr1_pilot6_smoke_meta` (12 rollouts: 9S/3F; output [`
 | Synchronized XR-1 smoke run (2 tasks) | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_recording_PNL4QPfz` | Commit `9e59c463`; 4/4 verified; archive `cc8999a5...` |
 | Visual inspection contact sheets | `outputs/long_horizon_failure_detection/xr1_recovery_recording_PNL4QPfz_inspection/*.png` | 4 contact sheets (Section 6.2) |
 | Synchronized XR-1 smoke run (6 tasks) | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_pilot6_smoke_20261128_135824` | Commit `4b3666de`; 12/12 verified (9S/3F); metadata `e4d123da...` |
-| 6-task pilot launcher & verifier | `scripts/run_xr1_recovery_pilot_6tasks.sh`, `scripts/xr1_lead_time/verify_recovery_recording.py` | 34/34 unit tests pass; full 120-rollout run launched |
-| 6-task oracle & Test-2 analyzer | `scripts/xr1_lead_time/analyze_recovery_pilot6.py`, `outputs/long_horizon_failure_detection/xr1_pilot6_smoke_analysis/summary.json` | 41/41 tests pass; smoke summary `40d7866e...` |
+| 6-task oracle & Test-2 analyzer | `scripts/xr1_lead_time/analyze_recovery_pilot6.py`, `tests/test_long_horizon_pilot6_analyzer.py` | 41/41 tests pass; smoke summary `40d7866e...` |
+| **Fresh 120-rollout 6-task pilot** | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_pilot6_full_20261128_142543` | Commit `4b3666de`; 120/120 verified (64S/56F); metadata `8407eb24...` |
+| **120-rollout split-conformal analysis** | `outputs/long_horizon_failure_detection/xr1_pilot6_full_120_analysis/summary.json` | `ff8c5660...`; **+6.63 pp (+8.3 s) over stage clock @ 0.00 pp excess FPR** |
+| Combined 132-rollout sensitivity | `outputs/long_horizon_failure_detection/xr1_pilot6_combined_132_analysis/summary.json` | `9c3b2154...`; +5.55 pp (+8.1 s) over stage clock @ 0.00 pp excess FPR |
 
 ### Recommended next steps (in order)
 
-1. **Commit & push the repaired `_grasped` + 6-task pilot code**, then run **`--smoke` (2 rollouts/task, seed `2700007`)** on the cluster to confirm opposing-pad `_check_grasp` fires cleanly on `bread_grasped` and eliminates grazing false positives across all 6 tasks.
-2. **Run the full 6-task synchronized passive pilot (`NUM_ROLLOUTS=20`/task = 120 rollouts, seed `2800007`, stride 2, 2–3 GPUs)** to measure:
-   - true rate of multi-decision unassisted self-corrections (including action-anchored missed-grasp retries) to decide whether Test 2 is sufficiently powered;
-   - oracle lead hierarchy: `P` → `stage clock` → `grasp/release action clock` → `+ lost condition & missed effect` with repaired predicates;
-   - **perception floor check:** evaluate a frozen vision-language model / SigLIP probe on 10–20 synchronized videos from the pilot (wrist + agentview) before building any custom training pipeline.
+1. **Perception floor check on the 120 already-recorded synchronized videos (`xr1_recovery_pilot6_full_20261128_142543`):** Before building a custom multi-module vision training pipeline, evaluate (a) a frozen vision-language backbone / VLM (e.g., Qwen2.5-VL / SigLIP) zero-shot and (b) a lightweight linear/cross-attention probe over frozen embeddings + proprioception/actions on the core relation primitives (`grasped`, `in/on`, `wrong_tool`, `open`) using the 3-view `obs_grid` frames. Measure per-relation F1, transition delay, and—most critically—substitute predicted relations into `analyze_recovery_pilot6` to measure **how much of the +20.5 s / +8.3 s lead survives real camera observations** (and compare against inferred-stage clock).
+2. **Test continuation-aware features on the 4–5 matched Test-2 pairs:** Inspect synchronized videos + executed action chunks + SAFE latents on the 5 multi-decision self-corrected successes (`c0f68907`, `a1ddc0a9`, `eca17b9b`, `35d06a39`, `66764859`, plus smoke `d285494e`) versus their matched persistent failures to check what visual/action cues distinguish self-correction before restoration.
+3. **Freeze the 18-task Group-A/B train vs. held-out composition split** (e.g., 10 train / 8 held-out compositions) and add an LLM-generated task-graph ablation once the perception floor check confirms camera-based relation estimation preserves a meaningful fraction of the oracle lead.
