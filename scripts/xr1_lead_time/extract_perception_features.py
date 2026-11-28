@@ -27,6 +27,10 @@ DEFAULT_PALIGEMMA_SNAPSHOT = (
     "/gs/bs/tga-shinoda/felid/hf_home/hub/models--google--paligemma-3b-pt-224/"
     "snapshots/35e4f46485b4d07967e7e9935bc3786aad50687c"
 )
+DEFAULT_SIGLIP_WEIGHTS = (
+    "/gs/bs/tga-shinoda/felid/hf_home/hub/models--lerobot--pi0_libero_finetuned_v044/"
+    "snapshots/45dcc8fc0e02601c8ccf0554fbd1d26a55070c1f/model.safetensors"
+)
 
 
 def causal_frame_indices(decision_steps: np.ndarray, video_frame_steps: list[int]) -> np.ndarray:
@@ -108,15 +112,17 @@ def summarize_action_chunks(chunks: np.ndarray) -> np.ndarray:
     return np.concatenate([c.mean(axis=1), c.std(axis=1), c[:, -1, :] - c[:, 0, :]], axis=1)
 
 
-def load_siglip_vision_tower(snapshot_dir: Path, device):
-    """Load ONLY the SigLIP vision tower from a cached PaliGemma snapshot.
+def load_siglip_vision_tower(snapshot_dir: Path, device, vision_weights: Path | None = None):
+    """Load ONLY the SigLIP vision tower from a cached PaliGemma config + safetensors weights.
 
-    Reads ``vision_tower.vision_model.*`` directly from the safetensors shards
-    to avoid loading the 2B Gemma language model into VRAM. PaliGemma omits
-    SigLIP's optional attention-pooling ``head``, so we always pool the trained
-    post-layernorm patch tokens (``last_hidden_state.mean(dim=1)``).
+    Supports both standard sharded PaliGemma snapshots (``vision_tower.vision_model.*``)
+    and single-file safetensors checkpoints containing a nested ``vision_tower.`` prefix
+    (e.g., ``model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.*``).
+    Always pools trained post-layernorm patch tokens (``last_hidden_state.mean(dim=1)``).
     """
     import torch
+    from safetensors import safe_open
+    from safetensors.torch import load_file
     from transformers import SiglipVisionConfig, SiglipVisionModel
 
     cfg_path = snapshot_dir / "config.json"
@@ -124,38 +130,44 @@ def load_siglip_vision_tower(snapshot_dir: Path, device):
     vision_cfg = SiglipVisionConfig.from_dict(cfg["vision_config"])
     image_size = int(vision_cfg.image_size)
 
+    state_dict = {}
     index_path = snapshot_dir / "model.safetensors.index.json"
-    if index_path.exists():
-        from safetensors.torch import load_file
-
+    if vision_weights is not None and vision_weights.is_file():
+        with safe_open(str(vision_weights), framework="pt", device="cpu") as f:
+            for k in f.keys():
+                if "vision_tower." in k:
+                    sub = k.split("vision_tower.", 1)[1]
+                    state_dict[sub] = f.get_tensor(k)
+        print(f"Loaded {len(state_dict)} SigLIP tensors from {vision_weights}")
+    elif index_path.exists():
         weight_map = json.loads(index_path.read_text())["weight_map"]
-        prefix = "vision_tower."
         by_shard: dict[str, list[str]] = {}
         for k, shard in weight_map.items():
-            if k.startswith(prefix):
+            if "vision_tower." in k:
                 by_shard.setdefault(shard, []).append(k)
-        state_dict = {}
         for shard, keys in by_shard.items():
             shard_tensors = load_file(str(snapshot_dir / shard), device="cpu")
             for k in keys:
-                state_dict[k[len(prefix) :]] = shard_tensors[k]
-        model = SiglipVisionModel(vision_cfg)
-        missing, unexpected = model.load_state_dict(state_dict, strict=False)
-        missing_non_head = [k for k in missing if ".head." not in k]
-        if missing_non_head:
-            raise RuntimeError(
-                f"Missing SigLIP vision weights: {missing_non_head[:5]} (total {len(missing_non_head)})"
-            )
-        if missing:
-            print(f"Note: {len(missing)} optional SigLIP head keys absent (expected for PaliGemma); using patch mean pooling")
-        if unexpected:
-            print(f"Note: ignored {len(unexpected)} unexpected keys when loading SigLIP tower")
+                state_dict[k.split("vision_tower.", 1)[1]] = shard_tensors[k]
     else:
-        from transformers import AutoModel
+        raise FileNotFoundError(
+            f"No safetensors weights found in {snapshot_dir} and --vision-weights not provided"
+        )
 
-        full = AutoModel.from_pretrained(str(snapshot_dir), torch_dtype=torch.bfloat16, local_files_only=True)
-        model = full.vision_tower
-        del full
+    if not state_dict:
+        raise RuntimeError("Found zero vision_tower.* tensors in checkpoint")
+
+    model = SiglipVisionModel(vision_cfg)
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    missing_non_head = [k for k in missing if ".head." not in k]
+    if missing_non_head:
+        raise RuntimeError(
+            f"Missing SigLIP vision weights: {missing_non_head[:5]} (total {len(missing_non_head)})"
+        )
+    if missing:
+        print(f"Note: {len(missing)} optional SigLIP head keys absent (expected for PaliGemma); using patch mean pooling")
+    if unexpected:
+        print(f"Note: ignored {len(unexpected)} unexpected keys when loading SigLIP tower")
 
     dtype = torch.bfloat16 if device.type == "cuda" else torch.float32
     model = model.to(device=device, dtype=dtype).eval()
@@ -224,6 +236,7 @@ def extract_dataset(
     output_dir: Path,
     vision_snapshot: Path | None,
     *,
+    vision_weights: Path | None = None,
     batch_size: int = 128,
     skip_vision: bool = False,
 ) -> dict:
@@ -250,7 +263,9 @@ def extract_dataset(
         if vision_snapshot is None or not vision_snapshot.exists():
             raise FileNotFoundError(f"Vision snapshot not found: {vision_snapshot}")
         t0 = time.time()
-        model, image_size, dtype = load_siglip_vision_tower(vision_snapshot, device)
+        model, image_size, dtype = load_siglip_vision_tower(
+            vision_snapshot, device, vision_weights=vision_weights
+        )
         print(f"Loaded SigLIP vision tower on {device} ({dtype}) in {time.time() - t0:.1f}s")
 
     episodes_meta = []
@@ -380,6 +395,7 @@ def main(argv=None):
     parser.add_argument("--run", type=Path, nargs="+", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--vision-snapshot", type=Path, default=Path(DEFAULT_PALIGEMMA_SNAPSHOT))
+    parser.add_argument("--vision-weights", type=Path, default=Path(DEFAULT_SIGLIP_WEIGHTS))
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--skip-vision", action="store_true")
     args = parser.parse_args(argv)
@@ -387,6 +403,7 @@ def main(argv=None):
         args.run,
         args.output,
         None if args.skip_vision else args.vision_snapshot,
+        vision_weights=None if args.skip_vision else args.vision_weights,
         batch_size=args.batch_size,
         skip_vision=args.skip_vision,
     )

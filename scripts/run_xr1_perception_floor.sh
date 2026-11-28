@@ -17,6 +17,7 @@ STORAGE="${STORAGE_BS:-/gs/bs/tga-shinoda/felid}"
 PY="${PERCEPTION_PY:-$STORAGE/envs/xiaomi_robotics_1_robocasa365/bin/python}"
 RUN_DIR="${PILOT6_RUN_DIR:-$STORAGE/robocasa_rollouts/safe/xr1_recovery_pilot6_full_20261128_142543}"
 VISION_SNAPSHOT="${VISION_SNAPSHOT:-$STORAGE/hf_home/hub/models--google--paligemma-3b-pt-224/snapshots/35e4f46485b4d07967e7e9935bc3786aad50687c}"
+VISION_WEIGHTS="${VISION_WEIGHTS:-$STORAGE/hf_home/hub/models--lerobot--pi0_libero_finetuned_v044/snapshots/45dcc8fc0e02601c8ccf0554fbd1d26a55070c1f/model.safetensors}"
 
 export HF_HOME="$STORAGE/hf_home"
 export TRANSFORMERS_CACHE="$STORAGE/hf_home/transformers"
@@ -26,7 +27,8 @@ export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
 
 test -x "$PY" || { echo "Missing Python env: $PY" >&2; exit 1; }
 test -d "$RUN_DIR" || { echo "Missing pilot run dir: $RUN_DIR" >&2; exit 1; }
-test -d "$VISION_SNAPSHOT" || { echo "Missing cached PaliGemma snapshot: $VISION_SNAPSHOT" >&2; exit 1; }
+test -d "$VISION_SNAPSHOT" || { echo "Missing cached PaliGemma config dir: $VISION_SNAPSHOT" >&2; exit 1; }
+test -f "$VISION_WEIGHTS" || { echo "Missing cached SigLIP safetensors: $VISION_WEIGHTS" >&2; exit 1; }
 
 TAG="xr1_perception_floor_$(date +%Y%m%d_%H%M%S)"
 OUT_ROOT="${PERCEPTION_OUT_ROOT:-$STORAGE/robocasa_rollouts/safe/$TAG}"
@@ -50,6 +52,7 @@ if [[ ! -f "$BUNDLE_DIR/perception_features.npz" ]]; then
   "$PY" -u -m scripts.xr1_lead_time.extract_perception_features \
     --run "$RUN_DIR" \
     --vision-snapshot "$VISION_SNAPSHOT" \
+    --vision-weights "$VISION_WEIGHTS" \
     --batch-size 128 \
     --output "$BUNDLE_DIR"
 else
