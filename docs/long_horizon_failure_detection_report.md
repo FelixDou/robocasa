@@ -227,6 +227,34 @@ Implemented and locally verified before the next cluster collection:
 - **Multi-GPU resumable 6-task launcher ([`scripts/run_xr1_recovery_pilot_6tasks.sh`](../scripts/run_xr1_recovery_pilot_6tasks.sh)):** Supports `--plan`, `--smoke` (2 rollouts/task, seed `2700007`, stride 1), and full pilot (`NUM_ROLLOUTS=20`/task = 120 rollouts, seed `2800007`, stride 2) across 1–6 GPUs (`PILOT_GPUS`), with asset preflight, client-only `PYTHONPATH`, `--resume` via `PILOT_OUT_DIR`, per-shard validation, and a lightweight `metadata_review.tar.gz` bundle.
 - **Local verification:** `34/34` unit tests pass (`tests.test_long_horizon_recovery_observations`, `tests.test_long_horizon_video_sync`, `tests.test_long_horizon_local_controls`, `tests.test_long_horizon_calibration`, `tests.test_long_horizon_relation_events`), `bash -n` passes on the launcher, and `verify_recovery_recording` passes on `PNL4QPfz`.
 
+### 6.5 Live 6-task XR-1 smoke verification (`4b3666de`, 28 November 2026)
+
+Ran `PILOT_GPUS="0" bash scripts/run_xr1_recovery_pilot_6tasks.sh --smoke` (`2` rollouts/task = 12 rollouts total, `seed = 2700007`, `video_frame_stride = 1`, ~25 min on 1 GPU, commit `4b3666de`).
+
+- **Validation:** `RoboCasa SAFE dataset: VALID` (12 rollouts: **9 successes, 3 failures**; 42 usable segments: 39 successes, 3 failures, 0 errors), `PASS: 12 synchronized XR-1 recordings`, exact 1-to-1 decoded frame sync on every episode.
+- **Per-rollout opposing-pad `_check_grasp` summary:**
+
+| Task | Rollout ID | Outcome | Frames / Decs | Obs changes | Grasp onsets (`_check_grasp`) |
+|---|---|---|---:|---:|---|
+| `ArrangeBreadBasket` | `aa214332a8c17e2f576155da` | **succeeded** | 1,015 / 64 | 14 | `bread_grasped: 1`, `basket_grasped: 2` |
+| `ArrangeBreadBasket` | `eaa2bfe17ae17ca418363127` | failed | 4,350 / 272 | 12 | `bread_grasped: 4`, `basket_grasped: 1` |
+| `CuttingToolSelection` | `0991c30bf37e02796a17b0cf` | **succeeded** | 308 / 20 | 4 | `correct_tool_grasped: 1`, `wrong_tool_grasped: 0` |
+| `CuttingToolSelection` | `5a4fdad1b1e1fc325653009f` | failed | 1,200 / 75 | 7 | `correct_tool_grasped: 1`, `wrong_tool_grasped: 1` |
+| `DeliverStraw` | `25c61d7219b98c6503e93a52` | **succeeded** | 948 / 60 | 19 | `straw_grasped: 2` |
+| `DeliverStraw` | `1c0979ccc457e27459793396` | **succeeded** | 1,009 / 64 | 8 | `straw_grasped: 1` |
+| `GarnishPancake` | `147b5ad937f776e90ce6e5cc` | **succeeded** | 1,248 / 78 | 13 | `strawberry_grasped: 1` |
+| `GarnishPancake` | `1d703e912d8c0752d4d48182` | failed | 2,700 / 169 | 11 | `strawberry_grasped: 1` |
+| `MakeIceLemonade` | `d285494e886a902cf64b5a26` | **succeeded** | 2,034 / 128 | 44 | `lemon: 1`, `ice_cube1: 1`, `ice_cube2: 1` |
+| `MakeIceLemonade` | `99438606c14f973d368b6bf4` | **succeeded** | 1,532 / 96 | 20 | `lemon: 1`, `ice_cube1: 0`, `ice_cube2: 1` |
+| `SetUpCuttingStation` | `87bbbc908c954b2806152b6e` | **succeeded** | 1,673 / 105 | 15 | `knife_grasped: 2`, `meat_grasped: 1` |
+| `SetUpCuttingStation` | `b1b33b2b23925a92fbd93609` | **succeeded** | 798 / 50 | 13 | `knife_grasped: 1`, `meat_grasped: 1` |
+
+- **Key validation result:** The `_check_grasp` fix worked immediately on live XR-1:
+  - `bread_grasped` now fires cleanly on wide bread loaves (`1` on success, `4` on failure — previously `0` throughout `00072ff1`);
+  - `basket_grasped` dropped from 23 grazing pulses (`00072ff1`) to `1`–`2` real opposing-pad grasps;
+  - **3 of 9 successful episodes** (`ArrangeBreadBasket aa214332`, `DeliverStraw 25c61d72`, `SetUpCuttingStation 87bbbc90`) recorded **multiple grasp onsets (`2`)** — strong candidate unassisted retries to inspect once `metadata_review.tar.gz` is synced locally.
+- **Decision:** Gate passed — proceed immediately to the **full 6-task pilot** (`NUM_ROLLOUTS=20`/task = 120 rollouts, `seed = 2800007`, `video_frame_stride = 2`).
+
 ---
 
 ## 7. Artifact index and next experiments
