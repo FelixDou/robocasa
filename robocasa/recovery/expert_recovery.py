@@ -1861,7 +1861,7 @@ class ExpertRun:
                 self.move_to(target, GRIPPER_CLOSE, pos_step=DOOR_PULL_POS_STEP, rot_step=DOOR_PULL_ROT_STEP)
                 slipped = sign * (q_wanted - self.door_q(door)) > slip   # the door trails the hand
                 if len(cyc["grip"]) <= DOOR_GRIP_TRACE or slipped:
-                    cyc["grip"].append(self.grip_sample(door, pads, q_wanted))
+                    cyc["grip"].append(self.grip_sample(door, pads, q_wanted, target))
                 if slipped:
                     stop = "slip"
                     break
@@ -1886,10 +1886,10 @@ class ExpertRun:
             rec["around_edge"] = "out"
         rec["fraction_end"] = round(door_open_fraction(door, self.door_q(door)), 4)
 
-    def grip_sample(self, door, pads, q_wanted):
+    def grip_sample(self, door, pads, q_wanted, target=None):
         """[wanted q, door q, pad offset from the bar (``pad_bar_offset``), finger opening, what each
-        finger touches, the rest of the robot's contacts, what the door touches] of the hand on the
-        door now."""
+        finger touches, the rest of the robot's contacts, what the door touches, {"track": the hand's
+        [position, rotation] error from ``target``, or None}] of the hand on the door now."""
         obs = self.world.observe()
         q = self.door_q(door)
         out = [round(float(q_wanted), 4), round(q, 4), pad_bar_offset(door, q, obs["eef"], pads)]
@@ -1909,6 +1909,11 @@ class ExpertRun:
                 out.append(touch(door["joint"]))
             except Exception as exc:   # keep the sample, say why the door was not read
                 out.append(f"{type(exc).__name__}: {exc}"[:120])
+        track = None
+        if target is not None:
+            pos, rot = pose_error(obs["eef"], target)
+            track = [round(float(pos), 4), round(float(rot), 4)]
+        out.append({"track": track})
         return out
 
     def around_edge(self, door, q, side, order):
