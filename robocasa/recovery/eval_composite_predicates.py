@@ -288,6 +288,8 @@ _TASK_PREDICATE_DESCRIPTION_OVERRIDES = {
         "bread_in_basket": "Move bread to basket.",
         "basket_on_dining_counter": "Move basket to dining counter.",
         "gripper_released": "Release basket.",
+        "bread_grasped": "The gripper holds the bread.",
+        "basket_grasped": "The gripper holds the basket.",
     },
     "ArrangeTea": {
         "kettle_on_tray": "Move kettle to tray.",
@@ -311,6 +313,8 @@ _TASK_PREDICATE_DESCRIPTION_OVERRIDES = {
         "drawer_open": "Open drawer.",
         "correct_tool_grasped": "Pick correct tool.",
         "correct_tool_on_cutting_board": "Move correct tool to cutting board.",
+        "correct_tool_present_on_board": "The selected tool is on the board.",
+        "wrong_tool_grasped": "The gripper holds the other tool.",
         "wrong_tool_not_on_cutting_board": "Remove wrong tool.",
         "gripper_released": "Release object.",
     },
@@ -2119,7 +2123,28 @@ def _far(env, *obj_names, **kwargs):
 
 
 def _grasped(env, obj_name):
-    return _safe(False, lambda: _OU().check_obj_grasped(env, obj_name))
+    """True when opposing gripper finger pads grasp ``obj_name``.
+
+    Uses Robosuite's ``env._check_grasp(gripper=..., object_geoms=...)``
+    (matching ``robocasa/utils/subtask_labeling/``) instead of
+    ``OU.check_obj_grasped(..., threshold=0.035)``, which misses wide objects
+    (e.g., bread loaves) and false-positives on incidental closed-gripper touch.
+    """
+
+    def _eval():
+        if hasattr(env, "_check_grasp") and hasattr(env, "robots") and hasattr(env, "objects"):
+            robot = env.robots[0]
+            gripper = (
+                robot.gripper["right"]
+                if isinstance(robot.gripper, dict) and "right" in robot.gripper
+                else robot.gripper
+            )
+            obj = env.objects[obj_name]
+            geoms = getattr(obj, "contact_geoms", obj)
+            return bool(env._check_grasp(gripper=gripper, object_geoms=geoms))
+        return bool(_OU().check_obj_grasped(env, obj_name))
+
+    return _safe(False, _eval)
 
 
 def _is_open(env, fixture):
@@ -2481,6 +2506,8 @@ def _arrange_bread_basket(env):
             _on_fixture(env, "basket", env.dining_table), stage="placement"
         ),
         "gripper_released": _p(_far(env, "basket"), stage="release"),
+        "bread_grasped": _p(_grasped(env, "bread"), stage="transient"),
+        "basket_grasped": _p(_grasped(env, "basket"), stage="transient"),
     }
 
 
@@ -2525,20 +2552,18 @@ def _cutting_tool_selection(env):
     peeler_on_board = _in(env, "peeler", "food_container")
     knife_on_board = _in(env, "knife", "food_container")
     correct_tool = env._CUTTING_MAP[env.food]
-    correct_tool_chosen = (
-        knife_on_board and not peeler_on_board
-        if correct_tool == "knife"
-        else peeler_on_board and not knife_on_board
-    )
+    if correct_tool == "knife":
+        selected_present, other_present, other_tool = knife_on_board, peeler_on_board, "peeler"
+    else:
+        selected_present, other_present, other_tool = peeler_on_board, knife_on_board, "knife"
     return {
         "drawer_open": _p(_is_open(env, env.drawer), stage="precondition"),
         "correct_tool_grasped": _p(_grasped(env, correct_tool), stage="transient"),
-        "correct_tool_on_cutting_board": _p(correct_tool_chosen, stage="placement"),
-        "wrong_tool_not_on_cutting_board": _p(
-            (not peeler_on_board) if correct_tool == "knife" else (not knife_on_board),
-            stage="placement",
-        ),
+        "correct_tool_on_cutting_board": _p(selected_present and not other_present, stage="placement"),
+        "wrong_tool_not_on_cutting_board": _p(not other_present, stage="placement"),
         "gripper_released": _p(_far(env, "food_container"), stage="release"),
+        "correct_tool_present_on_board": _p(selected_present, required=False, stage="placement"),
+        "wrong_tool_grasped": _p(_grasped(env, other_tool), stage="transient"),
     }
 
 
