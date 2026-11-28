@@ -259,6 +259,16 @@ Ran `PILOT_GPUS="0" bash scripts/run_xr1_recovery_pilot_6tasks.sh --smoke` (`2` 
   5. **Precondition note:** `fridge_open` fired cleanly on all 4 fridge episodes, whereas `drawer_open` / `cabinet_open` remained `False` even on successful `DeliverStraw`, `CuttingToolSelection`, `SetUpCuttingStation`, and `ArrangeBreadBasket` runs.
 - **Decision:** Gate passed — launched the **full 6-task pilot** (`NUM_ROLLOUTS=20`/task = 120 rollouts, `seed = 2800007`, `video_frame_stride = 2`, 1 GPU on `tsubame`).
 
+### 6.6 6-task oracle & Test-2 analyzer verification on smoke data (28 November 2026)
+
+Built and verified [`scripts/xr1_lead_time/analyze_recovery_pilot6.py`](../scripts/xr1_lead_time/analyze_recovery_pilot6.py) (with unit tests in [`tests/test_long_horizon_pilot6_analyzer.py`](../tests/test_long_horizon_pilot6_analyzer.py); **41/41** long-horizon tests passing in 0.33 s). The analyzer evaluates strictly causal 6-arm episode-level calibrated oracles (`global_timer` → `task_timer` → `stage_clock` → `clocks_release_timer` → `clocks_loss` → `full_physical`), inventories multi-decision self-corrections and candidate Test-2 matched pairs, and exports `summary.json`, `rollouts.csv`, and `events.jsonl`.
+
+End-to-end smoke check on `xr1_pilot6_smoke_meta` (12 rollouts: 9S/3F; output [`outputs/long_horizon_failure_detection/xr1_pilot6_smoke_analysis/summary.json`](../outputs/long_horizon_failure_detection/xr1_pilot6_smoke_analysis/summary.json), SHA-256 `40d7866e153864c4326dc22aca452823d4b4caa98f0ad8e2021ee2c499c80e37`):
+
+- **Clean placement delays (`n = 13`):** median **1.0 step** (0.05 s), p90 **2.8 steps**, max **7 steps** (0.35 s).
+- **Test-2 yield (smoke):** **1/9 successes (11.1%)** showed a multi-decision self-correction (`MakeIceLemonade d285494e`, `place_ice`, confirmed at step 1,600, restored at 2,016, **26 XR-1 decisions** before recovery); **3/3 failures** produced persistent/retry-failed physical mistakes (`matched_test2_pairs = 0` only because `MakeIceLemonade` had 2S/0F in the 2-rollout smoke).
+- **Early multi-object insight vs. Section 4's local control:** Even on this descriptive 12-rollout smoke (`small_sample_empirical` calibration mode; not yet split-conformal), `full_physical` differed from `clocks_release_timer` on **6/12 episodes** and warned earlier on **3/3 failures** (+24.1 pp / +33.1 s). Unlike the single-object tasks in Section 4 (`CuttingToolSelection`, `GarnishPancake`), on multi-object tasks (`ArrangeBreadBasket`, `MakeIceLemonade`, `SetUpCuttingStation`) the episode continues long after Object 1 is released—so a blind release timer accumulates huge age on successful runs, whereas destination-verified missed placement stops immediately when Object 1 lands. This will be tested properly under split-conformal calibration once the 120-rollout run completes.
+
 ---
 
 ## 7. Artifact index and next experiments
@@ -278,6 +288,7 @@ Ran `PILOT_GPUS="0" bash scripts/run_xr1_recovery_pilot_6tasks.sh --smoke` (`2` 
 | Visual inspection contact sheets | `outputs/long_horizon_failure_detection/xr1_recovery_recording_PNL4QPfz_inspection/*.png` | 4 contact sheets (Section 6.2) |
 | Synchronized XR-1 smoke run (6 tasks) | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_pilot6_smoke_20261128_135824` | Commit `4b3666de`; 12/12 verified (9S/3F); metadata `e4d123da...` |
 | 6-task pilot launcher & verifier | `scripts/run_xr1_recovery_pilot_6tasks.sh`, `scripts/xr1_lead_time/verify_recovery_recording.py` | 34/34 unit tests pass; full 120-rollout run launched |
+| 6-task oracle & Test-2 analyzer | `scripts/xr1_lead_time/analyze_recovery_pilot6.py`, `outputs/long_horizon_failure_detection/xr1_pilot6_smoke_analysis/summary.json` | 41/41 tests pass; smoke summary `40d7866e...` |
 
 ### Recommended next steps (in order)
 
