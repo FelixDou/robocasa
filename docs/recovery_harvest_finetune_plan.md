@@ -1862,6 +1862,35 @@ choice open, the code fixes it as follows:
   offset from the bar (depth out of the door from the bar's axis, across the
   bar, along the bar), the finger opening, and the bodies each finger
   touches. The run is ArrangeBreadBasket only.
+
+  *Grip traces (commit b5a869e, `transfer_grip1`, 28 November 2026).*
+  ArrangeBreadBasket only, 20 resets, 0 errors. The run repeats
+  `transfer_door4` step for step (the same 279 cabinet pulls, cabinet_open
+  3/20), now with the grip logged.
+  - *Missed grasps.* 121 of the 279 pulls closed the fingers on nothing. In
+    54 of them the hand stopped 5 cm or more from its grasp target. 41 came
+    to a partly open door that the approach pushed away from the fingers. These cabinets are wall cabinets above the counter.
+    The scripted door stage never moves the torso, so the hand reaches up to
+    the handle from whatever height the base was left at.
+  - *Lost grips.* 158 pulls closed on the bar (both fingers touching its
+    handle). In the 124 of them that ended at `slip`, the door followed for a
+    while (median 0.09 rad), then stopped while the hand went on along the
+    arc, and the bar was pulled out of the fingers. The hand tracked its arc
+    throughout, so the door met resistance it could not pass. What it met is
+    not logged. In the recording of seed 710008, the forearm rises to the
+    handle from below, in front of the doors.
+
+  *Amendment (28 November 2026, before the tenth transfer run).* The base
+  stands as far below the handle as the source's did.
+  - `source_stance` also returns the source base's height above its handle
+    when the source closed on it.
+  - Before each grasp, the torso moves the base to this handle's height plus
+    that offset, the hand held still relative to the base (at most 200 steps,
+    stopping after 10 steps without 2 mm of progress). Logged per pull as
+    `torso`: `dz` (the height change wanted), `left` and `steps`. On a robot
+    whose torso the probe could not move, nothing changes (`steps` 0).
+  - Each grip sample also lists the rest of the robot's contacts (not the
+    fingers'), to see what stops a held door.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
