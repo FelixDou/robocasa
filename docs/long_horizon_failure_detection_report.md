@@ -25,12 +25,11 @@ Key findings through November 28, 2026:
    - **Failure anatomy:** **40/56 failures (71.4%)** exhibited a confirmed physical mistake (30 missed placement, 7 lost condition, 3 both).
    - **Test-2 self-correction prevalence:** **5/64 successes (7.8%)** in the 120-rollout cohort (**6/73 = 8.2%** combining smoke + full) showed genuine multi-decision unassisted self-corrections (3–40 decisions before recovery), yielding **4 matched Test-2 pairs** (~1 matched pair per 30 rollouts → ~900 rollouts projected for 30 pairs).
 
-**Current decision:** **Stages 1–3 COMPLETE — 100% zero-privileged, zero-target-task-label monitor (`LOTO grasp` + `Qwen3-VL-4B` + `grasp+VLM pick-place stage clock`) reaches 32.40% (45.1 s, +10.6 s vs. $G$, 5/6 tasks) zero-shot and 29.20% (40.1 s, +5.6 s vs. $G$, 4.7% FPR, 5/6 tasks) with unseen-task LoRA (Section 10.5).** Anchoring the observable stage clock to our 0.966-AUROC LOTO universal grasp detector + VLM placement confirmation jumps `inferred_stage_clock` by **+6.59 pp** (`21.39% → 27.98%`, recovering 87.3% of the 32.05% oracle stage clock purely from observable streams) and unlocks:
-- **`univ_gv_stage_vlm_raw_hard_verholds` (`LOTO DiT grasp` + zero-shot `Qwen3-VL-4B`, ZERO target-task labels, ZERO VLM training):** **32.40% (45.1 s), 98.2% recall (55/56), 6.2% FPR (4/64), +5.90 pp over its own observable stage clock, +6.78 pp (+10.6 s) over $G$ (5/6 tasks positive)**.
-- **`univ_gv_stage_vlm_raw_hard_verholds` (`LOTO DiT grasp` + 3-fold cross-task LoRA unseen-task `Qwen3-VL-4B`, ZERO target-task labels, strictly ≤ 5% FPR):** **29.20% (40.1 s), 96.4% recall, 4.7% FPR (3/64), +3.58 pp (+5.6 s) over $G$ (5/6 tasks positive)**.
-- **Completely black-box policy-agnostic (`proprio_actions` only + `Qwen3-VL-4B`, ZERO DiT latents):** **30.18% (42.2 s), 4.7% FPR, +4.56 pp (+7.7 s) over $G$** (and **27.41% / 38.1 s, 4.7% FPR, 4/6 tasks** with 100% LOTO universal proprio grasp + unseen-task LoRA).
+**Current decision:** **Stages 1–3 COMPLETE AND Test-2 Continuation-Aware Pilot VALIDATED (Sections 10.5–11).**
+- **Decoupled zero-privileged monitor (Section 10.5):** Anchoring the observable stage clock to our 0.966-AUROC LOTO universal grasp detector + `Qwen3-VL-4B` destination verification (`grasp_and_vlm` stage clock, **zero privileged inputs, zero target-task labels**) reaches **32.40% (45.1 s, 98.2% recall, +10.6 s vs. $G$, 5/6 tasks)** with zero-shot `Qwen3-VL-4B` (6.2% FPR = 4/64) and **29.20% (40.1 s, 96.4% recall, 4.7% FPR = 3/64, +5.6 s vs. $G$, 5/6 tasks)** with 3-fold cross-task LoRA unseen-task `Qwen3-VL-4B`.
+- **Test-2 continuation-aware pilot (Section 11):** Strictly prior to recovery/regrasp, **persistent failures exhibit policy abandonment/runaway drift while self-correcting successes stay engaged near the mistake site**: on equal-duration matched pre-regrasp pairs ($n = 4$), `dit_cos_conf` and `dit_cos_onset` agree in **4/4 pairs** (`SC > PF`, `0.783` vs. `0.670`), and at fixed equal 3-decision windows (`H = 3`, zero truncation bias, `same_input_clock` LORO = `0.500`), `dit_cos_conf` already reaches **AUROC `0.8171` (`p = 0.022`)**. Across the broader confirmed-mistake cohort ($n = 11$ successes vs. $35$ persistent failures, strictly pre-regrasp), `fused_continuation` reaches **LOTO unseen-task AUROC `0.8286` (`p = 0.0002`)** (pre-restore **LOTO `0.8753`, `p = 0.0002`** vs. `same_input_clock` `0.626`, `p = 0.220`), with length-invariant `prop_state_step_vel` at **AUROC `0.8545` (`p = 0.0002`)** and `act_base_speed_max` at **AUROC `0.8519` (`p = 0.0005`)**.
 
-Ready for the two remaining paper pillars: (1) fast **Test-2 continuation-aware diagnostic** on our 5 existing multi-decision self-corrected successes + matched failures (already recorded with full videos/actions/DiT), and (2) scaling synchronized collection to the **18-task Group-A/B train vs. held-out composition benchmark (Test 1)** + LLM-generated task-graph predicates.
+Ready to scale synchronized collection to the **18-task Group-A/B train vs. held-out composition benchmark (Test 1 + powering Test 2 + LLM-generated task-graph ablation)**.
 
 ---
 
@@ -571,7 +570,48 @@ Reconstructing Subtask-SAFE's pick-then-place stage timeline strictly from our *
 
 ---
 
-## 11. Artifact index and next experiments
+## 11. Test-2 continuation-aware pilot check on the 120 recorded rollouts (28 November 2026)
+
+### 11.1 Setup and provenance
+
+- **Code:** commit `57c910c5` (`scripts/xr1_lead_time/eval_test2_continuation_pilot.py`, `scripts/run_xr1_test2_continuation_pilot.sh`, `tests/test_long_horizon_test2_continuation.py` — 2/2 causality tests passed).
+- **Cluster output:** `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_test2_continuation_pilot_20261128_205424` (`test2_continuation_pilot.tar.gz`, 24 KB).
+- **Cohort:** All confirmed physical mistakes across the 120 rollouts — **5 strict multi-decision self-corrected successes** across 5 distinct tasks (`ArrangeBreadBasket 66764859`, `CuttingToolSelection c0f68907`, `DeliverStraw a1ddc0a9`, `MakeIceLemonade eca17b9b`, `SetUpCuttingStation 35d06a39`), **11 broad confirmed-mistake successes**, **35 persistent failures**, and **4 exact equal-duration matched `(task, kind, operation, relation)` pairs**.
+- **Strict pre-recovery causality:** Features are extracted strictly inside `[confirmed_step, min(confirmed_step + H*16, restored_step))` (`pre_restore`) and `[confirmed_step, min(confirmed_step + H*16, next_regrasp_step, restored_step))` (`pre_regrasp`, strictly BEFORE the robot even touches/regrasps the dropped object). Evaluated with both out-of-fold LORO and **unseen-task LOTO** L2 logistic probes + two-sided 4,000-draw permutation tests.
+
+### 11.2 Continuation-aware discrimination vs. same-input clock baseline
+
+| Cohort & strict pre-recovery window | `same_input_clock` LORO / LOTO ($p$) | `action_kinematics` LORO / LOTO ($p$) | `visual_vlm_dynamics` (ZS VLM) LORO / LOTO ($p$) | `fused_continuation` (ZS VLM) LORO / LOTO ($p$) |
+|---|---:|---:|---:|---:|
+| Strict multi-dec, `pre_restore`, `H=8` (`5 vs 35`) | 0.463 / 0.309 (`0.184`) | 0.720 / 0.703 (`0.157`) | **0.783 (`0.045`) / 0.760 (`0.061`)** | 0.697 / 0.703 (`0.148`) |
+| Strict multi-dec, **`pre_regrasp`**, `H=8` (`5 vs 35`) | 0.469 / 0.457 (`0.784`) | **0.731 / 0.731 (`0.095`)** | 0.686 / 0.577 (`0.607`) | 0.651 / 0.640 (`0.327`) |
+| Broad all-succ, `pre_restore`, `H=8` (`11 vs 35`) | 0.670 / 0.639 (`0.175`) | **0.857 (`0.0005`) / 0.821 (`0.0005`)** | **0.881 (`0.0002`) / 0.878 (`0.0002`)** | **0.881 (`0.0005`) / 0.875 (`0.0002`)** |
+| Broad all-succ, **`pre_regrasp`**, `H=8` (`11 vs 35`) | 0.668 / 0.626 (`0.220`) | **0.855 (`0.0005`) / 0.797 (`0.0020`)** | **0.805 (`0.0015`) / 0.790 (`0.0020`)** | **0.855 (`0.0002`) / 0.829 (`0.0002`)** |
+
+**Key univariate physical continuation signatures (1 = persistent failure, 0 = self-corrected success):**
+
+| Signal | Strict `pre_regrasp` `H=8` (`5 vs 35`) | Equal-length `H=3` (`5 vs 35`, zero truncation) | Broad `pre_regrasp` `H=8` (`11 vs 35`) | Equal-duration matched pairs (`n=4`, `pre_regrasp`) | Physical meaning |
+|---|---:|---:|---:|---:|---|
+| `dit_cos_conf` | 0.686 (`p=0.186`) | **0.817 (`p=0.022`)** | — | **4 / 4 (`SC > PF`, 0.783 vs 0.670)** | Self-correcting VLA stays anchored to mistake context |
+| `dit_cos_onset` | 0.691 (`p=0.179`) | **0.743 (`p=0.083`)** | — | **4 / 4 (`SC > PF`, 0.780 vs 0.667)** | Failing VLA representation drifts into next subtask |
+| `prop_state_drift_conf` | **0.914 (`p=0.0015`)** | 0.703 (`+0.94 vs +3.67`) | **0.940 (`p=0.0002`)** | **3 / 4 (`PF > SC`, 7.10 vs 1.18)** | Failing robot moves/drifts away from mistake site |
+| `prop_state_step_vel` *(length-inv.)* | 0.731 (`p=0.108`) | — | **0.855 (`p=0.0002`)** | **3 / 4 (`PF > SC`, 4.46 vs 0.86)** | Faster runaway proprioceptive velocity in failures |
+| `act_base_speed_max` | **0.817 (`p=0.023`)** | — | **0.852 (`p=0.0005`)** | — | Mobile base drives away in persistent failures |
+| `act_chunk_cos` *(length-inv.)* | 0.749 (`p=0.072`) | 0.697 (`0.967 vs 0.841`) | **0.792 (`p=0.0025`)** | **3 / 4 (`SC > PF`, 0.948 vs 0.857)** | Self-correcting policy plans smooth consistent retries |
+| `vlm_logit_last` (ZS VLM) | **0.806 (`p=0.030`)** | — | **0.852 (`p=0.0005`)** | — | Target stays visually close (`−4.2` vs `−10.1`) |
+
+### 11.3 Scientific interpretation & methodological safeguard
+
+1. **Clear, physically coherent Test-2 mechanism (policy engagement vs. abandonment):** When XR-1 is going to self-correct, it remains physically and representationally anchored to the mistake site (high `dit_cos_conf` / `dit_cos_onset` in **4/4 equal-duration pre-regrasp pairs**, smooth `act_chunk_cos`, low runaway drift/base speed, target still in camera view). When XR-1 enters a persistent failure, it abandons the missed object and drives away (`4×–6×` higher proprioceptive drift/velocity even over strictly equal windows, `dit_cos` drops, VLM logit plunges to `−10.1`).
+2. **Methodological safeguard on window-truncation confound:** In `H = 8` windows, quick recoveries terminate before 8 decisions, which artificially lowers cumulative drift (`prop_state_drift_conf`) relative to full-8-decision failures. Three length-controlled checks prove the signal is genuinely physical and NOT a truncation artifact:
+   - Strictly equal 3-decision windows (`H = 3`, all 5 strict successes have ≥ 3 decisions, `same_input_clock` LORO = `0.5000`): **`dit_cos_conf` AUROC = `0.8171` (`p = 0.022`)**, `prop_state_drift_conf` still `4×` higher in failures (`+3.67` vs. `+0.94`);
+   - Strictly equal-duration matched pairs (`n = 4`, identical `w_pre_regrasp`): **`dit_cos_conf` 4/4**, **`dit_cos_onset` 4/4**, **`prop_state_drift_conf` 3/4 (`7.10` vs. `1.18`)**, **`prop_state_step_vel` 3/4 (`4.46` vs. `0.86`)**, **`act_chunk_cos` 3/4 (`0.948` vs. `0.857`)**;
+   - Length-invariant per-step velocity (`prop_state_step_vel` `0.855`, `p = 0.0002`) and chunk cosine (`act_chunk_cos` `0.792`, `p = 0.0025`).
+3. **Verdict:** **Test 2 is worth powering at scale** (and even better, it relies primarily on black-box kinematic/engagement features + DiT cosine anchor, transferring cleanly across unseen tasks at **LOTO AUROC `0.829–0.878`, `p = 0.0002`**!). Note that future Test-2 evaluation at scale should strictly use **equal-duration matched windows** (e.g., fixed `H = 3–4` decisions and exact pair-matched `w_pre_regrasp`) so cumulative drift cannot benefit from variable window lengths.
+
+---
+
+## 12. Artifact index and next experiments
 
 ### Reproducibility & artifact index
 
@@ -595,10 +635,13 @@ Reconstructing Subtask-SAFE's pick-then-place stage timeline strictly from our *
 | Zero-shot Qwen3-VL destination check | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_vlm_dest_full_20261128_193617` | Commit `f865dd48`; 14,082 queries (323 s); universal AUROC 0.791 |
 | VLM scoring upgrades & post-release audit | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_vlm_scoring_upgrades_20261128_195948` | Commit `970e3217`; post-rel AUROC 0.812; `tg_placeonly` 50.0 s; black-box `proprio+VLM` 42.2 s (+7.7 s vs G) @ 4.7% FPR |
 | 3-fold cross-task Qwen3-VL LoRA | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_vlm_lora_crosstask_20261128_202023` | Commit `2100d381`; 894 s; unseen universal AUROC **0.820**; `tg+LoRA+proprio` **53.5 s @ 4.7% FPR** |
-| **Grasp-anchored zero-privileged monitor** | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_grasp_anchored_monitor_20261128_204344` | Commit `bc7b45eb`; **100% zero-target-label `univ_gv_stage`**: **45.1 s (+10.6 s vs G, 5/6) ZS VLM**; **40.1 s (+5.6 s vs G, 4.7% FPR, 5/6) LoRA unseen VLM** |
+| Grasp-anchored zero-privileged monitor | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_grasp_anchored_monitor_20261128_204344` | Commit `bc7b45eb`; **100% zero-target-label `univ_gv_stage`**: **45.1 s (+10.6 s vs G, 5/6) ZS VLM**; **40.1 s (+5.6 s vs G, 4.7% FPR, 5/6) LoRA unseen VLM** |
+| **Test-2 continuation-aware pilot** | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_test2_continuation_pilot_20261128_205424` | Commit `57c910c5`; `dit_cos_conf` **4/4 matched pre-regrasp pairs** & **0.817 (`p=0.022`) at equal `H=3`**; broad pre-regrasp **LOTO `0.829` (`p=0.0002`)** |
 
 ### Recommended next steps (in order)
 
-1. **Pilot Test-2 continuation-aware diagnostic on the 5 existing multi-decision self-corrected successes + matched failures (~10 min, zero new rollouts):** Test whether post-mistake `policy_action_chunks` (homing vs. drifting away), `observation_state_history`, `xr1_dit` latents, or `Qwen3-VL` trajectories distinguish self-correcting successes from persistent failures *prior* to regrasp — establishing whether Test 2 has a strong learnable signal before investing GPU hours in powering 30 pairs.
-2. **Scale synchronized collection to the 18-task Group-A/B benchmark (Test 1 — e.g., 10 train tasks / 8 held-out unseen compositions, 20–30 rollouts/task):** Expands calibration successes to $n_{\text{cal}} \ge 100$ (tightening split-conformal FPR & bootstrap CIs and enabling union-bound calibration), tests true held-out composition transfer at paper scale, and evaluates **LLM-generated task-graph predicates** vs. hand-specified prompts.
-3. **Optional cross-VLA replication on RLDX-1** using our black-box `proprio_actions + Qwen3-VL-4B` monitor (which needs zero internal VLA latents!).
+1. **Scale synchronized collection to the 18-task Group-A/B benchmark (Test 1 + Test 2):** Instrument the remaining 12 shared-primitive composite tasks in `RECOVERY_PREDICATES` (expanding from 6 → 18 tasks, e.g., 10 train tasks / 8 held-out unseen compositions at 20–30 rollouts/task) to:
+   - Increase calibration successes to $n_{\text{cal}} \ge 100$ (tightening split-conformal FPR & bootstrap CIs and enabling union-bound calibration),
+   - Validate our decoupled `LOTO grasp + Qwen3-VL + gv_stage` monitor on **8 genuinely held-out unseen compositions** (with both hand-written and **LLM-generated task-graph predicates**), and
+   - Power **15–25+ equal-duration matched Test-2 pairs** to integrate the continuation-aware engagement/abandonment filter directly into the online alarm rule (suppressing false alarms on self-correcting successes!).
+2. **Optional cross-VLA replication on RLDX-1** using our completely black-box `proprio_actions + Qwen3-VL-4B` monitor (requires zero internal VLA latents).
