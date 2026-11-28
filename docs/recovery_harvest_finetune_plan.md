@@ -1820,6 +1820,48 @@ choice open, the code fixes it as follows:
   - Logged per pull as `stance_plan`: `source_reach`, `needed`, `planned`,
     and for a planned stance `planned_reach` and `stance` (x, y, yaw in the
     closed handle's frame).
+
+  *Pretrain transfer, planned stances (commit c16af51, `transfer_door4`,
+  28 November 2026).* GarnishPancake and ArrangeBreadBasket only, 40 resets,
+  0 errors.
+
+  | Stage | transfer_door3 | transfer_door4 |
+  |---|---|---|
+  | fridge_open | 14/20 | 14/20 (0.70, passes) |
+  | cabinet_open | 4/20 | 3/20 |
+  | pancake_on_plate | 14/14 | 14/14 |
+  | plate_on_table | 14/14 | 14/14 |
+  | strawberry_on_pancake | 1/14 | 0/14 |
+  | bread_in_basket | 0/4 | 0/3 |
+
+  - The planner replaced the source's stance on 278 of 279 cabinet pulls: from
+    the source's stance no cabinet pull could take one step inside the 0.05 m margin (source reach
+    0). On fridges it replaced it on 122 of 137 pulls. The base drove to the
+    stance on 123 cabinet pulls and was already there on 115; on 41 the
+    stance was blocked (`goal_blocked`: the planner does not check the
+    base's footprint against the kitchen) and the base stayed put. Fridges:
+    86 drove, 27 already there, 22 blocked.
+  - Cabinet pulls ending at `reach` fell from 171 of 272 to 33 of 279, but 236
+    now end at `slip` (8 at `goal`), and the pulls still gain nothing on
+    average (−0.02 rad). The arm can now follow the arc; the bar does not stay
+    in the hand.
+  - *Slips.* 135 of the 236 cabinet slips followed a grasp within 1 cm of its
+    target. At the slip, 212 had no finger contact at all and the pads were
+    0.08–0.20 m from the bar (median 0.12): the bar had left the fingers. In
+    the recording of ArrangeBreadBasket seed 710008, the fingers close around
+    the right door's bar, the door follows for about 0.1 rad, then the bar
+    slides out between the fingers along the pull. Every cycle on that door
+    repeats this (five pulls, 0.0 to 0.08 of its range).
+  - strawberry_on_pancake ended at the step cap in 13 of its 14 failures,
+    bread_in_basket in 2 of 3. Not yet inspected.
+
+  *Diagnostic (28 November 2026, before the ninth transfer run).* Before
+  changing the grasp, each pull logs its grip, as `grip`: right after the
+  fingers close, after each of the first 10 pull steps, and at the slip.
+  Each sample holds the wanted and actual door angle, the pad midpoint's
+  offset from the bar (depth out of the door from the bar's axis, across the
+  bar, along the bar), the finger opening, and the bodies each finger
+  touches. The run is ArrangeBreadBasket only.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

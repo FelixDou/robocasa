@@ -1806,6 +1806,22 @@ class ScriptedDoorTest(unittest.TestCase):
         outer, inner, _ = er.door_edge_route(right, math.pi / 2, [1.0, 0.4, 0.8])
         np.testing.assert_allclose(outer[:2], [1.0 + er.DOOR_EDGE_SIDE, edge], atol=1e-9)
 
+    def test_the_pads_offset_from_the_bar_is_split_into_depth_across_and_along(self):
+        door = front_door((0.0, 0.0), 0.4)                    # bar at (0.4, 0.04, 0.8), vertical, out is +y
+        eef = np.eye(4)
+        eef[:3, 3] = [0.4 + 0.02, 0.04 + 0.01, 0.8 + 0.05]
+        np.testing.assert_allclose(er.pad_bar_offset(door, 0.0, eef, (0.0, 0.0, 0.0)), [0.01, -0.02, 0.05], atol=1e-9)
+        np.testing.assert_allclose(er.pad_bar_offset(door, 0.0, eef, (0.0, -0.03, 0.0)), [-0.02, -0.02, 0.05], atol=1e-9)
+
+    def test_each_pull_logs_the_grip_after_closing_and_on_its_first_steps(self):
+        world, out = self.run_doors([front_door((0.0, 0.0), 0.4)])
+        self.assertTrue(out["stage_completed"])
+        cyc = out["phases"][0]["doors"][0]["cycles"][0]
+        self.assertGreaterEqual(len(cyc["grip"]), 2)
+        self.assertLessEqual(len(cyc["grip"]), er.DOOR_GRIP_TRACE + 1)
+        q_wanted, q, offset = cyc["grip"][0]
+        self.assertLess(max(abs(v) for v in offset[:2]), 0.03)   # closed on the bar
+
     def test_the_hand_goes_around_the_first_open_door_to_the_second(self):
         left = front_door((0.0, 0.0), 0.4, joint="left")
         right = front_door((1.0, 0.0), 0.4, hinge="right", joint="right")
