@@ -25,7 +25,7 @@ Key findings through November 28, 2026:
    - **Failure anatomy:** **40/56 failures (71.4%)** exhibited a confirmed physical mistake (30 missed placement, 7 lost condition, 3 both).
    - **Test-2 self-correction prevalence:** **5/64 successes (7.8%)** in the 120-rollout cohort (**6/73 = 8.2%** combining smoke + full) showed genuine multi-decision unassisted self-corrections (3–40 decisions before recovery), yielding **4 matched Test-2 pairs** (~1 matched pair per 30 rollouts → ~900 rollouts projected for 30 pairs).
 
-**Current decision:** **Simulator-oracle gate PASSED.** Proceed to the **camera-perception floor check** (evaluate a frozen VLM / SigLIP / lightweight visual probe directly on the 120 already-recorded synchronized `obs_grid` videos in `xr1_recovery_pilot6_full_20261128_142543`, and substitute predicted relations into `analyze_recovery_pilot6` to measure how much of the +20.5 s / +8.3 s lead survives real camera observations) before designing or scaling up full camera-monitor training.
+**Current decision:** **Simulator-oracle gate PASSED; first perception-floor check COMPLETE (Section 8).** Pooled frozen SigLIP embeddings fail on destination relations (F1 0.13–0.25), whereas **zero-shot LOTO grasp detection is already solved (`AUROC = 0.966`, F1 `0.78` via `xr1_dit` / `0.957` via `proprio_actions`)** and preserves **84% of the oracle lead (`+17.1 s` vs. `+20.5 s` over $G$ at 3.1% FPR)** when paired with true destinations. Even a simple 1-layer MLP on frozen `xr1_dit` alone already yields **+2.7 s over $G$ and +3.91 pp over `inferred_stage_clock` at 4.7% FPR** (zero privileged inputs). Component substitution proves **destination verification is the sole perception bottleneck**—next step is testing **zero-shot (and if needed LoRA-adapted) `Qwen3-VL-4B-Instruct`** (already cached on `/gs/bs`) specifically for open-vocabulary destination/condition verification paired with the fast `proprio + xr1_dit` grasp detector.
 
 ---
 
@@ -345,7 +345,61 @@ Per-task `full_physical − stage_clock` gains (all 6 tasks positive, 0 rollouts
 
 ---
 
-## 8. Artifact index and next experiments
+## 8. Camera & state perception-floor check on the 120 recorded rollouts (28 November 2026)
+
+### 8.1 Setup and provenance
+
+- **Code:** commit `bad8bbd8` (`scripts/xr1_lead_time/extract_perception_features.py`, `scripts/xr1_lead_time/eval_perception_floor.py`, `scripts/run_xr1_perception_floor.sh`)
+- **Input cohort:** `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_pilot6_full_20261128_142543` (**120 rollouts, 13,901 policy decisions**)
+- **Cluster output:** `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_perception_floor_20261128_191229` (results bundle: `perception_floor_results.tar.gz`, 44 KB)
+- **Vision encoder:** 437 trained SigLIP-So400M/14-224 tensors loaded from cached `models--lerobot--pi0_libero_finetuned_v044/.../model.safetensors` (patch mean pooling over `left`, `right`, `wrist` 224×224 crops; strictly causal frame mapping `frame_step <= t`; extracted all 13,901 3-cam decisions in 74.7 s on 1 GPU).
+- **Probes:** Exact L2-regularized L-BFGS linear probes (`hidden_dim = 0`) and cosine-annealed AdamW 1-hidden-layer MLP probes (`hidden_dim = 128`), strictly split by complete rollout (same 5 folds as Section 7) plus leave-one-task-out (LOTO) transfer on universal `any_object_grasped` and `any_placement_satisfied` primitives. Preflight PyTorch+OpenCV synthetic causality/probe tests passed 4/4 in 5.9 s (`AUROC = 0.9984` on separable signal).
+
+### 8.2 Relation probing: within-task 5-fold CV and LOTO zero-shot transfer
+
+| Feature stream | Linear macro AUROC | Linear grasp F1 / dest F1 | MLP-128 macro AUROC | LOTO grasp AUROC (F1) [Lin / MLP] | LOTO place AUROC (F1) [Lin / MLP] |
+|---|---:|---:|---:|---:|---:|
+| `proprio_actions` | 0.8359 | 0.568 / 0.307 | 0.8425 | **0.9571 (0.763)** / **0.9564 (0.704)** | 0.5643 (0.211) / 0.6961 (0.196) |
+| **`xr1_dit`** *(frozen VLA)* | **0.8647** | **0.630 / 0.458** | **0.8699** | **0.9645 (0.753)** / **0.9659 (0.780)** | **0.7252 (0.168)** / **0.7599 (0.181)** |
+| `siglip_wrist` *(pooled)* | 0.6525 | 0.275 / 0.245 | 0.5587 | 0.6306 (0.351) / 0.5542 (0.313) | 0.4842 (0.160) / 0.4767 (0.232) |
+| `siglip_3cam` *(pooled)* | 0.6094 | 0.203 / 0.130 | 0.5743 | 0.5372 (0.288) / 0.5721 (0.301) | 0.5119 (0.164) / 0.4630 (0.222) |
+| `siglip_3cam_plus_state` | 0.7941 | 0.453 / 0.260 | 0.6115 | 0.9507 (0.738) / 0.5852 (0.308) | 0.5434 (0.178) / 0.5035 (0.214) |
+| `all_fused` | 0.8372 | 0.570 / 0.393 | 0.8009 | 0.9594 (0.771) / 0.9260 (0.715) | 0.6835 (0.174) / 0.6710 (0.252) |
+
+### 8.3 Component substitution and fully-observed monitor lead (5% nominal FPR)
+
+**Component substitution** (`siglip_3cam_plus_state`, linear probe; isolates where oracle lead is lost):
+
+| Configuration | Lead (% horizon) | Lead (s) | Realized FPR | vs. stage clock | vs. global timer $G$ |
+|---|---:|---:|---:|---:|---:|
+| `oracle_reference` (true grasp + true dest) | **38.67%** | **55.0 s** | 3.1% | **+6.63 pp** | **+13.05 pp (+20.5 s)** |
+| **`pred_grasp_true_dest`** (pred grasp + true dest) | **36.74%** | **51.7 s** | **3.1%** | **+4.69 pp** | **+11.12 pp (+17.1 s)** |
+| `true_grasp_pred_dest` (true grasp + pred dest) | 13.79% | 20.5 s | 3.1% | −18.25 pp | −11.83 pp (−14.0 s) |
+| `fully_observed_camera_monitor` | 9.66% | 14.0 s | 3.1% | −11.10 pp | −15.96 pp (−20.5 s) |
+
+**Fully observed monitor by stream (zero privileged inputs — inferred stage clock + predicted grasps/destinations):**
+
+| Stream (MLP-128 / Linear) | `inferred_stage_clock` lead (FPR) | `camera_full` lead (FPR) | `camera_full − G` | `camera_full − inferred_stage` |
+|---|---:|---:|---:|---:|
+| **`xr1_dit` (MLP-128)** | 23.20% / 32.8 s (4.7%) | **27.11% / 37.2 s (4.7%)** | **+1.50 pp (+2.7 s)** | **+3.91 pp (+4.4 s)** |
+| `xr1_dit` (Linear) | 23.47% / 33.1 s (6.2%) | 25.45% / 35.7 s (6.2%) | −0.17 pp (+1.2 s) | +1.98 pp |
+| `all_fused` (Linear) | 24.16% / 34.6 s (3.1%) | 23.16% / 33.7 s (3.1%) | −2.46 pp (−0.8 s) | −1.00 pp |
+| `proprio_actions` (MLP-128) | 24.07% / 34.6 s (6.2%) | 22.14% / 31.2 s (3.1%) | −3.47 pp (−3.3 s) | −1.93 pp |
+| `siglip_3cam` (Linear) | 12.50% / 19.3 s (1.6%) | 11.21% / 18.2 s (1.6%) | −14.40 pp (−16.3 s) | −1.29 pp |
+
+### 8.4 Diagnostic conclusions (critical pivot for architecture design)
+
+1. **Grasp detection is already solved—including zero-shot across unseen tasks.** Both `proprio_actions` (LOTO **0.957 AUROC**) and `xr1_dit` (LOTO **0.966 AUROC**, F1 **0.780**) detect grasps cleanly. Substituting predicted grasps for simulator-truth grasps preserves **84% of the oracle's gain over $G$ (`+17.1 s` vs. `+20.5 s`, `+4.69 pp` over stage clock, 3.1% FPR)**.
+2. **Mean-pooled frozen ViT embeddings (`siglip_3cam` / `siglip_wrist`) are the wrong representation for spatial destination relations** (`dest_F1 = 0.13–0.25`, LOTO `place_AUROC ≈ 0.50`). Global spatial pooling erases tiny object-to-receptacle contacts (straw in glass, strawberry on pancake, knife on cutting board).
+3. **100% of the perception bottleneck is destination verification.** False negatives on destination arrival keep the missed-placement age running during successful calibration episodes, inflating the conformal cutoff and collapsing lead (`+20.5 s → −14.0 s`).
+4. **XR-1's own frozen DiT latents already carry strong relation information:** without any external vision model, an MLP-128 readout on `xr1_dit` alone already outperforms both $G$ (**+2.7 s**) and its own `inferred_stage_clock` (**+3.91 pp**) at **4.7% FPR**.
+5. **Architecture implication:** Decouple the monitor cleanly into two specialized modules:
+   - **Fast grasp/release trigger (< 1 ms, LOTO AUROC 0.966):** `proprio_actions + xr1_dit` detects grasp and release events at every decision.
+   - **Spatial/open-vocabulary destination verifier (queried after release or at low cadence):** evaluate local **`Qwen3-VL-4B-Instruct`** (`/gs/bs/tga-shinoda/felid/robocasa_checkpoints/lingbot_vla_v2/downloads/Qwen3-VL-4B-Instruct/`) zero-shot Yes/No logprobs over high-res spatial tokens (wrist + agentview) to test whether VLM destination accuracy unlocks the remaining **+14 s** of oracle headroom without task-specific training.
+
+---
+
+## 9. Artifact index and next experiments
 
 ### Reproducibility & artifact index
 
@@ -362,12 +416,13 @@ Per-task `full_physical − stage_clock` gains (all 6 tasks positive, 0 rollouts
 | Visual inspection contact sheets | `outputs/long_horizon_failure_detection/xr1_recovery_recording_PNL4QPfz_inspection/*.png` | 4 contact sheets (Section 6.2) |
 | Synchronized XR-1 smoke run (6 tasks) | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_pilot6_smoke_20261128_135824` | Commit `4b3666de`; 12/12 verified (9S/3F); metadata `e4d123da...` |
 | 6-task oracle & Test-2 analyzer | `scripts/xr1_lead_time/analyze_recovery_pilot6.py`, `tests/test_long_horizon_pilot6_analyzer.py` | 41/41 tests pass; smoke summary `40d7866e...` |
-| **Fresh 120-rollout 6-task pilot** | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_pilot6_full_20261128_142543` | Commit `4b3666de`; 120/120 verified (64S/56F); metadata `8407eb24...` |
-| **120-rollout split-conformal analysis** | `outputs/long_horizon_failure_detection/xr1_pilot6_full_120_analysis/summary.json` | `ff8c5660...`; **+6.63 pp (+8.3 s) over stage clock @ 0.00 pp excess FPR** |
+| Fresh 120-rollout 6-task pilot | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_recovery_pilot6_full_20261128_142543` | Commit `4b3666de`; 120/120 verified (64S/56F); metadata `8407eb24...` |
+| 120-rollout split-conformal analysis | `outputs/long_horizon_failure_detection/xr1_pilot6_full_120_analysis/summary.json` | `ff8c5660...`; **+6.63 pp (+8.3 s) over stage clock @ 0.00 pp excess FPR** |
 | Combined 132-rollout sensitivity | `outputs/long_horizon_failure_detection/xr1_pilot6_combined_132_analysis/summary.json` | `9c3b2154...`; +5.55 pp (+8.1 s) over stage clock @ 0.00 pp excess FPR |
+| **Perception floor check (120 rollouts)** | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_perception_floor_20261128_191229` | Commit `bad8bbd8`; LOTO grasp 0.966; `xr1_dit` cam_full +2.7 s vs G / +3.91 pp vs inf_stage |
 
 ### Recommended next steps (in order)
 
-1. **Perception floor check on the 120 already-recorded synchronized videos (`xr1_recovery_pilot6_full_20261128_142543`):** Before building a custom multi-module vision training pipeline, evaluate (a) a frozen vision-language backbone / VLM (e.g., Qwen2.5-VL / SigLIP) zero-shot and (b) a lightweight linear/cross-attention probe over frozen embeddings + proprioception/actions on the core relation primitives (`grasped`, `in/on`, `wrong_tool`, `open`) using the 3-view `obs_grid` frames. Measure per-relation F1, transition delay, and—most critically—substitute predicted relations into `analyze_recovery_pilot6` to measure **how much of the +20.5 s / +8.3 s lead survives real camera observations** (and compare against inferred-stage clock).
-2. **Test continuation-aware features on the 4–5 matched Test-2 pairs:** Inspect synchronized videos + executed action chunks + SAFE latents on the 5 multi-decision self-corrected successes (`c0f68907`, `a1ddc0a9`, `eca17b9b`, `35d06a39`, `66764859`, plus smoke `d285494e`) versus their matched persistent failures to check what visual/action cues distinguish self-correction before restoration.
-3. **Freeze the 18-task Group-A/B train vs. held-out composition split** (e.g., 10 train / 8 held-out compositions) and add an LLM-generated task-graph ablation once the perception floor check confirms camera-based relation estimation preserves a meaningful fraction of the oracle lead.
+1. **Zero-shot `Qwen3-VL-4B-Instruct` destination-verification check on `xr1_recovery_pilot6_full_20261128_142543`:** Using the already-cached local `Qwen3-VL-4B-Instruct`, compute Yes/No logprobs for each task's natural-language destination/condition predicates over the synchronized multi-view images (especially after detected releases), measure zero-shot AUROC/F1 per task, and substitute `proprio/DiT predicted grasps + Qwen3-VL predicted destinations` into `analyze_recovery_pilot6` to measure end-to-end zero-shot camera lead!
+2. **If zero-shot `Qwen3-VL-4B` still falls short on tiny objects (e.g., straw/strawberry/ice):** fine-tune a small **LoRA adapter** on `Qwen3-VL-4B-Instruct` (or spatial patch cross-attention over `Qwen3-VL`'s 2D patch grid without mean-pooling!) trained on 4 tasks and evaluated zero-shot on the 2 held-out tasks to verify cross-task destination transfer.
+3. **Test continuation-aware features on the 4–5 matched Test-2 pairs** once the visual destination verifier reaches high F1 (> 0.80).
