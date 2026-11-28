@@ -1660,6 +1660,47 @@ choice open, the code fixes it as follows:
   that at least one of 10 attempts completes the stage is 1 − (1 − p)^10.
   That is 0.99 at p = 0.35 (kettle), 0.89 at 0.2 (croissant), 0.40 at 0.05
   (doors) and 0 at 0 (tools, jam).
+
+  *Every checked door (found 28 November 2026, from the same run).*
+  RoboCasa's `is_open` is true only when *every* door joint it checks is at
+  0.90 of its range or more. For a fridge it checks the fridge doors, not the
+  freezer's. The executor opened one door per stage: the one matched to the
+  source's. In 26 of the 39 open stages the fixture here has two doors (left
+  and right), so the stage could not complete. In seed 710008 the matched
+  door was the freezer's.
+
+  *Amendment: scripted door opening (28 November 2026, before the fifth
+  transfer run).* It is used in transfer and Gate R; self-replay is
+  unchanged. It applies to the open stages (`fridge_open`, `cabinet_open`).
+  `cabinet_closed` keeps the door-angle replay.
+  - *Which doors.* All the joints the predicate checks (for a fridge, the
+    fridge doors), nearest first. A door already at 0.90 is skipped.
+  - *Stance.* The base drives to where the source base stood relative to its
+    own handle when it closed on it (x, y, yaw in the handle's frame). This
+    is carried to this door's handle at its current angle. When the two doors
+    are hinged on opposite sides, the stance is mirrored across the handle's
+    normal.
+  - *Grasp.* `SimWorld.doors` now reads each door's handle bar: of the door's
+    handle geoms, the one standing farthest out, with its long axis and half
+    length (MuJoCo's geom bounding box). The hand comes in from 10 cm in
+    front of the bar, against the door's outward normal, with the fingers
+    closing across the bar. On a mostly vertical bar the pads go to the
+    point nearest the hand's current height, 3 cm inside the bar's ends;
+    otherwise to the bar's centre. The gripper closes for 15 steps.
+  - *Pull.* The closed hand is carried with the door along this door's own
+    arc (or slide), in 0.04 rad (0.01 m) steps, toward 0.97 of the range.
+  - *A pull stops* at the goal; at `reach`, when the next hand pose would
+    come within 0.25 m of the robot base, or farther than 0.85 m from it,
+    horizontally; or at `slip`, when the door trails the wanted angle by
+    more than 0.25 rad (0.05 m).
+  - *Release and repeat.* The hand opens, backs off 10 cm along the door's
+    normal, and the cycle (stance, grasp, pull) repeats from the door's new
+    angle, up to 3 cycles per door. Each cycle adds 900 steps to the expert
+    cap.
+  - *Logs.* `door_script: true` and, per door, its joint, radius,
+    `fraction_start`, `fraction_end`, and per cycle the stance (`align`,
+    `mirror`), `grasp_error`, `stop`, `q_wanted` and `q_end`. A stop logs
+    `door_fractions_at_stop`.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

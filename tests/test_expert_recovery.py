@@ -1619,6 +1619,161 @@ class DoorAngleReplayTest(unittest.TestCase):
 GRASP_AXES = ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0), (0.0, 0.0, 0.0))   # FakeWorld: z out of the hand, fingers on y
 
 
+def front_door(anchor, radius, *, hinge="left", joint="door", height=0.8):
+    """A door in a fixture whose front faces +y: hinged at ``anchor``, its handle ``radius`` to the
+    right (left hinge) or left (right hinge), opening toward +y. The handle bar is vertical, 30 cm
+    long, 4 cm in front of the door."""
+    a = np.array([anchor[0], anchor[1], height])
+    sign = 1.0 if hinge == "left" else -1.0
+    handle = a + np.array([sign * radius, 0.0, 0.0])
+    door = er.door_reference(joint, "hinge", handle, a, [0.0, 0.0, sign], 0.0, (0.0, 1.6))
+    door.update(joint=joint, qpos_adr=joint, bar={"centre": list(handle + [0.0, 0.04, 0.0]),
+                                                 "axis": [0.0, 0.0, 1.0], "half_length": 0.15})
+    return door
+
+
+class DoorPullWorld(FakeWorld):
+    """FakeWorld with doors that follow a hand closed on their handle bar (pads within 2 cm), and
+    let go when it opens or drifts more than 5 cm from the grasp point. ``predicate``: all open."""
+
+    def __init__(self, doors, *, grip=True, **kw):
+        super().__init__(predicate=self.all_open, **kw)
+        self.door_list = doors
+        self.q = {d["qpos_adr"]: 0.0 for d in doors}
+        self.held_door, self.grip = None, grip
+
+    @staticmethod
+    def all_open(world):
+        return {"fridge_open": all(er.door_open_fraction(d, world.q[d["qpos_adr"]]) >= er.DOOR_OPEN_DONE
+                                   for d in world.door_list)}
+
+    def doors(self, fixture, predicate_joints=False):
+        return [{**d, "q": self.q[d["qpos_adr"]]} for d in self.door_list] if fixture == "fridge" else []
+
+    def joint_q(self, adr):
+        return self.q[adr]
+
+    def gripper_axes(self):
+        return tuple(np.array(v) for v in GRASP_AXES)
+
+    def step(self, a):
+        info = super().step(a)
+        hand = self.eef[:3, 3]
+        if self.gripper < 0.5:
+            self.held_door = None
+        elif self.held_door is None and self.grip:
+            for d in self.door_list:
+                centre, axis, half = er.door_bar(d, self.q[d["qpos_adr"]])
+                t = float(np.clip((hand - centre) @ axis, -half, half))
+                if np.linalg.norm(centre + t * axis - hand) < 0.02:
+                    local = er.inverse(er.door_motion(d, self.q[d["qpos_adr"]])) @ np.append(hand, 1.0)
+                    self.held_door = (d, local[:3])
+                    break
+        if self.held_door is not None:
+            d, local = self.held_door
+            anchor, u = np.asarray(d["anchor"]), np.asarray(d["axis"])
+            ang = lambda v: math.atan2(v[1], v[0])  # noqa: E731
+            lo, hi = d["range"]
+            q = float(np.clip(u[2] * (ang(hand - anchor) - ang(local - anchor)), lo, hi))
+            q = q - 2 * math.pi * round((q - self.q[d["qpos_adr"]]) / (2 * math.pi))
+            point = (er.door_motion(d, q) @ np.append(local, 1.0))[:3]
+            if np.linalg.norm(point - hand) > 0.05:
+                self.held_door = None
+            else:
+                self.q[d["qpos_adr"]] = q
+        predicates = self.predicate(self)
+        return {**info, "predicates": predicates}
+
+
+def door_open_demo(door, base_T, *, episode=0):
+    """A source that reaches the handle (frames 0-9), closes, and swings its door to 1.5 (10-29)."""
+    hand = er.pose([0.0, 0.0, 0.0], er.rot_z(math.pi) @ R_DOWN)
+    start = er.door_handle_frame(door, 0.0) @ er.pose([0.15, 0.0, 0.05], np.eye(3)) @ hand
+    goal = er.door_handle_frame(door, 0.0) @ hand
+    reach = [er.pose(start[:3, 3] + (goal[:3, 3] - start[:3, 3]) * s, goal[:3, :3]) for s in np.linspace(0, 1, 10)]
+    qs = [0.0] * 10 + list(np.linspace(0.0, 1.5, 20))
+    swing = [er.door_handle_frame(door, q) @ hand for q in qs[10:]]
+    n = len(qs)
+    return er.Source(task_name="GarnishPancake", episode=episode, predicate="fridge_open", target=None, start=0,
+                     end=n, steps=[er.SourceStep("OpenFridge", er.EXECUTE, 0, n)],
+                     eef=np.stack(reach + swing), base=np.stack([base_T] * n),
+                     gripper=np.array([0.0] * 10 + [1.0] * 20), door={**door, "q_track": qs, "q_track_start": 0})
+
+
+# The source stands 0.65 m in front of its left door's handle and 0.2 m away from the hinge, facing it.
+SOURCE_DOOR = front_door((0.0, 0.0), 0.4)
+SOURCE_BASE = world_pose(0.6, 0.65, 0.3, yaw=-math.pi / 2)
+
+
+class ScriptedDoorTest(unittest.TestCase):
+    def test_open_fraction_reads_like_robocasa_for_either_opening_direction(self):
+        door = SOURCE_DOOR
+        self.assertAlmostEqual(er.door_open_fraction(door, 0.8), 0.5)
+        self.assertAlmostEqual(er.door_goal_q(door, 0.9), 1.44)
+        neg = {**door, "range": [-1.6, 0.0], "open_sign": -1.0}
+        self.assertAlmostEqual(er.door_open_fraction(neg, -1.44), 0.9)
+        self.assertAlmostEqual(er.door_goal_q(neg, 0.9), -1.44)
+
+    def test_the_hand_comes_in_against_the_doors_normal_across_its_bar(self):
+        door = SOURCE_DOOR
+        grasp = er.handle_grasp(door, 0.0, *GRASP_AXES, R_DOWN, 1.5)
+        R = grasp[:3, :3]
+        np.testing.assert_allclose(R @ [0, 0, 1], [0, -1, 0], atol=1e-9)        # approach: into the door
+        self.assertAlmostEqual(float((R @ [0, 1, 0])[2]), 0.0)                  # fingers close horizontally
+        np.testing.assert_allclose(grasp[:3, 3], [0.4, 0.04, 0.8 + 0.15 - er.DOOR_BAR_MARGIN], atol=1e-9)
+        opened = er.handle_grasp(door, 0.5, *GRASP_AXES, R_DOWN, 0.8)
+        centre, _, _ = er.door_bar(door, 0.5)
+        np.testing.assert_allclose(opened[:3, 3], centre, atol=1e-9)             # the bar moved with the door
+        normal = er.door_handle_frame(door, 0.5)[:3, 0]
+        np.testing.assert_allclose(opened[:3, :3] @ [0, 0, 1], -normal, atol=1e-9)
+
+    def test_the_stance_is_mirrored_for_a_door_hinged_on_the_other_side(self):
+        rel = er.inverse(er.yaw_frame(er.door_handle_frame(SOURCE_DOOR, 0.0))) @ er.yaw_frame(SOURCE_BASE)
+        rel = (rel[0, 3], rel[1, 3], er.yaw_of(rel[:3, :3]))
+        same = er.door_stance(SOURCE_DOOR, 0.0, rel, False)
+        np.testing.assert_allclose(same[:2, 3], [0.6, 0.65], atol=1e-9)
+        right = front_door((1.2, 0.0), 0.4, hinge="right")
+        self.assertEqual((SOURCE_DOOR["side"], right["side"]), (1, -1))
+        mirrored = er.door_stance(right, 0.0, rel, True)
+        np.testing.assert_allclose(mirrored[:2, 3], [0.6, 0.65], atol=1e-9)   # away from this door's hinge too
+        self.assertAlmostEqual(abs(er.wrap(er.yaw_of(mirrored[:3, :3]) + math.pi / 2)), 0.0)
+
+    def run_doors(self, doors, *, grip=True, start=(0.5, 0.9, -math.pi / 2)):
+        demo = door_open_demo(SOURCE_DOOR, SOURCE_BASE)
+        world = DoorPullWorld(doors, grip=grip, mobile=start, eef_rel=(0.45, 0.0, 0.5))
+        run = er.ExpertRun(world, TRUE_GAINS, {demo.key: demo}, "fridge_open", cap=10 ** 6, budget=10 ** 7,
+                           scripted_door=True)
+        out = run.run([{"phase": "track", "source": list(demo.key), "step": 0, "kind": er.EXECUTE,
+                        "reference": ["door", "fridge"]}])
+        return world, out
+
+    def test_a_door_of_another_radius_is_pulled_open_on_its_own_arc(self):
+        door = front_door((0.1, 0.0), 0.55, joint="fridge_door")
+        world, out = self.run_doors([door])
+        self.assertTrue(out["stage_completed"], json.dumps(out, default=str)[:3000])
+        self.assertEqual(out["stop"], "stage")
+        self.assertGreaterEqual(er.door_open_fraction(door, world.q["fridge_door"]), er.DOOR_OPEN_DONE)
+
+    def test_both_doors_of_a_french_door_fridge_are_opened(self):
+        left = front_door((0.0, 0.0), 0.4, joint="left")
+        right = front_door((1.0, 0.0), 0.4, hinge="right", joint="right")
+        world, out = self.run_doors([left, right], start=(0.5, 0.9, -math.pi / 2))
+        self.assertTrue(out["stage_completed"], json.dumps(out["phases"], default=str)[:3000])
+        for d in (left, right):
+            self.assertGreaterEqual(er.door_open_fraction(d, world.q[d["qpos_adr"]]), er.DOOR_OPEN_DONE)
+
+    def test_a_door_that_does_not_follow_ends_each_cycle_as_a_slip(self):
+        door = front_door((0.1, 0.0), 0.55, joint="fridge_door")
+        world, out = self.run_doors([door], grip=False)
+        self.assertFalse(out["stage_completed"])
+        phase = out["phases"][0]
+        self.assertTrue(phase["door_script"])
+        cycles = phase["doors"][0]["cycles"]
+        self.assertEqual(len(cycles), er.DOOR_CYCLES)
+        self.assertEqual({c["stop"] for c in cycles}, {"slip"})
+        self.assertEqual(world.q["fridge_door"], 0.0)
+
+
 class GraspWorld(FakeWorld):
     """FakeWorld whose objects have bounding boxes (centre, half sizes in the object frame)."""
 
