@@ -1638,8 +1638,9 @@ class DoorPullWorld(FakeWorld):
     let go when it opens or drifts more than 5 cm from the grasp point. ``predicate``: all open.
     With ``shut``, a hand whose path crosses the leaf of an open door it does not hold shuts it."""
 
-    def __init__(self, doors, *, grip=True, knock=None, shut=False, **kw):
+    def __init__(self, doors, *, grip=True, knock=None, shut=False, rate=None, **kw):
         super().__init__(predicate=self.all_open, **kw)
+        self.rate, self.slips = rate, 0   # a held door turned faster than ``rate`` per step slips out
         self.door_list = doors
         self.q = {d["qpos_adr"]: 0.0 for d in doors}
         self.held_door, self.grip = None, grip
@@ -1709,6 +1710,9 @@ class DoorPullWorld(FakeWorld):
             point = (er.door_motion(d, q) @ np.append(local, 1.0))[:3]
             if np.linalg.norm(point - hand) > 0.05:
                 self.held_door = None
+            elif self.rate is not None and abs(q - self.q[d["qpos_adr"]]) > self.rate:
+                self.held_door = None
+                self.slips += 1
             else:
                 self.q[d["qpos_adr"]] = q
         predicates = self.predicate(self)
@@ -1803,9 +1807,10 @@ class ScriptedDoorTest(unittest.TestCase):
         self.assertEqual([(d["joint"], d["pass"]) for d in doors], [("left", 0), ("right", 0), ("left", 1)])
         self.assertGreater(doors[1]["cycles"][0]["fractions"]["left"], er.DOOR_OPEN_DONE)   # open before the knock
 
-    def run_doors(self, doors, *, grip=True, knock=None, shut=False, start=(0.5, 0.9, -math.pi / 2)):
+    def run_doors(self, doors, *, grip=True, knock=None, shut=False, rate=None, start=(0.5, 0.9, -math.pi / 2)):
         demo = door_open_demo(SOURCE_DOOR, SOURCE_BASE)
-        world = DoorPullWorld(doors, grip=grip, knock=knock, shut=shut, mobile=start, eef_rel=(0.45, 0.0, 0.5))
+        world = DoorPullWorld(doors, grip=grip, knock=knock, shut=shut, rate=rate, mobile=start,
+                              eef_rel=(0.45, 0.0, 0.5))
         run = er.ExpertRun(world, TRUE_GAINS, {demo.key: demo}, "fridge_open", cap=10 ** 6, budget=10 ** 7,
                            scripted_door=True)
         out = run.run([{"phase": "track", "source": list(demo.key), "step": 0, "kind": er.EXECUTE,
@@ -1860,6 +1865,18 @@ class ScriptedDoorTest(unittest.TestCase):
     def test_without_a_torso_the_base_height_is_left_alone(self):
         world, out = self.run_doors([front_door((0.0, 0.0), 0.4, height=1.1)])
         self.assertEqual(out["phases"][0]["doors"][0]["cycles"][0]["torso"]["steps"], 0)
+
+    def test_the_pull_turns_the_door_slowly_enough_to_keep_a_damped_door_in_hand(self):
+        world, out = self.run_doors([front_door((0.0, 0.0), 0.4)], rate=0.01)
+        self.assertTrue(out["stage_completed"], json.dumps(out["phases"], default=str)[:2000])
+        self.assertEqual(world.slips, 0)
+
+    def test_at_the_approach_speed_the_damped_door_slips_out_of_the_hand(self):
+        with mock.patch.object(er, "DOOR_PULL_ROT_STEP", er.APPROACH_ROT_STEP), \
+                mock.patch.object(er, "DOOR_PULL_POS_STEP", er.APPROACH_POS_STEP):
+            world, out = self.run_doors([front_door((0.0, 0.0), 0.4)], rate=0.01)
+        self.assertGreater(world.slips, 0)
+        self.assertFalse(out["stage_completed"])
 
     def test_the_hand_goes_around_the_first_open_door_to_the_second(self):
         left = front_door((0.0, 0.0), 0.4, joint="left")

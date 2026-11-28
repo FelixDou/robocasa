@@ -105,6 +105,8 @@ DOOR_PRE = 0.10               # m: the hand comes in from this far in front of t
 DOOR_BAR_MARGIN = 0.03        # m: the grasp stays this far inside a bar's ends
 DOOR_PULL_STEP = 0.04         # rad (hinge) between pull waypoints; DOOR_PULL_STEP_SLIDE m for a slide
 DOOR_PULL_STEP_SLIDE = 0.01
+DOOR_PULL_ROT_STEP = 0.006    # rad per control step the hand turns while pulling (about 0.12 rad/s at 20 Hz) ...
+DOOR_PULL_POS_STEP = 0.004    # ... and m it moves: slow enough that the hinge's damping does not pull the bar out
 DOOR_SLIP = 0.25              # rad (hinge) the door may trail the pull before it counts as slipped ...
 DOOR_SLIP_SLIDE = 0.05        # ... m for a slide
 DOOR_GRIP_TRACE = 10          # pull steps of each cycle whose grip is logged (and the last before a slip)
@@ -1419,9 +1421,9 @@ class ExpertRun:
         self.frame.update(obs, action, self.world.observe()["mobile"], self.gains, touching=bool(hit))
         return hit
 
-    def move_to(self, target, gripper, *, settle=True):
+    def move_to(self, target, gripper, *, settle=True, pos_step=APPROACH_POS_STEP, rot_step=APPROACH_ROT_STEP):
         obs = self.world.observe()
-        for waypoint in interpolate(obs["eef"], target):
+        for waypoint in interpolate(obs["eef"], target, pos_step, rot_step):
             obs = self.world.observe()
             self.act(arm_command(obs["base"], obs["eef"], waypoint, self.gains, gripper))
         if settle:
@@ -1856,7 +1858,7 @@ class ExpertRun:
                     break
                 q_wanted = q_next
                 self.progress["_target"] = target
-                self.move_to(target, GRIPPER_CLOSE)
+                self.move_to(target, GRIPPER_CLOSE, pos_step=DOOR_PULL_POS_STEP, rot_step=DOOR_PULL_ROT_STEP)
                 slipped = sign * (q_wanted - self.door_q(door)) > slip   # the door trails the hand
                 if len(cyc["grip"]) <= DOOR_GRIP_TRACE or slipped:
                     cyc["grip"].append(self.grip_sample(door, pads, q_wanted))
