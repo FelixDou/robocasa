@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -1627,21 +1628,43 @@ def front_door(anchor, radius, *, hinge="left", joint="door", height=0.8):
     sign = 1.0 if hinge == "left" else -1.0
     handle = a + np.array([sign * radius, 0.0, 0.0])
     door = er.door_reference(joint, "hinge", handle, a, [0.0, 0.0, sign], 0.0, (0.0, 1.6))
-    door.update(joint=joint, qpos_adr=joint, bar={"centre": list(handle + [0.0, 0.04, 0.0]),
+    door.update(joint=joint, qpos_adr=joint, width=radius + 0.05, bar={"centre": list(handle + [0.0, 0.04, 0.0]),
                                                  "axis": [0.0, 0.0, 1.0], "half_length": 0.15})
     return door
 
 
 class DoorPullWorld(FakeWorld):
     """FakeWorld with doors that follow a hand closed on their handle bar (pads within 2 cm), and
-    let go when it opens or drifts more than 5 cm from the grasp point. ``predicate``: all open."""
+    let go when it opens or drifts more than 5 cm from the grasp point. ``predicate``: all open.
+    With ``shut``, a hand whose path crosses the leaf of an open door it does not hold shuts it."""
 
-    def __init__(self, doors, *, grip=True, knock=None, **kw):
+    def __init__(self, doors, *, grip=True, knock=None, shut=False, **kw):
         super().__init__(predicate=self.all_open, **kw)
         self.door_list = doors
         self.q = {d["qpos_adr"]: 0.0 for d in doors}
         self.held_door, self.grip = None, grip
         self.knock = dict(knock or {})   # {door gripped: door it swings back to 0.3 rad, once}
+        self.shut, self.shut_doors, self.last_hand = shut, [], None
+
+    @staticmethod
+    def crosses(p0, p1, q0, q1):
+        """Whether the horizontal segments p0-p1 and q0-q1 cross."""
+        def turn(a, b, c):
+            return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+        return (turn(p0, p1, q0) * turn(p0, p1, q1) < 0) and (turn(q0, q1, p0) * turn(q0, q1, p1) < 0)
+
+    def shut_crossed(self, hand):
+        held = self.held_door[0]["qpos_adr"] if self.held_door is not None else None
+        for d in self.door_list:
+            adr = d["qpos_adr"]
+            if adr == held or abs(self.q[adr]) < 0.1:
+                continue
+            a = np.asarray(d["anchor"])
+            tip = er.door_handle_frame(d, self.q[adr])[:3, 3] - a
+            tip = a + tip / np.linalg.norm(tip[:2]) * d["width"]
+            if self.crosses(self.last_hand[:2], hand[:2], a[:2], tip[:2]):
+                self.q[adr] = 0.0
+                self.shut_doors.append(adr)
 
     @staticmethod
     def all_open(world):
@@ -1659,7 +1682,10 @@ class DoorPullWorld(FakeWorld):
 
     def step(self, a):
         info = super().step(a)
-        hand = self.eef[:3, 3]
+        hand = self.eef[:3, 3].copy()
+        if self.shut and self.last_hand is not None:
+            self.shut_crossed(hand)
+        self.last_hand = hand
         if self.gripper < 0.5:
             self.held_door = None
         elif self.held_door is None and self.grip:
@@ -1757,14 +1783,44 @@ class ScriptedDoorTest(unittest.TestCase):
         self.assertEqual([(d["joint"], d["pass"]) for d in doors], [("left", 0), ("right", 0), ("left", 1)])
         self.assertGreater(doors[1]["cycles"][0]["fractions"]["left"], er.DOOR_OPEN_DONE)   # open before the knock
 
-    def run_doors(self, doors, *, grip=True, knock=None, start=(0.5, 0.9, -math.pi / 2)):
+    def run_doors(self, doors, *, grip=True, knock=None, shut=False, start=(0.5, 0.9, -math.pi / 2)):
         demo = door_open_demo(SOURCE_DOOR, SOURCE_BASE)
-        world = DoorPullWorld(doors, grip=grip, knock=knock, mobile=start, eef_rel=(0.45, 0.0, 0.5))
+        world = DoorPullWorld(doors, grip=grip, knock=knock, shut=shut, mobile=start, eef_rel=(0.45, 0.0, 0.5))
         run = er.ExpertRun(world, TRUE_GAINS, {demo.key: demo}, "fridge_open", cap=10 ** 6, budget=10 ** 7,
                            scripted_door=True)
         out = run.run([{"phase": "track", "source": list(demo.key), "step": 0, "kind": er.EXECUTE,
                         "reference": ["door", "fridge"]}])
         return world, out
+
+    def test_the_route_around_an_open_door_passes_beyond_its_free_edge(self):
+        door = SOURCE_DOOR                                   # width 0.45, opens toward +y
+        self.assertIsNone(er.door_edge_route(door, 0.2, [0.0, 0.5, 0.8]))
+        outer, inner, side = er.door_edge_route(door, math.pi / 2, [-0.14, 0.4, 0.9])
+        edge = 0.45 + er.DOOR_EDGE_CLEAR
+        np.testing.assert_allclose(outer, [-er.DOOR_EDGE_SIDE, edge, 0.9], atol=1e-9)   # the handle's side
+        np.testing.assert_allclose(inner, [er.DOOR_EDGE_SIDE, edge, 0.9], atol=1e-9)
+        self.assertEqual(side, 1)
+        self.assertEqual(er.door_edge_route(door, math.pi / 2, [0.3, 0.2, 0.9])[2], -1)
+        self.assertEqual(er.door_edge_route(door, math.pi / 2, [0.0, 0.7, 0.9])[2], 0)
+        right = front_door((1.0, 0.0), 0.4, hinge="right")
+        outer, inner, _ = er.door_edge_route(right, math.pi / 2, [1.0, 0.4, 0.8])
+        np.testing.assert_allclose(outer[:2], [1.0 + er.DOOR_EDGE_SIDE, edge], atol=1e-9)
+
+    def test_the_hand_goes_around_the_first_open_door_to_the_second(self):
+        left = front_door((0.0, 0.0), 0.4, joint="left")
+        right = front_door((1.0, 0.0), 0.4, hinge="right", joint="right")
+        world, out = self.run_doors([left, right], shut=True)
+        self.assertEqual(world.shut_doors, [])
+        self.assertTrue(out["stage_completed"], json.dumps(out["phases"], default=str)[:3000])
+        doors = out["phases"][0]["doors"]
+        self.assertEqual(doors[0].get("around_edge"), "out")
+
+    def test_without_the_route_the_hand_shuts_the_first_door(self):
+        left = front_door((0.0, 0.0), 0.4, joint="left")
+        right = front_door((1.0, 0.0), 0.4, hinge="right", joint="right")
+        with mock.patch.object(er, "DOOR_EDGE_MIN", 10.0):
+            world, out = self.run_doors([left, right], shut=True)
+        self.assertNotEqual(world.shut_doors, [])
 
     def test_a_door_of_another_radius_is_pulled_open_on_its_own_arc(self):
         door = front_door((0.1, 0.0), 0.55, joint="fridge_door")

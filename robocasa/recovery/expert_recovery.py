@@ -111,6 +111,11 @@ DOOR_REACH_MIN = 0.25         # m: the pull stops when the hand would come this 
 DOOR_REACH_MAX = 0.85         # ... or this far from it (horizontal distance)
 DOOR_RETREAT = 0.10           # m: after a pull, the open hand backs off the handle along the door's normal
 DOOR_CYCLE_STEPS = 900        # steps each door cycle adds to the expert cap
+DOOR_EDGE_MIN = 0.35          # rad: a door opened at least this far is passed around its free edge ...
+DOOR_EDGE_CLEAR = 0.12        # ... this far beyond the edge (m) ...
+DOOR_EDGE_SIDE = 0.12         # ... and this far off the door's face on either side (m)
+DOOR_WIDTH_FALLBACK = 0.10    # m past the handle taken as the door's free edge when its width is unknown
+DOOR_EDGE_STEPS = 300         # steps a pass around a door's edge adds to the expert cap
 SELF_REPLAY_DEMOS, SELF_REPLAY_MIN = 20, 0.9
 TRANSFER_RESETS, TRANSFER_MIN = 20, 0.7
 TRANSFER_BASE_SEED = 710007   # fresh pretrain-split seeds 710007-710026; Phase A/B and Step 0 do not use them
@@ -726,6 +731,36 @@ def handle_grasp(door, q, approach, closing, pads, hand_R, height):
         options.append((float(np.linalg.norm(rotvec(R @ np.asarray(hand_R).T))), R))
     R = min(options, key=lambda x: x[0])[1]
     return pose(point - R @ np.asarray(pads, dtype=float), R)
+
+
+def door_edge_route(door, q, hand):
+    """Around the free edge of a hinged door opened to ``q``, at the hand's height: (outer, inner)
+    points ``DOOR_EDGE_CLEAR`` beyond the door's width, ``DOOR_EDGE_SIDE`` in front of its face
+    (the handle's side) and behind it, and the hand's side of the door: +1 in front, -1 behind,
+    0 beyond the edge. None for a slide, a door not swinging sideways, or one opened less than
+    ``DOOR_EDGE_MIN``.
+
+    A hand going from a door's handle to anywhere behind it (another door, or the inside of
+    the fixture) goes outer then inner, not straight through the door, which would push it shut.
+    """
+    u = np.asarray(door["axis"], dtype=float)
+    if door["type"] != "hinge" or abs(u[2]) < 0.7:
+        return None
+    if abs(float(q) - door_goal_q(door, 0.0)) < DOOR_EDGE_MIN:
+        return None
+    a = np.asarray(door["anchor"], dtype=float)
+    hand = np.asarray(hand, dtype=float)
+    frame = door_handle_frame(door, q)
+    n = frame[:3, 0] / max(np.linalg.norm(frame[:3, 0]), 1e-12)
+    r = frame[:3, 3] - a
+    r = r - (r @ u) * u
+    r = r / max(np.linalg.norm(r), 1e-12)
+    width = float(door.get("width") or door["radius"] + DOOR_WIDTH_FALLBACK)
+    foot = a + ((hand - a) @ u) * u
+    edge = foot + (width + DOOR_EDGE_CLEAR) * r
+    rel = hand - foot
+    side = 0 if rel @ r > width else (1 if rel @ n >= 0 else -1)
+    return edge + DOOR_EDGE_SIDE * n, edge - DOOR_EDGE_SIDE * n, side
 
 
 def door_stance(door, q, relative, mirror):
@@ -1661,6 +1696,9 @@ class ExpertRun:
             axes = getattr(self.world, "gripper_axes", None)
             approach, closing, pads = axes() if axes is not None else ((0, 0, 1), (0, 1, 0), (0, 0, 0))
             q0 = self.door_q(door)
+            if self.around_edge(door, q0, -1, (1, 0)):   # the hand is behind this open door
+                cyc["around_edge"] = "in"
+                obs = self.world.observe()
             grasp = handle_grasp(door, q0, approach, closing, pads, obs["eef"][:3, :3], obs["eef"][2, 3])
             out = door_handle_frame(door, q0)[:3, 0]
             pre = grasp.copy()
@@ -1716,7 +1754,25 @@ class ExpertRun:
             back[:3, 3] += DOOR_RETREAT * door_handle_frame(door, self.door_q(door))[:3, 0]
             self.progress["_target"] = back
             self.move_to(back, GRIPPER_OPEN)
+        if rec["cycles"] and self.around_edge(door, self.door_q(door), 1, (0, 1)):
+            rec["around_edge"] = "out"
         rec["fraction_end"] = round(door_open_fraction(door, self.door_q(door)), 4)
+
+    def around_edge(self, door, q, side, order):
+        """When the hand is on ``side`` of the door opened to ``q``, take it around the door's free
+        edge through the route's points in ``order`` (0 outer, 1 inner), keeping its orientation
+        and the gripper open. True if it went."""
+        eef = self.world.observe()["eef"]
+        route = door_edge_route(door, q, eef[:3, 3])
+        if route is None or route[2] != side:
+            return False
+        self.cap += DOOR_EDGE_STEPS
+        for i in order:
+            target = eef.copy()
+            target[:3, 3] = route[i]
+            self.progress["_target"] = target
+            self.move_to(target, GRIPPER_OPEN)
+        return True
 
     def door_sample(self, watch, i):
         """[frame, wanted joint value, actual joint value] of the door a door step swings."""
@@ -2392,6 +2448,7 @@ class SimWorld:
                                   model.jnt_range[j])
             door["handle_geoms"] = len(pts)
             door["bar"] = self._handle_bar(door, [g for g, body in handles if self._below(body, b, parent)])
+            door["width"] = self._door_width(door, b, parent)
             door["joint"], door["qpos_adr"] = name, int(model.jnt_qposadr[j])
             out.append(door)
         return out
@@ -2401,6 +2458,31 @@ class SimWorld:
         while body not in (ancestor, 0):
             body = int(parent[body])
         return body == ancestor
+
+    def _door_width(self, door, body, parent):
+        """How far the door's geoms (all below its joint's body) reach from its hinge axis,
+        horizontally: the radius its free edge sweeps. None for a slide or without geoms."""
+        if door["type"] != "hinge":
+            return None
+        sim = self.kitchen.sim
+        m = getattr(sim.model, "_model", sim.model)
+        data = sim.data
+        a, u = np.asarray(door["anchor"], dtype=float), np.asarray(door["axis"], dtype=float)
+        corners = np.array([[i, j, k] for i in (-1, 1) for j in (-1, 1) for k in (-1, 1)], dtype=float)
+        width = None
+        for g in range(int(m.ngeom)):
+            if not self._below(int(m.geom_bodyid[g]), body, parent):
+                continue
+            try:
+                aabb = np.asarray(m.geom_aabb[g], dtype=float)
+            except Exception:
+                return None
+            R = np.asarray(data.geom_xmat[g], dtype=float).reshape(3, 3)
+            pts = np.asarray(data.geom_xpos[g], dtype=float) + (aabb[:3] + corners * aabb[3:]) @ R.T - a
+            radial = pts - np.outer(pts @ u, u)
+            far = float(np.max(np.linalg.norm(radial, axis=1)))
+            width = far if width is None else max(width, far)
+        return width
 
     def _handle_bar(self, door, geoms):
         """The handle bar at the closed configuration: of the door's handle geoms, the one standing

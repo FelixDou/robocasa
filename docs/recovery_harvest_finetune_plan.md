@@ -1731,6 +1731,51 @@ choice open, the code fixes it as follows:
     and `door_ahead_steps`. A slip records `bar_distance` (from the pad
     midpoint to the bar) and `slip_contacts`. The stage records
     `fractions_start` and `fractions_end`.
+
+  *Pretrain transfer, two passes and five pulls (commit cddfe77, `transfer_door2`,
+  28 November 2026).* GarnishPancake and ArrangeBreadBasket only, 40 resets,
+  0 errors. fridge_open 4/20 (from 1/20), cabinet_open 1/20 (from 0/19).
+  - 38 door stages, 114 door visits (64 first pass, 50 second), 478 pulls.
+    Pulls ended at `reach` 243 times, at `slip` 193 times and at `goal` 38
+    times. 40 visits left their door at 0.90 or more.
+  - The 4 completed fridge stages are all single-door fridges (4 of 7). No
+    two-door fridge completed (0 of 12), yet in 9 of them every door stood at
+    0.90 or more at some point. Two-door cabinets: 0 of 14, 2 with every door
+    at 0.90 or more at some point. Single-door cabinets: 0 of 5.
+  - *Why opened doors close.* 34 times a door that was open fell by more than
+    0.3 of its range during a pull on *another* door; only 5 times during its
+    own pulls. In the recording of GarnishPancake seed 710007, the left door
+    reaches 0.97, the hand releases it and backs off, then moves straight to
+    the right door's handle. A door opened past about 90 degrees has its
+    handle face turned away from the other door, so that straight path runs
+    through the open door and pushes it shut (0.97 to 0.36). The same happens
+    when the hand comes back to an open door from behind it (ArrangeBreadBasket
+    seed 710008, a cabinet door from 0.74 to 0.03 during its own second-pass
+    pull).
+  - *Grasps.* 364 pulls began within 3 cm of the bar, 110 farther. The far
+    ones gained nothing on average (the hand blocked behind the other door, or
+    against the cabinet). Of the 109 slips after a good grasp, about 60 were
+    on a closed door that did not move at all; the hand ended 9–25 cm from
+    the bar, so the bar slid out of the fingers on the first steps of the pull.
+  - *Reach.* Several cabinet doors (seeds 710009, 710012, 710017, 710018) ended
+    every pull at `reach` with no gain: from the stance, the first pull pose is
+    already out of the arm's range.
+
+  *Amendment (28 November 2026, before the seventh transfer run).* The hand
+  goes around the free edge of an open door instead of through it.
+  - `SimWorld.doors` records each hinged door's `width`: how far its geoms reach
+    from the hinge axis, horizontally (MuJoCo's geom bounding boxes). Without
+    one, the handle radius plus 0.10 m.
+  - For a hinged door opened at least 0.35 rad, the route has two points at
+    the hand's height, 0.12 m beyond the door's width: one 0.12 m in front of
+    the door's face (the handle's side), one 0.12 m behind it.
+  - *Leaving a door.* After the last pull on a door, the open hand goes to the
+    front point, then the back point (logged `around_edge: "out"`).
+  - *Coming to a door.* After the stance, if the hand is behind this open door
+    and within its width, it goes to the back point, then the front point,
+    before the pre-grasp pose (logged per pull, `around_edge: "in"`).
+  - Each pass around an edge adds 300 steps to the expert cap. Slips from a
+    closed door and out-of-reach cabinet stances are not addressed yet.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
