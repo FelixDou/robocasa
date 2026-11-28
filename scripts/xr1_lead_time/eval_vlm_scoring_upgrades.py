@@ -701,10 +701,12 @@ def run_scoring_upgrades(
     tg_configs = [
         ("tg_vlm_raw_hard_allholds", "vlm_raw", "hard_binary", "all_holds", 0.70, 1.0),
         ("tg_vlm_raw_hard_placeonly", "vlm_raw", "hard_binary", "placement_only", 0.70, 1.0),
+        ("tg_vlm_raw_hard_verholds", "vlm_raw", "hard_binary", "verified_targets_only", 0.70, 1.0),
         ("tg_vlm_raw_rec90_placeonly", "vlm_raw_rec90", "hard_binary", "placement_only", 0.70, 1.0),
         ("tg_vlm_dpre_zs_placeonly", "vlm_dpre_zs", "hard_binary", "placement_only", 0.70, 1.0),
         ("tg_vlm_dpre_platt_placeonly", "vlm_dpre_platt", "hard_binary", "placement_only", 0.70, 1.0),
         ("tg_vlm_raw_soft_c070", "vlm_raw", "soft_evidence", "placement_only", 0.70, 1.0),
+        ("tg_vlm_raw_soft_verholds", "vlm_raw", "soft_evidence", "verified_targets_only", 0.70, 1.0),
         ("tg_vlm_raw_platt_soft_c070", "vlm_raw_platt", "soft_evidence", "placement_only", 0.70, 1.0),
         ("tg_vlm_dpre_zs_soft_c070", "vlm_dpre_zs", "soft_evidence", "placement_only", 0.70, 1.0),
         ("tg_vlm_dpre_platt_soft_c070", "vlm_dpre_platt", "soft_evidence", "placement_only", 0.70, 1.0),
@@ -734,7 +736,9 @@ def run_scoring_upgrades(
     hyb_configs = [
         ("hyb_raw_hard_allholds", "vlm_raw", "hard_binary", "all_holds", False, 0.70, 1.0),
         ("hyb_raw_hard_placeonly", "vlm_raw", "hard_binary", "placement_only", False, 0.70, 1.0),
+        ("hyb_raw_hard_verholds", "vlm_raw", "hard_binary", "verified_targets_only", False, 0.70, 1.0),
         ("hyb_raw_soft_c070", "vlm_raw", "soft_evidence", "placement_only", False, 0.70, 1.0),
+        ("hyb_raw_soft_verholds", "vlm_raw", "soft_evidence", "verified_targets_only", False, 0.70, 1.0),
         ("hyb_raw_platt_soft_c070", "vlm_raw_platt", "soft_evidence", "placement_only", False, 0.70, 1.0),
         ("hyb_dpre_zs_soft_c070", "vlm_dpre_zs", "soft_evidence", "placement_only", False, 0.70, 1.0),
         ("hyb_dpre_platt_soft_c070", "vlm_dpre_platt", "soft_evidence", "placement_only", False, 0.70, 1.0),
@@ -743,10 +747,13 @@ def run_scoring_upgrades(
         ("hyb_vlm_plus_state_oof_soft", "vlm_plus_state_oof", "soft_evidence", "placement_only", False, 0.70, 1.0),
         # TRUE ZERO-SHOT CROSS-TASK UNIVERSAL (LOTO universal grasp + zero target-task dest labels!)
         ("loto_univ_raw_hard_placeonly", "vlm_raw", "hard_binary", "placement_only", True, 0.70, 1.0),
+        ("loto_univ_raw_hard_verholds", "vlm_raw", "hard_binary", "verified_targets_only", True, 0.70, 1.0),
         ("loto_univ_raw_soft_c070", "vlm_raw", "soft_evidence", "placement_only", True, 0.70, 1.0),
+        ("loto_univ_raw_soft_verholds", "vlm_raw", "soft_evidence", "verified_targets_only", True, 0.70, 1.0),
         ("loto_univ_raw_platt_soft_c070", "vlm_raw_platt", "soft_evidence", "placement_only", True, 0.70, 1.0),
         ("loto_univ_dpre_zs_soft_c070", "vlm_dpre_zs", "soft_evidence", "placement_only", True, 0.70, 1.0),
         ("loto_univ_dpre_platt_soft_c070", "vlm_dpre_platt", "soft_evidence", "placement_only", True, 0.70, 1.0),
+        ("loto_univ_dpre_platt_soft_verholds", "vlm_dpre_platt", "soft_evidence", "verified_targets_only", True, 0.70, 1.0),
         ("loto_univ_dpre_platt_soft_c055_g2", "vlm_dpre_platt", "soft_evidence", "placement_only", True, 0.55, 2.0),
         ("loto_univ_vlm_plus_state_loto_soft", "vlm_plus_state_loto", "soft_evidence", "placement_only", True, 0.70, 1.0),
     ]
