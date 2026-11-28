@@ -25,7 +25,12 @@ Key findings through November 28, 2026:
    - **Failure anatomy:** **40/56 failures (71.4%)** exhibited a confirmed physical mistake (30 missed placement, 7 lost condition, 3 both).
    - **Test-2 self-correction prevalence:** **5/64 successes (7.8%)** in the 120-rollout cohort (**6/73 = 8.2%** combining smoke + full) showed genuine multi-decision unassisted self-corrections (3–40 decisions before recovery), yielding **4 matched Test-2 pairs** (~1 matched pair per 30 rollouts → ~900 rollouts projected for 30 pairs).
 
-**Current decision:** **3-fold cross-task LoRA on `Qwen3-VL-4B-Instruct` proves unseen-task visual calibration & lifts `true_grasp + LoRA VLM + proprio` to 53.5 s (within 1.5 s of the 55 s oracle), while isolating the final zero-privileged bottleneck to the inferred stage clock (Section 10).** Training a 0.34%-parameter rank-16 LoRA on 4 tasks and testing **strictly zero-shot on 2 held-out unseen tasks** (3 disjoint folds = all 120 rollouts) raises unseen-task universal `any_placement_satisfied` AUROC to **0.8197** (`dpre` macro **0.8288**; `bread_in_basket` **0.863**, `correct_tool` **0.867**, `knife` **0.875 / 0.949 post-rel**, `lemon` **0.913**, `straw` **0.919 post-rel**), eliminates the −8 No-bias across 7/9 unseen targets, and gives `tg_vlm_raw_hard_verholds` (**100% unseen-task VLM @ 0.5**) **34.41% (48.7 s) at 3.1% FPR, 96.4% recall, +8.80 pp (+14.2 s) over $G$, 95% CI `[+2.3, +15.7]` pp, 5/6 tasks positive** — and `true_grasp + unseen-task LoRA VLM + proprio` **37.35% (53.5 s) at 4.7% FPR (+5.31 pp over oracle `stage_clock`, +19.0 s over $G$)**. Comparing `true_stage` (`32.05%`) vs. `inferred_stage_clock` (`21.39–26.11%`) reveals why zero-privileged monitors still lose ~10 s: our naive `inferred_stage_clock` only latched on placement targets (leaving single-object tasks in `stage_0` for 99% of the rollout and ignoring our 0.966-AUROC LOTO grasp detector). Immediate next 20-second check: **grasp-anchored inferred stage clock** + **union-bound channel-separated split-conformal calibration** on both zero-shot and LoRA VLM scores.
+**Current decision:** **Stages 1–3 COMPLETE — 100% zero-privileged, zero-target-task-label monitor (`LOTO grasp` + `Qwen3-VL-4B` + `grasp+VLM pick-place stage clock`) reaches 32.40% (45.1 s, +10.6 s vs. $G$, 5/6 tasks) zero-shot and 29.20% (40.1 s, +5.6 s vs. $G$, 4.7% FPR, 5/6 tasks) with unseen-task LoRA (Section 10.5).** Anchoring the observable stage clock to our 0.966-AUROC LOTO universal grasp detector + VLM placement confirmation jumps `inferred_stage_clock` by **+6.59 pp** (`21.39% → 27.98%`, recovering 87.3% of the 32.05% oracle stage clock purely from observable streams) and unlocks:
+- **`univ_gv_stage_vlm_raw_hard_verholds` (`LOTO DiT grasp` + zero-shot `Qwen3-VL-4B`, ZERO target-task labels, ZERO VLM training):** **32.40% (45.1 s), 98.2% recall (55/56), 6.2% FPR (4/64), +5.90 pp over its own observable stage clock, +6.78 pp (+10.6 s) over $G$ (5/6 tasks positive)**.
+- **`univ_gv_stage_vlm_raw_hard_verholds` (`LOTO DiT grasp` + 3-fold cross-task LoRA unseen-task `Qwen3-VL-4B`, ZERO target-task labels, strictly ≤ 5% FPR):** **29.20% (40.1 s), 96.4% recall, 4.7% FPR (3/64), +3.58 pp (+5.6 s) over $G$ (5/6 tasks positive)**.
+- **Completely black-box policy-agnostic (`proprio_actions` only + `Qwen3-VL-4B`, ZERO DiT latents):** **30.18% (42.2 s), 4.7% FPR, +4.56 pp (+7.7 s) over $G$** (and **27.41% / 38.1 s, 4.7% FPR, 4/6 tasks** with 100% LOTO universal proprio grasp + unseen-task LoRA).
+
+Ready for the two remaining paper pillars: (1) fast **Test-2 continuation-aware diagnostic** on our 5 existing multi-decision self-corrected successes + matched failures (already recorded with full videos/actions/DiT), and (2) scaling synchronized collection to the **18-task Group-A/B train vs. held-out composition benchmark (Test 1)** + LLM-generated task-graph predicates.
 
 ---
 
@@ -540,6 +545,30 @@ Comparing `tg_vlm_raw_hard_verholds` (**34.41% / 48.7 s**, 95% CI `[+2.3, +15.7]
 - Yet replacing oracle `stage_clock` (`32.05%`) with our placement-only `inferred_stage_clock` (`21.39%`) dropped **−10.66 pp by itself** — because single-object tasks (`CuttingToolSelection`, `DeliverStraw`, `GarnishPancake`) only satisfy their single placement target near episode termination, leaving `inferred_stage_clock` stuck in `stage_0` for 99% of the rollout and completely blind to `no_sustained_grasp` failures (21.4% of failures!), while VLM stage-latch jitter inflated the pooled conformal cutoff for `full_physical`.
 - **Direct fix (zero new VLM inference):** Build a **grasp-anchored inferred stage clock** using our 0.966-AUROC LOTO universal grasp detector (`pre_first_grasp → post_first_grasp`, plus optional `grasp + VLM` pick-place stages) and evaluate both pooled and **union-bound channel-separated split-conformal calibration** ($\alpha/2 + \alpha/2 = 0.05$) on both base zero-shot and cross-task LoRA VLM scores.
 
+### 10.5 Grasp-anchored observable stage clock breakthrough (`xr1_grasp_anchored_monitor_20261128_204344`)
+
+- **Code:** commit `bc7b45eb` (`scripts/xr1_lead_time/eval_grasp_anchored_monitor.py`, `scripts/run_xr1_grasp_anchored_monitor.sh`, `tests/test_long_horizon_grasp_anchored.py` — 2/2 tests passed).
+- **Cluster output:** `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_grasp_anchored_monitor_20261128_204344` (`grasp_anchored_results.tar.gz`, 52 KB).
+
+Reconstructing Subtask-SAFE's pick-then-place stage timeline strictly from our **0.966-AUROC LOTO universal grasp detector** + **unseen-task `Qwen3-VL-4B` destination verification** (`grasp_and_vlm` stage clock, **zero privileged inputs, zero target-task labels**) immediately recovered the missing stage-clock headroom (`inferred_stage_clock` jumped `+5.93 pp` on base zero-shot VLM to `26.50%` and **`+6.59 pp` on unseen-task LoRA VLM to `27.98%`**, 87.3% of the `32.05%` simulator oracle stage clock):
+
+| Complete 6-task progression (120 rollouts, 5-fold split-conformal, 5% nominal FPR) | Privileged? | Target-task labels? | Stage lead | Full lead (% / s) | FPR | Recall | vs. stage | vs. $G$ (% / s) | Pos tasks |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `global_timer` ($G$) | None | Cal only | — | 25.62% / 34.5 s | 3.1% | 89.3% | — | 0.00 pp (0.0 s) | — |
+| `task_timer` ($P$) | None | Durations | — | 22.01% / 33.3 s | 4.7% | 94.6% | — | −3.61 pp (−1.2 s) | — |
+| `siglip_3cam` linear *(Sec 8)* | None | Within-task | 12.50% | 11.21% / 18.2 s | 1.6% | — | −1.29 pp | −14.40 pp (−16.3 s) | — |
+| `xr1_dit` MLP-128 alone *(Sec 8)* | None (DiT) | Within-task | 23.20% | 27.11% / 37.2 s | 4.7% | — | +3.91 pp | +1.50 pp (+2.7 s) | — |
+| `univ_no_stage` (`LOTO DiT` + ZS VLM, no stage clock) | **None** | **ZERO** | 22.00% | **28.76% / 40.2 s** | **4.7%** | 94.6% | **+6.76 pp** | **+3.14 pp (+5.7 s)** | 3/6 |
+| `univ_gv_stage` (`LOTO proprio` + LoRA unseen VLM) | **None (black-box)** | **ZERO** | 24.68% | **27.41% / 38.1 s** | **4.7%** | 92.9% | **+2.74 pp** | **+1.79 pp (+3.6 s)** | **4/6** |
+| `hyb_dpre_platt_verholds` (`proprio` + ZS VLM, *Sec 9.5*) | **None (black-box)** | 0 VLM labels | 24.70% | **30.18% / 42.2 s** | **4.7%** | 94.6% | **+5.49 pp** | **+4.56 pp (+7.7 s)** | **4/6** |
+| **`univ_gv_stage` (`LOTO DiT` + LoRA unseen VLM)** | **None** | **ZERO** | **27.98%** | **29.20% / 40.1 s** | **4.7%** | **96.4%** | +1.22 pp | **+3.58 pp (+5.6 s)** | **5/6** |
+| **`univ_gv_stage` (`LOTO DiT` + ZS `Qwen3-VL-4B`)** | **None** | **ZERO (0 VLM train!)** | **26.50%** | **32.40% / 45.1 s** | 6.2% *(4/64)* | **98.2%** | **+5.90 pp** | **+6.78 pp (+10.6 s)** | **5/6** |
+| `tg_vlm_raw_hard_verholds` (LoRA unseen VLM) | Grasp+stage | 0 VLM labels | 32.05% | **34.41% / 48.7 s** | **3.1%** | 96.4% | +2.37 pp | **+8.80 pp (+14.2 s)** | **5/6** |
+| `true_grasp + LoRA unseen VLM + proprio` | Grasp+stage | Grasp+proprio | 32.05% | **37.35% / 53.5 s** | 4.7% | 96.4% | +5.31 pp | **+11.74 pp (+19.0 s)** | — |
+| `oracle_reference` *(Sec 7)* | Full sim | — | 32.05% | **38.67% / 55.0 s** | **3.1%** | 98.2% | +6.63 pp | **+13.05 pp (+20.5 s)** | **6/6** |
+
+*(Methodological note on union-bound conformal at $\alpha/2 = 0.025$: with $n_{\text{cal}} = 34$ calibration successes per fold on the 6-task pilot, $\lceil (1 - 0.025)(34 + 1) \rceil = 35 > 34$ yields a vacuous `None` cutoff. Finite-sample union-bound calibration at $\alpha/2 = 0.025$ requires $n_{\text{cal}} \ge 39$, which will be met easily once scaled to the 18-task collection. Also note that with 64 successes, 1 episode = 1.56% FPR, so `3/64 = 4.7%` and `4/64 = 6.2%` differ by a single rollout.)*
+
 ---
 
 ## 11. Artifact index and next experiments
@@ -565,10 +594,11 @@ Comparing `tg_vlm_raw_hard_verholds` (**34.41% / 48.7 s**, 95% CI `[+2.3, +15.7]
 | Perception floor check (120 rollouts) | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_perception_floor_20261128_191229` | Commit `bad8bbd8`; LOTO grasp 0.966; `xr1_dit` cam_full +2.7 s vs G / +3.91 pp vs inf_stage |
 | Zero-shot Qwen3-VL destination check | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_vlm_dest_full_20261128_193617` | Commit `f865dd48`; 14,082 queries (323 s); universal AUROC 0.791 |
 | VLM scoring upgrades & post-release audit | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_vlm_scoring_upgrades_20261128_195948` | Commit `970e3217`; post-rel AUROC 0.812; `tg_placeonly` 50.0 s; black-box `proprio+VLM` 42.2 s (+7.7 s vs G) @ 4.7% FPR |
-| **3-fold cross-task Qwen3-VL LoRA** | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_vlm_lora_crosstask_20261128_202023` | Commit `2100d381`; 894 s; unseen universal AUROC **0.820** (`dpre` **0.829**); `tg+LoRA+proprio` **53.5 s @ 4.7% FPR**; `tg+LoRA@0.5` **48.7 s [+2.3,+15.7] pp (5/6) @ 3.1% FPR** |
+| 3-fold cross-task Qwen3-VL LoRA | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_vlm_lora_crosstask_20261128_202023` | Commit `2100d381`; 894 s; unseen universal AUROC **0.820**; `tg+LoRA+proprio` **53.5 s @ 4.7% FPR** |
+| **Grasp-anchored zero-privileged monitor** | `/gs/bs/tga-shinoda/felid/robocasa_rollouts/safe/xr1_grasp_anchored_monitor_20261128_204344` | Commit `bc7b45eb`; **100% zero-target-label `univ_gv_stage`**: **45.1 s (+10.6 s vs G, 5/6) ZS VLM**; **40.1 s (+5.6 s vs G, 4.7% FPR, 5/6) LoRA unseen VLM** |
 
 ### Recommended next steps (in order)
 
-1. **Grasp-anchored inferred stage clock + union-bound split-conformal check (~20 s, zero VLM re-inference):** Run `scripts/run_xr1_grasp_anchored_monitor.sh` across both base zero-shot and 3-fold cross-task LoRA VLM scores to verify whether anchoring inferred stages to our 0.966-AUROC LOTO grasp detector recovers the missing ~10 s of zero-privileged-input lead.
-2. **Test continuation-aware features on matched Test-2 pairs** once the zero-privileged monitor architecture is locked.
-3. **Scale collection to the frozen 18-task Group-A/B train vs. held-out composition split (Test 1)** to validate full cross-composition transfer and power Test 2.
+1. **Pilot Test-2 continuation-aware diagnostic on the 5 existing multi-decision self-corrected successes + matched failures (~10 min, zero new rollouts):** Test whether post-mistake `policy_action_chunks` (homing vs. drifting away), `observation_state_history`, `xr1_dit` latents, or `Qwen3-VL` trajectories distinguish self-correcting successes from persistent failures *prior* to regrasp — establishing whether Test 2 has a strong learnable signal before investing GPU hours in powering 30 pairs.
+2. **Scale synchronized collection to the 18-task Group-A/B benchmark (Test 1 — e.g., 10 train tasks / 8 held-out unseen compositions, 20–30 rollouts/task):** Expands calibration successes to $n_{\text{cal}} \ge 100$ (tightening split-conformal FPR & bootstrap CIs and enabling union-bound calibration), tests true held-out composition transfer at paper scale, and evaluates **LLM-generated task-graph predicates** vs. hand-specified prompts.
+3. **Optional cross-VLA replication on RLDX-1** using our black-box `proprio_actions + Qwen3-VL-4B` monitor (which needs zero internal VLA latents!).
