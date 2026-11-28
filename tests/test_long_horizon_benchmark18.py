@@ -153,6 +153,56 @@ class Benchmark18ContractTests(unittest.TestCase):
                 q, _ = format_predicate_question(task, p, "Do the task on the front left burner.")
                 self.assertTrue(len(q) > 20)
 
+    def test_searing_meat_pan_on_target_burner_respects_official_burner_disambiguation(self):
+        # Simulate a stove where pan is within 0.15m of target knob AND an earlier lit burner,
+        # so stove.check_obj_location_on_stove returns "rear_left" != env.knob ("front_left").
+        class _FakeStove:
+            def __init__(self, knob_on: bool, official_loc: str | None):
+                self._knob_on = knob_on
+                self._official_loc = official_loc
+                self.burner_sites = {
+                    "rear_left": {"name": "s_rl"},
+                    "front_left": {"name": "s_fl"},
+                }
+
+            def is_burner_on(self, env, burner_loc):
+                return self._knob_on if burner_loc == "front_left" else True
+
+            def check_obj_location_on_stove(self, env, obj_name, threshold=0.15):
+                return self._official_loc
+
+        env = _DummyEnv("SearingMeat")
+        env.knob = "front_left"
+        env.obj_body_id = {"pan": 0}
+        env.sim = types.SimpleNamespace(
+            data=types.SimpleNamespace(
+                body_xpos=[np.array([0.0, 0.0, 0.0])],
+                get_site_xpos=lambda name: np.array([0.0, 0.0, 0.0]),
+            )
+        )
+        orig_on_fixture = ecp._on_fixture
+        try:
+            ecp._on_fixture = lambda e, obj, fix: True
+            # 1. Before target knob is turned on: pan_on_target_burner still reflects physical placement
+            env.stove = _FakeStove(knob_on=False, official_loc=None)
+            p_off = ecp._searing_meat(env)
+            self.assertTrue(p_off["pan_on_target_burner"]["value"])
+            self.assertFalse(p_off["burner_on"]["value"])
+
+            # 2. Target knob is on, but earlier lit burner hijacks official check -> pan_on_target_burner False!
+            env.stove = _FakeStove(knob_on=True, official_loc="rear_left")
+            p_hijack = ecp._searing_meat(env)
+            self.assertTrue(p_hijack["burner_on"]["value"])
+            self.assertFalse(p_hijack["pan_on_target_burner"]["value"])
+
+            # 3. Target knob is on and official check returns env.knob -> both True!
+            env.stove = _FakeStove(knob_on=True, official_loc="front_left")
+            p_ok = ecp._searing_meat(env)
+            self.assertTrue(p_ok["burner_on"]["value"])
+            self.assertTrue(p_ok["pan_on_target_burner"]["value"])
+        finally:
+            ecp._on_fixture = orig_on_fixture
+
 
 if __name__ == "__main__":
     unittest.main()

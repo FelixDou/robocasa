@@ -2442,13 +2442,22 @@ def _scrub_cutting_board(env):
 
 def _searing_meat(env):
     pan_on_burner = _stove_obj_on_burner(env, env.stove, "pan", burner_name=env.knob)
+    burner_on = _stove_burner_on(env, env.stove, env.knob)
+    pan_loc_exact = _safe(
+        False,
+        lambda: env.stove.check_obj_location_on_stove(env, "pan", threshold=0.15)
+        == env.knob,
+    )
     return {
         "cabinet_open": _p(_is_open(env, env.cab), stage="precondition"),
         "pan_grasped": _p(_grasped(env, "pan"), stage="transient"),
-        "pan_on_target_burner": _p(pan_on_burner, stage="placement"),
+        "pan_on_target_burner": _p(
+            pan_on_burner and (not burner_on or pan_loc_exact),
+            stage="placement",
+        ),
         "meat_grasped": _p(_grasped(env, "meat"), stage="transient"),
         "meat_in_pan": _p(_in(env, "meat", "pan", th=0.07), stage="placement"),
-        "burner_on": _p(_stove_burner_on(env, env.stove, env.knob), stage="control"),
+        "burner_on": _p(burner_on, stage="control"),
         "gripper_released": _p(_far(env, "meat"), stage="release"),
     }
 
