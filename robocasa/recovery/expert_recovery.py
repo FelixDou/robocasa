@@ -107,6 +107,7 @@ DOOR_PULL_STEP = 0.04         # rad (hinge) between pull waypoints; DOOR_PULL_ST
 DOOR_PULL_STEP_SLIDE = 0.01
 DOOR_SLIP = 0.25              # rad (hinge) the door may trail the pull before it counts as slipped ...
 DOOR_SLIP_SLIDE = 0.05        # ... m for a slide
+DOOR_GRIP_TRACE = 10          # pull steps of each cycle whose grip is logged (and the last before a slip)
 DOOR_REACH_MIN = 0.25         # m: the pull stops when the hand would come this close to the robot base ...
 DOOR_REACH_MAX = 0.85         # ... or this far from it (horizontal distance)
 DOOR_RETREAT = 0.10           # m: after a pull, the open hand backs off the handle along the door's normal
@@ -738,6 +739,19 @@ def handle_grasp(door, q, approach, closing, pads, hand_R, height):
         options.append((float(np.linalg.norm(rotvec(R @ np.asarray(hand_R).T))), R))
     R = min(options, key=lambda x: x[0])[1]
     return pose(point - R @ np.asarray(pads, dtype=float), R)
+
+
+def pad_bar_offset(door, q, eef, pads):
+    """Where the pad midpoint of the hand at ``eef`` sits from the handle bar of the door at ``q``:
+    [depth, lateral, along] (m). depth is out of the door from the bar's axis (negative: deeper
+    than the axis, toward the door), lateral across the bar and the door's normal, along the bar
+    from its centre."""
+    centre, b, _ = door_bar(door, q)
+    out = door_handle_frame(door, q)[:3, 0]
+    out = out - (out @ b) * b
+    out = out / max(np.linalg.norm(out), 1e-12)
+    d = np.asarray(eef)[:3, :3] @ np.asarray(pads, dtype=float) + np.asarray(eef)[:3, 3] - centre
+    return [round(float(d @ out), 4), round(float(d @ np.cross(b, out)), 4), round(float(d @ b), 4)]
 
 
 def door_edge_route(door, q, hand):
@@ -1791,6 +1805,7 @@ class ExpertRun:
             q_goal = door_goal_q(door, DOOR_OPEN_GOAL)
             sign = 1.0 if q_goal >= q_grip else -1.0
             q_wanted, last, stop, ahead = q_grip, False, "goal", 0
+            cyc["grip"] = [self.grip_sample(door, pads, q_wanted)]
             while not last:
                 q_next, last = next_pull_q(q_wanted, self.door_q(door), q_goal, step_q)
                 ahead += int(sign * (self.door_q(door) - q_wanted) > 0)
@@ -1802,7 +1817,10 @@ class ExpertRun:
                 q_wanted = q_next
                 self.progress["_target"] = target
                 self.move_to(target, GRIPPER_CLOSE)
-                if sign * (q_wanted - self.door_q(door)) > slip:   # the door trails the hand
+                slipped = sign * (q_wanted - self.door_q(door)) > slip   # the door trails the hand
+                if len(cyc["grip"]) <= DOOR_GRIP_TRACE or slipped:
+                    cyc["grip"].append(self.grip_sample(door, pads, q_wanted))
+                if slipped:
                     stop = "slip"
                     break
             cyc.update(stop=stop, q_wanted=round(float(q_wanted), 4), q_end=round(self.door_q(door), 4),
@@ -1825,6 +1843,21 @@ class ExpertRun:
         if rec["cycles"] and self.around_edge(door, self.door_q(door), 1, (0, 1)):
             rec["around_edge"] = "out"
         rec["fraction_end"] = round(door_open_fraction(door, self.door_q(door)), 4)
+
+    def grip_sample(self, door, pads, q_wanted):
+        """[wanted q, door q, pad offset from the bar (``pad_bar_offset``), finger opening, what each
+        finger touches] of the hand on the door now."""
+        obs = self.world.observe()
+        q = self.door_q(door)
+        out = [round(float(q_wanted), 4), round(q, 4), pad_bar_offset(door, q, obs["eef"], pads)]
+        state = getattr(self.world, "grip_state", None)
+        if state is not None:
+            try:
+                got = state()
+                out += [got.get("width"), got.get("left"), got.get("right")]
+            except Exception as exc:   # keep the sample, say why the grip was not read
+                out.append(f"{type(exc).__name__}: {exc}"[:120])
+        return out
 
     def around_edge(self, door, q, side, order):
         """When the hand is on ``side`` of the door opened to ``q``, take it around the door's free
@@ -2611,6 +2644,35 @@ class SimWorld:
 
     def joint_q(self, qpos_adr):
         return float(self.kitchen.sim.data.qpos[int(qpos_adr)])
+
+    def grip_state(self):
+        """{"width": summed finger joint travel (m), "left"/"right": the bodies each finger touches}."""
+        sim = self.kitchen.sim
+        model = sim.model
+        gripper = self.kitchen.robots[0].gripper
+        gripper = gripper["right"] if isinstance(gripper, dict) else gripper
+        try:
+            width = round(float(sum(abs(float(sim.data.get_joint_qpos(j))) for j in gripper.joints)), 4)
+        except Exception:
+            width = None
+        sides = {}
+        for side in ("left", "right"):
+            ids = set()
+            for key in (f"{side}_finger", f"{side}_fingerpad"):
+                for g in gripper.important_geoms.get(key, []):
+                    try:
+                        ids.add(int(model.geom_name2id(g)))
+                    except Exception:
+                        pass
+            sides[side] = ids
+        touched = {"left": set(), "right": set()}
+        for i in range(int(sim.data.ncon)):
+            c = sim.data.contact[i]
+            for mine, other in ((c.geom1, c.geom2), (c.geom2, c.geom1)):
+                for side, ids in sides.items():
+                    if int(mine) in ids and int(other) not in sides["left"] | sides["right"]:
+                        touched[side].add(model.body_id2name(int(model.geom_bodyid[int(other)])) or "<unnamed>")
+        return {"width": width, **{k: sorted(v)[:3] for k, v in touched.items()}}
 
     def robot_contacts(self, top=6):
         """{"robot_body>other_body": count} of the robot's contacts with anything but the floor."""
