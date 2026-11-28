@@ -1818,9 +1818,25 @@ class ScriptedDoorTest(unittest.TestCase):
     def test_without_the_route_the_hand_shuts_the_first_door(self):
         left = front_door((0.0, 0.0), 0.4, joint="left")
         right = front_door((1.0, 0.0), 0.4, hinge="right", joint="right")
-        with mock.patch.object(er, "DOOR_EDGE_MIN", 10.0):
+        with mock.patch.object(er, "DOOR_EDGE_MIN", 10.0), mock.patch.object(er, "DOOR_STANCE_GAIN", math.inf):
             world, out = self.run_doors([left, right], shut=True)
         self.assertNotEqual(world.shut_doors, [])
+
+    def test_a_stance_the_arc_leaves_is_replaced_by_one_that_covers_it(self):
+        door = SOURCE_DOOR
+        hand = er.door_bar(door, 0.0)[0]
+        close = world_pose(0.4, 0.45, 0.3, yaw=-math.pi / 2)   # in front of the handle: the door swings into it
+        goal = er.door_goal_q(door, er.DOOR_OPEN_GOAL)
+        before = er.door_arc_reach(door, 0.0, goal, hand, close, er.DOOR_STANCE_MARGIN)
+        self.assertLess(before, goal / 2)
+        where, log = er.door_pull_stance(door, 0.0, goal, hand, close)
+        self.assertTrue(log["planned"], log)
+        self.assertAlmostEqual(log["planned_reach"], round(goal, 3))
+        self.assertAlmostEqual(er.door_arc_reach(door, 0.0, goal, hand, where, er.DOOR_STANCE_MARGIN), goal, places=6)
+        self.assertGreater(where[1, 3], 0.3)                    # in front of the fixture
+        kept, log = er.door_pull_stance(door, 0.0, goal, hand, where)   # a stance that covers it is kept
+        self.assertFalse(log["planned"])
+        self.assertIs(kept, where)
 
     def test_a_door_of_another_radius_is_pulled_open_on_its_own_arc(self):
         door = front_door((0.1, 0.0), 0.55, joint="fridge_door")

@@ -116,6 +116,13 @@ DOOR_EDGE_CLEAR = 0.12        # ... this far beyond the edge (m) ...
 DOOR_EDGE_SIDE = 0.12         # ... and this far off the door's face on either side (m)
 DOOR_WIDTH_FALLBACK = 0.10    # m past the handle taken as the door's free edge when its width is unknown
 DOOR_EDGE_STEPS = 300         # steps a pass around a door's edge adds to the expert cap
+DOOR_STANCE_X = (0.35, 1.10)  # m: planned stances lie this far in front of the closed handle ...
+DOOR_STANCE_Y = 0.60          # ... up to this far to either side of it ...
+DOOR_STANCE_GRID = 0.05       # ... on this grid ...
+DOOR_STANCE_YAWS = (-0.5, 0.0, 0.5)   # ... turned this much (rad) from facing the fixture
+DOOR_STANCE_MARGIN = 0.05     # m: a planned stance keeps the pull this far inside its reach limits
+DOOR_BASE_CLEAR = 0.40        # m: the door's leaf keeps this far from the base centre as it swings
+DOOR_STANCE_GAIN = 0.10       # rad: a planned stance replaces the source's only if its pull gets this much farther
 SELF_REPLAY_DEMOS, SELF_REPLAY_MIN = 20, 0.9
 TRANSFER_RESETS, TRANSFER_MIN = 20, 0.7
 TRANSFER_BASE_SEED = 710007   # fresh pretrain-split seeds 710007-710026; Phase A/B and Step 0 do not use them
@@ -761,6 +768,64 @@ def door_edge_route(door, q, hand):
     rel = hand - foot
     side = 0 if rel @ r > width else (1 if rel @ n >= 0 else -1)
     return edge + DOOR_EDGE_SIDE * n, edge - DOOR_EDGE_SIDE * n, side
+
+
+def door_arc_reach(door, q0, q_goal, hand, base, margin=0.0):
+    """How far (rad, or m for a slide) a pull from ``q0`` toward ``q_goal`` gets before the hand
+    point (``hand`` at ``q0``, carried with the door) leaves the pull's reach of a robot base at
+    ``base``, shrunk by ``margin``, or the door's leaf comes within ``DOOR_BASE_CLEAR`` of the base."""
+    step = DOOR_PULL_STEP if door["type"] == "hinge" else DOOR_PULL_STEP_SLIDE
+    n = max(1, int(math.ceil(abs(float(q_goal) - float(q0)) / step)))
+    local = inverse(door_motion(door, q0)) @ np.append(np.asarray(hand, dtype=float), 1.0)
+    B = inverse(base)
+    a = np.asarray(door["anchor"], dtype=float)
+    width = float(door.get("width") or door["radius"] + DOOR_WIDTH_FALLBACK)
+    centre = np.asarray(base, dtype=float)[:2, 3]
+    got = 0.0
+    for q in np.linspace(q0, q_goal, n + 1)[1:]:
+        rel = B @ (door_motion(door, q) @ local)
+        if rel[0] < DOOR_REACH_MIN + margin or math.hypot(rel[0], rel[1]) > DOOR_REACH_MAX - margin:
+            break
+        if door["type"] == "hinge":
+            tip = door_handle_frame(door, q)[:2, 3] - a[:2]
+            tip = a[:2] + tip / max(np.linalg.norm(tip), 1e-12) * width
+            d = tip - a[:2]
+            t = float(np.clip((centre - a[:2]) @ d / max(d @ d, 1e-12), 0.0, 1.0))
+            if np.linalg.norm(a[:2] + t * d - centre) < DOOR_BASE_CLEAR:
+                break
+        got = abs(float(q) - float(q0))
+    return got
+
+
+def door_pull_stance(door, q0, q_goal, hand, source_stance):
+    """The robot-base pose to pull from: the source's stance (``door_stance``) when its pull
+    reaches the goal; else, of base poses on a grid in front of the closed handle facing the
+    fixture, the one whose pull gets farthest (nearest the source's stance on ties), if it gets
+    ``DOOR_STANCE_GAIN`` farther than the source's. Returns (pose, log)."""
+    full = abs(float(q_goal) - float(q0))
+    src = door_arc_reach(door, q0, q_goal, hand, source_stance, DOOR_STANCE_MARGIN)
+    log = {"source_reach": round(src, 3), "needed": round(full, 3)}
+    if src >= full - 1e-9:
+        return source_stance, {**log, "planned": False}
+    front = yaw_frame(door_handle_frame(door, door_goal_q(door, 0.0)))
+    here = np.asarray(source_stance, dtype=float)[:2, 3]
+    best = None
+    xs = np.arange(DOOR_STANCE_X[0], DOOR_STANCE_X[1] + 1e-9, DOOR_STANCE_GRID)
+    ys = np.arange(-DOOR_STANCE_Y, DOOR_STANCE_Y + 1e-9, DOOR_STANCE_GRID)
+    for x in xs:
+        for y in ys:
+            for dyaw in DOOR_STANCE_YAWS:
+                cand = front @ pose([float(x), float(y), 0.0], rot_z(math.pi + dyaw))
+                got = door_arc_reach(door, q0, q_goal, hand, cand, DOOR_STANCE_MARGIN)
+                key = (round(got, 6), -float(np.linalg.norm(cand[:2, 3] - here)))
+                if best is None or key > best[0]:
+                    best = (key, cand)
+    if best is None or best[0][0] < src + DOOR_STANCE_GAIN:
+        return source_stance, {**log, "planned": False}
+    rel = inverse(front) @ best[1]
+    return best[1], {**log, "planned": True, "planned_reach": round(best[0][0], 3),
+                     "stance": [round(float(rel[0, 3]), 3), round(float(rel[1, 3]), 3),
+                                round(yaw_of(rel[:3, :3]), 3)]}
 
 
 def door_stance(door, q, relative, mirror):
@@ -1686,15 +1751,18 @@ class ExpertRun:
             cyc = {"q_start": round(q0, 4), "fractions": fractions()}
             rec["cycles"].append(cyc)
             obs = self.world.observe()
+            axes = getattr(self.world, "gripper_axes", None)
+            approach, closing, pads = axes() if axes is not None else ((0, 0, 1), (0, 1, 0), (0, 0, 0))
             if self.align_base and stance is not None:
                 rel, src_side = stance
                 mirror = bool(src_side and door.get("side") and src_side != door["side"])
-                goal = align_goal(np.eye(4), door_stance(door, q0, rel, mirror), obs["base"], obs["mobile"])
+                planned = handle_grasp(door, q0, approach, closing, pads, obs["eef"][:3, :3], obs["eef"][2, 3])
+                where, cyc["stance_plan"] = door_pull_stance(door, q0, door_goal_q(door, DOOR_OPEN_GOAL),
+                                                             planned[:3, 3], door_stance(door, q0, rel, mirror))
+                goal = align_goal(np.eye(4), where, obs["base"], obs["mobile"])
                 cyc["mirror"] = mirror
                 cyc["align"] = self.align(goal)
                 obs = self.world.observe()
-            axes = getattr(self.world, "gripper_axes", None)
-            approach, closing, pads = axes() if axes is not None else ((0, 0, 1), (0, 1, 0), (0, 0, 0))
             q0 = self.door_q(door)
             if self.around_edge(door, q0, -1, (1, 0)):   # the hand is behind this open door
                 cyc["around_edge"] = "in"

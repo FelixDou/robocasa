@@ -1776,6 +1776,50 @@ choice open, the code fixes it as follows:
     before the pre-grasp pose (logged per pull, `around_edge: "in"`).
   - Each pass around an edge adds 300 steps to the expert cap. Slips from a
     closed door and out-of-reach cabinet stances are not addressed yet.
+
+  *Pretrain transfer, around the door's edge (commit 1478a26, `transfer_door3`,
+  28 November 2026).* GarnishPancake and ArrangeBreadBasket only, 40 resets,
+  0 errors.
+
+  | Stage | transfer_door2 | transfer_door3 |
+  |---|---|---|
+  | fridge_open | 4/20 | **14/20 (0.70, passes)** |
+  | cabinet_open | 1/20 | 4/20 |
+  | pancake_on_plate | 4/4 | 14/14 |
+  | plate_on_table | 4/4 | 14/14 |
+  | strawberry_on_pancake | 0/4 | 1/14 |
+  | bread_in_basket | 0/1 | 0/4 |
+
+  - Two-door fridges: 9 of 12 completed (0 of 12 before); single-door
+    fridges 5 of 7. The hand went around a door's edge 54 times on leaving
+    and once on coming back. An open door fell by more than 0.3 of its range
+    during a pull on another door 4 times (34 before).
+  - Cabinets: 3 of 19 door stages completed (1 of 5 single-door, 2 of 14
+    two-door). Of 272 cabinet pulls, 171 ended at `reach`, 94 at `slip`, 7 at
+    `goal`, and the pulls that ended at `reach` lost 0.03 rad on average.
+    From the source's stance the arc leaves the arm's range: often at the
+    first step (38 of the `reach` stops began at a closed door), the rest at
+    every angle up to 0.9 of the range.
+  - The stages after the doors now fail on their picks, which the door work
+    does not touch: strawberry_on_pancake ended at the step cap in 11 of its
+    13 failures, bread_in_basket in 3 of 4. Not yet inspected.
+
+  *Amendment (28 November 2026, before the eighth transfer run).* The base
+  stands where the whole pull stays in the arm's reach.
+  - Before each pull, the hand's grasp point is carried along the door's arc
+    from its current angle to 0.97 of its range, in pull steps.
+    `door_arc_reach` is how far that arc gets before the hand would leave the
+    pull's reach of a given base pose (by a 0.05 m margin), or the door's
+    leaf would come within 0.40 m of the base centre.
+  - If the source's stance (as before) covers the whole arc, it is kept.
+    Otherwise base poses are tried on a 0.05 m grid 0.35–1.10 m in front of
+    the closed handle and up to 0.60 m to either side, facing the fixture or
+    turned 0.5 rad either way. The one whose arc gets farthest (then the one
+    nearest the source's stance) replaces the source's if it gets at least
+    0.10 rad farther.
+  - Logged per pull as `stance_plan`: `source_reach`, `needed`, `planned`,
+    and for a planned stance `planned_reach` and `stance` (x, y, yaw in the
+    closed handle's frame).
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
