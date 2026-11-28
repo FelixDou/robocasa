@@ -170,12 +170,12 @@ def fit_predict_probe(
     *,
     device: torch.device,
     hidden_dim: int = 0,
-    epochs: int = 80,
-    lr: float = 3e-3,
+    epochs: int = 120,
+    lr: float = 1e-2,
     weight_decay: float = 1e-2,
     seed: int = 0,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Fit an L2-regularized linear (hidden_dim=0) or 1-hidden-layer MLP binary probe.
+    """Fit an L2-regularized linear (exact L-BFGS, hidden_dim=0) or 1-layer MLP probe.
 
     Standardizes using training-fold statistics only. Returns
     ``(train_probs, eval_probs)``.
@@ -195,36 +195,50 @@ def fit_predict_probe(
 
     torch.manual_seed(seed)
     d_in = Xt.shape[1]
-    if hidden_dim > 0:
-        net: nn.Module = nn.Sequential(
+    pos_weight = torch.tensor([min(10.0, max(0.2, n_neg / max(1, n_pos)))], device=device)
+    loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+
+    if hidden_dim == 0:
+        # Exact convex L2-regularized logistic regression via L-BFGS.
+        net: nn.Module = nn.Linear(d_in, 1).to(device)
+        nn.init.zeros_(net.weight)
+        nn.init.zeros_(net.bias)
+        l2_coeff = max(1e-3, 10.0 / max(1, len(Xt)))
+        opt = torch.optim.LBFGS(net.parameters(), lr=1.0, max_iter=40, line_search_fn="strong_wolfe")
+
+        def closure():
+            opt.zero_grad(set_to_none=True)
+            logits = net(Xt).squeeze(-1)
+            loss = loss_fn(logits, yt) + 0.5 * l2_coeff * (net.weight ** 2).sum()
+            loss.backward()
+            return loss
+
+        net.train()
+        opt.step(closure)
+    else:
+        net = nn.Sequential(
             nn.Linear(d_in, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.GELU(),
             nn.Dropout(0.25),
             nn.Linear(hidden_dim, 1),
         ).to(device)
-    else:
-        net = nn.Linear(d_in, 1).to(device)
-
-    pos_weight = torch.tensor([min(10.0, max(0.2, n_neg / max(1, n_pos)))], device=device)
-    loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-    opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=weight_decay)
-
-    net.train()
-    for _ in range(epochs):
-        opt.zero_grad(set_to_none=True)
-        logits = net(Xt).squeeze(-1)
-        loss = loss_fn(logits, yt)
-        loss.backward()
-        opt.step()
+        opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=weight_decay)
+        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(1, epochs))
+        net.train()
+        for _ in range(epochs):
+            opt.zero_grad(set_to_none=True)
+            logits = net(Xt).squeeze(-1)
+            loss = loss_fn(logits, yt)
+            loss.backward()
+            opt.step()
+            sched.step()
 
     net.eval()
     with torch.no_grad():
         p_tr = torch.sigmoid(net(Xt).squeeze(-1)).cpu().numpy().astype(np.float32)
         p_ev = torch.sigmoid(net(Xe).squeeze(-1)).cpu().numpy().astype(np.float32)
     del Xt, Xe, yt, net
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
     return p_tr, p_ev
 
 
