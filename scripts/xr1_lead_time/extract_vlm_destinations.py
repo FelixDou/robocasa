@@ -323,10 +323,17 @@ class Qwen3VLTernaryScorer:
         # Keep native 256x256 camera crops without unintended upscaling.
         if hasattr(self.processor, "image_processor"):
             ip = self.processor.image_processor
-            if hasattr(ip, "max_pixels"):
+            cur_max = getattr(ip, "max_pixels", None)
+            if isinstance(cur_max, int) and cur_max > max_pixels:
                 ip.max_pixels = max_pixels
-            if hasattr(ip, "min_pixels"):
-                ip.min_pixels = min(getattr(ip, "min_pixels", max_pixels), max_pixels)
+            cur_min = getattr(ip, "min_pixels", None)
+            if isinstance(cur_min, int) and cur_min > max_pixels:
+                ip.min_pixels = max_pixels
+            size_cfg = getattr(ip, "size", None)
+            if isinstance(size_cfg, dict) and isinstance(size_cfg.get("longest_edge"), int):
+                size_cfg["longest_edge"] = min(size_cfg["longest_edge"], max_pixels)
+                if isinstance(size_cfg.get("shortest_edge"), int):
+                    size_cfg["shortest_edge"] = min(size_cfg["shortest_edge"], max_pixels)
         self.processor.tokenizer.padding_side = "left"
         if self.processor.tokenizer.pad_token_id is None:
             self.processor.tokenizer.pad_token = self.processor.tokenizer.eos_token
