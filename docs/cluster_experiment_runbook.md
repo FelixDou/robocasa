@@ -52,11 +52,13 @@ caused quota failures.
 
 ## 3. Canonical fresh-terminal exports
 
-Run this in each new cluster terminal:
+Run this in each new cluster terminal. The miniconda module moved from
+24.1.2 to 26.9.3 in November 2026; if `module load miniconda` prints a
+different path, use that one. Older docs still show 24.1.2.
 
 ```bash
 module load miniconda
-eval "$(/apps/t4/rhel9/free/miniconda/24.1.2/bin/conda shell.bash hook)"
+eval "$(/apps/t4/rhel9/free/miniconda/26.9.3/bin/conda shell.bash hook)"
 conda activate /gs/bs/tga-shinoda/felid/envs/robocasa_openpi
 
 export USER_ID=ut06746
