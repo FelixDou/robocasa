@@ -1912,7 +1912,7 @@ choice open, the code fixes it as follows:
     damping only (2 N m s/rad), no spring. A door pushed back toward closed
     points to a contact on the door itself, for instance its hinge-side edge
     against a neighbouring fixture (seed 710008's cabinet stands next to a
-    fridge housing).
+    fridge housing). (The next run ruled this out; see below.)
   - Some doors stall at the same angle on every pull (710008 right door
     0.1–0.3 rad over 10 pulls, 710016 right door 0.11–0.14, 710014 right door
     about 0.2), others gain on each pull (710008 left door, opened on the
@@ -1923,6 +1923,31 @@ choice open, the code fixes it as follows:
   bodies in contact with it (count and deepest penetration), and the
   generalized forces on its hinge from constraints (contacts and limits)
   and from damping.
+
+  *Door contacts (commit 4d8de10, `transfer_doortouch1`, 28 November 2026).*
+  ArrangeBreadBasket only, 20 resets, 0 errors; outcomes as in
+  `transfer_torso1` (cabinet_open 3/20, bread_in_basket 0/3).
+  - No cabinet door touched anything but its own cabinet body, and that only
+    lightly (penetration under 1 mm). Released, it pushes the door back
+    toward closed with about 0.02 N m, which is the slow creep seen before.
+    The neighbouring-fixture explanation above is wrong.
+  - While a door is held, the hinge's constraint torque (the fingers' pull)
+    and its passive torque (damping) balance at about ±1 N m (seed 710008's
+    right door: +0.99 and −0.97 on the first pull step). The pull moves the
+    hand up to 1 cm and 0.05 rad per control step, which on a 0.04 rad
+    waypoint is two steps: about 0.4 rad/s of door speed, or 0.8 N m against
+    the 2 N m s/rad damping. Then the bar slides out of the fingers and the
+    torque drops to zero. Over the 116 held cabinet pulls that ended at
+    `slip`, the peak torque before the loss had median 0.74 N m (quartiles
+    0.14 and 1.02). The grip holds about 1 N m; the pull asks for that much
+    by going too fast. A quarter of the held slips lost the bar at under
+    0.14 N m; that is not explained.
+
+  *Amendment (28 November 2026, before the twelfth transfer run).* The hand
+  pulls a door slowly: at most 0.006 rad of turn and 4 mm of travel per
+  control step while it is closed on the bar (about 0.12 rad/s at 20 Hz, a
+  quarter of the damping torque), instead of the approach's 0.05 rad and
+  1 cm. A full pull of 1.5 rad takes about 250 steps.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
