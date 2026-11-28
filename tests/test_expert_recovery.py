@@ -1509,3 +1509,184 @@ class AlignmentTest(unittest.TestCase):
         self.assertLess(last["frame_reached"], last["frames"])
         self.assertIn("error_at_stop", last)
         self.assertIsInstance(last["holding_after"], bool)
+
+
+def swing_door(anchor, radius, yaw=0.0, height=0.8, role="door"):
+    """A left-hinged door (vertical axis) whose closed handle sits ``radius`` from ``anchor``."""
+    a = np.array([anchor[0], anchor[1], height])
+    handle = a + er.rot_z(yaw) @ np.array([radius, 0.0, 0.0])
+    return er.door_reference(role, "hinge", handle, a, [0, 0, 1], 0.0, (0.0, 1.6))
+
+
+HAND_ON_HANDLE = er.pose([0.0, 0.0, 0.0], er.rot_z(math.pi) @ R_DOWN)
+
+
+def swing_demo(door, base_T, *, q_open=1.0, episode=0):
+    """Reach the handle (frames 0-9), close, and swing the door to ``q_open`` (10-29)."""
+    start = er.door_handle_frame(door, 0.0) @ er.pose([0.15, 0.0, 0.05], np.eye(3)) @ HAND_ON_HANDLE
+    goal = er.door_handle_frame(door, 0.0) @ HAND_ON_HANDLE
+    reach = [er.pose(start[:3, 3] + (goal[:3, 3] - start[:3, 3]) * s, goal[:3, :3]) for s in np.linspace(0, 1, 10)]
+    qs = [0.0] * 10 + list(np.linspace(0.0, q_open, 20))
+    swing = [er.door_handle_frame(door, q) @ HAND_ON_HANDLE for q in qs[10:]]
+    n = len(qs)
+    src_door = {**door, "q_track": qs, "q_track_start": 0}
+    return er.Source(task_name="ArrangeTea", episode=episode, predicate="cabinet_closed", target=None, start=0,
+                     end=n, steps=[er.SourceStep("OpenCabinet", er.EXECUTE, 0, n)],
+                     eef=np.stack(reach + swing), base=np.stack([base_T] * n),
+                     gripper=np.array([0.0] * 10 + [1.0] * 20), door=src_door)
+
+
+class DoorAngleReplayTest(unittest.TestCase):
+    def test_the_handle_frame_follows_the_door(self):
+        door = swing_door((0.0, 0.0), 0.4)
+        moved = er.door_handle_frame(door, 0.7)
+        np.testing.assert_allclose(moved[:3, 3], [0.4 * math.cos(0.7), 0.4 * math.sin(0.7), 0.8], atol=1e-9)
+        opened = er.door_reference("door", "hinge", moved[:3, 3], door["anchor"], [0, 0, 1], 0.7, (0.0, 1.6))
+        np.testing.assert_allclose(opened["frame"], door["frame"], atol=1e-9)   # read back closed
+        drawer = er.door_reference("slide", "slide", [1.0, 0.0, 0.5], [9, 9, 9], [0, -1, 0], 0.0, (0.0, 0.4))
+        np.testing.assert_allclose(er.door_handle_frame(drawer, 0.3)[:3, 3], [1.0, -0.3, 0.5], atol=1e-9)
+
+    def test_a_hand_on_the_source_handle_lands_on_this_handle_at_the_same_angle(self):
+        src = swing_door((0.0, 0.0), 0.4)
+        here = swing_door((2.0, 1.0), 0.55, yaw=0.5)
+        qs = np.linspace(0.0, 1.2, 7)
+        Ts, q_here = er.door_track_transforms(src, here, qs, 0.0)
+        np.testing.assert_allclose(q_here, qs)
+        for T, q in zip(Ts, qs):
+            hand = T @ er.door_handle_frame(src, q) @ HAND_ON_HANDLE
+            np.testing.assert_allclose(hand, er.door_handle_frame(here, q) @ HAND_ON_HANDLE, atol=1e-9)
+            radius = np.hypot(*(hand[:2, 3] - np.asarray(here["anchor"])[:2]))
+            self.assertAlmostEqual(radius, 0.55)
+        _, q_here = er.door_track_transforms(src, here, qs, 0.9)   # a door already partly open here
+        np.testing.assert_allclose(q_here, np.clip(0.9 + qs, 0.0, 1.6))
+
+    def test_the_executor_swings_the_hand_on_this_doors_radius(self):
+        src = swing_door((0.0, 0.0), 0.4)
+        demo = swing_demo(src, world_pose(0.2, -0.9, 0.3, yaw=math.pi / 2))
+        here = swing_door((2.0, 1.0), 0.55, yaw=0.5)
+        world = DoorWorld(here, mobile=(2.0, 0.0, 1.0))
+        run = er.ExpertRun(world, TRUE_GAINS, {demo.key: demo}, None, cap=10 ** 5, budget=10 ** 5)
+        phase = run.run([{"phase": "track", "source": list(demo.key), "step": 0, "kind": er.EXECUTE,
+                          "reference": ["door", "cab"]}])["phases"][0]
+        self.assertTrue(phase["door_track"])
+        self.assertEqual(phase["door_q"], [0.0, 1.0])
+        want = er.door_handle_frame(here, 1.0) @ HAND_ON_HANDLE
+        np.testing.assert_allclose(world.eef[:3, 3], want[:3, 3], atol=er.TRACK_TOL)
+        rigid = {**demo.door, "q_track": None}
+        demo.door = rigid
+        world = DoorWorld(here, mobile=(2.0, 0.0, 1.0))
+        run = er.ExpertRun(world, TRUE_GAINS, {demo.key: demo}, None, cap=10 ** 5, budget=10 ** 5)
+        phase = run.run([{"phase": "track", "source": list(demo.key), "step": 0, "kind": er.EXECUTE,
+                          "reference": ["door", "cab"]}])["phases"][0]
+        self.assertFalse(phase["door_track"])                              # the rigid arc, off this circle
+        self.assertGreater(np.linalg.norm(world.eef[:3, 3] - want[:3, 3]), 0.05)
+
+    def test_the_joint_track_is_read_from_the_states_and_checked_against_the_restore(self):
+        n = 12
+        q = np.linspace(0.0, 1.1, n)
+        states = np.column_stack([np.arange(n) * 0.05, np.full(n, 0.3), q, np.zeros((n, 3))])   # time, qpos, qvel
+        src = er.Source(task_name="T", episode=0, predicate="p", target=None, start=2, end=10, steps=[],
+                        eef=np.zeros((8, 4, 4)), base=np.zeros((8, 4, 4)), gripper=np.zeros(8))
+        door = {"q": float(q[3]), "qpos_adr": 1}
+        out = er.source_q_track(states, door, src, 3, 9, round(float(q[9]), 4))
+        self.assertEqual(out["q_track_column"], 2)
+        np.testing.assert_allclose(out["q_track"], q[2:10], atol=1e-5)
+        self.assertEqual(out["q_track_start"], 2)
+        bad = er.source_q_track(states, {"q": 0.7, "qpos_adr": 1}, src, 3, 9, float(q[9]))
+        self.assertIsNone(bad["q_track"])
+
+
+GRASP_AXES = ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0), (0.0, 0.0, 0.0))   # FakeWorld: z out of the hand, fingers on y
+
+
+class GraspWorld(FakeWorld):
+    """FakeWorld whose objects have bounding boxes (centre, half sizes in the object frame)."""
+
+    def __init__(self, boxes, **kw):
+        super().__init__(**kw)
+        self.boxes = boxes
+
+    def object_box(self, name):
+        if name not in self.boxes:
+            return None
+        centre, half = self.boxes[name]
+        return self.objects[name], np.asarray(centre, dtype=float), np.asarray(half, dtype=float)
+
+    def gripper_axes(self):
+        return tuple(np.array(v) for v in GRASP_AXES)
+
+
+def carried(demo, name="obj"):
+    """The demo with its object moving in the hand between the close and the release."""
+    closed = demo.gripper >= 0.5
+    k0 = int(np.argmax(closed))
+    rel = er.inverse(demo.eef[k0]) @ demo.objects[name][k0]
+    poses, last = [], demo.objects[name][0]
+    for k in range(len(demo.gripper)):
+        if closed[k]:
+            last = demo.eef[k] @ rel
+        poses.append(last)
+    demo.objects[name] = np.stack(poses)
+    return demo
+
+
+class ScriptedGraspTest(unittest.TestCase):
+    def test_the_grasp_closes_across_the_narrow_side_below_the_top(self):
+        T = world_pose(1.0, 2.0, 0.9, yaw=0.3)
+        corners = er.box_corners(T, [0, 0, 0], [0.06, 0.025, 0.04])
+        plan = er.grasp_plan(corners, *GRASP_AXES, R_DOWN)
+        self.assertAlmostEqual(plan["width"], 0.05)
+        R = plan["grasp"][:3, :3]
+        np.testing.assert_allclose(R @ [0, 0, 1], [0, 0, -1], atol=1e-9)             # approach: straight down
+        g = er.rot_z(0.3) @ np.array([0.0, 1.0, 0.0])
+        self.assertAlmostEqual(abs(float((R @ [0, 1, 0]) @ g)), 1.0)                 # fingers across the 5 cm
+        np.testing.assert_allclose(plan["grasp"][:3, 3], [1.0, 2.0, 0.94 - er.GRASP_DEPTH], atol=1e-9)
+        np.testing.assert_allclose(plan["above"][:3, 3], plan["grasp"][:3, 3] + [0, 0, er.GRASP_ABOVE], atol=1e-9)
+        flat = er.grasp_plan(er.box_corners(T, [0, 0, 0], [0.03, 0.02, 0.005]), *GRASP_AXES, R_DOWN)
+        self.assertAlmostEqual(flat["pad_height"], 0.895 + er.GRASP_CLEAR)           # a thin object: above its bottom
+        wide = er.grasp_plan(er.box_corners(T, [0, 0, 0], [0.06, 0.05, 0.04]), *GRASP_AXES, R_DOWN)
+        self.assertEqual(wide, {"too_wide": 0.1})
+
+    def test_object_path_targets_carry_the_object_then_repeat_the_hands_retreat(self):
+        demo = carried(demo_source(world_pose(0.55, 0.05, 0.9), world_pose(0.6, -0.4, 0.9), world_pose(0, 0, 0.3)))
+        frames = range(20, len(demo.gripper))
+        T = world_pose(1.0, 2.0, 0.0, yaw=0.8)
+        G = er.pose([0.03, 0.0, 0.05], er.rot_z(0.6) @ R_DOWN)     # held unlike the demo: offset and turned
+        objs = [demo.objects["obj"][f] for f in frames]
+        eefs = [demo.eef[f] for f in frames]
+        grip = [float(demo.gripper[f]) for f in frames]
+        targets = er.object_path_targets(T, objs, eefs, grip, G)
+        opened = next(k for k in range(1, len(grip)) if grip[k] < 0.5 <= grip[k - 1])
+        for k in range(opened):
+            np.testing.assert_allclose(targets[k] @ er.inverse(G), T @ objs[k], atol=1e-9)   # object on the path
+        for k in range(opened, len(grip)):
+            np.testing.assert_allclose(er.inverse(targets[opened]) @ targets[k],
+                                       er.inverse(eefs[opened]) @ eefs[k], atol=1e-9)
+
+    def scene(self, boxes):
+        demo = carried(demo_source(world_pose(0.55, 0.05, 0.9), world_pose(0.6, -0.4, 0.9), world_pose(0, 0, 0.3)))
+        world = GraspWorld(boxes, mobile=(1.0, 2.0, 0.6), eef_rel=(0.4, 0.2, 0.8), predicate=mug_on_tray)
+        base = world.base_T()
+        world.objects = {"obj": base @ world_pose(0.6, 0.15, 0.6, yaw=1.0),
+                         "container": base @ world_pose(0.5, -0.3, 0.6)}
+        program = er.plan_attempts("ArrangeTea", "mug_on_tray", facts_of(world), FakeLibrary([demo]), n=1)[0]
+        run = er.ExpertRun(world, TRUE_GAINS, {demo.key: demo}, "mug_on_tray", cap=10 ** 5, budget=10 ** 5,
+                           scripted_grasp=True)
+        return world, run.run(program["phases"])
+
+    def test_a_scripted_pick_then_the_object_follows_the_source_objects_path(self):
+        # The box centre sits 1.5 cm off the object's origin: the hand holds it there, not as the demo did.
+        world, out = self.scene({"obj": ([0.015, 0.0, 0.0], [0.02, 0.03, 0.03])})
+        self.assertTrue(out["stage_completed"], out)
+        pick, place = out["phases"]
+        self.assertEqual((pick["grasp"], pick["holding_after"]), ("scripted", True))
+        self.assertAlmostEqual(pick["width"], 0.04)
+        self.assertEqual(place["place"], "object_path")
+        tray = world.objects["container"][:3, 3] + [0, 0, PLACE_HEIGHT]
+        self.assertLess(np.linalg.norm(world.objects["obj"][:3, 3] - tray), er.TRACK_TOL)
+
+    def test_an_object_too_wide_for_the_gripper_keeps_the_replayed_pick(self):
+        _, out = self.scene({"obj": ([0.0, 0.0, 0.0], [0.06, 0.06, 0.03])})
+        self.assertTrue(out["stage_completed"], out)
+        self.assertEqual(out["phases"][0]["grasp"], "replay")
+        self.assertEqual(out["phases"][0]["grasp_skipped"], {"too_wide": 0.12})

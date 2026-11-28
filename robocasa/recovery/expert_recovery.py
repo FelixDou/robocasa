@@ -82,6 +82,15 @@ ALIGN_SHIFT_STEP = 0.025      # m between the candidate shifts
 DOOR_MISMATCH = 1.0           # rank penalty: another door type or hinge side than the source's
 DOOR_ROLE_MISMATCH = 0.1      # rank penalty: another door of the fixture (left/right, freezer)
 DOOR_SOURCES_MAX = 40         # fixture sources measured per stage (episode order); the rest rank last
+DOOR_FORMAT = 2               # source_doors.jsonl rows with the door's axis, anchor and joint track
+DOOR_Q_TOL = 1e-3             # the door's joint read from the demo's states vs the restored simulator
+GRIPPER_SPAN = 0.07           # m: widest object (narrow horizontal side) the scripted grasp takes
+GRASP_DEPTH = 0.03            # m: the finger pads close this far below the object's top ...
+GRASP_CLEAR = 0.01            # m: ... and at least this far above its bottom
+GRASP_ABOVE = 0.10            # m: the pre-grasp pose stands this far above the grasp
+GRASP_LIFT = 0.12             # m: lift after closing
+GRASP_CLOSE_STEPS = 15
+GRASP_STEPS = 150             # steps the scripted grasp adds to the expert cap
 SELF_REPLAY_DEMOS, SELF_REPLAY_MIN = 20, 0.9
 TRANSFER_RESETS, TRANSFER_MIN = 20, 0.7
 TRANSFER_BASE_SEED = 710007   # fresh pretrain-split seeds 710007-710026; Phase A/B and Step 0 do not use them
@@ -604,7 +613,113 @@ def door_reference(role, jtype, handle, anchor, axis, q, joint_range=(0.0, 1.0))
     return {"role": str(role), "type": str(jtype), "frame": frame, "q": float(q), "open_sign": open_sign,
             "range": [lo, hi], "side": int(np.sign(local[1])) if swings else 0,
             "radius": float(np.hypot(*(closed - anchor)[:2])) if jtype == "hinge" else 0.0,
-            "height": float(closed[2])}
+            "height": float(closed[2]), "anchor": [float(v) for v in anchor], "axis": [float(v) for v in u]}
+
+
+def door_motion(door, q):
+    """The door body's rigid motion from closed (joint at 0) to joint value ``q``."""
+    u = np.asarray(door["axis"], dtype=float)
+    if door["type"] == "hinge":
+        R = axis_rotation(u, float(q))
+        a = np.asarray(door["anchor"], dtype=float)
+        return pose(a - R @ a, R)
+    return pose(float(q) * u, np.eye(3))
+
+
+def door_handle_frame(door, q):
+    """The replay frame (``door_reference``) carried with the door to joint value ``q``."""
+    return door_motion(door, q) @ np.asarray(door["frame"], dtype=float)
+
+
+def door_track_transforms(src_door, here_door, q_src, q_here):
+    """Per-frame source-to-here transforms that keep the hand on this door's handle.
+
+    ``q_src`` is the source door's joint at each frame of the step; this door starts at ``q_here``
+    and moves by the source's increments (signed by each door's opening direction, clipped to its
+    range). A hand pose fixed to the source's handle maps to the same pose on this handle, so the
+    replayed arc follows this door's radius, not the source's.
+    """
+    q_src = np.asarray(q_src, dtype=float)
+    sign = float(here_door["open_sign"]) / float(src_door["open_sign"])
+    lo, hi = sorted(float(v) for v in here_door["range"])
+    q_here_track = np.clip(float(q_here) + sign * (q_src - q_src[0]), lo, hi)
+    return ([door_handle_frame(here_door, qh) @ inverse(door_handle_frame(src_door, qs))
+             for qs, qh in zip(q_src, q_here_track)], q_here_track)
+
+
+# ---- scripted grasp (simulator-free) ------------------------------------------------------------
+
+def box_corners(T_obj, centre, half):
+    """World corners of an object's bounding box (``centre``, ``half`` in the object's frame)."""
+    signs = np.array([[sx, sy, sz] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)], dtype=float)
+    local = np.asarray(centre, dtype=float) + signs * np.asarray(half, dtype=float)
+    return (np.asarray(T_obj)[:3, :3] @ local.T).T + np.asarray(T_obj)[:3, 3]
+
+
+def grasp_plan(corners, approach, closing, pads, hand_R, *, span=GRIPPER_SPAN):
+    """A top-down grasp on an object's bounding box: the pads close across its narrower horizontal side.
+
+    ``approach``, ``closing`` and ``pads`` are the gripper's approach axis, finger-closing axis and
+    pad midpoint in the end-effector frame. The pads close ``GRASP_DEPTH`` below the box's top (at
+    least ``GRASP_CLEAR`` above its bottom), over the box's centre. Of the two finger orientations
+    the one nearer the hand's current one is kept. Returns ``{"too_wide": width}`` when the narrower
+    side exceeds ``span``, and None when the box has no horizontal axis.
+    """
+    corners = np.asarray(corners, dtype=float)
+    centre = corners.mean(axis=0)
+    top, bottom = float(corners[:, 2].max()), float(corners[:, 2].min())
+    best = None
+    for k in range(3):   # the box's own axes that lie mostly horizontal
+        ax = corners[1 << (2 - k)] - corners[0]   # corner index bits: x, y, z (box_corners order)
+        h = np.array([ax[0], ax[1], 0.0])
+        if np.linalg.norm(ax) < 1e-9 or np.linalg.norm(h) < 0.5 * np.linalg.norm(ax):
+            continue
+        g = h / np.linalg.norm(h)
+        proj = corners[:, :2] @ g[:2]
+        width = float(proj.max() - proj.min())
+        if best is None or width < best[0]:
+            best = (width, g)
+    if best is None:
+        return None
+    width, g = best
+    if width > span:
+        return {"too_wide": round(width, 4)}
+    a = np.asarray(approach, dtype=float)
+    a = a / np.linalg.norm(a)
+    c = np.asarray(closing, dtype=float)
+    c = c - (c @ a) * a
+    c = c / np.linalg.norm(c)
+    E = np.column_stack([a, c, np.cross(a, c)])
+    down = np.array([0.0, 0.0, -1.0])
+    options = []
+    for s in (1.0, -1.0):
+        W = np.column_stack([down, s * g, np.cross(down, s * g)])
+        R = W @ E.T
+        options.append((float(np.linalg.norm(rotvec(R @ np.asarray(hand_R).T))), R))
+    R = min(options, key=lambda x: x[0])[1]
+    z = max(bottom + GRASP_CLEAR, top - GRASP_DEPTH)
+    grasp = pose(np.array([centre[0], centre[1], z]) - R @ np.asarray(pads, dtype=float), R)
+    above = grasp.copy()
+    above[2, 3] += GRASP_ABOVE
+    return {"grasp": grasp, "above": above, "width": round(width, 4), "pad_height": round(z, 4),
+            "top": round(top, 4), "bottom": round(bottom, 4),
+            "axis_yaw": round(math.atan2(g[1], g[0]), 4)}
+
+
+def object_path_targets(transform, obj_poses, src_eef, grippers, hand_in_object):
+    """Place targets that move the carried object along the source object's path (``transform``
+    applied), with the hand as it holds the object now; after the source opens the gripper, the
+    hand repeats the source hand's motion from there."""
+    targets, opened = [], None
+    for k in range(len(obj_poses)):
+        if opened is None and k > 0 and grippers[k] < 0.5 <= grippers[k - 1]:
+            opened = k
+        if opened is None:
+            targets.append(transform @ obj_poses[k] @ hand_in_object)
+        else:
+            anchor = transform @ obj_poses[opened] @ hand_in_object
+            targets.append(anchor @ inverse(src_eef[opened]) @ src_eef[k])
+    return targets
 
 
 def door_distance(a, b):
@@ -1023,9 +1138,13 @@ def hold_action(gripper):
 class ExpertRun:
     """Runs a program's phases on ``world``; stops at the stage, the step cap or the budget."""
 
-    def __init__(self, world, gains, sources, predicate, *, cap, budget, align=True):
+    def __init__(self, world, gains, sources, predicate, *, cap, budget, align=True, scripted_grasp=False):
         self.world, self.gains, self.sources = world, gains, sources
         self.align_base = bool(align)   # drive to the source's base pose relative to each step's reference
+        # Another object instance than the source's (transfer, Gate R): picks are scripted top-down
+        # grasps where the object fits the gripper, and places move the held object along the
+        # source object's path.
+        self.scripted_grasp = bool(scripted_grasp)
         self.progress = None            # the running track phase, logged if a stop interrupts it
         self.watch = StageWatch(predicate) if predicate else None
         self.cap, self.budget = int(cap), int(budget)
@@ -1207,10 +1326,33 @@ class ExpertRun:
             align_log = self.align(align_goal(transform, source.base[i0], obs["base"], obs["mobile"]))
             obs = self.world.observe()
             transform, ref_log = self.replay_transform(source, i0, reference, obs)
+        if step.kind == PICK and self.scripted_grasp and reference[0] == "object":
+            plan = self.plan_grasp(reference[1])
+            if plan is not None and "grasp" in plan:
+                return self.scripted_pick(plan, step, ref_log, align_log)
+            ref_log = {**ref_log, "grasp": "replay", "grasp_skipped": plan or "no_box"}
         frames = range(step.start, step.end)
-        targets = [transform @ source.eef[source.at(f)] for f in frames]
-        bases = [transform @ source.base[source.at(f)] for f in frames]
         grippers = [float(source.gripper[source.at(f)]) for f in frames]
+        door_transforms, door_log = self.door_transforms(source, step, reference)
+        ref_log = {**ref_log, **door_log}
+        object_path = (step.kind == PLACE and self.scripted_grasp and source.target in source.objects
+                       and source.target in obs["objects"] and world_holding(self.world))
+        if object_path:
+            # The grasp here is not the source's: move the object, not the hand, along the source's path.
+            targets = object_path_targets(transform, [source.objects[source.target][source.at(f)] for f in frames],
+                                          [source.eef[source.at(f)] for f in frames], grippers,
+                                          inverse(obs["objects"][source.target]) @ obs["eef"])
+            ref_log = {**ref_log, "place": "object_path"}
+        elif door_transforms is not None:
+            targets = [T @ source.eef[source.at(f)] for T, f in zip(door_transforms, frames)]
+        else:
+            targets = [transform @ source.eef[source.at(f)] for f in frames]
+        hand_R = [(door_transforms[k] if door_transforms is not None else transform)[:3, :3]
+                  for k in range(len(targets))]
+        # The demo's own arm action still leads an object-path place: the hand turns and moves with
+        # the object it holds, so the demo's hand motion is the object's to within the grasp's lever.
+        feedforward = source.actions is not None
+        bases = [transform @ source.base[source.at(f)] for f in frames]
         driving = [source.base_mode(f) for f in frames]
         start, base_frames = self.steps, 0
         frame_since = len(self.frame.samples)
@@ -1246,7 +1388,7 @@ class ExpertRun:
                 sent = False
             if grippers[i] >= 0.5 and (i == 0 or grippers[i - 1] < 0.5) and not sent:
                 diag.close(frames[i], pose_error(obs["eef"], targets[i]))
-            if source.actions is None:
+            if not feedforward:
                 # No demo actions (test sources): command the whole error, hold the frame until reached.
                 action = arm_command(obs["base"], obs["eef"], targets[i], self.gains, grippers[i])
                 goal = targets[i]
@@ -1257,7 +1399,7 @@ class ExpertRun:
                 if not sent:
                     ff_pos, ff_rot = feedforward_arm(source.actions[source.at(frames[i])],
                                                      source.base[source.at(frames[i])][:3, :3],
-                                                     obs["base"][:3, :3], transform[:3, :3], self.gains)
+                                                     obs["base"][:3, :3], hand_R[i], self.gains)
                     fb_pos, fb_rot = arm_feedback(obs["base"], obs["eef"], targets[i], self.gains)
                     a_pos, a_rot = ff_pos + FEEDBACK_GAIN * fb_pos, ff_rot + FEEDBACK_GAIN * fb_rot
                     sent = True
@@ -1272,7 +1414,7 @@ class ExpertRun:
             obs = self.world.observe()
             err = pose_error(obs["eef"], goal)
             # The last frame has no recorded pose after it: its demo action, once sent, finishes it.
-            last = source.actions is not None and i + 1 >= len(targets)
+            last = feedforward and i + 1 >= len(targets)
             if err[0] < TRACK_TOL or last:
                 if not last:
                     diag.advance(err)
@@ -1288,6 +1430,59 @@ class ExpertRun:
         if step.kind == PICK:
             out["holding_after"] = world_holding(self.world)
         return out
+
+    def door_transforms(self, source, step, reference):
+        """(per-frame transforms, log) keeping a door step's hand on this door's handle as it swings,
+        or (None, log) without the source's measured joint track or a matched door here."""
+        if reference[0] != "door" or not source.door:
+            return None, {}
+        q_track = source.door.get("q_track")
+        doors = getattr(self.world, "doors", None)
+        door, _ = match_door(source.door, doors(reference[1]) if doors is not None else [])
+        if q_track is None or door is None or "axis" not in door or "axis" not in source.door:
+            return None, {"door_track": False}
+        q_track = np.asarray(q_track, dtype=float)
+        k = np.clip(np.arange(step.start, step.end) - int(source.door.get("q_track_start", source.start)),
+                    0, len(q_track) - 1)
+        transforms, q_here = door_track_transforms(source.door, door, q_track[k], door["q"])
+        return transforms, {"door_track": True,
+                            "door_q": [round(float(q_here[0]), 4), round(float(q_here[-1]), 4)],
+                            "source_door_q": [round(float(q_track[k[0]]), 4), round(float(q_track[k[-1]]), 4)]}
+
+    def plan_grasp(self, name):
+        """``grasp_plan`` for the object ``name`` here, or None if the world cannot say its box."""
+        box, axes = getattr(self.world, "object_box", None), getattr(self.world, "gripper_axes", None)
+        if box is None or axes is None:
+            return None
+        got = box(name)
+        if got is None:
+            return None
+        approach, closing, pads = axes()
+        return grasp_plan(box_corners(*got), approach, closing, pads, self.world.observe()["eef"][:3, :3])
+
+    def scripted_pick(self, plan, step, ref_log, align_log):
+        """Top-down grasp from ``grasp_plan``: above the box, down, close, lift."""
+        self.cap += GRASP_STEPS
+        start = self.steps
+        info = {"grasp": "scripted", **{k: v for k, v in plan.items() if k not in ("grasp", "above")}, **ref_log}
+        if align_log is not None:
+            info["align"] = align_log
+        self.progress = {"phase": "track", "kind": PICK, "frames": step.end - step.start, "_start": start,
+                         "_target": plan["above"], **info}
+        self.move_to(plan["above"], GRIPPER_OPEN)
+        self.progress["_target"] = plan["grasp"]
+        self.move_to(plan["grasp"], GRIPPER_OPEN)
+        pos, rot = pose_error(self.world.observe()["eef"], plan["grasp"])
+        info["grasp_error"] = [round(pos, 4), round(rot, 4)]
+        self.progress.update(grasp_error=info["grasp_error"])
+        self.hold_gripper(GRIPPER_CLOSE, GRASP_CLOSE_STEPS)
+        up = self.world.observe()["eef"].copy()
+        up[2, 3] += GRASP_LIFT
+        self.progress["_target"] = up
+        self.move_to(up, GRIPPER_CLOSE)
+        self.progress = None
+        return {"phase": "track", "kind": PICK, "steps": self.steps - start, "frames": step.end - step.start,
+                **info, "holding_after": world_holding(self.world)}
 
     def set_aside(self, tool, board):
         obs = self.world.observe()
@@ -1893,8 +2088,36 @@ class SimWorld:
                                   data.xanchor[j], data.xaxis[j], float(data.qpos[int(model.jnt_qposadr[j])]),
                                   model.jnt_range[j])
             door["handle_geoms"] = len(pts)
+            door["joint"], door["qpos_adr"] = name, int(model.jnt_qposadr[j])
             out.append(door)
         return out
+
+    def object_box(self, name):
+        """(world pose, box centre, box half sizes) of a task object's bounding-box region, or None."""
+        obj = self.kitchen.objects.get(name)
+        if obj is None:
+            return None
+        try:
+            elem = obj._regions["bbox"]["elem"]
+            centre = np.array([float(v) for v in elem.get("pos", "0 0 0").split()])
+            half = np.array([float(v) for v in elem.get("size").split()])
+        except Exception:
+            return None
+        return self.observe()["objects"][str(name)], centre, half
+
+    def gripper_axes(self):
+        """(approach axis, finger-closing axis, pad midpoint) in the end-effector frame, from the
+        finger pads and the gripper's root body."""
+        sim = self.kitchen.sim
+        gripper = self.kitchen.robots[0].gripper
+        gripper = gripper["right"] if isinstance(gripper, dict) else gripper
+        pads = [np.mean([sim.data.geom_xpos[sim.model.geom_name2id(g)] for g in gripper.important_geoms[side]], axis=0)
+                for side in ("left_fingerpad", "right_fingerpad")]
+        mid = (pads[0] + pads[1]) / 2
+        root = np.asarray(sim.data.body_xpos[sim.model.body_name2id(gripper.root_body)], dtype=float)
+        eef = self.observe()["eef"]
+        Re = eef[:3, :3]
+        return Re.T @ (mid - root), Re.T @ (pads[1] - pads[0]), Re.T @ (mid - eef[:3, 3])
 
     def base_in_contact(self):
         """The mobile base touches anything but the robot and the floor (the world body).
@@ -2598,6 +2821,28 @@ def source_door(world, fixture, restore_end):
                           "doors": sorted(before)}
 
 
+def source_q_track(states, door, src, start_frame, end_frame, q_end):
+    """The source door's joint at each source frame, read from the demo's flattened states.
+
+    The joint's state column (MuJoCo's [time, qpos, qvel] layout, else qpos first) must agree with
+    the restored simulator at the step start and the segment end; otherwise ``q_track`` is None.
+    """
+    states = np.asarray(states, dtype=float)
+    adr = door.get("qpos_adr")
+    if adr is None or q_end is None:
+        return {"q_track": None, "q_track_start": int(src.start), "q_track_error": "no joint address"}
+    for offset in (1, 0):
+        col = int(adr) + offset
+        if col >= states.shape[1]:
+            continue
+        if (abs(states[start_frame, col] - door["q"]) < DOOR_Q_TOL
+                and abs(states[end_frame, col] - float(q_end)) < DOOR_Q_TOL):
+            hi = min(int(src.end), len(states))
+            return {"q_track": [round(float(v), 5) for v in states[int(src.start):hi, col]],
+                    "q_track_start": int(src.start), "q_track_column": col}
+    return {"q_track": None, "q_track_start": int(src.start), "q_track_error": "states disagree with the restore"}
+
+
 def measure_source_doors(library, task, cache_path, *, make_env=None, max_sources=DOOR_SOURCES_MAX, log=print):
     """The door each fixture-stage source of ``task`` opened, from its demo restored once (cached).
 
@@ -2606,7 +2851,8 @@ def measure_source_doors(library, task, cache_path, *, make_env=None, max_source
     The door is read at the source's first manipulation step, at its closed configuration.
     """
     cache_path = Path(cache_path)
-    have = {(r["task_name"], int(r["episode"]), r["predicate"]): r for r in ladder.read_jsonl(cache_path)}
+    have = {(r["task_name"], int(r["episode"]), r["predicate"]): r for r in ladder.read_jsonl(cache_path)
+            if r.get("door_format") == DOOR_FORMAT}   # older rows lack the joint track: measured again
     library.doors.update({k: door_from_record(r["door"]) for k, r in have.items() if r.get("door")})
     todo = [(src, spec) for (t, predicate), spec in STAGE_SPECS.items() if t == task and spec["kind"] == "fixture"
             for src in library.sources(task, predicate)[: int(max_sources)] if src.key not in have]
@@ -2619,7 +2865,7 @@ def measure_source_doors(library, task, cache_path, *, make_env=None, max_source
         reset_to = ladder._env_method(env, "reset_to")
         for src, spec in todo:
             rec = {"task_name": task, "episode": int(src.episode), "predicate": src.predicate,
-                   "fixture": spec["fixture"], "created_at": ladder.utc_now()}
+                   "fixture": spec["fixture"], "door_format": DOOR_FORMAT, "created_at": ladder.utc_now()}
             try:
                 states, ep_meta, model_xml = es.load_episode(library.lerobots[task], src.episode)
                 first = next((st for st in src.steps if st.kind != NAVIGATE), src.steps[0])
@@ -2629,6 +2875,8 @@ def measure_source_doors(library, task, cache_path, *, make_env=None, max_source
                                          lambda: reset_to({"states": states[end]}))
                 rec.update(info)
                 if door is not None:
+                    door.update(source_q_track(states, door, src, first.start, end, info.get("q_end")))
+                    rec["q_track_ok"] = door["q_track"] is not None
                     rec["door"] = door_record(door)
                     library.doors[src.key] = door
                     src.door = door
@@ -2637,7 +2885,7 @@ def measure_source_doors(library, task, cache_path, *, make_env=None, max_source
             ladder.append_jsonl(cache_path, rec)
             log(f"[doors] {task}:{src.predicate} ep {src.episode} "
                 + (f"{rec['door']['role']} {rec['door']['type']} side={rec['door']['side']} "
-                   f"r={rec['door']['radius']:.3f} moved={rec['moved']}" if rec.get("door")
+                   f"r={rec['door']['radius']:.3f} moved={rec['moved']} q_track={rec['q_track_ok']}" if rec.get("door")
                    else "ERROR " + rec["error"].strip().splitlines()[-1]))
     finally:
         ladder._close(env, None)
@@ -2687,7 +2935,7 @@ def run_transfer(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, dat
                         program = programs[i]
                         sources = _sources_of([program], library, task)
                         run = ExpertRun(world, gains, sources, predicate, cap=program_cap(program, sources),
-                                        budget=10 ** 6)
+                                        budget=10 ** 6, scripted_grasp=True)
                         result = run.run(program["phases"])
                         if result["stage_completed"] and world.facts(task)["held_any"]:
                             ExpertRun(world, gains, sources, None, cap=10 ** 6, budget=10 ** 6).run([{"phase": "release"}])
@@ -2844,7 +3092,7 @@ def run_gate_r(source_runs, alarms_path, audit_dir, index_dir, output_dir, gains
                         program = programs[k]
                         sources = _sources_of([program], library, task)
                         run = ExpertRun(world, gains, sources, state["stage"], cap=program_cap(program, sources),
-                                        budget=budget)
+                                        budget=budget, scripted_grasp=True)
                         result = run.run(program["phases"])
                         record.update({"source": program["source"], "rank_distance": program["rank_distance"],
                                        "facts": facts_record(facts), **result})

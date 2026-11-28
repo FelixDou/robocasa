@@ -1520,6 +1520,53 @@ choice open, the code fixes it as follows:
     video. Of the 35 picks that close, 23 hold the object. Picks that
     close and hold, out of logged picks: kettle 9 / 20, mug 4 / 7, croissant
     5 / 20, correct cutting tool 4 / 20.
+
+  *Amendment: door-angle replay and the scripted grasp (28 November 2026,
+  before the third transfer run).* Self-replay is unchanged; transfer and
+  Gate R use both changes.
+  - *Door-angle replay.* A door step's hand path is no longer moved
+    rigidly. The source door's joint is read at every frame of the step from
+    the demo's own states (MuJoCo's flattened [time, qpos, qvel]). The read
+    is kept only if it agrees with the restored simulator, to within 1e-3, at
+    the step start and the segment end; `q_track` is None otherwise. Frame
+    *k*'s hand pose is held fixed relative to the source handle at the
+    source's joint value. It is then placed on this door's handle at this
+    door's start value plus the source's change since the step start. That
+    change is signed by each door's opening direction and clipped to this
+    door's range. On a door of another radius, the hand stays on the handle
+    and swings on this door's circle.
+    - Base alignment, base-mode frames and the torso still use the closed
+      door's frame.
+    - A door step without a joint track keeps the rigid replay
+      (`door_track: false`).
+    - `source_doors.jsonl` rows now carry the hinge axis, the anchor, the
+      joint's state column and the track (`door_format: 2`). Older rows are
+      measured again.
+  - *Scripted grasp.* This is the fallback named above for a category whose
+    grasps do not transfer, and every rated pick stage failed. It is a
+    top-down grasp on the object's bounding box.
+    - The fingers close across the box's narrower horizontal side, over its
+      centre. The pads close 3 cm below its top, and at least 1 cm above its
+      bottom.
+    - The gripper's approach and closing axes are read from the finger pads
+      and the gripper body, not assumed.
+    - The hand moves 10 cm above the grasp, then down, closes for 15 steps
+      and lifts 12 cm. This adds 150 steps to the expert cap.
+    - An object whose narrower side exceeds 7 cm (the gripper opens to about
+      8 cm) keeps the replayed pick, logged as `grasp_skipped: too_wide`.
+      Mugs and kettles may land here.
+  - *Object-path place.* Whenever the executor holds the stage's object at a
+    place step, the hand moves so that the *object* follows the source
+    object's path, carried to this receptacle. The hand holds the object as
+    it does now. From the frame where the source opens the gripper, the hand
+    repeats the source hand's motion from there. The demo's arm action
+    still leads each frame, since the hand moves with the object it holds.
+    This applies after either kind of pick, and to Gate R states that start
+    holding the object.
+  - *Logs.* A pick logs `grasp` (`scripted` or `replay`), the box width, the
+    pad height and the hand's error at the grasp. A door step logs
+    `door_track` and the joint values here and in the source. A place logs
+    `place: object_path`.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
