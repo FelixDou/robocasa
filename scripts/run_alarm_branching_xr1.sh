@@ -213,17 +213,19 @@ if [[ "$action" == r2-self-replay || "$action" == r2-transfer ]]; then
   test -f "$gains" || { echo "Missing $gains (run r2-probe first)"; exit 1; }
   gpu=${R2_GPU:-0}
   command=${action#r2-}
-  out="$r2_dir/$command"
+  # R2_TAG names a separate output folder (out=<command>_<tag>); R2_ARGS adds arguments (e.g. --record 2).
+  out="$r2_dir/$command${R2_TAG:+_$R2_TAG}"
+  read -r -a extra <<< "${R2_ARGS:-}"
   resume=()
   [[ ! -e "$out/${command//-/_}.jsonl" ]] || resume=(--resume)
   # Doors the fixture sources open, measured once from their restored demos (shared with Gate R).
   [[ "$command" != transfer ]] || resume+=(--doors "$r2_dir/source_doors.jsonl")
   mkdir -p "$out"
   git -C "$ROBOCASA_REPO" rev-parse HEAD > "$out/git_commit.txt"
-  log="$log_dir/$(basename "$ALARM_ROOT")_r2_${command}_$(date +%Y%m%d_%H%M%S).log"
+  log="$log_dir/$(basename "$ALARM_ROOT")_r2_${command}${R2_TAG:+_$R2_TAG}_$(date +%Y%m%d_%H%M%S).log"
   CUDA_VISIBLE_DEVICES="$gpu" MUJOCO_EGL_DEVICE_ID="$gpu" PYTHONPATH="$ROBOCASA_REPO" nohup "$py" -u \
     -m robocasa.recovery.expert_recovery "$command" --index-dir "$segments_dir/index" \
-    --dataset-base "$ROBOCASA_DATASET_BASE" --gains "$gains" --output-dir "$out" "${resume[@]}" > "$log" 2>&1 &
+    --dataset-base "$ROBOCASA_DATASET_BASE" --gains "$gains" --output-dir "$out" "${resume[@]}" ${extra[@]+"${extra[@]}"} > "$log" 2>&1 &
   echo "$command pid=$! gpu=$gpu log=$log out=$out"
   exit 0
 fi

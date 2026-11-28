@@ -1567,6 +1567,59 @@ choice open, the code fixes it as follows:
     pad height and the hand's error at the grasp. A door step logs
     `door_track` and the joint values here and in the source. A place logs
     `place: object_path`.
+  *Pretrain transfer, door-angle replay and scripted grasp (commit cc024a7,
+  28 November 2026).* 100 resets, 0 errors. Failed again: no rated stage
+  reached 0.7.
+
+  | Stage | aligned run (2c60536) | this run |
+  |---|---|---|
+  | ArrangeBreadBasket cabinet_open | 1/19 | 1/19 |
+  | GarnishPancake fridge_open | 1/20 | 1/20 |
+  | ArrangeTea kettle_on_tray | 7/20 | 7/20 |
+  | ArrangeTea mug_on_tray | 2/7 | 2/7 |
+  | BreadSelection croissant_on_cutting_board | 2/20 | 4/20 |
+  | CuttingToolSelection correct_tool_on_cutting_board | 0/20 | 0/20 |
+
+  - *Doors: door-angle replay changed nothing.* All door steps had a
+    checked joint track (`door_track: true`), and the hand targets followed
+    this door's circle. The hand still stalls at the same point: the median
+    share of frames reached is 0.41 for doors at d < 0.20 (0.43 before) and
+    0.63 beyond (0.66 before). Of the 5 doors at d < 0.10, 2 were completed
+    (3 before). So the stall is not the door radius. The log does not show
+    where the door was when the hand stalled, nor what the robot was
+    touching.
+  - *Scripted grasp works on open counters.* Croissants on the counter: the
+    hand reached the grasp to within 1 cm in 8/8, and held 7/8. The replayed
+    croissant pick held 2/12.
+  - *It fails where something is above the object.* Jam on a cabinet shelf:
+    the hand stopped 17–43 cm short in 3/4. Tools in the open drawer: 23 cm
+    short in 11/14, held 2/14 (the replayed pick held 2/6).
+  - *Too wide.* 12/20 croissants measured 7.1–8.5 cm on the narrow side and
+    went to the replayed pick. All kettles (11.7–19.3 cm) and mugs
+    (7.7–10.7 cm) did too.
+  - *Object-path place works once the object is held.* Stage completed after
+    a held pick: kettle 7/8, croissant 4/8, mug 2/6, tool 0/4.
+
+  *Amendment: diagnostics, ceiling check, wider span (28 November 2026,
+  before the fourth transfer run).*
+  - *Door diagnostics.* A door step logs `door_samples`: [frame, wanted
+    joint value, actual joint value] every 25 frames, at the end and at a
+    stop. Any stopped phase logs `contacts_at_stop`, the robot's contacts
+    with anything but the floor.
+  - *Ceiling check.* Before a scripted grasp, rays are cast upward from five
+    points at pad height: the centre, both fingers and both hand edges. They
+    skip the object, the robot and visual-only geoms. A collision geom within
+    25 cm of the pads keeps the replayed pick, logged as `grasp_skipped:
+    {blocked, clearance}`. If the check raises, the grasp proceeds and logs
+    `ceiling_error`.
+  - *Short grasps.* A scripted grasp that ends more than 2 cm from its target
+    logs `grasp_offset` (eef minus target) and `grasp_contacts`.
+  - *Span.* The widest narrow side for a scripted grasp goes from 7.0 to
+    7.6 cm (the fingers open to 8 cm). This takes the croissants and mugs
+    measured at 7.1–7.6 cm.
+  - *Videos.* `transfer --record N` records the first N resets per task under
+    `videos/<task>/seed_<seed>`. The launcher takes `R2_TAG` (a separate
+    output folder) and `R2_ARGS` (extra arguments).
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

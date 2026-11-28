@@ -1570,6 +1570,9 @@ class DoorAngleReplayTest(unittest.TestCase):
                           "reference": ["door", "cab"]}])["phases"][0]
         self.assertTrue(phase["door_track"])
         self.assertEqual(phase["door_q"], [0.0, 1.0])
+        # [frame, wanted, actual] every DOOR_SAMPLE_EVERY frames and at the end; this world has no joint
+        self.assertEqual([s[0] for s in phase["door_samples"]], [0, 25, 29])
+        self.assertEqual(phase["door_samples"][-1][1:], [1.0, None])
         want = er.door_handle_frame(here, 1.0) @ HAND_ON_HANDLE
         np.testing.assert_allclose(world.eef[:3, 3], want[:3, 3], atol=er.TRACK_TOL)
         rigid = {**demo.door, "q_track": None}
@@ -1580,6 +1583,23 @@ class DoorAngleReplayTest(unittest.TestCase):
                           "reference": ["door", "cab"]}])["phases"][0]
         self.assertFalse(phase["door_track"])                              # the rigid arc, off this circle
         self.assertGreater(np.linalg.norm(world.eef[:3, 3] - want[:3, 3]), 0.05)
+
+    def test_a_stopped_door_step_says_where_the_door_was_and_what_the_robot_touched(self):
+        src = swing_door((0.0, 0.0), 0.4)
+        demo = swing_demo(src, world_pose(0.2, -0.9, 0.3, yaw=math.pi / 2))
+        here = {**swing_door((2.0, 1.0), 0.55, yaw=0.5), "qpos_adr": 7}
+        world = DoorWorld(here, mobile=(2.0, 0.0, 1.0))
+        world.joint_q = lambda adr: 0.25 if adr == 7 else float("nan")
+        world.robot_contacts = lambda: {"gripper0_right_leftfinger>cab_door": 3}
+        run = er.ExpertRun(world, TRUE_GAINS, {demo.key: demo}, None, cap=60, budget=10 ** 5)
+        out = run.run([{"phase": "track", "source": list(demo.key), "step": 0, "kind": er.EXECUTE,
+                        "reference": ["door", "cab"]}])
+        phase = out["phases"][-1]
+        self.assertEqual((out["stop"], phase["stopped"]), ("cap", "cap"))
+        frame, wanted, actual = phase["door_samples"][-1]
+        self.assertEqual(frame, phase["frame_reached"])
+        self.assertEqual(actual, 0.25)
+        self.assertEqual(phase["contacts_at_stop"], {"gripper0_right_leftfinger>cab_door": 3})
 
     def test_the_joint_track_is_read_from_the_states_and_checked_against_the_restore(self):
         n = 12
@@ -1663,9 +1683,11 @@ class ScriptedGraspTest(unittest.TestCase):
             np.testing.assert_allclose(er.inverse(targets[opened]) @ targets[k],
                                        er.inverse(eefs[opened]) @ eefs[k], atol=1e-9)
 
-    def scene(self, boxes):
+    def scene(self, boxes, ceiling=None):
         demo = carried(demo_source(world_pose(0.55, 0.05, 0.9), world_pose(0.6, -0.4, 0.9), world_pose(0, 0, 0.3)))
         world = GraspWorld(boxes, mobile=(1.0, 2.0, 0.6), eef_rel=(0.4, 0.2, 0.8), predicate=mug_on_tray)
+        if ceiling is not None:
+            world.ceiling = ceiling
         base = world.base_T()
         world.objects = {"obj": base @ world_pose(0.6, 0.15, 0.6, yaw=1.0),
                          "container": base @ world_pose(0.5, -0.3, 0.6)}
@@ -1684,6 +1706,30 @@ class ScriptedGraspTest(unittest.TestCase):
         self.assertEqual(place["place"], "object_path")
         tray = world.objects["container"][:3, 3] + [0, 0, PLACE_HEIGHT]
         self.assertLess(np.linalg.norm(world.objects["obj"][:3, 3] - tray), er.TRACK_TOL)
+
+    def test_the_ceiling_rays_start_at_the_fingers_and_the_hand_edges(self):
+        plan = {"centre": [1.0, 2.0], "pad_height": 0.9, "axis_yaw": 0.0, "width": 0.04}
+        pts = np.array(er.ceiling_points(plan))
+        np.testing.assert_allclose(pts[:, 2], 0.9)
+        np.testing.assert_allclose(pts[:3, :2], [[1.0, 2.0], [1.0 + 0.02 + er.GRASP_FINGER, 2.0],
+                                                 [1.0 - 0.02 - er.GRASP_FINGER, 2.0]], atol=1e-12)
+        np.testing.assert_allclose(pts[3:, :2], [[1.0, 2.0 + er.GRASP_HAND_HALF], [1.0, 2.0 - er.GRASP_HAND_HALF]],
+                                   atol=1e-12)
+
+    def test_something_over_the_object_keeps_the_replayed_pick(self):
+        asked = []
+
+        def ceiling(name, points, height):
+            asked.append((name, len(points), height))
+            return ("shelf_main", 0.12)
+
+        _, out = self.scene({"obj": ([0.015, 0.0, 0.0], [0.02, 0.03, 0.03])}, ceiling=ceiling)
+        self.assertEqual(asked, [("obj", 5, er.GRASP_CEILING)])
+        self.assertTrue(out["stage_completed"], out)
+        self.assertEqual(out["phases"][0]["grasp"], "replay")
+        self.assertEqual(out["phases"][0]["grasp_skipped"], {"blocked": "shelf_main", "clearance": 0.12, "width": 0.04})
+        _, clear = self.scene({"obj": ([0.015, 0.0, 0.0], [0.02, 0.03, 0.03])}, ceiling=lambda *a: None)
+        self.assertEqual(clear["phases"][0]["grasp"], "scripted")
 
     def test_an_object_too_wide_for_the_gripper_keeps_the_replayed_pick(self):
         _, out = self.scene({"obj": ([0.0, 0.0, 0.0], [0.06, 0.06, 0.03])})

@@ -84,13 +84,17 @@ DOOR_ROLE_MISMATCH = 0.1      # rank penalty: another door of the fixture (left/
 DOOR_SOURCES_MAX = 40         # fixture sources measured per stage (episode order); the rest rank last
 DOOR_FORMAT = 2               # source_doors.jsonl rows with the door's axis, anchor and joint track
 DOOR_Q_TOL = 1e-3             # the door's joint read from the demo's states vs the restored simulator
-GRIPPER_SPAN = 0.07           # m: widest object (narrow horizontal side) the scripted grasp takes
+GRIPPER_SPAN = 0.076          # m: widest object (narrow horizontal side) the scripted grasp takes (fingers open 0.08)
 GRASP_DEPTH = 0.03            # m: the finger pads close this far below the object's top ...
 GRASP_CLEAR = 0.01            # m: ... and at least this far above its bottom
 GRASP_ABOVE = 0.10            # m: the pre-grasp pose stands this far above the grasp
 GRASP_LIFT = 0.12             # m: lift after closing
 GRASP_CLOSE_STEPS = 15
 GRASP_STEPS = 150             # steps the scripted grasp adds to the expert cap
+GRASP_CEILING = 0.25          # m: free height the hand needs above the pads to come down from above
+GRASP_FINGER = 0.01           # m: finger thickness outside the object's narrow side, for the ceiling rays
+GRASP_HAND_HALF = 0.04        # m: the hand's half breadth along the object's long side, for the ceiling rays
+DOOR_SAMPLE_EVERY = 25        # frames between logged (wanted, actual) door joint values on a door step
 SELF_REPLAY_DEMOS, SELF_REPLAY_MIN = 20, 0.9
 TRANSFER_RESETS, TRANSFER_MIN = 20, 0.7
 TRANSFER_BASE_SEED = 710007   # fresh pretrain-split seeds 710007-710026; Phase A/B and Step 0 do not use them
@@ -703,7 +707,17 @@ def grasp_plan(corners, approach, closing, pads, hand_R, *, span=GRIPPER_SPAN):
     above[2, 3] += GRASP_ABOVE
     return {"grasp": grasp, "above": above, "width": round(width, 4), "pad_height": round(z, 4),
             "top": round(top, 4), "bottom": round(bottom, 4),
-            "axis_yaw": round(math.atan2(g[1], g[0]), 4)}
+            "axis_yaw": round(math.atan2(g[1], g[0]), 4), "centre": [round(float(v), 4) for v in centre[:2]]}
+
+
+def ceiling_points(plan):
+    """Where the hand comes down for a ``grasp_plan``: the centre, both fingers and both hand edges,
+    at pad height. Rays cast up from these find what would stop a top-down grasp."""
+    c = np.array([*plan["centre"], plan["pad_height"]], dtype=float)
+    g = np.array([math.cos(plan["axis_yaw"]), math.sin(plan["axis_yaw"]), 0.0])
+    n = np.array([-g[1], g[0], 0.0])
+    out = plan["width"] / 2 + GRASP_FINGER
+    return [c, c + out * g, c - out * g, c + GRASP_HAND_HALF * n, c - GRASP_HAND_HALF * n]
 
 
 def object_path_targets(transform, obj_poses, src_eef, grippers, hand_in_object):
@@ -1334,6 +1348,7 @@ class ExpertRun:
         frames = range(step.start, step.end)
         grippers = [float(source.gripper[source.at(f)]) for f in frames]
         door_transforms, door_log = self.door_transforms(source, step, reference)
+        door_watch = door_log.pop("_watch", None)
         ref_log = {**ref_log, **door_log}
         object_path = (step.kind == PLACE and self.scripted_grasp and source.target in source.objects
                        and source.target in obs["objects"] and world_holding(self.world))
@@ -1360,10 +1375,16 @@ class ExpertRun:
         i, sent = 0, False
         self.progress = {"phase": "track", "kind": step.kind, "frames": len(targets), "frame_reached": 0,
                          "_start": start, "_diag": diag, **ref_log}
+        if door_watch is not None:
+            self.progress["_door"] = door_watch
+            self.progress["door_samples"] = []
         if align_log is not None:
             self.progress["align"] = align_log
         while i < len(targets):
             self.progress["frame_reached"], self.progress["_target"] = i, targets[i]
+            if door_watch is not None and i % DOOR_SAMPLE_EVERY == 0 and (
+                    not self.progress["door_samples"] or self.progress["door_samples"][-1][0] != i):
+                self.progress["door_samples"].append(self.door_sample(door_watch, i))
             obs = self.world.observe()
             diag.step(i)
             dz = bases[i][2, 3] - obs["base"][2, 3]
@@ -1420,9 +1441,12 @@ class ExpertRun:
                     diag.advance(err)
                 i += 1
                 sent = False
+        samples = self.progress.get("door_samples") if door_watch is not None else None
         self.progress = None
         out = {"phase": "track", "kind": step.kind, "steps": self.steps - start, "frames": len(targets),
                "base_mode_steps": base_frames, **diag.summary(), **ref_log}
+        if door_watch is not None:
+            out.update(door_samples=samples + [self.door_sample(door_watch, len(targets) - 1)])
         if align_log is not None:
             out["align"] = align_log
         if base_frames:
@@ -1445,9 +1469,16 @@ class ExpertRun:
         k = np.clip(np.arange(step.start, step.end) - int(source.door.get("q_track_start", source.start)),
                     0, len(q_track) - 1)
         transforms, q_here = door_track_transforms(source.door, door, q_track[k], door["q"])
-        return transforms, {"door_track": True,
+        return transforms, {"door_track": True, "_watch": (door.get("qpos_adr"), [float(v) for v in q_here]),
                             "door_q": [round(float(q_here[0]), 4), round(float(q_here[-1]), 4)],
                             "source_door_q": [round(float(q_track[k[0]]), 4), round(float(q_track[k[-1]]), 4)]}
+
+    def door_sample(self, watch, i):
+        """[frame, wanted joint value, actual joint value] of the door a door step swings."""
+        adr, q_here = watch
+        joint_q = getattr(self.world, "joint_q", None)
+        actual = None if adr is None or joint_q is None else round(float(joint_q(adr)), 4)
+        return [int(i), round(float(q_here[min(int(i), len(q_here) - 1)]), 4), actual]
 
     def plan_grasp(self, name):
         """``grasp_plan`` for the object ``name`` here, or None if the world cannot say its box."""
@@ -1458,7 +1489,17 @@ class ExpertRun:
         if got is None:
             return None
         approach, closing, pads = axes()
-        return grasp_plan(box_corners(*got), approach, closing, pads, self.world.observe()["eef"][:3, :3])
+        plan = grasp_plan(box_corners(*got), approach, closing, pads, self.world.observe()["eef"][:3, :3])
+        ceiling = getattr(self.world, "ceiling", None)
+        if plan is not None and "grasp" in plan and ceiling is not None:
+            try:
+                hit = ceiling(name, ceiling_points(plan), GRASP_CEILING)
+            except Exception as exc:   # keep the grasp, say why the check did not run
+                plan["ceiling_error"] = f"{type(exc).__name__}: {exc}"[:200]
+                hit = None
+            if hit is not None:   # a shelf, a counter over a drawer: the hand cannot come down from above
+                return {"blocked": hit[0], "clearance": round(float(hit[1]), 4), "width": plan["width"]}
+        return plan
 
     def scripted_pick(self, plan, step, ref_log, align_log):
         """Top-down grasp from ``grasp_plan``: above the box, down, close, lift."""
@@ -1472,8 +1513,14 @@ class ExpertRun:
         self.move_to(plan["above"], GRIPPER_OPEN)
         self.progress["_target"] = plan["grasp"]
         self.move_to(plan["grasp"], GRIPPER_OPEN)
-        pos, rot = pose_error(self.world.observe()["eef"], plan["grasp"])
+        eef = self.world.observe()["eef"]
+        pos, rot = pose_error(eef, plan["grasp"])
         info["grasp_error"] = [round(pos, 4), round(rot, 4)]
+        if pos >= TRACK_TOL:   # short of the grasp: which way, and what the robot is touching
+            info["grasp_offset"] = [round(float(v), 4) for v in eef[:3, 3] - plan["grasp"][:3, 3]]
+            contacts = getattr(self.world, "robot_contacts", None)
+            if contacts is not None:
+                info["grasp_contacts"] = contacts()
         self.progress.update(grasp_error=info["grasp_error"])
         self.hold_gripper(GRIPPER_CLOSE, GRASP_CLOSE_STEPS)
         up = self.world.observe()["eef"].copy()
@@ -1506,8 +1553,13 @@ class ExpertRun:
         """The log of the phase a stop interrupted: how far it got and how far the hand was off."""
         p = dict(self.progress)
         self.progress = None
-        diag, target = p.pop("_diag", None), p.pop("_target", None)
+        diag, target, watch = p.pop("_diag", None), p.pop("_target", None), p.pop("_door", None)
         out = {**p, "steps": self.steps - p.pop("_start", self.steps), "stopped": stop}
+        if watch is not None:
+            out["door_samples"] = list(p.get("door_samples", [])) + [self.door_sample(watch, p.get("frame_reached", 0))]
+        contacts = getattr(self.world, "robot_contacts", None)
+        if contacts is not None:
+            out["contacts_at_stop"] = contacts()
         if diag is not None:
             out.update(diag.summary())
         if target is not None:
@@ -2118,6 +2170,69 @@ class SimWorld:
         eef = self.observe()["eef"]
         Re = eef[:3, :3]
         return Re.T @ (mid - root), Re.T @ (pads[1] - pads[0]), Re.T @ (mid - eef[:3, 3])
+
+    def joint_q(self, qpos_adr):
+        return float(self.kitchen.sim.data.qpos[int(qpos_adr)])
+
+    def robot_contacts(self, top=6):
+        """{"robot_body>other_body": count} of the robot's contacts with anything but the floor."""
+        sim = self.kitchen.sim
+        model = sim.model
+        robot = ("robot", "gripper", "mobilebase")
+        seen = Counter()
+        for i in range(int(sim.data.ncon)):
+            c = sim.data.contact[i]
+            names = [model.body_id2name(int(model.geom_bodyid[g])) or "" for g in (c.geom1, c.geom2)]
+            mine = [n.startswith(robot) for n in names]
+            if mine[0] == mine[1]:
+                continue
+            other = names[1] if mine[0] else names[0]
+            if other == "world" or "floor" in other.lower():
+                continue
+            seen[f"{names[0] if mine[0] else names[1]}>{other or '<unnamed>'}"] += 1
+        return dict(seen.most_common(top))
+
+    def ceiling(self, name, points, height):
+        """(body, distance) of the nearest collision geom above any of ``points`` within ``height``,
+        ignoring the object ``name`` and the robot; None if the space above is free."""
+        import mujoco
+
+        sim = self.kitchen.sim
+        m = getattr(sim.model, "_model", sim.model)
+        d = getattr(sim.data, "_data", sim.data)
+        obj = self.kitchen.objects.get(name)
+        own = self.kitchen.obj_body_id[name] if obj is not None else -1
+        parent = np.asarray(m.body_parentid)
+
+        def ignored(geom):
+            body = int(m.geom_bodyid[geom])
+            if not (int(m.geom_contype[geom]) or int(m.geom_conaffinity[geom])):
+                return True   # visual only
+            b = body
+            while b > 0:
+                if b == own:
+                    return True
+                b = int(parent[b])
+            return (mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, body) or "").startswith(("robot", "gripper", "mobilebase"))
+
+        up = np.array([0.0, 0.0, 1.0])
+        best = None
+        for p in points:
+            start, travelled = np.asarray(p, dtype=float).copy(), 0.0
+            while travelled < height:
+                geom = np.zeros(1, dtype=np.int32)
+                dist = mujoco.mj_ray(m, d, start, up, None, 1, -1, geom)
+                if dist < 0 or travelled + dist >= height:
+                    break
+                if ignored(int(geom[0])):
+                    travelled += dist + 1e-4
+                    start = start + (dist + 1e-4) * up
+                    continue
+                if best is None or travelled + dist < best[1]:
+                    body = int(m.geom_bodyid[int(geom[0])])
+                    best = (mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, body) or f"body{body}", travelled + dist)
+                break
+        return best
 
     def base_in_contact(self):
         """The mobile base touches anything but the robot and the floor (the world body).
@@ -2898,8 +3013,10 @@ def transfer_stages(task_name, required):
 
 def run_transfer(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, dataset_base=None,
                  lerobot_overrides=None, resets=TRANSFER_RESETS, base_seed=TRANSFER_BASE_SEED, split="pretrain",
-                 resume=False, doors_path=None, log=print):
-    """Every stage in order from fresh pretrain-split resets, sources from the target demos."""
+                 resume=False, doors_path=None, videos=0, log=print):
+    """Every stage in order from fresh pretrain-split resets, sources from the target demos.
+
+    ``videos``: record the first ``videos`` resets per task under ``videos/<task>/seed_<seed>``."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     gains = load_gains(gains_path)
@@ -2921,7 +3038,9 @@ def run_transfer(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, dat
                     if env is None:
                         env = _make_env(task, split, base_seed)
                     env.reset(seed=seed)
-                    world = SimWorld(env)
+                    video = output_dir / "videos" / task / f"seed_{seed}"
+                    world = SimWorld(env, recorder=AttemptRecorder(video)
+                                     if i < int(videos) and not video.exists() else None)
                     from robocasa.recovery.subtask_eval import get_subtask_eval
 
                     required = list((get_subtask_eval(env) or {}).get("required_predicates") or [])
@@ -2943,8 +3062,16 @@ def run_transfer(index_dir, output_dir, gains_path, *, tasks=es.PILOT_TASKS, dat
                                                  "rank_distance": program["rank_distance"], **result})
                         if not result["stage_completed"]:
                             break
+                    _finish_recording(world, {"stage_completed": all(s["stage_completed"] for s in record["stages"]),
+                                              "stop": record["stages"][-1].get("stop") if record["stages"] else None},
+                                      video, "")
+                    if i < int(videos):
+                        record["recording"] = str(video)
                 except Exception:
                     record["error"] = traceback.format_exc()
+                    recorder = getattr(locals().get("world"), "recorder", None)
+                    if recorder is not None:
+                        recorder.abort()
                     ladder._close(env, None)
                     env = None
                 ladder.append_jsonl(out_path, record)
@@ -3187,6 +3314,7 @@ def build_parser():
     p.add_argument("--tasks", nargs="*", default=list(es.PILOT_TASKS))
     p.add_argument("--resets", type=int, default=TRANSFER_RESETS)
     p.add_argument("--doors", type=Path, help="cache of the doors fixture sources open (default: in --output-dir)")
+    p.add_argument("--record", type=int, default=0, help="videos of the first N resets per task")
     p = sub.add_parser("gate-r", help="expert + XR-1 at the class-2 alarm states (simulator + policy server)")
     data_args(p)
     p.add_argument("--source-runs", nargs="+", required=True, type=Path)
@@ -3251,7 +3379,7 @@ def main(argv=None):
                         stages=args.stages, action_replay=args.action_replay, videos=args.record, **common)
     elif args.command == "transfer":
         run_transfer(args.index_dir, args.output_dir, args.gains, tasks=args.tasks, resets=args.resets,
-                     doors_path=args.doors, **common)
+                     doors_path=args.doors, videos=args.record, **common)
     else:
         run_gate_r(args.source_runs, args.alarms, args.audit_dir, args.index_dir, args.output_dir, args.gains,
                    attempts=args.attempts, host=args.host, port=args.port,
