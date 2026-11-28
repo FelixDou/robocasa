@@ -1886,7 +1886,8 @@ class ExpertRun:
 
     def grip_sample(self, door, pads, q_wanted):
         """[wanted q, door q, pad offset from the bar (``pad_bar_offset``), finger opening, what each
-        finger touches, the rest of the robot's contacts] of the hand on the door now."""
+        finger touches, the rest of the robot's contacts, what the door touches] of the hand on the
+        door now."""
         obs = self.world.observe()
         q = self.door_q(door)
         out = [round(float(q_wanted), 4), round(q, 4), pad_bar_offset(door, q, obs["eef"], pads)]
@@ -1900,6 +1901,12 @@ class ExpertRun:
         contacts = getattr(self.world, "robot_contacts", None)
         if contacts is not None:
             out.append({k: v for k, v in contacts().items() if "finger" not in k.split(">")[0]})
+        touch = getattr(self.world, "door_touch", None)
+        if touch is not None and door.get("joint") is not None:
+            try:
+                out.append(touch(door["joint"]))
+            except Exception as exc:   # keep the sample, say why the door was not read
+                out.append(f"{type(exc).__name__}: {exc}"[:120])
         return out
 
     def around_edge(self, door, q, side, order):
@@ -2687,6 +2694,36 @@ class SimWorld:
 
     def joint_q(self, qpos_adr):
         return float(self.kitchen.sim.data.qpos[int(qpos_adr)])
+
+    def door_touch(self, joint):
+        """What the door on hinge ``joint`` touches, apart from the robot: {"contacts": {body:
+        [count, deepest penetration (m)]}, "constraint" and "passive": the generalized forces on
+        its joint (N m), from contacts and limits, and from damping or springs}."""
+        sim = self.kitchen.sim
+        m = getattr(sim.model, "_model", sim.model)
+        model, data = sim.model, sim.data
+        j = int(model.joint_name2id(joint))
+        jb = int(m.jnt_bodyid[j])
+        parent = np.asarray(m.body_parentid)
+        robot = ("robot", "gripper", "mobilebase")
+        seen = {}
+        for i in range(int(data.ncon)):
+            c = data.contact[i]
+            g = (int(c.geom1), int(c.geom2))
+            bodies = [int(m.geom_bodyid[x]) for x in g]
+            mine = [self._below(b, jb, parent) for b in bodies]
+            if mine[0] == mine[1]:
+                continue
+            other = bodies[1] if mine[0] else bodies[0]
+            name = model.body_id2name(other) or "<unnamed>"
+            if name.startswith(robot):
+                continue
+            count, depth = seen.get(name, (0, 0.0))
+            seen[name] = (count + 1, min(depth, float(c.dist)))
+        dof = int(m.jnt_dofadr[j])
+        return {"contacts": {k: [n, round(d, 4)] for k, (n, d) in sorted(seen.items())[:4]},
+                "constraint": round(float(data.qfrc_constraint[dof]), 3),
+                "passive": round(float(data.qfrc_passive[dof]), 3)}
 
     def grip_state(self):
         """{"width": summed finger joint travel (m), "left"/"right": the bodies each finger touches}."""

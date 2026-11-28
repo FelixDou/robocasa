@@ -1891,6 +1891,38 @@ choice open, the code fixes it as follows:
     whose torso the probe could not move, nothing changes (`steps` 0).
   - Each grip sample also lists the rest of the robot's contacts (not the
     fingers'), to see what stops a held door.
+
+  *Torso (commit ced6f6e, `transfer_torso1`, 28 November 2026).*
+  ArrangeBreadBasket only, 20 resets, 0 errors. cabinet_open 3/20,
+  bread_in_basket 0/3: no change.
+  - The torso moved on 212 of 257 cabinet pulls, but the height change wanted
+    was only −0.05 to +0.04 m: the base already stood about as far below the
+    handle as the source's did. Height was not what stopped the grasps.
+  - 156 pulls closed on the bar, 101 on nothing (43 of those with the hand
+    5 cm or more from its target, some with the hand's orientation 0.3 rad
+    off).
+  - Of the 116 held pulls that ended at `slip`, none had a robot contact
+    other than the fingers when the door stopped. The arm does not block the
+    door.
+  - The door slows as it opens while the hand keeps to its arc: the lag grows
+    step by step, the pads move out of the bar's axis by a few millimetres,
+    and at about 1 cm the bar leaves the fingers. Released, some doors then
+    creep back toward closed with nothing touching the robot (seed 710008's
+    right door: 0.178 to 0.173 rad over five steps). RoboCasa's hinges have
+    damping only (2 N m s/rad), no spring. A door pushed back toward closed
+    points to a contact on the door itself, for instance its hinge-side edge
+    against a neighbouring fixture (seed 710008's cabinet stands next to a
+    fridge housing).
+  - Some doors stall at the same angle on every pull (710008 right door
+    0.1–0.3 rad over 10 pulls, 710016 right door 0.11–0.14, 710014 right door
+    about 0.2), others gain on each pull (710008 left door, opened on the
+    second pass).
+
+  *Diagnostic (28 November 2026, before the eleventh transfer run).* Each
+  grip sample also records what the door touches, apart from the robot: the
+  bodies in contact with it (count and deepest penetration), and the
+  generalized forces on its hinge from constraints (contacts and limits)
+  and from damping.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,
