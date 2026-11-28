@@ -1701,6 +1701,36 @@ choice open, the code fixes it as follows:
     `fraction_start`, `fraction_end`, and per cycle the stance (`align`,
     `mirror`), `grasp_error`, `stop`, `q_wanted` and `q_end`. A stop logs
     `door_fractions_at_stop`.
+
+  *Pretrain transfer, scripted doors (commit 5abb460, `transfer_door`, 28
+  November 2026).* GarnishPancake and ArrangeBreadBasket only, 40 resets,
+  0 errors. fridge_open 1/20, cabinet_open 0/19: no better at the stage
+  level, but the doors now move.
+  - 64 doors in 38 stages, 180 cycles. The hand reached the bar to within
+    5 cm in 154 cycles. Pulls ended at `reach` 88 times, at `slip` 82 times
+    and at `goal` 9 times.
+  - 15 doors ended at 0.90 or more. Many more ended between 0.5 and 0.9 with
+    every cycle used, each cycle gaining 0.3–0.5 rad.
+  - In 3 stages every door ended at 0.90 or more, yet the stage failed: the
+    door opened first was no longer open when the last one was. Doors
+    swinging back between cycles of the same door were rare (4 of 116 by
+    more than 0.1 rad).
+  - Of the 82 slips, 4 were the door running ahead of the pull and 78 were
+    the door trailing the hand.
+  - Cabinet stances on later cycles were often `goal_blocked`, and the pull
+    then ended at `reach` with no gain.
+
+  *Amendment (28 November 2026, before the sixth transfer run).*
+  - 5 cycles per door instead of 3.
+  - Two passes over the checked doors. The second pass reopens any door that
+    is again below 0.90.
+  - A door that runs ahead of the pull is no longer a slip: the next wanted
+    angle steps on from the door's actual angle. A slip is only the door
+    trailing the hand by more than 0.25 rad.
+  - Logs: every cycle records `fractions` (all checked doors at its start)
+    and `door_ahead_steps`. A slip records `bar_distance` (from the pad
+    midpoint to the bar) and `slip_contacts`. The stage records
+    `fractions_start` and `fractions_end`.
 - *Ranking and navigation.* Sources are ranked by d = the distance between
   the first executed step's reference positions in the base frame, plus
   0.1 m per radian of heading difference. If even the best d exceeds 0.25 m,

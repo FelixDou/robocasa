@@ -99,7 +99,8 @@ DOOR_SAMPLE_EVERY = 25        # frames between logged (wanted, actual) door join
 DOOR_OPEN_PREDICATES = ("fridge_open", "cabinet_open")
 DOOR_OPEN_DONE = 0.90         # RoboCasa's is_open: every checked joint at >= 0.90 of its range
 DOOR_OPEN_GOAL = 0.97         # the pull aims here
-DOOR_CYCLES = 3               # stance, grasp, pull, release; repeated while the door is short of DONE
+DOOR_CYCLES = 5               # stance, grasp, pull, release; repeated while the door is short of DONE
+DOOR_PASSES = 2               # passes over the checked doors: a second pass reopens a door that swung back
 DOOR_PRE = 0.10               # m: the hand comes in from this far in front of the handle bar
 DOOR_BAR_MARGIN = 0.03        # m: the grasp stays this far inside a bar's ends
 DOOR_PULL_STEP = 0.04         # rad (hinge) between pull waypoints; DOOR_PULL_STEP_SLIDE m for a slide
@@ -738,12 +739,15 @@ def door_stance(door, q, relative, mirror):
     return frame @ pose([x, y, 0.0], rot_z(yaw))
 
 
-def door_pull_targets(door, q_from, q_to, eef):
-    """Hand poses that carry ``eef`` (fixed to the door at ``q_from``) with the door to ``q_to``."""
-    step = DOOR_PULL_STEP if door["type"] == "hinge" else DOOR_PULL_STEP_SLIDE
-    n = max(1, int(math.ceil(abs(float(q_to) - float(q_from)) / step)))
-    base = inverse(door_motion(door, q_from))
-    return [(float(q), door_motion(door, q) @ base @ eef) for q in np.linspace(q_from, q_to, n + 1)[1:]]
+def next_pull_q(q_wanted, q_actual, q_goal, step):
+    """(next wanted joint value, last): one ``step`` toward ``q_goal`` from the wanted value, or
+    from the door's actual value when the door has run ahead of the pull; ``last`` at the goal."""
+    sign = 1.0 if q_goal >= q_wanted else -1.0
+    ahead = q_actual if sign * (q_actual - q_wanted) > 0 else q_wanted
+    q = ahead + sign * step
+    if sign * (q - q_goal) >= 0:
+        return float(q_goal), True
+    return float(q), False
 
 
 # ---- scripted grasp (simulator-free) ------------------------------------------------------------
@@ -1616,78 +1620,103 @@ class ExpertRun:
         log = {"phase": "track", "kind": step.kind, "door_script": True, "doors": []}
         self.progress = {**log, "_start": start}
         stance = self.source_stance(source, step)
-        obs = self.world.observe()
-        here = obs["base"][:3, 3]
-        doors = [d for d in doors if door_open_fraction(d, self.door_q(d)) < DOOR_OPEN_DONE]
-        doors.sort(key=lambda d: float(np.linalg.norm(np.asarray(d["frame"])[:2, 3] - here[:2])))
         self.progress["_door_objs"] = doors
-        if not doors:
+        fractions = lambda: {str(d.get("joint", d["role"])): round(  # noqa: E731
+            door_open_fraction(d, self.door_q(d)), 4) for d in doors}
+        log["fractions_start"] = fractions()
+        if not any(door_open_fraction(d, self.door_q(d)) < DOOR_OPEN_DONE for d in doors):
             log["door_script"] = "nothing_to_open"
-        for door in doors:
-            rec = {"joint": door.get("joint", door["role"]), "type": door["type"], "radius": round(door["radius"], 4),
-                   "bar": door.get("bar") is not None, "cycles": []}
-            log["doors"].append(rec)
-            self.progress["doors"] = log["doors"]
-            rec["fraction_start"] = round(door_open_fraction(door, self.door_q(door)), 4)
-            for _ in range(DOOR_CYCLES):
-                q0 = self.door_q(door)
-                if door_open_fraction(door, q0) >= DOOR_OPEN_DONE:
-                    break
-                self.cap += DOOR_CYCLE_STEPS
-                cyc = {"q_start": round(q0, 4)}
-                rec["cycles"].append(cyc)
-                obs = self.world.observe()
-                if self.align_base and stance is not None:
-                    rel, src_side = stance
-                    mirror = bool(src_side and door.get("side") and src_side != door["side"])
-                    goal = align_goal(np.eye(4), door_stance(door, q0, rel, mirror), obs["base"], obs["mobile"])
-                    cyc["mirror"] = mirror
-                    cyc["align"] = self.align(goal)
-                    obs = self.world.observe()
-                axes = getattr(self.world, "gripper_axes", None)
-                approach, closing, pads = axes() if axes is not None else ((0, 0, 1), (0, 1, 0), (0, 0, 0))
-                q0 = self.door_q(door)
-                grasp = handle_grasp(door, q0, approach, closing, pads, obs["eef"][:3, :3], obs["eef"][2, 3])
-                out = door_handle_frame(door, q0)[:3, 0]
-                pre = grasp.copy()
-                pre[:3, 3] += DOOR_PRE * out
-                self.progress["_target"] = pre
-                self.move_to(pre, GRIPPER_OPEN)
-                self.progress["_target"] = grasp
-                self.move_to(grasp, GRIPPER_OPEN)
-                eef = self.world.observe()["eef"]
-                pos, rot = pose_error(eef, grasp)
-                cyc["grasp_error"] = [round(pos, 4), round(rot, 4)]
-                if pos >= TRACK_TOL:
-                    contacts = getattr(self.world, "robot_contacts", None)
-                    if contacts is not None:
-                        cyc["grasp_contacts"] = contacts()
-                self.hold_gripper(GRIPPER_CLOSE, GRASP_CLOSE_STEPS)
-                eef = self.world.observe()["eef"]
-                q_grip = self.door_q(door)
-                slip = DOOR_SLIP if door["type"] == "hinge" else DOOR_SLIP_SLIDE
-                stop, q_wanted = "goal", q_grip
-                for q_wanted, target in door_pull_targets(door, q_grip, door_goal_q(door, DOOR_OPEN_GOAL), eef):
-                    obs = self.world.observe()
-                    rel = inverse(obs["base"]) @ target
-                    if rel[0, 3] < DOOR_REACH_MIN or math.hypot(rel[0, 3], rel[1, 3]) > DOOR_REACH_MAX:
-                        stop = "reach"
-                        break
-                    self.progress["_target"] = target
-                    self.move_to(target, GRIPPER_CLOSE)
-                    if abs(self.door_q(door) - q_wanted) > slip:
-                        stop = "slip"
-                        break
-                cyc.update(stop=stop, q_wanted=round(float(q_wanted), 4), q_end=round(self.door_q(door), 4))
-                self.hold_gripper(GRIPPER_OPEN, RELEASE_OPEN_STEPS)
-                obs = self.world.observe()
-                back = obs["eef"].copy()
-                back[:3, 3] += DOOR_RETREAT * door_handle_frame(door, self.door_q(door))[:3, 0]
-                self.progress["_target"] = back
-                self.move_to(back, GRIPPER_OPEN)
-            rec["fraction_end"] = round(door_open_fraction(door, self.door_q(door)), 4)
+        for pass_index in range(DOOR_PASSES):
+            here = self.world.observe()["base"][:3, 3]
+            todo = [d for d in doors if door_open_fraction(d, self.door_q(d)) < DOOR_OPEN_DONE]
+            todo.sort(key=lambda d: float(np.linalg.norm(np.asarray(d["frame"])[:2, 3] - here[:2])))
+            for door in todo:
+                self.open_door(door, stance, log, pass_index, fractions)
+        log["fractions_end"] = fractions()
         self.progress = None
         return {**log, "steps": self.steps - start}
+
+    def open_door(self, door, stance, log, pass_index, fractions):
+        """Up to ``DOOR_CYCLES`` of stance, grasp, pull and release on one door."""
+        rec = {"joint": door.get("joint", door["role"]), "pass": pass_index, "type": door["type"],
+               "radius": round(door["radius"], 4), "bar": door.get("bar") is not None, "cycles": []}
+        log["doors"].append(rec)
+        self.progress["doors"] = log["doors"]
+        rec["fraction_start"] = round(door_open_fraction(door, self.door_q(door)), 4)
+        for _ in range(DOOR_CYCLES):
+            q0 = self.door_q(door)
+            if door_open_fraction(door, q0) >= DOOR_OPEN_DONE:
+                break
+            self.cap += DOOR_CYCLE_STEPS
+            cyc = {"q_start": round(q0, 4), "fractions": fractions()}
+            rec["cycles"].append(cyc)
+            obs = self.world.observe()
+            if self.align_base and stance is not None:
+                rel, src_side = stance
+                mirror = bool(src_side and door.get("side") and src_side != door["side"])
+                goal = align_goal(np.eye(4), door_stance(door, q0, rel, mirror), obs["base"], obs["mobile"])
+                cyc["mirror"] = mirror
+                cyc["align"] = self.align(goal)
+                obs = self.world.observe()
+            axes = getattr(self.world, "gripper_axes", None)
+            approach, closing, pads = axes() if axes is not None else ((0, 0, 1), (0, 1, 0), (0, 0, 0))
+            q0 = self.door_q(door)
+            grasp = handle_grasp(door, q0, approach, closing, pads, obs["eef"][:3, :3], obs["eef"][2, 3])
+            out = door_handle_frame(door, q0)[:3, 0]
+            pre = grasp.copy()
+            pre[:3, 3] += DOOR_PRE * out
+            self.progress["_target"] = pre
+            self.move_to(pre, GRIPPER_OPEN)
+            self.progress["_target"] = grasp
+            self.move_to(grasp, GRIPPER_OPEN)
+            eef = self.world.observe()["eef"]
+            pos, rot = pose_error(eef, grasp)
+            cyc["grasp_error"] = [round(pos, 4), round(rot, 4)]
+            if pos >= TRACK_TOL:
+                contacts = getattr(self.world, "robot_contacts", None)
+                if contacts is not None:
+                    cyc["grasp_contacts"] = contacts()
+            self.hold_gripper(GRIPPER_CLOSE, GRASP_CLOSE_STEPS)
+            eef = self.world.observe()["eef"]
+            q_grip = self.door_q(door)
+            in_door = inverse(door_motion(door, q_grip)) @ eef   # the closed hand, fixed to the door
+            slip = DOOR_SLIP if door["type"] == "hinge" else DOOR_SLIP_SLIDE
+            step_q = DOOR_PULL_STEP if door["type"] == "hinge" else DOOR_PULL_STEP_SLIDE
+            q_goal = door_goal_q(door, DOOR_OPEN_GOAL)
+            sign = 1.0 if q_goal >= q_grip else -1.0
+            q_wanted, last, stop, ahead = q_grip, False, "goal", 0
+            while not last:
+                q_next, last = next_pull_q(q_wanted, self.door_q(door), q_goal, step_q)
+                ahead += int(sign * (self.door_q(door) - q_wanted) > 0)
+                target = door_motion(door, q_next) @ in_door
+                rel = inverse(self.world.observe()["base"]) @ target
+                if rel[0, 3] < DOOR_REACH_MIN or math.hypot(rel[0, 3], rel[1, 3]) > DOOR_REACH_MAX:
+                    stop = "reach"
+                    break
+                q_wanted = q_next
+                self.progress["_target"] = target
+                self.move_to(target, GRIPPER_CLOSE)
+                if sign * (q_wanted - self.door_q(door)) > slip:   # the door trails the hand
+                    stop = "slip"
+                    break
+            cyc.update(stop=stop, q_wanted=round(float(q_wanted), 4), q_end=round(self.door_q(door), 4),
+                       door_ahead_steps=ahead)
+            if stop == "slip":   # has the bar left the fingers, or does the door not move with the hand?
+                obs = self.world.observe()
+                centre, b, half = door_bar(door, self.door_q(door))
+                pad = obs["eef"][:3, :3] @ np.asarray(pads, dtype=float) + obs["eef"][:3, 3]
+                t = float(np.clip((pad - centre) @ b, -half, half))
+                cyc["bar_distance"] = round(float(np.linalg.norm(centre + t * b - pad)), 4)
+                contacts = getattr(self.world, "robot_contacts", None)
+                if contacts is not None:
+                    cyc["slip_contacts"] = contacts()
+            self.hold_gripper(GRIPPER_OPEN, RELEASE_OPEN_STEPS)
+            obs = self.world.observe()
+            back = obs["eef"].copy()
+            back[:3, 3] += DOOR_RETREAT * door_handle_frame(door, self.door_q(door))[:3, 0]
+            self.progress["_target"] = back
+            self.move_to(back, GRIPPER_OPEN)
+        rec["fraction_end"] = round(door_open_fraction(door, self.door_q(door)), 4)
 
     def door_sample(self, watch, i):
         """[frame, wanted joint value, actual joint value] of the door a door step swings."""

@@ -1636,11 +1636,12 @@ class DoorPullWorld(FakeWorld):
     """FakeWorld with doors that follow a hand closed on their handle bar (pads within 2 cm), and
     let go when it opens or drifts more than 5 cm from the grasp point. ``predicate``: all open."""
 
-    def __init__(self, doors, *, grip=True, **kw):
+    def __init__(self, doors, *, grip=True, knock=None, **kw):
         super().__init__(predicate=self.all_open, **kw)
         self.door_list = doors
         self.q = {d["qpos_adr"]: 0.0 for d in doors}
         self.held_door, self.grip = None, grip
+        self.knock = dict(knock or {})   # {door gripped: door it swings back to 0.3 rad, once}
 
     @staticmethod
     def all_open(world):
@@ -1668,6 +1669,9 @@ class DoorPullWorld(FakeWorld):
                 if np.linalg.norm(centre + t * axis - hand) < 0.02:
                     local = er.inverse(er.door_motion(d, self.q[d["qpos_adr"]])) @ np.append(hand, 1.0)
                     self.held_door = (d, local[:3])
+                    other = self.knock.pop(d["qpos_adr"], None)
+                    if other is not None:
+                        self.q[other] = 0.3
                     break
         if self.held_door is not None:
             d, local = self.held_door
@@ -1738,9 +1742,24 @@ class ScriptedDoorTest(unittest.TestCase):
         np.testing.assert_allclose(mirrored[:2, 3], [0.6, 0.65], atol=1e-9)   # away from this door's hinge too
         self.assertAlmostEqual(abs(er.wrap(er.yaw_of(mirrored[:3, :3]) + math.pi / 2)), 0.0)
 
-    def run_doors(self, doors, *, grip=True, start=(0.5, 0.9, -math.pi / 2)):
+    def test_the_pull_steps_on_from_the_door_when_it_runs_ahead(self):
+        self.assertEqual(er.next_pull_q(0.2, 0.1, 1.4, 0.04), (0.24000000000000002, False))   # trailing: from the pull
+        self.assertEqual(er.next_pull_q(0.2, 0.6, 1.4, 0.04), (0.64, False))                 # ahead: from the door
+        self.assertEqual(er.next_pull_q(1.38, 1.38, 1.4, 0.04), (1.4, True))
+        self.assertEqual(er.next_pull_q(-0.2, -0.5, -1.4, 0.04), (-0.54, False))              # opening toward negative
+
+    def test_a_door_that_swung_back_is_reopened_on_a_second_pass(self):
+        left = front_door((0.0, 0.0), 0.4, joint="left")
+        right = front_door((1.0, 0.0), 0.4, hinge="right", joint="right")
+        world, out = self.run_doors([left, right], knock={"right": "left"})
+        self.assertTrue(out["stage_completed"], json.dumps(out["phases"], default=str)[:3000])
+        doors = out["phases"][-1]["doors"]
+        self.assertEqual([(d["joint"], d["pass"]) for d in doors], [("left", 0), ("right", 0), ("left", 1)])
+        self.assertGreater(doors[1]["cycles"][0]["fractions"]["left"], er.DOOR_OPEN_DONE)   # open before the knock
+
+    def run_doors(self, doors, *, grip=True, knock=None, start=(0.5, 0.9, -math.pi / 2)):
         demo = door_open_demo(SOURCE_DOOR, SOURCE_BASE)
-        world = DoorPullWorld(doors, grip=grip, mobile=start, eef_rel=(0.45, 0.0, 0.5))
+        world = DoorPullWorld(doors, grip=grip, knock=knock, mobile=start, eef_rel=(0.45, 0.0, 0.5))
         run = er.ExpertRun(world, TRUE_GAINS, {demo.key: demo}, "fridge_open", cap=10 ** 6, budget=10 ** 7,
                            scripted_door=True)
         out = run.run([{"phase": "track", "source": list(demo.key), "step": 0, "kind": er.EXECUTE,
